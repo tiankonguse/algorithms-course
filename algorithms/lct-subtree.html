@@ -1,0 +1,1488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LCT 维护子树信息 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .ls-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .ls-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .ls-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  .ls-node{cursor:pointer;}
+  .ls-node:hover .ls-box{stroke:var(--accent);stroke-width:2;}
+  @media(max-width:760px){
+    .ls-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>LCT 维护子树信息</h1>
+    <p class="intro">LCT 天然擅长的是路径：makeroot、access、splay 一套下来，一条链就完整地躺在一棵辅助树里。子树不一样，它横跨好多条链，成员还会因为别人的 access 随时变动。这一节看怎么给「虚子树」单独记一笔账，把连通区大小、子树最大点权这类信息挂上去；以及信息做不了减法时，每个点还得额外配什么。</p>
+
+    <h2>零、背景</h2>
+    <p>LCT 里每个节点最多认一个实儿子。实边首尾相接，把整棵树切成若干条互不相交的实链。</p>
+    <p>一个节点只把它的实儿子记在辅助树的左右儿子里；虚儿子不占任何位置，由那个儿子单方面把 <code class="inline">fa</code> 指向父亲，父亲这边什么都不知道。</p>
+    <p>每条实链单独用一棵 splay 维护，splay 里按节点在原树中的深度排序：浅的在左，深的在右。下图左边是原树上实边和虚边的划分，右边是对应的四棵辅助树。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="原树的实边虚边划分与对应的辅助树" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="20" y="20" width="300" height="240" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="36" y="42" font-size="13" fill="#6b7280">原树</text>
+        <g stroke="#2563eb" stroke-width="2.4">
+          <line x1="170" y1="52" x2="250" y2="108"/>
+          <line x1="250" y1="124" x2="285" y2="172"/>
+          <line x1="80" y1="124" x2="110" y2="172"/>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.8" stroke-dasharray="5 4">
+          <line x1="170" y1="52" x2="80" y2="108"/>
+          <line x1="80" y1="124" x2="40" y2="172"/>
+          <line x1="250" y1="124" x2="215" y2="172"/>
+        </g>
+        <g font-size="14" font-weight="600">
+          <g fill="#2563eb">
+            <circle cx="170" cy="44" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+            <text x="170" y="49" text-anchor="middle" fill="#1f2328">1</text>
+            <circle cx="250" cy="116" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+            <text x="250" y="121" text-anchor="middle" fill="#1f2328">3</text>
+            <circle cx="285" cy="180" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+            <text x="285" y="185" text-anchor="middle" fill="#1f2328">7</text>
+            <circle cx="80" cy="116" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+            <text x="80" y="121" text-anchor="middle" fill="#1f2328">2</text>
+            <circle cx="110" cy="180" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+            <text x="110" y="185" text-anchor="middle" fill="#1f2328">5</text>
+          </g>
+          <circle cx="40" cy="180" r="16" fill="#ffffff" stroke="#c9ced4" stroke-width="1.6"/>
+          <text x="40" y="185" text-anchor="middle" fill="#1f2328">4</text>
+          <circle cx="215" cy="180" r="16" fill="#ffffff" stroke="#c9ced4" stroke-width="1.6"/>
+          <text x="215" y="185" text-anchor="middle" fill="#1f2328">6</text>
+        </g>
+
+        <rect x="350" y="20" width="250" height="240" rx="8" fill="#ffffff" stroke="#e6e8eb"/>
+        <text x="366" y="42" font-size="13" fill="#6b7280">辅助树（每条实链一棵）</text>
+        <g stroke="#2563eb" stroke-width="1.6">
+          <line x1="400" y1="66" x2="400" y2="104"/>
+          <line x1="400" y1="126" x2="400" y2="164"/>
+          <line x1="500" y1="126" x2="500" y2="164"/>
+        </g>
+        <g font-size="11" fill="#6b7280">
+          <text x="424" y="81" text-anchor="start">辅助树 1</text>
+          <text x="524" y="211" text-anchor="start">辅助树 2</text>
+          <text x="604" y="211" text-anchor="end">单节点</text>
+        </g>
+        <g font-size="13" font-weight="600">
+          <circle cx="400" cy="76" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="400" y="81" text-anchor="middle" fill="#1f2328">1</text>
+          <circle cx="400" cy="114" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="400" y="119" text-anchor="middle" fill="#1f2328">3</text>
+          <circle cx="400" cy="152" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="400" y="157" text-anchor="middle" fill="#1f2328">7</text>
+          <circle cx="500" cy="114" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="500" y="119" text-anchor="middle" fill="#1f2328">2</text>
+          <circle cx="500" cy="152" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="500" y="157" text-anchor="middle" fill="#1f2328">5</text>
+          <circle cx="580" cy="180" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="580" y="185" text-anchor="middle" fill="#1f2328">4</text>
+          <circle cx="580" cy="76" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="580" y="81" text-anchor="middle" fill="#1f2328">6</text>
+        </g>
+
+        <g font-size="13">
+          <line x1="40" y1="278" x2="70" y2="278" stroke="#2563eb" stroke-width="2.4"/>
+          <text x="80" y="283" fill="#6b7280">实边</text>
+          <line x1="140" y1="278" x2="170" y2="278" stroke="#9aa0a6" stroke-width="1.8" stroke-dasharray="5 4"/>
+          <text x="180" y="283" fill="#6b7280">虚边（只有下端的那个点记着父亲）</text>
+        </g>
+      </svg>
+      <figcaption>实链被拆出来单独用 splay 维护，虚边不在任何辅助树里，只是一条 fa 指针</figcaption>
+    </figure>
+
+    <p>splay 转来转去，改的是树的形状，不改「哪些点在同一条链上、链上谁深谁浅」。处理路径信息时这也是常规操作：<code class="inline">makeroot(x)</code>、<code class="inline">access(y)</code>、<code class="inline">splay(y)</code> 之后，x 到 y 的整条路径正好完整落在 y 的辅助树里。</p>
+    <p>子树就没这个待遇了。</p>
+
+    <h2>一、问题</h2>
+    <p>先从一道题说起。大融合：n 个点，初始互不连通，q 次操作。</p>
+    <ul>
+      <li><code class="inline">A x y</code>：x 和 y 之间加一条边，保证之前两点不连通。</li>
+      <li><code class="inline">Q x y</code>：打印 x、y 这条边的负载，保证这条边存在。</li>
+    </ul>
+    <p>负载的定义是这条边两侧端点各自所在连通区的大小之积。n、q 都到 10⁵。</p>
+    <p>要回答一次 Q，就得知道「这条边被临时拆掉之后，两边各有多少个点」。森林的形态一直在变，加边这件事情 LCT 很拿手，难的是挂在上面的那个「大小」。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>每次 Q，把这条边临时删掉，从 x 出发 dfs 数一遍、从 y 出发再数一遍，乘起来，然后把边加回去。一次 O(n)，q 次下来 O(nq)。</p>
+    <p>换个思路：真正需要持续跟进的其实就一件事，「某个点这一侧有多大」。只要树变形的时候这个数跟着变，Q 就能压到 O(log n)。</p>
+
+    <h2>三、vir 和 sum</h2>
+    <p>拿一个点 x 来看，它在 LCT 里的全部贡献分成四块：自己在辅助树里的左儿子、右儿子、全部的虚子树，以及它自己。</p>
+    <p>左儿子右儿子顺着 splay 就能查到，虚子树没有任何地方存着，所以单独开一个数组，这里叫它 <code class="inline">vir</code>。</p>
+
+    <pre class="code">void up(int x) {
+    sum[x] = sum[ls[x]] + sum[rs[x]] + vir[x] + 1;
+}</pre>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="sum 的四部分贡献" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="s1a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+          </marker>
+        </defs>
+        <rect x="60" y="96" width="86" height="40" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+        <text x="103" y="121" font-size="14" text-anchor="middle" fill="#2563eb">ls[x]</text>
+        <rect x="474" y="96" width="86" height="40" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+        <text x="517" y="121" font-size="14" text-anchor="middle" fill="#2563eb">rs[x]</text>
+        <rect x="270" y="96" width="80" height="40" rx="6" fill="#ffffff" stroke="#1f2328" stroke-width="1.6"/>
+        <text x="310" y="121" font-size="15" text-anchor="middle" font-weight="600" fill="#1f2328">x</text>
+        <rect x="230" y="180" width="160" height="52" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+        <text x="310" y="200" font-size="13" text-anchor="middle" fill="#ea580c">x 的虚子树们</text>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.2">
+          <circle cx="280" cy="216" r="10"/>
+          <circle cx="310" cy="216" r="10"/>
+          <circle cx="340" cy="216" r="10"/>
+        </g>
+
+        <g stroke="#2563eb" stroke-width="1.6" fill="none" marker-end="url(#s1a)">
+          <path d="M150 116 L262 116"/>
+          <path d="M474 116 L358 116"/>
+          <path d="M310 180 L310 143"/>
+        </g>
+        <text x="386" y="60" font-size="13" fill="#6b7280" text-anchor="middle">+ 1（x 自己）</text>
+        <path d="M330 96 C340 70 380 62 386 64" stroke="#6b7280" stroke-width="1.4" fill="none"/>
+
+        <g font-size="13" fill="#6b7280">
+          <text x="103" y="88" text-anchor="middle">sum[ls[x]]</text>
+          <text x="517" y="88" text-anchor="middle">sum[rs[x]]</text>
+          <text x="416" y="200">vir[x]（单独记账）</text>
+        </g>
+        <text x="310" y="256" font-size="14" text-anchor="middle" fill="#1f2328">sum[x] = sum[ls[x]] + sum[rs[x]] + vir[x] + 1</text>
+      </svg>
+      <figcaption>左右儿子跟着辅助树走，虚子树的贡献没人会帮忙算，只能自己攒在 vir 里</figcaption>
+    </figure>
+
+    <p>这里有个细节值得先说清楚：<code class="inline">sum[x]</code> 并不等于「x 在原树里的子树大小」。如果 x 的辅助树里还挂着它上方的节点，这些也会被算进去。</p>
+    <p>想拿 x 的子树答案，先 <code class="inline">access(x); splay(x);</code>。这一趟做完 <code class="inline">rs[x]</code> 一定是 0，x 的所有儿子都在 vir 里了，答案就是 <code class="inline">vir[x]</code> 加上 x 自己的贡献。</p>
+
+    <h2>四、access 时的实虚转换</h2>
+    <p>access 是把某个点到树的根这条路径变成实边的一趟旅行。每路过一个节点 x，就发生一次实虚互换，vir 必须同步改账。</p>
+
+    <pre class="code">void access(int x) {
+    for (int y = 0; x != 0; y = x, x = fa[x]) {
+        splay(x);
+        vir[x] += sum[rs[x]];
+        vir[x] -= sum[y];
+        rs[x] = y;
+        up(x);
+    }
+}</pre>
+
+    <p>具体来说就两件事。x 原来的右子树是它实方向上更深的那一段，这一趟要把它变成虚的，<code class="inline">vir[x] += sum[rs[x]]</code>；y 是上一趟处理过的下层节点，它本来是 x 的虚儿子，现在要接到实方向上，<code class="inline">vir[x] -= sum[y]</code>。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="access 一次迭代前后的实虚互换" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="16" y="26" width="272" height="212" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="152" y="48" font-size="13" fill="#6b7280" text-anchor="middle">迭代之前</text>
+        <line x1="146" y1="90" x2="214" y2="132" stroke="#2563eb" stroke-width="2.4"/>
+        <line x1="214" y1="146" x2="214" y2="180" stroke="#2563eb" stroke-width="1.6"/>
+        <line x1="146" y1="90" x2="78" y2="132" stroke="#9aa0a6" stroke-width="1.8" stroke-dasharray="5 4"/>
+        <line x1="78" y1="146" x2="78" y2="180" stroke="#9aa0a6" stroke-width="1.8" stroke-dasharray="5 4"/>
+        <g font-size="13" font-weight="600">
+          <circle cx="146" cy="82" r="16" fill="#ffffff" stroke="#1f2328" stroke-width="1.6"/>
+          <text x="146" y="87" text-anchor="middle" fill="#1f2328">x</text>
+          <circle cx="214" cy="132" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="214" y="137" text-anchor="middle" fill="#1f2328">A</text>
+          <circle cx="214" cy="188" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="214" y="193" text-anchor="middle" fill="#1f2328">B</text>
+          <circle cx="78" cy="132" r="15" fill="#ffffff" stroke="#c9ced4" stroke-width="1.4"/>
+          <text x="78" y="137" text-anchor="middle" fill="#1f2328">y</text>
+          <circle cx="78" cy="188" r="15" fill="#ffffff" stroke="#c9ced4" stroke-width="1.4"/>
+          <text x="78" y="193" text-anchor="middle" fill="#1f2328">c</text>
+        </g>
+        <text x="248" y="118" font-size="12" fill="#2563eb">实</text>
+        <text x="40" y="118" font-size="12" fill="#6b7280">虚</text>
+        <text x="152" y="228" font-size="13" fill="#1f2328" text-anchor="middle">vir[x] = 5</text>
+
+        <path d="M300 132 L330 132" stroke="#2563eb" stroke-width="1.8" fill="none" marker-end="url(#gy1)"/>
+        <text x="315" y="122" font-size="12" fill="#6b7280" text-anchor="middle">迭代</text>
+
+        <rect x="332" y="26" width="272" height="212" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="468" y="48" font-size="13" fill="#6b7280" text-anchor="middle">迭代之后</text>
+        <line x1="462" y1="90" x2="394" y2="132" stroke="#2563eb" stroke-width="2.4"/>
+        <line x1="394" y1="146" x2="394" y2="180" stroke="#2563eb" stroke-width="1.6"/>
+        <line x1="462" y1="90" x2="530" y2="132" stroke="#9aa0a6" stroke-width="1.8" stroke-dasharray="5 4"/>
+        <line x1="530" y1="146" x2="530" y2="180" stroke="#9aa0a6" stroke-width="1.8" stroke-dasharray="5 4"/>
+        <g font-size="13" font-weight="600">
+          <circle cx="462" cy="82" r="16" fill="#ffffff" stroke="#1f2328" stroke-width="1.6"/>
+          <text x="462" y="87" text-anchor="middle" fill="#1f2328">x</text>
+          <circle cx="394" cy="132" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="394" y="137" text-anchor="middle" fill="#1f2328">y</text>
+          <circle cx="394" cy="188" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="394" y="193" text-anchor="middle" fill="#1f2328">c</text>
+          <circle cx="530" cy="132" r="15" fill="#ffffff" stroke="#c9ced4" stroke-width="1.4"/>
+          <text x="530" y="137" text-anchor="middle" fill="#1f2328">A</text>
+          <circle cx="530" cy="188" r="15" fill="#ffffff" stroke="#c9ced4" stroke-width="1.4"/>
+          <text x="530" y="193" text-anchor="middle" fill="#1f2328">B</text>
+        </g>
+        <text x="366" y="118" font-size="12" fill="#2563eb">实</text>
+        <text x="566" y="118" font-size="12" fill="#6b7280">虚</text>
+        <text x="468" y="228" font-size="13" fill="#1f2328" text-anchor="middle">vir[x] = 5 + 3 − 2 = 6</text>
+
+        <defs>
+          <marker id="gy1" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+          </marker>
+        </defs>
+        <text x="310" y="258" font-size="12" fill="#6b7280" text-anchor="middle">右子树 A-B 两个点整体变虚（+3），原来的虚儿子 y 带着 c 变实（−2）</text>
+      </svg>
+      <figcaption>一加一减刚好把账摊平：变虚的加进来，变实的拿出去</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">实虚转换的账本</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">左边是原树，右边是每条实链对应的辅助树。节点框里第二行是 vir 和 sum。点「下一步」一步步走，也可以直接点左边的某个点，对它做一次 access。</p>
+      <svg id="lsSvg" viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="实虚转换演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><i class="dot full"></i>实边（两个端点在同一棵辅助树里）</span>
+        <span><i class="dot partial"></i>虚边（只有下端那个点记着父亲）</span>
+      </div>
+      <div class="breakdown" id="lsInfo"></div>
+      <div class="viz-controls">
+        <button class="ls-btn" id="lsPrev" type="button">上一步</button>
+        <button class="ls-btn" id="lsNext" type="button">下一步</button>
+        <button class="ls-btn" id="lsReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>五、link 也要记账</h2>
+    <p>加边的时候，x 整棵树是挂到 y 下面当虚儿子的。</p>
+
+    <pre class="code">void link(int x, int y) {
+    makeroot(x);
+    if (findroot(y) != x) {
+        access(y);
+        splay(y);
+        fa[x] = y;
+        vir[y] += sum[x];
+        up(y);
+    }
+}</pre>
+
+    <p><code class="inline">makeroot(x)</code> 之后 x 那棵树以 x 为根，<code class="inline">fa[x] = y</code> 就是把整棵挂过去，所以 <code class="inline">vir[y] += sum[x]</code>。</p>
+    <p>cut 反倒不用动 vir：被断开的那条边本来是实的，摘掉之后两侧各自还是完整的两棵树，<code class="inline">up</code> 一遍就够了。</p>
+
+    <h2>六、题目1：大融合</h2>
+    <p>回到最开始那道题。有了 sum，一次 Q 就是三步：先把这条边断开，两侧各问一次，再连回去。</p>
+
+    <pre class="code">long query(int x, int y) {
+    cut(x, y);
+    makeroot(x);
+    int sizx = sum[x];
+    makeroot(y);
+    int sizy = sum[y];
+    link(x, y);
+    return 1LL * sizx * sizy;
+}</pre>
+
+    <p><code class="inline">cut(x, y)</code> 之后是两个连通区。<code class="inline">makeroot(x)</code> 让 x 这一侧以 x 为根，此时 x 没有上方节点了，它的辅助树加虚子树就是整个连通区，读 <code class="inline">sum[x]</code> 即可。y 那一侧同理。</p>
+    <p>整套代码就是这样：标准的 LCT 骨架，只在 up、access、link 三个地方多了 vir 那几笔。</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+<span class="kw">int</span> n, q;
+
+<span class="kw">int</span> fa[MAXN];
+<span class="kw">int</span> ls[MAXN];
+<span class="kw">int</span> rs[MAXN];
+<span class="kw">bool</span> rev[MAXN];
+<span class="kw">int</span> sta[MAXN];
+
+<span class="kw">int</span> vir[MAXN];
+<span class="kw">int</span> sum[MAXN];
+
+<span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> x) {
+    sum[x] = sum[ls[x]] + sum[rs[x]] + vir[x] + 1;
+}
+
+<span class="kw">bool</span> <span class="fn">isroot</span>(<span class="kw">int</span> x) {
+    <span class="kw">return</span> ls[fa[x]] != x &amp;&amp; rs[fa[x]] != x;
+}
+
+<span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> x) {
+    <span class="kw">return</span> ls[fa[x]] == x ? 0 : 1;
+}
+
+<span class="kw">void</span> <span class="fn">reverse</span>(<span class="kw">int</span> x) {
+    <span class="kw">if</span> (x != 0) {
+        swap(ls[x], rs[x]);
+        rev[x] = !rev[x];
+    }
+}
+
+<span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> x) {
+    <span class="kw">if</span> (rev[x]) {
+        reverse(ls[x]);
+        reverse(rs[x]);
+        rev[x] = <span class="kw">false</span>;
+    }
+}
+
+<span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> x) {
+    <span class="kw">int</span> f = fa[x], g = fa[f];
+    <span class="kw">if</span> (lr(x) == 0) {
+        ls[f] = rs[x];
+        <span class="kw">if</span> (ls[f] != 0) {
+            fa[ls[f]] = f;
+        }
+        rs[x] = f;
+    } <span class="kw">else</span> {
+        rs[f] = ls[x];
+        <span class="kw">if</span> (rs[f] != 0) {
+            fa[rs[f]] = f;
+        }
+        ls[x] = f;
+    }
+    <span class="kw">if</span> (!isroot(f)) {
+        <span class="kw">if</span> (lr(f) == 0) {
+            ls[g] = x;
+        } <span class="kw">else</span> {
+            rs[g] = x;
+        }
+    }
+    fa[f] = x;
+    fa[x] = g;
+    up(f);
+    up(x);
+}
+
+<span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> x) {
+    <span class="kw">int</span> siz = 0;
+    sta[++siz] = x;
+    <span class="kw">for</span> (<span class="kw">int</span> y = x; !isroot(y); y = fa[y]) {
+        sta[++siz] = fa[y];
+    }
+    <span class="kw">while</span> (siz != 0) {
+        down(sta[siz--]);
+    }
+    <span class="kw">while</span> (!isroot(x)) {
+        <span class="kw">int</span> f = fa[x];
+        <span class="kw">if</span> (!isroot(f)) {
+            <span class="kw">if</span> (lr(x) == lr(f)) {
+                rotate(f);
+            } <span class="kw">else</span> {
+                rotate(x);
+            }
+        }
+        rotate(x);
+    }
+}
+
+<span class="kw">void</span> <span class="fn">access</span>(<span class="kw">int</span> x) {
+    <span class="kw">for</span> (<span class="kw">int</span> y = 0; x != 0; y = x, x = fa[x]) {
+        splay(x);
+        vir[x] += sum[rs[x]];
+        vir[x] -= sum[y];
+        rs[x] = y;
+        up(x);
+    }
+}
+
+<span class="kw">void</span> <span class="fn">makeroot</span>(<span class="kw">int</span> x) {
+    access(x);
+    splay(x);
+    reverse(x);
+}
+
+<span class="kw">int</span> <span class="fn">findroot</span>(<span class="kw">int</span> x) {
+    access(x);
+    splay(x);
+    down(x);
+    <span class="kw">while</span> (ls[x] != 0) {
+        x = ls[x];
+        down(x);
+    }
+    splay(x);
+    <span class="kw">return</span> x;
+}
+
+<span class="kw">void</span> <span class="fn">split</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+    makeroot(x);
+    access(y);
+    splay(y);
+}
+
+<span class="kw">void</span> <span class="fn">link</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+    makeroot(x);
+    <span class="kw">if</span> (findroot(y) != x) {
+        access(y);
+        splay(y);
+        fa[x] = y;
+        vir[y] += sum[x];
+        up(y);
+    }
+}
+
+<span class="kw">void</span> <span class="fn">cut</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+    makeroot(x);
+    <span class="kw">if</span> (findroot(y) == x &amp;&amp; fa[y] == x &amp;&amp; ls[y] == 0 &amp;&amp; rs[x] == y) {
+        fa[y] = rs[x] = 0;
+        up(x);
+    }
+}
+
+<span class="kw">long</span> <span class="fn">query</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+    cut(x, y);
+    makeroot(x);
+    <span class="kw">int</span> sizx = sum[x];
+    makeroot(y);
+    <span class="kw">int</span> sizy = sum[y];
+    link(x, y);
+    <span class="kw">return</span> 1LL * sizx * sizy;
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    ios::sync_with_stdio(<span class="kw">false</span>);
+    cin.tie(<span class="kw">nullptr</span>);
+    cin &gt;&gt; n &gt;&gt; q;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        sum[i] = 1;
+    }
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++) {
+        <span class="kw">char</span> op;
+        <span class="kw">int</span> x, y;
+        cin &gt;&gt; op &gt;&gt; x &gt;&gt; y;
+        <span class="kw">if</span> (op == 'A') {
+            link(x, y);
+        } <span class="kw">else</span> {
+            cout &lt;&lt; query(x, y) &lt;&lt; "\n";
+        }
+    }
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <h2>七、题目2：QTREE6</h2>
+    <p>接下来这道题换了个方向：树的形态完全固定，会变的是每个节点的颜色。要求回答节点 x 所在的同色连通块有多大。</p>
+    <p>先把每个点拆成两个状态点：黑色状态的编号是 x，白色状态的编号是 x + n。两套森林共用同一套 LCT 数组，彼此之间没有任何边。</p>
+    <p>状态点的「有效」与否由它自己的贡献值 <code class="inline">val</code> 决定：有效就是 1，无效就是 0。初始全是黑色，于是黑森林里连好了原树的所有边，白森林里全是孤立点。</p>
+    <p>接下来是这里最关键的一个设计：原树以 1 号点为根固定下来，每个状态点记着自己那个固定不动的父亲 <code class="inline">parent[x]</code>。翻转 x 的颜色时，只断一条边、连一条边，老颜色那边把 parent 边删掉，新颜色那边把对应的 parent 边连上。</p>
+    <p>这条设计省下的是工作量。如果按另一种想法，翻转时把 x 和所有同色邻居重连一遍，菊花图上中间那个点一次翻转就要动 O(n) 条边。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="黑白两套森林" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="16" y="20" width="280" height="240" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="156" y="42" font-size="13" fill="#6b7280" text-anchor="middle">黑森林（3 号翻成了白色）</text>
+        <g stroke="#9aa0a6" stroke-width="1.6">
+          <line x1="120" y1="72" x2="70" y2="120"/>
+          <line x1="120" y1="88" x2="180" y2="112"/>
+          <line x1="180" y1="128" x2="120" y2="176"/>
+          <line x1="180" y1="128" x2="245" y2="176"/>
+        </g>
+        <line x1="245" y1="192" x2="245" y2="216" stroke="#9aa0a6" stroke-width="1.6"/>
+        <g font-size="13" font-weight="600">
+          <circle cx="120" cy="64" r="15" fill="#ffffff" stroke="#1f2328" stroke-width="1.6"/>
+          <text x="120" y="69" text-anchor="middle" fill="#1f2328">1</text>
+          <circle cx="70" cy="128" r="15" fill="#ffffff" stroke="#1f2328" stroke-width="1.6"/>
+          <text x="70" y="133" text-anchor="middle" fill="#1f2328">2</text>
+          <circle cx="180" cy="112" r="15" fill="#ffffff" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="4 3"/>
+          <text x="180" y="117" text-anchor="middle" fill="#ea580c">3</text>
+          <circle cx="120" cy="184" r="15" fill="#ffffff" stroke="#1f2328" stroke-width="1.6"/>
+          <text x="120" y="189" text-anchor="middle" fill="#1f2328">4</text>
+          <circle cx="245" cy="184" r="15" fill="#ffffff" stroke="#1f2328" stroke-width="1.6"/>
+          <text x="245" y="189" text-anchor="middle" fill="#1f2328">5</text>
+          <circle cx="245" cy="224" r="15" fill="#ffffff" stroke="#1f2328" stroke-width="1.6"/>
+          <text x="245" y="229" text-anchor="middle" fill="#1f2328">6</text>
+        </g>
+        <text x="156" y="250" font-size="12" fill="#6b7280" text-anchor="middle">白点仍然连着它的孩子，只是自己的贡献是 0</text>
+
+        <rect x="324" y="20" width="280" height="240" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="464" y="42" font-size="13" fill="#6b7280" text-anchor="middle">问 4 号的同色连通块</text>
+        <g stroke="#9aa0a6" stroke-width="1.6">
+          <line x1="428" y1="72" x2="378" y2="120"/>
+          <line x1="428" y1="88" x2="488" y2="112"/>
+          <line x1="488" y1="128" x2="428" y2="176"/>
+          <line x1="488" y1="128" x2="553" y2="176"/>
+        </g>
+        <line x1="553" y1="192" x2="553" y2="216" stroke="#9aa0a6" stroke-width="1.6"/>
+        <g font-size="13" font-weight="600">
+          <circle cx="428" cy="64" r="15" fill="#ffffff" stroke="#c9ced4" stroke-width="1.4"/>
+          <text x="428" y="69" text-anchor="middle" fill="#9aa0a6">1</text>
+          <circle cx="378" cy="128" r="15" fill="#ffffff" stroke="#c9ced4" stroke-width="1.4"/>
+          <text x="378" y="133" text-anchor="middle" fill="#9aa0a6">2</text>
+          <circle cx="488" cy="112" r="15" fill="#ffffff" stroke="#ea580c" stroke-width="1.6"/>
+          <text x="488" y="117" text-anchor="middle" fill="#ea580c">3</text>
+          <circle cx="428" cy="184" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+          <text x="428" y="189" text-anchor="middle" fill="#1f2328">4</text>
+          <circle cx="553" cy="184" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+          <text x="553" y="189" text-anchor="middle" fill="#1f2328">5</text>
+          <circle cx="553" cy="224" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+          <text x="553" y="229" text-anchor="middle" fill="#1f2328">6</text>
+        </g>
+        <text x="464" y="250" font-size="12" fill="#6b7280" text-anchor="middle">答案是 4、5、6 三个点</text>
+      </svg>
+      <figcaption>白点不参与计数，但它还在树上当「架子」；答案就是把顶上那个无效点摘掉之后剩下的部分</figcaption>
+    </figure>
+
+    <p>查询的写法顺着这个图就出来了。找到 x 当前那个状态点在它所在森林里的根 ys：</p>
+
+    <pre class="code">int query(int x) {
+    int xs = val[x] == 1 ? x : x + n;
+    int ys = findroot(xs);
+    return val[ys] == 1 ? sum[ys] : sum[rs[ys]];
+}</pre>
+
+    <p>ys 是这片森林最顶上的那个点。它要是有效，整棵树都同色，答案就是 <code class="inline">sum[ys]</code>；它要是无效，<code class="inline">findroot</code> 最后一步把 ys 旋到了辅助树的根，它右边挂着的正是 ys 下面那一整摊，答案就是 <code class="inline">sum[rs[ys]]</code>。</p>
+    <p>注意这只 LCT 没有 makeroot 也没有 reverse：树以 1 号点为根这件事是固定的，边的方向永远是「儿子连向父亲」，所以整套操作都不需要翻转。</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+<span class="kw">int</span> n, q;
+
+<span class="kw">int</span> head[MAXN];
+<span class="kw">int</span> nxt[MAXN];
+<span class="kw">int</span> to[MAXN];
+<span class="kw">int</span> cntg;
+
+<span class="kw">int</span> fa[MAXN];
+<span class="kw">int</span> ls[MAXN];
+<span class="kw">int</span> rs[MAXN];
+
+<span class="kw">int</span> parent[MAXN];
+<span class="kw">int</span> val[MAXN];
+<span class="kw">int</span> vir[MAXN];
+<span class="kw">int</span> sum[MAXN];
+
+<span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+    nxt[++cntg] = head[u];
+    to[cntg] = v;
+    head[u] = cntg;
+}
+
+<span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> x) {
+    sum[x] = sum[ls[x]] + sum[rs[x]] + vir[x] + val[x];
+}
+
+<span class="kw">bool</span> <span class="fn">isroot</span>(<span class="kw">int</span> x) {
+    <span class="kw">return</span> ls[fa[x]] != x &amp;&amp; rs[fa[x]] != x;
+}
+
+<span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> x) {
+    <span class="kw">return</span> ls[fa[x]] == x ? 0 : 1;
+}
+
+<span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> x) {
+    <span class="kw">int</span> f = fa[x], g = fa[f];
+    <span class="kw">if</span> (lr(x) == 0) {
+        ls[f] = rs[x];
+        <span class="kw">if</span> (ls[f] != 0) {
+            fa[ls[f]] = f;
+        }
+        rs[x] = f;
+    } <span class="kw">else</span> {
+        rs[f] = ls[x];
+        <span class="kw">if</span> (rs[f] != 0) {
+            fa[rs[f]] = f;
+        }
+        ls[x] = f;
+    }
+    <span class="kw">if</span> (!isroot(f)) {
+        <span class="kw">if</span> (lr(f) == 0) {
+            ls[g] = x;
+        } <span class="kw">else</span> {
+            rs[g] = x;
+        }
+    }
+    fa[f] = x;
+    fa[x] = g;
+    up(f);
+    up(x);
+}
+
+<span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> x) {
+    <span class="kw">while</span> (!isroot(x)) {
+        <span class="kw">int</span> f = fa[x];
+        <span class="kw">if</span> (!isroot(f)) {
+            <span class="kw">if</span> (lr(x) == lr(f)) {
+                rotate(f);
+            } <span class="kw">else</span> {
+                rotate(x);
+            }
+        }
+        rotate(x);
+    }
+    up(x);
+}
+
+<span class="kw">void</span> <span class="fn">access</span>(<span class="kw">int</span> x) {
+    <span class="kw">for</span> (<span class="kw">int</span> y = 0; x != 0; y = x, x = fa[x]) {
+        splay(x);
+        vir[x] += sum[rs[x]];
+        vir[x] -= sum[y];
+        rs[x] = y;
+        up(x);
+    }
+}
+
+<span class="kw">int</span> <span class="fn">findroot</span>(<span class="kw">int</span> x) {
+    access(x);
+    splay(x);
+    <span class="kw">while</span> (ls[x] != 0) {
+        x = ls[x];
+    }
+    splay(x);
+    <span class="kw">return</span> x;
+}
+
+<span class="kw">void</span> <span class="fn">link</span>(<span class="kw">int</span> x, <span class="kw">int</span> f) {
+    <span class="kw">if</span> (f == 0) {
+        <span class="kw">return</span>;
+    }
+    access(f);
+    splay(f);
+    splay(x);
+    fa[x] = f;
+    vir[f] += sum[x];
+    up(f);
+}
+
+<span class="kw">void</span> <span class="fn">cut</span>(<span class="kw">int</span> x, <span class="kw">int</span> f) {
+    access(x);
+    splay(x);
+    <span class="kw">if</span> (f != 0) {
+        <span class="kw">int</span> left = ls[x];
+        fa[left] = 0;
+        ls[x] = 0;
+        up(x);
+    }
+}
+
+<span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> x) {
+    <span class="kw">int</span> xs = val[x] == 1 ? x : x + n;
+    <span class="kw">int</span> ys = findroot(xs);
+    <span class="kw">return</span> val[ys] == 1 ? sum[ys] : sum[rs[ys]];
+}
+
+<span class="kw">void</span> <span class="fn">reverseColor</span>(<span class="kw">int</span> x) {
+    <span class="kw">int</span> pre = val[x] == 1 ? x : x + n;
+    <span class="kw">int</span> cur = pre &lt;= n ? pre + n : pre - n;
+    cut(pre, parent[pre]);
+    val[pre] = 0;
+    val[cur] = 1;
+    link(cur, parent[cur]);
+}
+
+<span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> f) {
+    <span class="kw">if</span> (f != 0) {
+        parent[u] = f;
+        parent[u + n] = f + n;
+    }
+    val[u] = sum[u] = 1;
+    <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e != 0; e = nxt[e]) {
+        <span class="kw">int</span> v = to[e];
+        <span class="kw">if</span> (v != f) {
+            dfs(v, u);
+            link(v, u);
+        }
+    }
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    ios::sync_with_stdio(<span class="kw">false</span>);
+    cin.tie(<span class="kw">nullptr</span>);
+    cin &gt;&gt; n;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+        cin &gt;&gt; u &gt;&gt; v;
+        addEdge(u, v);
+        addEdge(v, u);
+    }
+    dfs(1, 0);
+    cin &gt;&gt; q;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x; i &lt;= q; i++) {
+        cin &gt;&gt; op &gt;&gt; x;
+        <span class="kw">if</span> (op == 0) {
+            cout &lt;&lt; query(x) &lt;&lt; "\n";
+        } <span class="kw">else</span> {
+            reverseColor(x);
+        }
+    }
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <h2>八、题目3：QTREE7</h2>
+    <p>把上一题的「连通块大小」换成「连通块里的最大点权」，再加一个改点权的操作。</p>
+    <p>麻烦在于大小可以加加减减，最大值不行。一个虚子树要退场，和是把减掉那部分减掉即可，最大值减完之后你并不知道剩下的还有没有一样大的。</p>
+    <p>常见的办法是给每个点挂一张有序表：表里存的是它每个虚子树当前的答案，出现几次存几次。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="每个点维护一张虚子树答案的有序表" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="40" y="30" width="150" height="34" rx="6" fill="#ffffff" stroke="#1f2328" stroke-width="1.6"/>
+        <text x="115" y="52" font-size="14" text-anchor="middle" font-weight="600" fill="#1f2328">状态点 x</text>
+        <text x="115" y="88" font-size="13" text-anchor="middle" fill="#6b7280">val = 5</text>
+
+        <g font-size="13" fill="#1f2328">
+          <rect x="380" y="30" width="60" height="30" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="410" y="50" text-anchor="middle">ls → 8</text>
+          <rect x="470" y="30" width="60" height="30" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="500" y="50" text-anchor="middle">rs → 3</text>
+        </g>
+        <text x="440" y="88" font-size="13" text-anchor="middle" fill="#6b7280">左右儿子的 maxv</text>
+
+        <rect x="330" y="120" width="220" height="60" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+        <text x="440" y="142" font-size="13" text-anchor="middle" fill="#ea580c">有序表 vir[x] = { 2, 7, 7, 9 }</text>
+        <text x="440" y="166" font-size="12" text-anchor="middle" fill="#6b7280">每个虚儿子当前的答案，各存一份</text>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.2">
+          <circle cx="250" cy="150" r="13"/>
+          <circle cx="215" cy="205" r="13"/>
+          <circle cx="285" cy="205" r="13"/>
+        </g>
+        <g font-size="11" fill="#ea580c">
+          <text x="250" y="154" text-anchor="middle">2</text>
+          <text x="215" y="209" text-anchor="middle">7</text>
+          <text x="285" y="209" text-anchor="middle">9</text>
+        </g>
+        <g stroke="#ea580c" stroke-width="1.2" fill="none">
+          <path d="M115 64 L115 140 L240 140"/>
+          <path d="M115 64 L115 200 L202 200"/>
+          <path d="M115 64 L115 200 L272 200"/>
+        </g>
+
+        <text x="310" y="228" font-size="14" text-anchor="middle" fill="#1f2328">maxv[x] = max(val[x], 表里的最大值, maxv[ls], maxv[rs]) = 9</text>
+      </svg>
+      <figcaption>有序表把「删掉一个虚子树」变成了「删掉表里一个数」，剩下的最大值直接从表尾拿</figcaption>
+    </figure>
+
+    <p>access 那两笔记账也就跟着改了写法：</p>
+
+    <pre class="code">void access(int x) {
+    for (int y = 0; x != 0; y = x, x = fa[x]) {
+        splay(x);
+        if (rs[x] != 0) vir[x].insert(maxv[rs[x]]);
+        if (y != 0) vir[x].erase(vir[x].find(maxv[y]));
+        rs[x] = y;
+        up(x);
+    }
+}</pre>
+
+    <p>link 的时候同样要在父亲的表中插入一份 <code class="inline">maxv[x]</code>。初始时黑色状态点的 val 是它的点权，白色状态点的 val 是 <code class="inline">-INF</code>；改点权就是把当前有效那个状态点 access、splay 之后改 val 再 up。</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+<span class="kw">const</span> <span class="kw">int</span> INF = 1000000001;
+<span class="kw">int</span> n, q;
+
+<span class="kw">int</span> color[MAXN];
+<span class="kw">int</span> weight[MAXN];
+
+<span class="kw">int</span> head[MAXN];
+<span class="kw">int</span> nxt[MAXN];
+<span class="kw">int</span> to[MAXN];
+<span class="kw">int</span> cntg;
+
+<span class="kw">int</span> fa[MAXN];
+<span class="kw">int</span> ls[MAXN];
+<span class="kw">int</span> rs[MAXN];
+
+<span class="kw">int</span> parent[MAXN];
+<span class="kw">int</span> val[MAXN];
+<span class="kw">multiset</span>&lt;<span class="kw">int</span>&gt; vir[MAXN];
+<span class="kw">int</span> maxv[MAXN];
+
+<span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+    nxt[++cntg] = head[u];
+    to[cntg] = v;
+    head[u] = cntg;
+}
+
+<span class="kw">int</span> <span class="fn">getmax</span>(<span class="kw">int</span> x) {
+    <span class="kw">if</span> (vir[x].empty()) {
+        <span class="kw">return</span> -INF;
+    }
+    <span class="kw">return</span> *vir[x].rbegin();
+}
+
+<span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> x) {
+    maxv[x] = max(val[x], max(getmax(x), max(maxv[ls[x]], maxv[rs[x]])));
+}
+
+<span class="kw">bool</span> <span class="fn">isroot</span>(<span class="kw">int</span> x) {
+    <span class="kw">return</span> ls[fa[x]] != x &amp;&amp; rs[fa[x]] != x;
+}
+
+<span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> x) {
+    <span class="kw">return</span> ls[fa[x]] == x ? 0 : 1;
+}
+
+<span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> x) {
+    <span class="kw">int</span> f = fa[x], g = fa[f];
+    <span class="kw">if</span> (lr(x) == 0) {
+        ls[f] = rs[x];
+        <span class="kw">if</span> (ls[f] != 0) {
+            fa[ls[f]] = f;
+        }
+        rs[x] = f;
+    } <span class="kw">else</span> {
+        rs[f] = ls[x];
+        <span class="kw">if</span> (rs[f] != 0) {
+            fa[rs[f]] = f;
+        }
+        ls[x] = f;
+    }
+    <span class="kw">if</span> (!isroot(f)) {
+        <span class="kw">if</span> (lr(f) == 0) {
+            ls[g] = x;
+        } <span class="kw">else</span> {
+            rs[g] = x;
+        }
+    }
+    fa[f] = x;
+    fa[x] = g;
+    up(f);
+    up(x);
+}
+
+<span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> x) {
+    <span class="kw">while</span> (!isroot(x)) {
+        <span class="kw">int</span> f = fa[x];
+        <span class="kw">if</span> (!isroot(f)) {
+            <span class="kw">if</span> (lr(x) == lr(f)) {
+                rotate(f);
+            } <span class="kw">else</span> {
+                rotate(x);
+            }
+        }
+        rotate(x);
+    }
+    up(x);
+}
+
+<span class="kw">void</span> <span class="fn">access</span>(<span class="kw">int</span> x) {
+    <span class="kw">for</span> (<span class="kw">int</span> y = 0; x != 0; y = x, x = fa[x]) {
+        splay(x);
+        <span class="kw">if</span> (rs[x] != 0) {
+            vir[x].insert(maxv[rs[x]]);
+        }
+        <span class="kw">if</span> (y != 0) {
+            vir[x].erase(vir[x].find(maxv[y]));
+        }
+        rs[x] = y;
+        up(x);
+    }
+}
+
+<span class="kw">int</span> <span class="fn">findroot</span>(<span class="kw">int</span> x) {
+    access(x);
+    splay(x);
+    <span class="kw">while</span> (ls[x] != 0) {
+        x = ls[x];
+    }
+    splay(x);
+    <span class="kw">return</span> x;
+}
+
+<span class="kw">void</span> <span class="fn">link</span>(<span class="kw">int</span> x, <span class="kw">int</span> f) {
+    <span class="kw">if</span> (f == 0) {
+        <span class="kw">return</span>;
+    }
+    access(f);
+    splay(f);
+    splay(x);
+    fa[x] = f;
+    vir[f].insert(maxv[x]);
+    up(f);
+}
+
+<span class="kw">void</span> <span class="fn">cut</span>(<span class="kw">int</span> x, <span class="kw">int</span> f) {
+    access(x);
+    splay(x);
+    <span class="kw">if</span> (f != 0) {
+        <span class="kw">int</span> left = ls[x];
+        fa[left] = 0;
+        ls[x] = 0;
+        up(x);
+    }
+}
+
+<span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> x) {
+    <span class="kw">int</span> xs = val[x] != -INF ? x : x + n;
+    <span class="kw">int</span> ys = findroot(xs);
+    <span class="kw">return</span> val[ys] != -INF ? maxv[ys] : maxv[rs[ys]];
+}
+
+<span class="kw">void</span> <span class="fn">reverseColor</span>(<span class="kw">int</span> x) {
+    <span class="kw">int</span> pre = val[x] != -INF ? x : x + n;
+    <span class="kw">int</span> cur = pre &lt;= n ? pre + n : pre - n;
+    cut(pre, parent[pre]);
+    val[cur] = val[pre];
+    val[pre] = -INF;
+    link(cur, parent[cur]);
+}
+
+<span class="kw">void</span> <span class="fn">updateValue</span>(<span class="kw">int</span> x, <span class="kw">int</span> w) {
+    <span class="kw">int</span> cur = val[x] != -INF ? x : x + n;
+    access(cur);
+    splay(cur);
+    val[cur] = w;
+    up(cur);
+}
+
+<span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> f) {
+    <span class="kw">if</span> (f != 0) {
+        parent[u] = f;
+        parent[u + n] = f + n;
+    }
+    <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e != 0; e = nxt[e]) {
+        <span class="kw">int</span> v = to[e];
+        <span class="kw">if</span> (v != f) {
+            dfs(v, u);
+            <span class="kw">int</span> cur = color[v] == 0 ? v : v + n;
+            link(cur, parent[cur]);
+        }
+    }
+}
+
+<span class="kw">void</span> <span class="fn">prepare</span>() {
+    maxv[0] = -INF;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        <span class="kw">if</span> (color[i] == 0) {
+            val[i] = maxv[i] = weight[i];
+            val[i + n] = maxv[i + n] = -INF;
+        } <span class="kw">else</span> {
+            val[i] = maxv[i] = -INF;
+            val[i + n] = maxv[i + n] = weight[i];
+        }
+    }
+    dfs(1, 0);
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    ios::sync_with_stdio(<span class="kw">false</span>);
+    cin.tie(<span class="kw">nullptr</span>);
+    cin &gt;&gt; n;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+        cin &gt;&gt; u &gt;&gt; v;
+        addEdge(u, v);
+        addEdge(v, u);
+    }
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        cin &gt;&gt; color[i];
+    }
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        cin &gt;&gt; weight[i];
+    }
+    prepare();
+    cin &gt;&gt; q;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x, w; i &lt;= q; i++) {
+        cin &gt;&gt; op &gt;&gt; x;
+        <span class="kw">if</span> (op == 0) {
+            cout &lt;&lt; query(x) &lt;&lt; "\n";
+        } <span class="kw">else</span> <span class="kw">if</span> (op == 1) {
+            reverseColor(x);
+        } <span class="kw">else</span> {
+            cin &gt;&gt; w;
+            updateValue(x, w);
+        }
+    }
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <h2>九、题目4：QTREE5</h2>
+    <p>再往前一步。树固定，节点黑白，操作是翻转颜色和「打印 x 到最近白色节点的距离」。</p>
+    <p>一条实链上要维护两个值：<code class="inline">lm[x]</code> 是这条链最浅的那个点出发到最近白点的距离，<code class="inline">rm[x]</code> 是最深的那个点出发的距离。虚子树那边依旧是每人一张有序表，存的是每个虚儿子自己的 lm；表里的最小值加 1，就是从 x 一头扎进这片虚子树之后的距离。</p>
+    <p>于是 lm[x] 就是三个候选值里取最小。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="lm 的三个候选" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#2563eb" stroke-width="1.6">
+          <line x1="170" y1="52" x2="170" y2="88"/>
+          <line x1="170" y1="118" x2="170" y2="154"/>
+          <line x1="170" y1="184" x2="170" y2="220"/>
+        </g>
+        <g font-size="13" font-weight="600">
+          <circle cx="170" cy="40" r="16" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="170" y="45" text-anchor="middle" fill="#1f2328">a</text>
+          <circle cx="170" cy="100" r="16" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="170" y="105" text-anchor="middle" fill="#1f2328">b</text>
+          <circle cx="170" cy="166" r="17" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+          <text x="170" y="171" text-anchor="middle" fill="#1f2328">x</text>
+          <circle cx="170" cy="232" r="16" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="170" y="237" text-anchor="middle" fill="#1f2328">d</text>
+        </g>
+        <text x="200" y="66" font-size="12" fill="#6b7280">链顶（最浅）</text>
+        <text x="200" y="248" font-size="12" fill="#6b7280">链底（最深）</text>
+
+        <rect x="430" y="150" width="160" height="52" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="510" y="172" font-size="12" text-anchor="middle" fill="#6b7280">x 的某一片虚子树</text>
+        <text x="510" y="190" font-size="12" text-anchor="middle" fill="#6b7280">最近白点距离 2</text>
+        <path d="M188 166 L424 166" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="4 3" fill="none"/>
+
+        <g font-size="12" fill="#6b7280">
+          <rect x="240" y="36" width="150" height="22" rx="5" fill="#ffffff" stroke="#e6e8eb"/>
+          <text x="248" y="51">① lm[ls[x]]，答案在上方</text>
+          <rect x="240" y="96" width="150" height="22" rx="5" fill="#ffffff" stroke="#e6e8eb"/>
+          <text x="248" y="111">② 走到 x 再扎进虚子树</text>
+          <rect x="240" y="222" width="150" height="22" rx="5" fill="#ffffff" stroke="#e6e8eb"/>
+          <text x="248" y="237">③ 继续往下走进 rs[x]</text>
+        </g>
+        <g stroke="#c9ced4" stroke-width="1.2" fill="none">
+          <path d="M236 47 L192 47"/>
+          <path d="M236 107 L192 150"/>
+          <path d="M236 233 L192 233"/>
+        </g>
+        <text x="310" y="286" font-size="13" text-anchor="middle" fill="#1f2328">lm[x] = min( lm[ls], siz[ls] + (x 是白 ? 0 : 虚表最小 + 1), siz[ls] + 1 + lm[rs] )</text>
+      </svg>
+      <figcaption>从链顶出发，最近的那个白点要么在上方、要么经过 x 进虚子树、要么还在更下面，三种可能都算一遍取最小</figcaption>
+    </figure>
+
+    <p>查询的时候 <code class="inline">access(x); splay(x);</code>，此时 x 就是这条链最深的点，答案直接读 <code class="inline">rm[x]</code>。翻转颜色也只是这三行：</p>
+
+    <pre class="code">void reverseColor(int x) {
+    access(x);
+    splay(x);
+    color[x] ^= 1;
+    up(x);
+}</pre>
+
+    <p>建图的时候，dfs 一遍，把每个孩子的 lm 塞进父亲的表里，此时所有边都是虚的。题目初始全是黑色，所以 lm、rm 一律初始化成 INF。</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+<span class="kw">const</span> <span class="kw">int</span> INF = 1000000001;
+<span class="kw">int</span> n, q;
+
+<span class="kw">int</span> head[MAXN];
+<span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+<span class="kw">int</span> to[MAXN &lt;&lt; 1];
+<span class="kw">int</span> cntg;
+
+<span class="kw">int</span> fa[MAXN];
+<span class="kw">int</span> ls[MAXN];
+<span class="kw">int</span> rs[MAXN];
+
+<span class="kw">int</span> color[MAXN];
+<span class="kw">int</span> siz[MAXN];
+<span class="kw">int</span> lm[MAXN];
+<span class="kw">int</span> rm[MAXN];
+
+<span class="kw">multiset</span>&lt;<span class="kw">int</span>&gt; vir[MAXN];
+
+<span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+    nxt[++cntg] = head[u];
+    to[cntg] = v;
+    head[u] = cntg;
+}
+
+<span class="kw">int</span> <span class="fn">getmin</span>(<span class="kw">int</span> x) {
+    <span class="kw">if</span> (vir[x].empty()) {
+        <span class="kw">return</span> INF;
+    }
+    <span class="kw">return</span> *vir[x].begin();
+}
+
+<span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> x) {
+    siz[x] = siz[ls[x]] + siz[rs[x]] + 1;
+    <span class="kw">int</span> l1 = lm[ls[x]];
+    <span class="kw">int</span> l2 = siz[ls[x]] + (color[x] == 1 ? 0 : getmin(x) + 1);
+    <span class="kw">int</span> l3 = siz[ls[x]] + 1 + lm[rs[x]];
+    lm[x] = min(l1, min(l2, l3));
+    <span class="kw">int</span> r1 = rm[rs[x]];
+    <span class="kw">int</span> r2 = siz[rs[x]] + (color[x] == 1 ? 0 : getmin(x) + 1);
+    <span class="kw">int</span> r3 = siz[rs[x]] + 1 + rm[ls[x]];
+    rm[x] = min(r1, min(r2, r3));
+}
+
+<span class="kw">bool</span> <span class="fn">isroot</span>(<span class="kw">int</span> x) {
+    <span class="kw">return</span> ls[fa[x]] != x &amp;&amp; rs[fa[x]] != x;
+}
+
+<span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> x) {
+    <span class="kw">return</span> ls[fa[x]] == x ? 0 : 1;
+}
+
+<span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> x) {
+    <span class="kw">int</span> f = fa[x], g = fa[f];
+    <span class="kw">if</span> (lr(x) == 0) {
+        ls[f] = rs[x];
+        <span class="kw">if</span> (ls[f] != 0) {
+            fa[ls[f]] = f;
+        }
+        rs[x] = f;
+    } <span class="kw">else</span> {
+        rs[f] = ls[x];
+        <span class="kw">if</span> (rs[f] != 0) {
+            fa[rs[f]] = f;
+        }
+        ls[x] = f;
+    }
+    <span class="kw">if</span> (!isroot(f)) {
+        <span class="kw">if</span> (lr(f) == 0) {
+            ls[g] = x;
+        } <span class="kw">else</span> {
+            rs[g] = x;
+        }
+    }
+    fa[f] = x;
+    fa[x] = g;
+    up(f);
+    up(x);
+}
+
+<span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> x) {
+    <span class="kw">while</span> (!isroot(x)) {
+        <span class="kw">int</span> f = fa[x];
+        <span class="kw">if</span> (!isroot(f)) {
+            <span class="kw">if</span> (lr(x) == lr(f)) {
+                rotate(f);
+            } <span class="kw">else</span> {
+                rotate(x);
+            }
+        }
+        rotate(x);
+    }
+    up(x);
+}
+
+<span class="kw">void</span> <span class="fn">access</span>(<span class="kw">int</span> x) {
+    <span class="kw">for</span> (<span class="kw">int</span> y = 0; x != 0; y = x, x = fa[x]) {
+        splay(x);
+        <span class="kw">if</span> (rs[x] != 0) {
+            vir[x].insert(lm[rs[x]]);
+        }
+        <span class="kw">if</span> (y != 0) {
+            vir[x].erase(vir[x].find(lm[y]));
+        }
+        rs[x] = y;
+        up(x);
+    }
+}
+
+<span class="kw">void</span> <span class="fn">reverseColor</span>(<span class="kw">int</span> x) {
+    access(x);
+    splay(x);
+    color[x] ^= 1;
+    up(x);
+}
+
+<span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> x) {
+    access(x);
+    splay(x);
+    <span class="kw">return</span> rm[x] == INF ? -1 : rm[x];
+}
+
+<span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> f) {
+    fa[u] = f;
+    siz[u] = 1;
+    lm[u] = rm[u] = INF;
+    <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e != 0; e = nxt[e]) {
+        <span class="kw">int</span> v = to[e];
+        <span class="kw">if</span> (v != f) {
+            dfs(v, u);
+            vir[u].insert(lm[v]);
+        }
+    }
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    ios::sync_with_stdio(<span class="kw">false</span>);
+    cin.tie(<span class="kw">nullptr</span>);
+    cin &gt;&gt; n;
+    lm[0] = rm[0] = INF;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+        cin &gt;&gt; u &gt;&gt; v;
+        addEdge(u, v);
+        addEdge(v, u);
+    }
+    dfs(1, 0);
+    cin &gt;&gt; q;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x; i &lt;= q; i++) {
+        cin &gt;&gt; op &gt;&gt; x;
+        <span class="kw">if</span> (op == 0) {
+            reverseColor(x);
+        } <span class="kw">else</span> {
+            cout &lt;&lt; query(x) &lt;&lt; "\n";
+        }
+    }
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <h2>十、总结与注意点</h2>
+    <p>能这么维护的子树信息，本质上是可减的：节点数、点权和、异或和。虚子树进出只要加一项减一项。</p>
+    <p>汇总一个状态点的时候，永远是三块加自己：x 自身 + x 的所有虚子树 + x 在辅助树里的左右儿子。access 引起的实虚转换，必须同步地在这三块之间搬数据。</p>
+    <p>不可减的信息，比如最大值、最小值，常见做法就是每个点再配一张有序表或者一棵平衡树。</p>
+    <p>剩下的几条是踩坑换来的经验：</p>
+    <ol>
+      <li>LCT 天生不擅长子树信息，尤其是信息不可减的时候，或者动态树上还要做子树懒更新。</li>
+      <li>这些情况往往还得额外配数据结构，实现难度会明显上一个台阶。</li>
+      <li>如果发现越写越复杂，多半应该退回来想想有没有难度更低的做法。</li>
+      <li>动态树配上复杂的路径或子树信息、子树懒更新，这类问题更适合用 top tree。</li>
+      <li>这一类题比赛里出现频率不高。</li>
+    </ol>
+
+    <h2>十一、复杂度分析</h2>
+    <p>设 n 为点数，q 为操作次数。</p>
+    <p>LCT 的 makeroot、access、splay、link、cut、findroot、split 都是均摊 O(log n)。vir 记账只是在这些操作的常量步里多几次加减。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code class="inline">up</code>（汇总一个点）</td><td><code class="inline">O(1)</code></td></tr>
+        <tr><td><code class="inline">access</code> / <code class="inline">link</code> / <code class="inline">cut</code> / <code class="inline">findroot</code></td><td><code class="inline">O(log n)</code> 均摊</td></tr>
+        <tr><td>题目1（大融合）单次 <code class="inline">Q</code></td><td><code class="inline">O(log n)</code></td></tr>
+        <tr><td>题目2（QTREE6）单次操作</td><td><code class="inline">O(log n)</code></td></tr>
+        <tr><td>题目3、4，带有序表</td><td>每轮 access 要在表里增删一次，<code class="inline">O(log² n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间上，题目1 是几个长度 O(n) 的数组，O(n)。题目2 到 4 每个点拆成两个状态点，数组开到 2n，仍然是 O(n)。题目3、4 每个点一张有序表，所有表加起来存的是虚子树的条目，总数 O(n)，只是常数比单纯数组大不少。</p>
+
+    <h2>十二、最后</h2>
+    <p>LCT 维护子树信息，说穿了就是一句话：实的部分交给 splay，虚的部分自己记账。</p>
+    <p>麻烦都集中在「access 会把谁实谁虚换一遍」这件事上。记账的公式从来没变过，变的是记的东西：题目1 记的是点数可以做加减，题目3 记的是最大值就只能用有序表代替减法。</p>
+    <p>下一节把同样的骨架搬到图结构上，边变成点、点双变成方点，LCT 就不再是维护一棵树，而是在维护一张图的连通结构。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var N = 6;
+  var EDGES = [[2,1],[3,1],[4,3],[5,3],[6,5]];
+  var POS = {1:[170,44],2:[80,116],3:[250,116],4:[196,180],5:[300,180],6:[300,248]};
+
+  var fa=[], ls=[], rs=[], rev=[], vir=[], sum=[];
+  function reset(){
+    fa=[0]; ls=[0]; rs=[0]; rev=[false]; vir=[0]; sum=[0];
+    for(var i=1;i<=N;i++){ fa[i]=0; ls[i]=0; rs[i]=0; rev[i]=false; vir[i]=0; sum[i]=1; }
+  }
+  function up(x){ sum[x] = sum[ls[x]] + sum[rs[x]] + vir[x] + 1; }
+  function isroot(x){ return ls[fa[x]] !== x && rs[fa[x]] !== x; }
+  function lr(x){ return ls[fa[x]] === x ? 0 : 1; }
+  function reverse(x){ if(x!==0){ var t=ls[x]; ls[x]=rs[x]; rs[x]=t; rev[x] = !rev[x]; } }
+  function down(x){ if(rev[x]){ reverse(ls[x]); reverse(rs[x]); rev[x]=false; } }
+  function rotate(x){
+    var f=fa[x], g=fa[f];
+    if(lr(x)===0){ ls[f]=rs[x]; if(ls[f]!==0) fa[ls[f]]=f; rs[x]=f; }
+    else { rs[f]=ls[x]; if(rs[f]!==0) fa[rs[f]]=f; ls[x]=f; }
+    if(!isroot(f)){ if(lr(f)===0) ls[g]=x; else rs[g]=x; }
+    fa[f]=x; fa[x]=g;
+    up(f); up(x);
+  }
+  function splay(x){
+    var st=[], y=x;
+    st.push(y);
+    while(!isroot(y)){ y=fa[y]; st.push(y); }
+    while(st.length) down(st.pop());
+    while(!isroot(x)){
+      var f=fa[x];
+      if(!isroot(f)){ if(lr(x)===lr(f)) rotate(f); else rotate(x); }
+      rotate(x);
+    }
+  }
+  function makeroot(x){ access(x); splay(x); reverse(x); }
+  function findroot(x){
+    access(x); splay(x); down(x);
+    while(ls[x]!==0){ x=ls[x]; down(x); }
+    splay(x); return x;
+  }
+  function access(x){
+    for(var y=0; x!==0; y=x, x=fa[x]){
+      splay(x);
+      vir[x] += sum[rs[x]];
+      vir[x] -= sum[y];
+      rs[x] = y;
+      up(x);
+    }
+  }
+  function link(x, y){
+    makeroot(x);
+    if(findroot(y) !== x){
+      access(y); splay(y);
+      fa[x] = y;
+      vir[y] += sum[x];
+      up(y);
+    }
+  }
+
+  function snap(cap, hi, ne){
+    return { fa:fa.slice(), ls:ls.slice(), rs:rs.slice(), rev:rev.slice(),
+             vir:vir.slice(), sum:sum.slice(), cap:cap, hi:hi||null, ne:ne };
+  }
+  function restore(f){
+    fa=f.fa.slice(); ls=f.ls.slice(); rs=f.rs.slice(); rev=f.rev.slice();
+    vir=f.vir.slice(); sum=f.sum.slice();
+  }
+
+  var frames = [];
+  function build(){
+    frames = [];
+    reset();
+    frames.push(snap('六个孤立点，还没有任何边。每个点 sum = 1，vir = 0。', null, 0));
+    var names = ['link(2, 1)','link(3, 1)','link(4, 3)','link(5, 3)','link(6, 5)'];
+    EDGES.forEach(function(e, i){
+      link(e[0], e[1]);
+      frames.push(snap(names[i] + '：' + e[0] + ' 整棵挂到 ' + e[1] + ' 下面当虚儿子。vir[' + e[1] + '] += sum[' + e[0] + '] = ' + sum[e[0]] +
+        '，up 之后 sum[' + e[1] + '] = ' + sum[e[1]] + '。', {node:e[0], top:e[1]}, i + 1));
+    });
+    runAccess(6, 'access(6)');
+    runAccess(4, 'access(4)');
+  }
+  function runAccess(start, tag){
+    var x = start, y = 0, k = 0;
+    while(x !== 0){
+      splay(x);
+      var addV = sum[rs[x]], subV = sum[y], cur = x, py = y;
+      vir[x] += addV; vir[x] -= subV; rs[x] = y; up(x);
+      k++;
+      var msg = tag + ' 第 ' + k + ' 趟，轮到 ' + cur + '：splay(' + cur + ') 之后' +
+        (addV ? '，原来实的右子树整体变虚，vir[' + cur + '] += ' + addV : '，右子树是空的，加 0') +
+        (py ? '；' + py + ' 原来是 ' + cur + ' 的虚儿子，现在接到右儿子上，vir[' + cur + '] −= ' + subV : '；y 是 0，没有要减的') +
+        '。这一趟之后 vir[' + cur + '] = ' + vir[cur] + '，sum[' + cur + '] = ' + sum[cur] + '。';
+      frames.push(snap(msg, {node:cur, top:py}, EDGES.length));
+      y = x; x = fa[x];
+    }
+    var tail = 'access 走完了，' + start + ' 到根的路径已经全是实边。此时 splay(' + start + ') 之后 rs 是 0，所有儿子都在 vir 里，所以 ' +
+      start + ' 的子树大小就是 vir[' + start + '] + 1 = ' + (vir[start] + 1) + '。';
+    frames.push(snap(tail, {node:start, top:0}, EDGES.length));
+  }
+
+  var svgEl = document.getElementById('lsSvg');
+  var infoEl = document.getElementById('lsInfo');
+  var btnPrev = document.getElementById('lsPrev');
+  var btnNext = document.getElementById('lsNext');
+  var btnReset = document.getElementById('lsReset');
+  var cur = 0;
+
+  function cssvar(name, def){ return def; }
+
+  function nodeBox(id, x, y, hi){
+    var fill = hi === id ? '#ffedd5' : '#eef4ff';
+    var stroke = hi === id ? '#ea580c' : '#2563eb';
+    var s = '<g class="ls-node" data-id="' + id + '">';
+    s += '<rect x="' + (x-31) + '" y="' + (y-20) + '" width="62" height="40" rx="7" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.4"/>';
+    s += '<text x="' + x + '" y="' + (y-3) + '" font-size="15" font-weight="600" text-anchor="middle" fill="#1f2328">' + id + '</text>';
+    s += '<text x="' + x + '" y="' + (y+13) + '" font-size="11" text-anchor="middle" fill="#6b7280">v' + vir[id] + ' s' + sum[id] + '</text>';
+    s += '</g>';
+    return s;
+  }
+
+  function auxLayout(){
+    var roots = [];
+    for(var i=1;i<=N;i++) if(isroot(i)) roots.push(i);
+    var pos = {};
+    var cx = 366, cy = 52, rowH = 0;
+    roots.forEach(function(r){
+      var items = [], cnt = 0, maxd = 0;
+      (function walk(u, d){
+        if(u === 0) return;
+        walk(ls[u], d+1);
+        items.push({id:u, ord:cnt++, d:d});
+        maxd = Math.max(maxd, d);
+        walk(rs[u], d+1);
+      })(r, 0);
+      var w = (cnt - 1) * 52 + 44;
+      var h = maxd * 44 + 34;
+      if(cx + w > 594){ cx = 366; cy += rowH + 22; rowH = 0; }
+      items.forEach(function(it){ pos[it.id] = [cx + it.ord * 52, cy + it.d * 44]; });
+      cx += w + 16;
+      rowH = Math.max(rowH, h);
+    });
+    return pos;
+  }
+
+  function draw(hi, ne){
+    var s = '';
+    s += '<rect x="16" y="16" width="320" height="292" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>';
+    s += '<text x="176" y="36" font-size="13" fill="#6b7280" text-anchor="middle">原树</text>';
+    s += '<rect x="348" y="16" width="256" height="292" rx="8" fill="#ffffff" stroke="#e6e8eb"/>';
+    s += '<text x="476" y="36" font-size="13" fill="#6b7280" text-anchor="middle">辅助树（每条实链一棵）</text>';
+
+    EDGES.slice(0, ne).forEach(function(e){
+      var u = e[0], v = e[1];
+      var solid = (fa[u] === v && !isroot(u)) || (fa[v] === u && !isroot(v));
+      var a = POS[u], b = POS[v];
+      if(solid) s += '<line x1="' + a[0] + '" y1="' + a[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke="#2563eb" stroke-width="2.6"/>';
+      else s += '<line x1="' + a[0] + '" y1="' + a[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke="#9aa0a6" stroke-width="1.8" stroke-dasharray="5 4"/>';
+    });
+    for(var i=1;i<=N;i++) s += nodeBox(i, POS[i][0], POS[i][1], hi && hi.node === i ? hi.node : 0);
+
+    var ap = auxLayout();
+    Object.keys(ap).forEach(function(idStr){
+      var id = parseInt(idStr, 10);
+      var childs = [ls[id], rs[id]];
+      childs.forEach(function(c){
+        if(c !== 0){
+          s += '<line x1="' + ap[id][0] + '" y1="' + ap[id][1] + '" x2="' + ap[c][0] + '" y2="' + ap[c][1] + '" stroke="#2563eb" stroke-width="1.6"/>';
+        }
+      });
+    });
+    Object.keys(ap).forEach(function(idStr){
+      var id = parseInt(idStr, 10);
+      var p = ap[id];
+      var hl = (hi && hi.node === id);
+      s += '<rect x="' + (p[0]-22) + '" y="' + (p[1]-17) + '" width="44" height="34" rx="6" fill="' + (hl ? '#ffedd5' : '#eef4ff') +
+           '" stroke="' + (hl ? '#ea580c' : '#2563eb') + '" stroke-width="1.4"/>';
+      s += '<text x="' + p[0] + '" y="' + (p[1]+5) + '" font-size="13" font-weight="600" text-anchor="middle" fill="#1f2328">' + id + '</text>';
+    });
+    return s;
+  }
+
+  function render(){
+    var f = frames[cur];
+    restore(f);
+    svgEl.innerHTML = draw(f.hi, f.ne);
+    var rows = '';
+    for(var i=1;i<=N;i++){
+      rows += '<div class="row">' + i + ' 号：vir = ' + vir[i] + '&nbsp;&nbsp;sum = ' + sum[i] + '</div>';
+    }
+    infoEl.innerHTML = '<div class="row" style="margin-bottom:6px;color:var(--text-dim);">第 ' + cur + ' / ' + (frames.length - 1) + ' 步</div>' +
+                       '<div class="row" style="margin-bottom:8px;">' + f.cap + '</div>' + rows;
+    btnPrev.disabled = (cur === 0);
+    btnNext.disabled = (cur === frames.length - 1);
+  }
+
+  svgEl.addEventListener('click', function(ev){
+    var g = ev.target.closest ? ev.target.closest('.ls-node') : null;
+    if(!g) return;
+    var id = parseInt(g.getAttribute('data-id'), 10);
+    restore(frames[cur]);
+    access(id); splay(id);
+    frames = frames.slice(0, cur + 1);
+    frames.push(snap('查询：access(' + id + '); splay(' + id + ') 之后 rs 是 0，' + id + ' 的儿子全都在 vir 里了，子树大小 = vir[' + id + '] + 1 = ' +
+      (vir[id] + 1) + '。', {node:id, top:0}, frames[cur].ne));
+    cur = frames.length - 1;
+    render();
+  });
+  btnPrev.addEventListener('click', function(){ if(cur > 0){ cur--; render(); } });
+  btnNext.addEventListener('click', function(){ if(cur < frames.length - 1){ cur++; render(); } });
+  btnReset.addEventListener('click', function(){ build(); cur = 0; render(); });
+
+  build();
+  render();
+})();
+</script>
+</body>
+</html>

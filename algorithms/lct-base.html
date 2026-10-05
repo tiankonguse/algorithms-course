@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LCT 原理与模版 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .lct-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .lct-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .lct-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  .lct-node{font-size:13px;}
+  @media(max-width:760px){
+    .lct-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>LCT 原理与模版</h1>
+    <p class="intro">Link-Cut Tree 要在一条随时加边删边的森林上做路径查询。它的骨架只有六个操作，代码不到一百行。难点全在理解「实链怎么组织成一棵 splay」以及「一个点的父亲为什么可能不认它」。这一节先把原理讲透，再用模版把三道最直接的题走一遍。</p>
+
+    <h2>零、背景</h2>
+    <p>有一片森林，边上会发生两件事：中间加一条边，或者删一条边。整个过程图始终是森林，不能出环。要做的事有四种：判断两点是否连通、查一条路径上的信息、求动态 LCA、维护动态生成树。</p>
+    <p>这类问题叫动态树问题。它和普通树形问题的区别在于结构会变，一次 link 或 cut 之后，原来的父子关系可能整条链都换了。用重链剖分或倍增预处理过的东西，一旦树变了就全部作废。</p>
+    <p>LCT 是解决动态树最经典的结构，由 Sleator 和 Tarjan 提出。它把树上的边分成实边和虚边，实边连成链，每条链挂在一棵 splay 上。所有操作都靠调整这两类边来完成。</p>
+    <p>它是在线的：link、cut、查询交错的顺序也能直接处理。别的手段里，线段树分治是离线的，Euler Tour Tree、Top Tree、全局平衡二叉树也能处理一部分动态树问题，只是普及度不如 LCT。</p>
+
+    <h2>一、实链剖分</h2>
+    <p>先给边分两类。</p>
+    <p>一个点如果有儿子，可以指定其中一个儿子和它之间的边为实边，其余和它相连的边都是虚边。一个点最多认一个实边儿子，所以实边连起来是一段一段的路径，叫实链。</p>
+    <p>每条实链上挂一棵 splay。这棵 splay 的中序遍历，恰好是实链上的点按「在原树里从浅到深」的顺序排出来的结果。</p>
+    <p>也就是说，一棵辅助 splay 的中序序列，就是原树上一段从上到下的路径。想把一段路径拎出来，只要让它变成一条实链。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 264" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="原树的实链对应一棵辅助 splay" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="lb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+
+        <rect x="14" y="14" width="266" height="236" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="30" y="38" font-size="13" fill="#6b7280">原树</text>
+
+        <line x1="96" y1="92" x2="163" y2="150" stroke="#2563eb" stroke-width="2.6"/>
+        <line x1="163" y1="150" x2="96" y2="208" stroke="#2563eb" stroke-width="2.6"/>
+        <line x1="118" y1="94" x2="146" y2="148" stroke="#c9ced4" stroke-width="1.6" stroke-dasharray="5 4"/>
+        <line x1="96" y1="92" x2="232" y2="92" stroke="#c9ced4" stroke-width="1.6" stroke-dasharray="5 4"/>
+        <line x1="180" y1="150" x2="228" y2="206" stroke="#c9ced4" stroke-width="1.6" stroke-dasharray="5 4"/>
+
+        <circle cx="80" cy="84" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="80" y="89" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">1</text>
+        <circle cx="170" cy="150" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="170" y="155" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">2</text>
+        <circle cx="80" cy="216" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="80" y="221" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">4</text>
+        <circle cx="243" cy="84" r="16" fill="#ffffff" stroke="#c9ced4" stroke-width="1.6"/>
+        <text x="243" y="89" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">3</text>
+        <circle cx="243" cy="216" r="16" fill="#ffffff" stroke="#c9ced4" stroke-width="1.6"/>
+        <text x="243" y="221" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">5</text>
+        <text x="30" y="240" font-size="11" fill="#6b7280">实边连成 1–2–4 这条链，其余是虚边</text>
+
+        <line x1="292" y1="130" x2="332" y2="130" stroke="#9aa0a6" stroke-width="1.6" marker-end="url(#lb-arrow)"/>
+        <text x="312" y="118" font-size="12" fill="#374151" text-anchor="middle">中序</text>
+
+        <rect x="342" y="14" width="264" height="236" rx="8" fill="#ffffff" stroke="#e6e8eb"/>
+        <text x="358" y="38" font-size="13" fill="#6b7280">实链挂的辅助 splay</text>
+
+        <line x1="450" y1="120" x2="392" y2="84" stroke="#2563eb" stroke-width="2"/>
+        <line x1="450" y1="120" x2="508" y2="84" stroke="#2563eb" stroke-width="2"/>
+        <line x1="392" y1="84" x2="352" y2="120" stroke="#2563eb" stroke-width="2"/>
+
+        <circle cx="450" cy="120" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="450" y="125" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">2</text>
+        <circle cx="376" cy="76" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="376" y="81" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">1</text>
+        <circle cx="524" cy="76" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="524" y="81" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">4</text>
+
+        <rect x="358" y="164" width="230" height="34" rx="6" fill="#eef4ff" stroke="#cfe0ff"/>
+        <text x="366" y="186" font-size="12" fill="#1f2328">中序：1 → 2 → 4</text>
+        <text x="358" y="222" font-size="11" fill="#6b7280">splay 的形态可以变，中序序列不变</text>
+        <text x="358" y="240" font-size="11" fill="#6b7280">形态只影响「这一个点是左还是右儿子」</text>
+      </svg>
+      <figcaption>一条实链就是一棵辅助 splay，中序遍历给出这条链从上到下的顺序</figcaption>
+    </figure>
+
+    <h2>二、认父不认子</h2>
+    <p>辅助 splay 的根还留着一个 <code class="inline">fa</code> 指针，指向实链顶点的父亲，也就是虚边另一头的那个点。这个指针必须留着，否则 access 往上爬会断线。</p>
+    <p>麻烦在于这个 <code class="inline">fa</code> 是单向的：它指向的那个父亲，并不把 splay 的根当成自己的儿子。所以 <code class="inline">ls[fa[x]]</code> 和 <code class="inline">rs[fa[x]]</code> 里都找不到 <code class="inline">x</code>。</p>
+    <p>判断一个点是不是它所在 splay 的根，就看它的父亲认不认它当儿子：</p>
+
+        <pre class="code"><span class="kw">bool</span> <span class="fn">isroot</span>(<span class="kw">int</span> x) {
+    <span class="kw">return</span> ls[fa[x]] != x &amp;&amp; rs[fa[x]] != x;
+}</pre>
+
+    <p>父亲两个儿子都不是它，说明它上面那条边是虚边，它就是所在 splay 的根。后面所有「往上走」的判断都建立在这一句上：<code class="inline">splay</code> 停在根，<code class="inline">access</code> 从根跳虚边去上一层。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 236" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="辅助 splay 的根通过 fa 指向虚边父亲" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="lb-arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+
+        <line x1="180" y1="112" x2="112" y2="70" stroke="#2563eb" stroke-width="2"/>
+        <line x1="180" y1="112" x2="248" y2="70" stroke="#2563eb" stroke-width="2"/>
+
+        <circle cx="180" cy="112" r="18" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+        <text x="180" y="117" font-size="14" font-weight="600" fill="#1f2328" text-anchor="middle">4</text>
+        <circle cx="96" cy="62" r="18" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+        <text x="96" y="67" font-size="14" font-weight="600" fill="#1f2328" text-anchor="middle">2</text>
+        <circle cx="264" cy="62" r="18" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+        <text x="264" y="67" font-size="14" font-weight="600" fill="#1f2328" text-anchor="middle">6</text>
+
+        <path d="M180 94 C 150 46, 116 30, 88 44" fill="none" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#lb-arrow2)"/>
+        <text x="128" y="26" font-size="11" fill="#ea580c" text-anchor="middle">fa[4] = 1（虚边）</text>
+
+        <circle cx="70" cy="52" r="18" fill="#ffffff" stroke="#c9ced4" stroke-width="1.8"/>
+        <text x="70" y="57" font-size="14" font-weight="600" fill="#1f2328" text-anchor="middle">1</text>
+
+        <circle cx="70" cy="176" r="18" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <text x="70" y="181" font-size="14" font-weight="600" fill="#1f2328" text-anchor="middle">5</text>
+        <path d="M88 176 C 130 176, 150 130, 170 122" fill="none" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#lb-arrow2)"/>
+        <text x="150" y="200" font-size="11" fill="#ea580c" text-anchor="middle">fa[5] = 2（虚边）</text>
+
+        <rect x="330" y="42" width="272" height="152" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="346" y="70" font-size="12" fill="#374151">辅助 splay 里有 4、2、6，根是 4</text>
+        <text x="346" y="96" font-size="12" fill="#374151">4 的 fa 指向 1，但 1 的两个儿子里没有 4</text>
+        <text x="346" y="122" font-size="12" fill="#ea580c">于是 isroot(4) = true，4 是这棵 splay 的根</text>
+        <text x="346" y="148" font-size="12" fill="#374151">5 自成一棵 splay，fa[5] = 2 也只用于往上爬</text>
+        <text x="346" y="174" font-size="12" fill="#374151">ls[2] 是 1，不是 5，所以 isroot(5) 同样成立</text>
+      </svg>
+      <figcaption>辅助 splay 的根通过 fa 指向虚边父亲，那个父亲却不认这个儿子</figcaption>
+    </figure>
+
+    <h2>三、六个操作</h2>
+    <p>模版只有六个动作。前四个负责把路径拎出来，后两个负责改结构。</p>
+
+    <p><code class="inline">access(x)</code> 把从整棵树根到 x 的路径变成一条实链，路上原来的实边全部断开成虚边。它是所有操作的地基。</p>
+
+        <pre class="code"><span class="kw">void</span> <span class="fn">access</span>(<span class="kw">int</span> x) {
+    <span class="kw">for</span> (<span class="kw">int</span> y = 0; x != 0; y = x, x = fa[x]) {
+        splay(x);
+        rs[x] = y;
+        up(x);
+    }
+}</pre>
+
+    <p>从 x 出发，一层层往上爬。每次把当前点 splay 到它辅助树的根，再把它的右儿子换成上一轮处理的那个点。<code class="inline">y</code> 从 0 起步，所以第一轮会把 x 原来的实儿子断掉；之后每接一次，就有一小段路径从虚变实。</p>
+    <p>下面这个演示把 access(6) 的过程逐步展开。虚线是虚边，蓝色实线是实边。</p>
+
+    <div class="viz">
+      <div class="viz-title">access(6)：把根到 6 的路径接成一条实链</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">点「下一步」看每一轮 splay 之后哪条边从虚变实。橙色点是当前正在处理的点。</p>
+      <svg id="acSvg" viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="access 过程演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>实边（同一条实链）</span>
+        <span><span class="dot partial"></span>当前处理的点</span>
+        <span><span class="dot skip"></span>虚边</span>
+      </div>
+      <div class="breakdown" id="acInfo"></div>
+      <div class="viz-controls">
+        <button class="lct-btn" id="acPrev" type="button">上一步</button>
+        <button class="lct-btn" id="acNext" type="button">下一步</button>
+        <button class="lct-btn" id="acReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <p><code class="inline">makeroot(x)</code> 把 x 变成整棵原树的根。</p>
+
+        <pre class="code"><span class="kw">void</span> <span class="fn">makeroot</span>(<span class="kw">int</span> x) {
+    access(x);
+    splay(x);
+    reverse(x);
+}</pre>
+
+    <p>access(x) 之后，根到 x 已经在一条实链上，x 是这条链最深的点。这时把整条链翻转，x 就成了最浅的点，也就是新的树根。</p>
+    <p>翻转靠一个 <code class="inline">rev</code> 懒标记：对一个点打上标记，等价于交换它的左右儿子并递归下去。因为 splay 的中序遍历就是链的深度序，交换左右儿子正好把顺序倒过来。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="makeroot 靠翻转整条实链换根" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="lb-arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+        <text x="40" y="34" font-size="12" fill="#374151">access(6) 之后：1 是根，6 最深</text>
+        <circle cx="60" cy="72" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="60" y="77" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">1</text>
+        <line x1="78" y1="72" x2="128" y2="72" stroke="#2563eb" stroke-width="2" marker-end="url(#lb-arrow3)"/>
+        <circle cx="148" cy="72" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="148" y="77" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">2</text>
+        <line x1="166" y1="72" x2="216" y2="72" stroke="#2563eb" stroke-width="2" marker-end="url(#lb-arrow3)"/>
+        <circle cx="236" cy="72" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="236" y="77" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">4</text>
+        <line x1="254" y1="72" x2="304" y2="72" stroke="#2563eb" stroke-width="2" marker-end="url(#lb-arrow3)"/>
+        <circle cx="324" cy="72" r="16" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <text x="324" y="77" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">6</text>
+        <text x="356" y="77" font-size="11" fill="#6b7280">深度 0 → 3</text>
+
+        <line x1="192" y1="104" x2="192" y2="128" stroke="#9aa0a6" stroke-width="1.6"/>
+        <text x="204" y="122" font-size="12" fill="#ea580c">翻转整条链</text>
+
+        <text x="40" y="158" font-size="12" fill="#374151">make root(6) 之后：6 成了根，深度序倒过来</text>
+        <circle cx="60" cy="182" r="16" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <text x="60" y="187" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">6</text>
+        <line x1="78" y1="182" x2="128" y2="182" stroke="#2563eb" stroke-width="2" marker-start="url(#lb-arrow3)"/>
+        <circle cx="148" cy="182" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="148" y="187" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">4</text>
+        <line x1="166" y1="182" x2="216" y2="182" stroke="#2563eb" stroke-width="2" marker-start="url(#lb-arrow3)"/>
+        <circle cx="236" cy="182" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="236" y="187" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">2</text>
+        <line x1="254" y1="182" x2="304" y2="182" stroke="#2563eb" stroke-width="2" marker-start="url(#lb-arrow3)"/>
+        <circle cx="324" cy="182" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="324" y="187" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">1</text>
+        <text x="392" y="187" font-size="11" fill="#6b7280">新的深度序</text>
+      </svg>
+      <figcaption>换根不搬任何东西，只是把整条链的深度序倒过来</figcaption>
+    </figure>
+
+    <p><code class="inline">findroot(x)</code> 找到 x 所在的整棵原树的根。</p>
+
+        <pre class="code"><span class="kw">int</span> <span class="fn">findroot</span>(<span class="kw">int</span> x) {
+    access(x);
+    splay(x);
+    <span class="kw">while</span> (ls[x] != 0) {
+        x = ls[x];
+    }
+    splay(x);
+    <span class="kw">return</span> x;
+}</pre>
+    <p>access(x) 之后，根到 x 都在同一棵 splay 里，根就是中序最靠前的点。一路往左儿子走到底，就是整棵树的根。代码里还夹了几次 <code class="inline">down</code> 下传翻转标记，否则左右儿子可能是反的。</p>
+    <p>两点是否连通，就是 <code class="inline">findroot(x) == findroot(y)</code>。</p>
+
+    <p><code class="inline">split(x, y)</code> 把 x 到 y 的路径拎出来，整条路径落在一棵 splay 里，根是 y。</p>
+
+        <pre class="code"><span class="kw">void</span> <span class="fn">split</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+    makeroot(x);
+    access(y);
+    splay(y);
+}</pre>
+    <p>先把 x 换成根，此时 x 到 y 就是从根往下的一条路径，access(y) 把它接成实链，最后 splay(y) 把 y 顶到这棵 splay 的根上。于是答案直接挂在 <code class="inline">y</code> 这个点的汇总值上。</p>
+
+    <p>剩下两个改结构的动作很薄。</p>
+
+        <pre class="code"><span class="kw">void</span> <span class="fn">link</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+    makeroot(x);
+    <span class="kw">if</span> (findroot(y) != x) {
+        fa[x] = y;
+    }
+}
+
+<span class="kw">void</span> <span class="fn">cut</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+    makeroot(x);
+    <span class="kw">if</span> (findroot(y) == x &amp;&amp; fa[y] == x &amp;&amp; ls[y] == 0 &amp;&amp; rs[x] == y) {
+        fa[y] = rs[x] = 0;
+        up(x);
+    }
+}</pre>
+
+    <p>link 先让 x 成为根，只要 y 不和它连通，把 x 的 fa 指向 y 就接上了。这是一条虚边，x 是它自己那棵 splay 的根，正好符合「认父不认子」。</p>
+    <p>cut 判断得细一点：先 makeroot(x)，如果 y 的根确实是 x，说明它们连通；再要求 <code class="inline">fa[y] == x</code>、<code class="inline">ls[y] == 0</code>、<code class="inline">rs[x] == y</code>，这三条说明 x 和 y 之间正好是一条直接边，中间没夹别的点。都满足才断开。</p>
+
+    <h2>四、完整模版</h2>
+    <p>把上面六个动作拼起来，再加上 <code class="inline">rotate</code>、<code class="inline">splay</code> 和汇总函数 <code class="inline">up</code>，就是一份能直接用的 LCT。这道题维护路径异或和，所以 <code class="inline">up</code> 里做的是异或。</p>
+    <p>有一点和普通 splay 不同：<code class="inline">splay</code> 在转之前要先把 x 到根的翻转标记从上到下推一遍，否则左右儿子的交换会错位。模版里用一个栈 <code class="inline">sta</code> 把路径上的点压起来，再倒着 <code class="inline">down</code>。</p>
+
+            <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+
+    <span class="kw">bool</span> rev[MAXN];
+    <span class="kw">int</span> sta[MAXN];
+
+    <span class="kw">int</span> xorsum[MAXN];
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> x) {
+        xorsum[x] = xorsum[ls[x]] ^ xorsum[rs[x]] ^ arr[x];
+    }
+
+    <span class="kw">bool</span> <span class="fn">isroot</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> ls[fa[x]] != x &amp;&amp; rs[fa[x]] != x;
+    }
+
+    <span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> ls[fa[x]] == x ? 0 : 1;
+    }
+
+    <span class="kw">void</span> <span class="fn">reverse</span>(<span class="kw">int</span> x) {
+        <span class="kw">if</span> (x != 0) {
+            swap(ls[x], rs[x]);
+            rev[x] = !rev[x];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> x) {
+        <span class="kw">if</span> (rev[x]) {
+            reverse(ls[x]);
+            reverse(rs[x]);
+            rev[x] = <span class="kw">false</span>;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> f = fa[x], g = fa[f];
+        <span class="kw">if</span> (lr(x) == 0) {
+            ls[f] = rs[x];
+            <span class="kw">if</span> (ls[f] != 0) {
+                fa[ls[f]] = f;
+            }
+            rs[x] = f;
+        } <span class="kw">else</span> {
+            rs[f] = ls[x];
+            <span class="kw">if</span> (rs[f] != 0) {
+                fa[rs[f]] = f;
+            }
+            ls[x] = f;
+        }
+        <span class="kw">if</span> (!isroot(f)) {
+            <span class="kw">if</span> (lr(f) == 0) {
+                ls[g] = x;
+            } <span class="kw">else</span> {
+                rs[g] = x;
+            }
+        }
+        fa[f] = x;
+        fa[x] = g;
+        up(f);
+        up(x);
+    }
+
+    <span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> siz = 0;
+        sta[++siz] = x;
+        <span class="kw">for</span> (<span class="kw">int</span> y = x; !isroot(y); y = fa[y]) {
+            sta[++siz] = fa[y];
+        }
+        <span class="kw">while</span> (siz != 0) {
+            down(sta[siz--]);
+        }
+        <span class="kw">while</span> (!isroot(x)) {
+            <span class="kw">int</span> f = fa[x];
+            <span class="kw">if</span> (!isroot(f)) {
+                <span class="kw">if</span> (lr(x) == lr(f)) {
+                    rotate(f);
+                } <span class="kw">else</span> {
+                    rotate(x);
+                }
+            }
+            rotate(x);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">access</span>(<span class="kw">int</span> x) {
+        <span class="kw">for</span> (<span class="kw">int</span> y = 0; x != 0; y = x, x = fa[x]) {
+            splay(x);
+            rs[x] = y;
+            up(x);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">makeroot</span>(<span class="kw">int</span> x) {
+        access(x);
+        splay(x);
+        reverse(x);
+    }
+
+    <span class="kw">int</span> <span class="fn">findroot</span>(<span class="kw">int</span> x) {
+        access(x);
+        splay(x);
+        down(x);
+        <span class="kw">while</span> (ls[x] != 0) {
+            x = ls[x];
+            down(x);
+        }
+        splay(x);
+        <span class="kw">return</span> x;
+    }
+
+    <span class="kw">void</span> <span class="fn">split</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        makeroot(x);
+        access(y);
+        splay(y);
+    }
+
+    <span class="kw">void</span> <span class="fn">link</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        makeroot(x);
+        <span class="kw">if</span> (findroot(y) != x) {
+            fa[x] = y;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">cut</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        makeroot(x);
+        <span class="kw">if</span> (findroot(y) == x &amp;&amp; fa[y] == x &amp;&amp; ls[y] == 0 &amp;&amp; rs[x] == y) {
+            fa[y] = rs[x] = 0;
+            up(x);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+            xorsum[i] = arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x, y; i &lt;= m; i++) {
+            cin &gt;&gt; op &gt;&gt; x &gt;&gt; y;
+            <span class="kw">if</span> (op == 0) {
+                split(x, y);
+                cout &lt;&lt; xorsum[y] &lt;&lt; "\n";
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 1) {
+                link(x, y);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 2) {
+                cut(x, y);
+            } <span class="kw">else</span> {
+                splay(x);
+                arr[x] = y;
+                up(x);
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>五、题目1：模版题</h2>
+    <p>n 个点，每个点有点权。m 条操作：<code class="inline">0 x y</code> 查 x 到 y 路径上点权的异或和（保证连通），<code class="inline">1 x y</code> 加一条直接边（已连通就忽略），<code class="inline">2 x y</code> 删一条直接边（不存在就忽略），<code class="inline">3 x y</code> 把 x 的点权改成 y。</p>
+    <p>n 到 10⁵，m 到 3×10⁵。</p>
+    <p>这是上面那段代码本身，只是把 <code class="inline">up</code> 里的汇总换成异或。查询走 <code class="inline">split(x, y)</code> 后读 <code class="inline">xorsum[y]</code>；改点权时先把 <code class="inline">x</code> splay 到根，改完 <code class="inline">up</code> 一次就够，splay 之后它没有祖先，往上的汇总只需要翻它自己。</p>
+
+    <h2>六、题目2：动态树 LCA</h2>
+    <p>n 个点，初始时每个点各自是一棵单点有根树。m 条操作：<code class="inline">link x y</code> 让 x 成为 y 的儿子（保证 x 是所在树的根，且和 y 不连通），<code class="inline">cut x</code> 删掉 x 和它父亲的直接边（保证 x 不是根），<code class="inline">lca x y</code> 查 x 和 y 的最低公共祖先（保证同树）。</p>
+    <p>n、m 到 10⁵。</p>
+    <p>因为已经规定了谁是儿子，link 不需要 makeroot，把 x 的 fa 直接指向 y 就行；cut 更省，access(x) 之后 x 和父亲的边一定在 x 的左链上，断开即可。</p>
+    <p>关键在 lca。有一个很轻的写法：先 <code class="inline">access(x)</code>，再 <code class="inline">access(y)</code>。第二次 access 一路往上爬，最后停留的那个点，就是 x 和 y 的 LCA。</p>
+    <p>道理不难看。第一次 access(x) 之后，根到 x 成了实链。第二次 access(y) 往上爬时，会一直在实链上走到根到 y 的分岔口为止，那个分岔点正是两点的最低公共祖先。代码里让 <code class="inline">access</code> 返回它最后 splay 的那个点，正好就是答案。</p>
+    <p>注意 x 等于 y 时要单独返回，否则两次 access 会互相干扰。</p>
+
+            <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+
+    <span class="kw">bool</span> <span class="fn">isroot</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> ls[fa[x]] != x &amp;&amp; rs[fa[x]] != x;
+    }
+
+    <span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> ls[fa[x]] == x ? 0 : 1;
+    }
+
+    <span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> f = fa[x], g = fa[f];
+        <span class="kw">if</span> (lr(x) == 0) {
+            ls[f] = rs[x];
+            <span class="kw">if</span> (ls[f] != 0) {
+                fa[ls[f]] = f;
+            }
+            rs[x] = f;
+        } <span class="kw">else</span> {
+            rs[f] = ls[x];
+            <span class="kw">if</span> (rs[f] != 0) {
+                fa[rs[f]] = f;
+            }
+            ls[x] = f;
+        }
+        <span class="kw">if</span> (!isroot(f)) {
+            <span class="kw">if</span> (lr(f) == 0) {
+                ls[g] = x;
+            } <span class="kw">else</span> {
+                rs[g] = x;
+            }
+        }
+        fa[f] = x;
+        fa[x] = g;
+    }
+
+    <span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> x) {
+        <span class="kw">while</span> (!isroot(x)) {
+            <span class="kw">int</span> f = fa[x];
+            <span class="kw">if</span> (!isroot(f)) {
+                <span class="kw">if</span> (lr(x) == lr(f)) {
+                    rotate(f);
+                } <span class="kw">else</span> {
+                    rotate(x);
+                }
+            }
+            rotate(x);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">access</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> y = 0; x != 0; y = x, x = fa[x]) {
+            splay(x);
+            rs[x] = y;
+            ans = x;
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">makeson</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        access(x);
+        splay(x);
+        fa[x] = y;
+    }
+
+    <span class="kw">void</span> <span class="fn">cutfa</span>(<span class="kw">int</span> x) {
+        access(x);
+        splay(x);
+        fa[ls[x]] = 0;
+        ls[x] = 0;
+    }
+
+    <span class="kw">int</span> <span class="fn">lca</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">if</span> (x == y) {
+            <span class="kw">return</span> x;
+        }
+        access(x);
+        <span class="kw">return</span> access(y);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x, y; i &lt;= m; i++) {
+            <span class="kw">string</span> op;
+            cin &gt;&gt; op;
+            <span class="kw">if</span> (op == "link") {
+                cin &gt;&gt; x &gt;&gt; y;
+                makeson(x, y);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == "cut") {
+                cin &gt;&gt; x;
+                cutfa(x);
+            } <span class="kw">else</span> {
+                cin &gt;&gt; x &gt;&gt; y;
+                cout &lt;&lt; lca(x, y) &lt;&lt; "\n";
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>七、题目3：洞穴勘测</h2>
+    <p>n 个点，初始没有边，任意时刻图都是森林。m 条操作：<code class="inline">Connect x y</code> 加一条直接边（保证原来不存在），<code class="inline">Destroy x y</code> 删一条直接边（保证原来存在），<code class="inline">Query x y</code> 查两点是否连通，打印 Yes 或 No。</p>
+    <p>n 到 10⁴，m 到 2×10⁵。</p>
+    <p>这题只用得上模版里的两个动作：Connect 就是 link，Destroy 就是 cut，Query 就是比两次 findroot。连 <code class="inline">up</code> 都不用写，因为没有任何信息需要往上汇总。</p>
+    <p>它也算是模版里 <code class="inline">cut</code> 那串判断的样板：直接边不存在时不能乱切，所以 cut 里那四条检查一条都不能省。</p>
+
+            <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 10001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">bool</span> rev[MAXN];
+
+    <span class="kw">bool</span> <span class="fn">isroot</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> ls[fa[x]] != x &amp;&amp; rs[fa[x]] != x;
+    }
+
+    <span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> ls[fa[x]] == x ? 0 : 1;
+    }
+
+    <span class="kw">void</span> <span class="fn">reverse</span>(<span class="kw">int</span> x) {
+        <span class="kw">if</span> (x != 0) {
+            swap(ls[x], rs[x]);
+            rev[x] = !rev[x];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> x) {
+        <span class="kw">if</span> (rev[x]) {
+            reverse(ls[x]);
+            reverse(rs[x]);
+            rev[x] = <span class="kw">false</span>;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> f = fa[x], g = fa[f];
+        <span class="kw">if</span> (lr(x) == 0) {
+            ls[f] = rs[x];
+            <span class="kw">if</span> (ls[f] != 0) {
+                fa[ls[f]] = f;
+            }
+            rs[x] = f;
+        } <span class="kw">else</span> {
+            rs[f] = ls[x];
+            <span class="kw">if</span> (rs[f] != 0) {
+                fa[rs[f]] = f;
+            }
+            ls[x] = f;
+        }
+        <span class="kw">if</span> (!isroot(f)) {
+            <span class="kw">if</span> (lr(f) == 0) {
+                ls[g] = x;
+            } <span class="kw">else</span> {
+                rs[g] = x;
+            }
+        }
+        fa[f] = x;
+        fa[x] = g;
+    }
+
+    <span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> siz = 0;
+        sta[++siz] = x;
+        <span class="kw">for</span> (<span class="kw">int</span> y = x; !isroot(y); y = fa[y]) {
+            sta[++siz] = fa[y];
+        }
+        <span class="kw">while</span> (siz != 0) {
+            down(sta[siz--]);
+        }
+        <span class="kw">while</span> (!isroot(x)) {
+            <span class="kw">int</span> f = fa[x];
+            <span class="kw">if</span> (!isroot(f)) {
+                <span class="kw">if</span> (lr(x) == lr(f)) {
+                    rotate(f);
+                } <span class="kw">else</span> {
+                    rotate(x);
+                }
+            }
+            rotate(x);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">access</span>(<span class="kw">int</span> x) {
+        <span class="kw">for</span> (<span class="kw">int</span> y = 0; x != 0; y = x, x = fa[x]) {
+            splay(x);
+            rs[x] = y;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">makeroot</span>(<span class="kw">int</span> x) {
+        access(x);
+        splay(x);
+        reverse(x);
+    }
+
+    <span class="kw">int</span> <span class="fn">findroot</span>(<span class="kw">int</span> x) {
+        access(x);
+        splay(x);
+        down(x);
+        <span class="kw">while</span> (ls[x] != 0) {
+            x = ls[x];
+            down(x);
+        }
+        splay(x);
+        <span class="kw">return</span> x;
+    }
+
+    <span class="kw">void</span> <span class="fn">link</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        makeroot(x);
+        <span class="kw">if</span> (findroot(y) != x) {
+            fa[x] = y;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">cut</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        makeroot(x);
+        <span class="kw">if</span> (findroot(y) == x &amp;&amp; fa[y] == x &amp;&amp; ls[y] == 0 &amp;&amp; rs[x] == y) {
+            fa[y] = rs[x] = 0;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x, y; i &lt;= m; i++) {
+            <span class="kw">string</span> op;
+            cin &gt;&gt; op &gt;&gt; x &gt;&gt; y;
+            <span class="kw">if</span> (op == "Connect") {
+                link(x, y);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == "Destroy") {
+                cut(x, y);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (findroot(x) == findroot(y)) {
+                    cout &lt;&lt; "Yes" &lt;&lt; "\n";
+                } <span class="kw">else</span> {
+                    cout &lt;&lt; "No" &lt;&lt; "\n";
+                }
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>八、复杂度分析</h2>
+    <p>splay 的均摊分析在 Splay 树那一讲，LCT 沿用它。每个操作单次均摊 O(log n)，常数比普通线段树大不少。</p>
+    <p>为什么常数大还能保证总代价：每次操作都先 access 把实链串好，某一次 access 可能走很远、代价很高，但它顺手把这些点调整成了便于以后访问的 splay 形态；老实链因为新实链断开时，各段仍然是 splay 的组织，性能优势留着。付出和补偿一抵消，均摊就是对数。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code class="inline">up</code>（汇总一个点）</td><td><code class="inline">O(1)</code></td></tr>
+        <tr><td><code class="inline">rotate</code> / <code class="inline">splay</code></td><td><code class="inline">O(log n)</code> 均摊</td></tr>
+        <tr><td><code class="inline">access</code> / <code class="inline">makeroot</code> / <code class="inline">findroot</code> / <code class="inline">split</code> / <code class="inline">link</code> / <code class="inline">cut</code></td><td><code class="inline">O(log n)</code> 均摊</td></tr>
+        <tr><td>题目1 / 题目2 / 题目3：单次操作</td><td><code class="inline">O(log n)</code> 均摊</td></tr>
+        <tr><td>题目1 / 题目2 / 题目3：总时间</td><td><code class="inline">O(m log n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间上，LCT 只需要几个大小 n 的数组：<code class="inline">fa</code>、<code class="inline">ls</code>、<code class="inline">rs</code>、<code class="inline">rev</code>，再加一个 <code class="inline">sta</code> 辅助栈和题目各自要汇总的数组，整体 O(n)。</p>
+
+    <h2 id="last9">九、最后</h2>
+    <p>原理部分到这里就够用了。模版里真正需要记住的只有一句：辅助 splay 的中序是路径，access 是唯一把虚边改成实边的动作。</p>
+    <p>六个操作可以拆成两半记：access、makeroot、findroot、split 负责把路径拎出来，link、cut 负责改结构。最难理解的是「认父不认子」：辅助 splay 的根保留 fa 指针指回实链顶点的父亲，access 往上爬就靠它。三道理题的差别只在 up 汇总什么，骨架一字不改。</p>
+    <p>下一节把剩下的四道模版题走完，它们都要在模版上多维护一点东西，有的维护边的开关，有的维护点权和，有的要按颜色把整棵树复制好几份。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var POS = {1:[310,44], 2:[200,118], 3:[420,118], 4:[130,196], 5:[270,196], 6:[130,274]};
+  var EDGES = [
+    {u:1, v:2}, {u:1, v:3}, {u:2, v:4}, {u:2, v:5}, {u:4, v:6}
+  ];
+  var STEPS = [
+    {solid:[], cur:null,
+     info:'初始时每个点自成一棵辅助树，所有边都是虚边。'},
+    {solid:[], cur:6,
+     info:'从 6 开始。<b>6</b> 在自己的辅助树里，splay 上来，把右儿子置空（原来没有实儿子）。'},
+    {solid:['4-6'], cur:4,
+     info:'顺着 fa 走到 <b>4</b>。splay(4) 后把右儿子设成 6，边 <b>4–6</b> 从虚变实。'},
+    {solid:['4-6','2-4'], cur:2,
+     info:'再走到 <b>2</b>。splay(2) 后右儿子设成 4，边 <b>2–4</b> 变实。'},
+    {solid:['4-6','2-4','1-2'], cur:1,
+     info:'走到 <b>1</b>，它是整棵树的根。splay(1) 后右儿子设成 2，边 <b>1–2</b> 变实。access 结束。'},
+    {solid:['4-6','2-4','1-2'], cur:null,
+     info:'现在 1–2–4–6 是一条实链，别的边都变回虚边。这条链挂在同一棵 splay 里。'}
+  ];
+
+  var svg = document.getElementById('acSvg');
+  var info = document.getElementById('acInfo');
+  var prev = document.getElementById('acPrev');
+  var next = document.getElementById('acNext');
+  var reset = document.getElementById('acReset');
+  var at = 0;
+
+  function key(u,v){ return Math.min(u,v)+'-'+Math.max(u,v); }
+
+  function render(){
+    var st = STEPS[at];
+    var parts = [];
+    parts.push('<rect x="0" y="0" width="620" height="300" fill="none"/>');
+
+    EDGES.forEach(function(e){
+      var p = POS[e.u], q = POS[e.v];
+      var dx = q[0]-p[0], dy = q[1]-p[1];
+      var len = Math.sqrt(dx*dx+dy*dy);
+      var ox = dx/len*20, oy = dy/len*20;
+      var on = st.solid.indexOf(key(e.u,e.v)) >= 0;
+      var stroke = on ? '#2563eb' : '#c9ced4';
+      var width = on ? 3 : 1.8;
+      var dash = on ? 'none' : '5 4';
+      parts.push('<line x1="'+(p[0]+ox)+'" y1="'+(p[1]+oy)+'" x2="'+(q[0]-ox)+'" y2="'+(q[1]-oy)+'" stroke="'+stroke+'" stroke-width="'+width+'" stroke-dasharray="'+dash+'"/>');
+    });
+
+    Object.keys(POS).forEach(function(k){
+      var p = POS[k];
+      var isCur = st.cur === Number(k);
+      var fill = isCur ? '#ffedd5' : '#dbeafe';
+      var stroke = isCur ? '#ea580c' : '#2563eb';
+      var w = isCur ? 2.2 : 1.6;
+      parts.push('<circle cx="'+p[0]+'" cy="'+p[1]+'" r="17" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+w+'"/>');
+      parts.push('<text x="'+p[0]+'" y="'+(p[1]+5)+'" font-size="14" font-weight="600" fill="#1f2328" text-anchor="middle">'+k+'</text>');
+    });
+
+    var note = '#6b7280';
+    if (st.solid.length === 3) note = '#2563eb';
+    parts.push('<text x="20" y="24" font-size="12" fill="'+note+'">实链长度：'+st.solid.length+'</text>');
+    parts.push('<text x="20" y="46" font-size="12" fill="#6b7280">access 的目标点是 6</text>');
+
+    svg.innerHTML = parts.join('');
+    info.innerHTML = st.info;
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if(at>0){ at--; render(); } });
+  next.addEventListener('click', function(){ if(at<STEPS.length-1){ at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

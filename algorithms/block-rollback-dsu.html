@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分块结合可撤销并查集 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .br-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .br-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .br-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #brSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .br-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>分块结合可撤销并查集</h1>
+    <p class="intro">前面分块的对象都是数组的位置。这一节换个对象：分的是「操作序列」和「边序列」。两道题都是图论题，共同骨架是，块里不变的那部分先排好序、按查询的关键字单调加进并查集；块里会变的那部分，对每个查询临时加进去、查完立刻撤销。</p>
+
+    <h2>零、背景</h2>
+    <p>可撤销并查集和普通的并查集只差一点：不做路径压缩，只按大小合并，每次合并把 <code class="inline">(fx, fy, siz[fx])</code> 压进一个栈。要撤销时从栈顶一路弹回去，把 <code class="inline">fa[fy] = fy</code>、<code class="inline">siz[fx]</code> 还原，就回到合并前的样子。记下当时的栈深 <code class="inline">opsize</code>，就能一次撤销到那个时刻。</p>
+    <p>路径压缩会破坏树形，所以撤销版本不能压缩，find 是 O(log n) 而不是 α(n)。这一点会写进后面的块长里。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 176" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="可撤销并查集的栈" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="20" y="20" font-size="11" fill="#6b7280">每次合并压一条记录，撤销时从栈顶弹回去</text>
+        <g font-size="10" fill="#1f2328" text-anchor="middle">
+          <rect x="30" y="34" width="150" height="28" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="105" y="52">fx=1  fy=3  siz=2</text>
+          <rect x="30" y="68" width="150" height="28" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="105" y="86">fx=2  fy=4  siz=3</text>
+          <rect x="30" y="102" width="150" height="28" rx="5" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+          <text x="105" y="120">fx=1  fy=2  siz=4</text>
+        </g>
+        <g font-size="10" fill="#6b7280" text-anchor="middle">
+          <text x="194" y="52">1</text><text x="194" y="86">2</text><text x="194" y="120">3</text>
+        </g>
+        <line x1="212" y1="116" x2="240" y2="116" stroke="#ea580c" stroke-width="1.6"/>
+        <text x="246" y="120" font-size="11" fill="#ea580c">opsize = 3</text>
+        <text x="290" y="52" font-size="11" fill="#374151">合并：先记下 fx、fy 和合并前</text>
+        <text x="290" y="72" font-size="11" fill="#374151">的 siz[fx]，再把 fy 挂到 fx 下面。</text>
+        <text x="290" y="104" font-size="11" fill="#2563eb">撤销：把栈顶记的 fy 摘回自己，</text>
+        <text x="290" y="124" font-size="11" fill="#2563eb">siz[fx] 写成旧值，opsize 减一。</text>
+        <text x="290" y="152" font-size="11" fill="#6b7280">只按大小合并，树高是 O(log n)，find 走链</text>
+        <text x="20" y="164" font-size="11" fill="#6b7280">块内「不变的边」不加撤销标记，「临时边」查完就撤销</text>
+      </svg>
+      <figcaption>撤销靠一根栈：记下合并前的样子，弹栈就能回到那一刻</figcaption>
+    </figure>
+
+    <h2>一、题目1：桥梁</h2>
+    <p>n 个点的无向图，m 条边，边权同时也是限重：车重不超过限重才能过。q 条操作，操作 1 把某条边的限重改掉，操作 2 问从某点出发、车重为 car 能到达几个不同的点。n ≤ 5×10⁴，m、q ≤ 10⁵。测试链接：<a href="https://www.luogu.com.cn/problem/P5443" target="_blank" rel="noopener">洛谷 P5443</a>。</p>
+    <p>一次查询要做的事是：把所有限重 ≥ car 的边加进并查集，看点所在的集合有多大。带修改就没法一次性加完，这是时间分块的典型场景。</p>
+
+    <h2>二、时间分块</h2>
+    <p>把 q 条操作按顺序切成块，块长取 <code class="inline">sqrt(q · log₂n)</code>。对每个块，块内的边分成两类：会被本块修改的边（<code class="inline">change</code> 标记），和本块内始终不变的边。</p>
+    <p>不变的边可以放心地按限重降序加进并查集，加进去就不撤；会变的边对每个查询单独判断当时的权值，临时加、查完撤销。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 188" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="时间分块" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="20" y="18" font-size="11" fill="#6b7280">q 条操作切成块，每个块重新分一次边</text>
+        <g font-size="10" fill="#1f2328" text-anchor="middle">
+          <rect x="30" y="30" width="120" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="90" y="47">块 1</text>
+          <rect x="158" y="30" width="120" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="218" y="47">块 2</text>
+          <rect x="286" y="30" width="120" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="346" y="47">块 3</text>
+          <rect x="414" y="30" width="120" height="26" rx="5" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1"/>
+          <text x="474" y="47">块 4</text>
+        </g>
+        <text x="20" y="82" font-size="11" fill="#374151">进块 2 时：块内的改边标成 change，其余边是不变边</text>
+        <g font-size="10" fill="#1f2328" text-anchor="middle">
+          <rect x="30" y="92" width="90" height="26" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="75" y="109">不变边（降序）</text>
+          <rect x="130" y="92" width="90" height="26" rx="5" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="175" y="109">本块会改的边</text>
+        </g>
+        <text x="236" y="101" font-size="11" fill="#2563eb">按车重降序处理查询，双指针只进不退</text>
+        <text x="236" y="121" font-size="11" fill="#ea580c">每个查询临时加、查完撤销</text>
+        <text x="30" y="146" font-size="11" fill="#374151">出块时把改动真正落到 w 上，再把两类边归并成一个降序序列</text>
+        <text x="30" y="168" font-size="11" fill="#6b7280">归并是 O(m)：不变边本来有序，只需把改过的边排序后插进去</text>
+      </svg>
+      <figcaption>每个块开始时把边分成「不变」和「会变」两堆，前者常驻并查集，后者临时加</figcaption>
+    </figure>
+
+    <h2>三、块内怎么跑</h2>
+    <p>块内的查询按车重从大到小排序。指针 j 只往前走，把 <code class="inline">w[edge[j]] &gt;= car</code> 的不变边依次合并进去，所有查询加起来只扫一遍边表。</p>
+    <p>轮到某个查询时，先记下 <code class="inline">opsize</code>，再把本块里那些修改边按「这条查询发生前最后一次修改」的权值算一遍：≥ car 就临时合并。答案取 <code class="inline">siz[find(nid)]</code>，然后撤销到刚才记下的 <code class="inline">opsize</code>。</p>
+    <p>这里有个细节：块内的修改边最多块长条，所以每个查询的临时合并是 O(块长) 次，这是块长不能取太大的原因之一；反过来块长太小，块数就多，每块要扫一遍 m 条边，这是块长不能太小的原因。</p>
+
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 50001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXQ = 100001;
+    <span class="kw">int</span> n, m, q;
+    <span class="kw">int</span> blen, bnum;
+
+    <span class="kw">int</span> u[MAXM];
+    <span class="kw">int</span> v[MAXM];
+    <span class="kw">int</span> w[MAXM];
+
+    <span class="kw">int</span> op[MAXQ];
+    <span class="kw">int</span> eid[MAXQ];
+    <span class="kw">int</span> tow[MAXQ];
+    <span class="kw">int</span> nid[MAXQ];
+    <span class="kw">int</span> car[MAXQ];
+
+    <span class="kw">int</span> edge[MAXM];
+    <span class="kw">bool</span> change[MAXM];
+    <span class="kw">int</span> curw[MAXM];
+
+    <span class="kw">int</span> operate[MAXQ];
+    <span class="kw">int</span> query[MAXQ];
+    <span class="kw">int</span> update[MAXQ];
+
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">int</span> rollback[MAXM][2];
+    <span class="kw">int</span> opsize = 0;
+
+    <span class="kw">int</span> arr1[MAXM];
+    <span class="kw">int</span> arr2[MAXM];
+
+    <span class="kw">int</span> ans[MAXQ];
+
+    <span class="kw">void</span> <span class="fn">build</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            fa[i] = i;
+            siz[i] = 1;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> x) {
+        <span class="kw">while</span> (x != fa[x]) {
+            x = fa[x];
+        }
+        <span class="kw">return</span> x;
+    }
+
+    <span class="kw">void</span> <span class="fn">Union</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">int</span> fx = find(x), fy = find(y);
+        <span class="kw">if</span> (fx == fy) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">if</span> (siz[fx] &lt; siz[fy]) {
+            swap(fx, fy);
+        }
+        fa[fy] = fx;
+        siz[fx] += siz[fy];
+        rollback[++opsize][0] = fx;
+        rollback[opsize][1] = fy;
+    }
+
+    <span class="kw">void</span> <span class="fn">undo</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> fx, fy; opsize &gt; 0; opsize--) {
+            fx = rollback[opsize][0];
+            fy = rollback[opsize][1];
+            fa[fy] = fy;
+            siz[fx] -= siz[fy];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">merge</span>() {
+        <span class="kw">int</span> siz1 = 0, siz2 = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">if</span> (change[edge[i]]) {
+                arr1[++siz1] = edge[i];
+            } <span class="kw">else</span> {
+                arr2[++siz2] = edge[i];
+            }
+        }
+        sort(arr1 + 1, arr1 + siz1 + 1, [&amp;](<span class="kw">int</span> x, <span class="kw">int</span> y) { <span class="kw">return</span> w[x] &gt; w[y]; });
+        <span class="kw">int</span> i = 0, p1 = 1, p2 = 1;
+        <span class="kw">while</span> (p1 &lt;= siz1 &amp;&amp; p2 &lt;= siz2) {
+            edge[++i] = w[arr1[p1]] &gt;= w[arr2[p2]] ? arr1[p1++] : arr2[p2++];
+        }
+        <span class="kw">while</span> (p1 &lt;= siz1) {
+            edge[++i] = arr1[p1++];
+        }
+        <span class="kw">while</span> (p2 &lt;= siz2) {
+            edge[++i] = arr2[p2++];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        build();
+        memset(change + 1, 0, m * <span class="kw">sizeof</span>(<span class="kw">bool</span>));
+        <span class="kw">int</span> cntu = 0, cntq = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+            <span class="kw">if</span> (op[operate[i]] == 1) {
+                change[eid[operate[i]]] = <span class="kw">true</span>;
+                update[++cntu] = operate[i];
+            } <span class="kw">else</span> {
+                query[++cntq] = operate[i];
+            }
+        }
+        sort(query + 1, query + cntq + 1, [&amp;](<span class="kw">int</span> x, <span class="kw">int</span> y) { <span class="kw">return</span> car[x] &gt; car[y]; });
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, j = 1; i &lt;= cntq; i++) {
+            <span class="kw">while</span> (j &lt;= m &amp;&amp; w[edge[j]] &gt;= car[query[i]]) {
+                <span class="kw">if</span> (!change[edge[j]]) {
+                    Union(u[edge[j]], v[edge[j]]);
+                }
+                j++;
+            }
+            opsize = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> k = 1; k &lt;= cntu; k++) {
+                curw[eid[update[k]]] = w[eid[update[k]]];
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> k = 1; k &lt;= cntu &amp;&amp; update[k] &lt; query[i]; k++) {
+                curw[eid[update[k]]] = tow[update[k]];
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> k = 1; k &lt;= cntu; k++) {
+                <span class="kw">if</span> (curw[eid[update[k]]] &gt;= car[query[i]]) {
+                    Union(u[eid[update[k]]], v[eid[update[k]]]);
+                }
+            }
+            ans[query[i]] = siz[find(nid[query[i]])];
+            undo();
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntu; i++) {
+            w[eid[update[i]]] = tow[update[i]];
+        }
+        merge();
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        blen = max(1, (<span class="kw">int</span>)sqrt(q * log2(n)));
+        bnum = (q + blen - 1) / blen;
+        sort(edge + 1, edge + m + 1, [&amp;](<span class="kw">int</span> x, <span class="kw">int</span> y) { <span class="kw">return</span> w[x] &gt; w[y]; });
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; u[i] &gt;&gt; v[i] &gt;&gt; w[i];
+            edge[i] = i;
+        }
+        cin &gt;&gt; q;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++) {
+            cin &gt;&gt; op[i];
+            <span class="kw">if</span> (op[i] == 1) {
+                cin &gt;&gt; eid[i] &gt;&gt; tow[i];
+            } <span class="kw">else</span> {
+                cin &gt;&gt; nid[i] &gt;&gt; car[i];
+            }
+            operate[i] = i;
+        }
+        prepare();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, l, r; i &lt;= bnum; i++) {
+            l = (i - 1) * blen + 1;
+            r = min(i * blen, q);
+            compute(l, r);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++) {
+            <span class="kw">if</span> (op[i] == 2) {
+                cout &lt;&lt; ans[i] &lt;&lt; '\n';
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+
+    <div class="viz">
+      <div class="viz-title">一个块内的两次查询</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">四个点三条边：1-2 限重 5、2-3 限重 3、3-4 限重 7。块内操作是先查（车重 4），再把边 2 改成 6，再查（车重 6）。点「下一步」看哪些边常驻、哪些临时加、撤销撤到哪。</p>
+      <svg id="brSvg" viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="桥梁分块演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>常驻在并查集里的边</span>
+        <span><span class="dot partial"></span>本次临时加的边</span>
+        <span><span class="dot skip"></span>还没加 / 加不进</span>
+      </div>
+      <div class="breakdown" id="brInfo"></div>
+      <div class="viz-controls">
+        <button class="br-btn" id="brPrev" type="button">上一步</button>
+        <button class="br-btn" id="brNext" type="button">下一步</button>
+        <button class="br-btn" id="brReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>四、题目2：最小公倍数</h2>
+    <p>n 个点的无向图，边权形如 2ᵃ · 3ᵇ。q 次查询，每次问：从 u 出发能不能走到 v，且路径上所有边权的最小公倍数恰好是 2ᵃ · 3ᵇ。n、q ≤ 5×10⁴，m ≤ 10⁵。测试链接：<a href="https://www.luogu.com.cn/problem/P3247" target="_blank" rel="noopener">洛谷 P3247</a>。</p>
+    <p>最小公倍数在每个质因子上取指数最大值，所以问题等价于：存在一条 u 到 v 的路径，路径上每条边都满足 aᵢ ≤ a 且 bᵢ ≤ b，并且至少有一条边取到 a、至少有一条边取到 b。</p>
+    <p>第二条是关键。它要求路径上必须有一条边，其 aᵢ 恰好等于 a。把边按 a 排序之后，这样的边落在哪个块里是唯一确定的，这是这题能分块的原因。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 196" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="按 a 排序后分块" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="20" y="18" font-size="11" fill="#6b7280">边按 a 升序排好，再按块长切开</text>
+        <g font-size="10" fill="#1f2328" text-anchor="middle">
+          <rect x="30" y="32" width="80" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="70" y="49">块 1</text>
+          <rect x="118" y="32" width="80" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="158" y="49">块 2</text>
+          <rect x="206" y="32" width="80" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="246" y="49">块 3</text>
+          <rect x="294" y="32" width="80" height="26" rx="5" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1"/>
+          <text x="334" y="49">块 4</text>
+        </g>
+        <line x1="30" y1="76" x2="374" y2="76" stroke="#c9ced4" stroke-width="1.2"/>
+        <g font-size="10" fill="#374151" text-anchor="middle">
+          <text x="30" y="92">a=0</text><text x="110" y="92">a=1</text><text x="198" y="92">a=2</text><text x="286" y="92">a=3</text><text x="374" y="92">a=5</text>
+        </g>
+        <line x1="198" y1="66" x2="198" y2="118" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="4 3"/>
+        <text x="204" y="130" font-size="11" fill="#ea580c">查询的 a = 3</text>
+        <text x="204" y="150" font-size="11" fill="#374151">归属条件 ea[l] ≤ 3 &lt; ea[r+1]</text>
+        <text x="30" y="170" font-size="11" fill="#2563eb">前缀边 edge[1..l−1] 全部满足 aᵢ ≤ 3</text>
+        <text x="30" y="188" font-size="11" fill="#374151">块内边再按 aᵢ ≤ 3、bᵢ ≤ b 筛一遍，两堆合起来正好不多不少</text>
+      </svg>
+      <figcaption>按 a 排序后，查询要求的那条「a 恰好等于 qa」的边落在唯一一个块里</figcaption>
+    </figure>
+
+    <p>归属条件写成 <code class="inline">ea[edge[l]] &lt;= qa &amp;&amp; (r+1 &gt; m || qa &lt; ea[edge[r+1]])</code>。这个条件同时保证两件事：前缀 <code class="inline">edge[1..l-1]</code> 里所有边的 a 都不超过 qa；a 大于 qa 的边既不在前缀里、也不在块内，天然被排除。</p>
+    <p>于是并查集里的边就是「aᵢ ≤ qa 且 bᵢ ≤ qb」的全部边：前缀的那部分按 b 升序排序后双指针加入（查询也按 b 升序排过），块内的那部分逐个判断后临时加入，查完撤销。</p>
+    <p>判定的时候除了 <code class="inline">find(u) == find(v)</code>，还要看集合上的 <code class="inline">maxa == qa</code> 且 <code class="inline">maxb == qb</code>。这两个最大值是并查集根上额外维护的，合并时取两边最大值再和当前边的指数取 max，撤销时一并还原。</p>
+    <p>为什么最大可以取在整个连通块上，而不是某一条具体的路径上：路径允许重复走边，一条走法可以在连通块里绕一圈把需要的边都走一遍，所以两个最大值能同时在一条路径上达成。</p>
+
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 50001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXQ = 50001;
+    <span class="kw">int</span> n, m, q;
+    <span class="kw">int</span> blen, bnum;
+
+    <span class="kw">int</span> eu[MAXM];
+    <span class="kw">int</span> ev[MAXM];
+    <span class="kw">int</span> ea[MAXM];
+    <span class="kw">int</span> eb[MAXM];
+
+    <span class="kw">int</span> qu[MAXQ];
+    <span class="kw">int</span> qv[MAXQ];
+    <span class="kw">int</span> qa[MAXQ];
+    <span class="kw">int</span> qb[MAXQ];
+
+    <span class="kw">int</span> edge[MAXM];
+    <span class="kw">int</span> query[MAXQ];
+
+    <span class="kw">int</span> cur[MAXQ];
+    <span class="kw">int</span> cursiz;
+
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">int</span> maxa[MAXN];
+    <span class="kw">int</span> maxb[MAXN];
+    <span class="kw">int</span> rollback[MAXN][5];
+    <span class="kw">int</span> opsize = 0;
+
+    <span class="kw">bool</span> ans[MAXQ];
+
+    <span class="kw">void</span> <span class="fn">build</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            fa[i] = i;
+            siz[i] = 1;
+            maxa[i] = -1;
+            maxb[i] = -1;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> x) {
+        <span class="kw">while</span> (x != fa[x]) {
+            x = fa[x];
+        }
+        <span class="kw">return</span> x;
+    }
+
+    <span class="kw">void</span> <span class="fn">Union</span>(<span class="kw">int</span> x, <span class="kw">int</span> y, <span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">int</span> fx = find(x), fy = find(y);
+        <span class="kw">if</span> (siz[fx] &lt; siz[fy]) {
+            swap(fx, fy);
+        }
+        rollback[++opsize][0] = fx;
+        rollback[opsize][1] = fy;
+        rollback[opsize][2] = siz[fx];
+        rollback[opsize][3] = maxa[fx];
+        rollback[opsize][4] = maxb[fx];
+        <span class="kw">if</span> (fx != fy) {
+            fa[fy] = fx;
+            siz[fx] += siz[fy];
+        }
+        maxa[fx] = max(max(maxa[fx], maxa[fy]), a);
+        maxb[fx] = max(max(maxb[fx], maxb[fy]), b);
+    }
+
+    <span class="kw">void</span> <span class="fn">undo</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> fx, fy; opsize &gt; 0; opsize--) {
+            fx = rollback[opsize][0];
+            fy = rollback[opsize][1];
+            fa[fy] = fy;
+            siz[fx] = rollback[opsize][2];
+            maxa[fx] = rollback[opsize][3];
+            maxb[fx] = rollback[opsize][4];
+        }
+    }
+
+    <span class="kw">bool</span> <span class="fn">check</span>(<span class="kw">int</span> x, <span class="kw">int</span> y, <span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">int</span> fx = find(x), fy = find(y);
+        <span class="kw">return</span> fx == fy &amp;&amp; maxa[fx] == a &amp;&amp; maxb[fx] == b;
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        cursiz = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++) {
+            <span class="kw">if</span> (ea[edge[l]] &lt;= qa[query[i]] &amp;&amp; (r + 1 &gt; m || qa[query[i]] &lt; ea[edge[r + 1]])) {
+                cur[++cursiz] = query[i];
+            }
+        }
+        <span class="kw">if</span> (cursiz &gt; 0) {
+            build();
+            sort(edge + 1, edge + l, [&amp;](<span class="kw">int</span> x, <span class="kw">int</span> y) { <span class="kw">return</span> eb[x] &lt; eb[y]; });
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1, j = 1; i &lt;= cursiz; i++) {
+                <span class="kw">while</span> (j &lt; l &amp;&amp; eb[edge[j]] &lt;= qb[cur[i]]) {
+                    Union(eu[edge[j]], ev[edge[j]], ea[edge[j]], eb[edge[j]]);
+                    j++;
+                }
+                opsize = 0;
+                <span class="kw">for</span> (<span class="kw">int</span> k = l; k &lt;= r; k++) {
+                    <span class="kw">if</span> (ea[edge[k]] &lt;= qa[cur[i]] &amp;&amp; eb[edge[k]] &lt;= qb[cur[i]]) {
+                	      Union(eu[edge[k]], ev[edge[k]], ea[edge[k]], eb[edge[k]]);
+                    }
+                }
+                ans[cur[i]] = check(qu[cur[i]], qv[cur[i]], qa[cur[i]], qb[cur[i]]);
+                undo();
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        blen = max(1, (<span class="kw">int</span>)sqrt(m * log2(n)));
+        bnum = (m + blen - 1) / blen;
+        sort(edge + 1, edge + m + 1, [&amp;](<span class="kw">int</span> x, <span class="kw">int</span> y) { <span class="kw">return</span> ea[x] &lt; ea[y]; });
+        sort(query + 1, query + q + 1, [&amp;](<span class="kw">int</span> x, <span class="kw">int</span> y) { <span class="kw">return</span> qb[x] &lt; qb[y]; });
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; eu[i] &gt;&gt; ev[i] &gt;&gt; ea[i] &gt;&gt; eb[i];
+            edge[i] = i;
+        }
+        cin &gt;&gt; q;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++) {
+            cin &gt;&gt; qu[i] &gt;&gt; qv[i] &gt;&gt; qa[i] &gt;&gt; qb[i];
+            query[i] = i;
+        }
+        prepare();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, l, r; i &lt;= bnum; i++) {
+            l = (i - 1) * blen + 1;
+            r = min(i * blen, m);
+            compute(l, r);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++) {
+            cout &lt;&lt; (ans[i] ? "Yes" : "No") &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+
+    <h2>五、复杂度分析</h2>
+    <p>桥梁：设块长 B、块数 q/B。每块的代价是「扫一遍边表 O(m)」+「排序查询 O(B log B)」+「每个查询处理块内改边 O(B²)」，出块时再归并一次 O(m)。</p>
+    <p>最小公倍数：每块的代价是「给前缀排序 O(m log m)」+「每个查询处理块内边 O(B)」，全部查询只归属一个块，所以块内处理总共 O(q·B)。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>桥梁：进一个块（分边 + 归并 + 排序查询）</td><td><code class="inline">O(m + B log B)</code></td><td rowspan="5"><code class="inline">O(n + m + q)</code>：边与操作各存一份，并查集的 fa / siz 开 n 个，回滚栈开块长量级；最小公倍数那题回滚栈每条记录五项，开 n 个</td></tr>
+        <tr><td>桥梁：块内查询（双指针加边 + 临时改边）</td><td><code class="inline">O(m + B²)</code></td></tr>
+        <tr><td>桥梁：全部</td><td><code class="inline">O((q/B) · m + q · B)</code></td></tr>
+        <tr><td>最小公倍数：进一个块（前缀按 b 排序）</td><td><code class="inline">O(m log m)</code></td></tr>
+        <tr><td>最小公倍数：全部</td><td><code class="inline">O((m/B) · m log m + q · B)</code></td></tr>
+      </tbody>
+    </table>
+    <p>桥梁那题平衡 m·q/B 与 q·B，理论最优是 B = √m；代码取 <code class="inline">sqrt(q · log₂n)</code> 偏大一些，因为撤销版并查集的 find 是 O(log n)，块内那 B 条临时边的常数比排序的常数重。最小公倍数那题取 <code class="inline">sqrt(m · log₂n)</code>，同理。</p>
+
+    <h2>六、最后</h2>
+    <p>两块题的骨架是一样的：把「会变的东西」限制在一个块里，块外那部分就能预先排序、单调地加进并查集；块内那部分对每个查询临时加、查完撤销。时间分块切的是操作序列，边分块切的是排好序的边表，切什么取决于「什么在变」。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var svg = document.getElementById('brSvg');
+  if (!svg) return;
+  var info = document.getElementById('brInfo');
+  var prev = document.getElementById('brPrev');
+  var next = document.getElementById('brNext');
+  var reset = document.getElementById('brReset');
+
+  var P = {1:[70,60],2:[190,60],3:[190,150],4:[70,150]};
+  var E = [{u:1,v:2,w:5,id:1},{u:2,v:3,w:3,id:2},{u:3,v:4,w:7,id:3}];
+  var STEPS = [
+    {t:'块开始', perm:[], tmp:[], q:null, ans:null, sets:[[1],[2],[3],[4]], s:'边 2 在本块里会被改，标成 change；边 3（7）、边 1（5）是不变边，按限重降序排好。'},
+    {t:'查询排序', perm:[], tmp:[], q:null, ans:null, sets:[[1],[2],[3],[4]], s:'块内查询按车重降序：先处理车重 6，再处理车重 4。'},
+    {t:'车重 6：加不变边', perm:[3], tmp:[], q:{car:6,nid:1}, ans:null, sets:[[1],[2],[3,4]], s:'限重 ≥ 6 的不变边只有边 3（7），合并 3、4，这部分常驻不撤。'},
+    {t:'车重 6：临时边生效', perm:[3], tmp:[2], q:{car:6,nid:1}, ans:null, sets:[[1],[2,3,4]], s:'这条查询发生在改边之后，边 2 当时的限重是 6，≥ 6，临时合并 2、3。'},
+    {t:'车重 6：取答案并撤销', perm:[3], tmp:[], q:{car:6,nid:1}, ans:1, sets:[[1],[2],[3,4]], s:'点 1 所在集合只有它自己，答案是 1。然后撤销到快照，临时加的边 2 被摘掉。'},
+    {t:'车重 4：继续加不变边', perm:[3,1], tmp:[], q:{car:4,nid:1}, ans:null, sets:[[1,2],[3,4]], s:'指针继续走，边 1（5）≥ 4 合并进来，1 和 2 连上了。'},
+    {t:'车重 4：临时边不生效', perm:[3,1], tmp:[], q:{car:4,nid:1}, ans:2, sets:[[1,2],[3,4]], s:'这条查询在改边之前，边 2 还是限重 3 < 4，不加。答案是 2。'},
+    {t:'出块：改动落地', perm:[3,1], tmp:[], q:null, ans:null, sets:[[1],[2],[3],[4]], s:'w[边 2] 真正改成 6，把两类边归并回一个降序序列，下一个块重新开始。'}
+  ];
+  var at = 0;
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+    p.push('<rect x="12" y="10" width="596" height="278" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+    E.forEach(function(e){
+      var a = P[e.u], b = P[e.v];
+      var col = '#c9ced4', w = 1.5;
+      if (st.tmp.indexOf(e.id) >= 0){ col = '#ea580c'; w = 3; }
+      else if (st.perm.indexOf(e.id) >= 0){ col = '#2563eb'; w = 2.6; }
+      p.push('<line x1="'+a[0]+'" y1="'+a[1]+'" x2="'+b[0]+'" y2="'+b[1]+'" stroke="'+col+'" stroke-width="'+w+'"/>');
+      var mx = (a[0]+b[0])/2, my = (a[1]+b[1])/2;
+      p.push('<text x="'+mx+'" y="'+(my-6)+'" font-size="10" fill="#6b7280" text-anchor="middle">边'+e.id+' w='+e.w+'</text>');
+    });
+    Object.keys(P).forEach(function(k){
+      var c = P[k];
+      p.push('<circle cx="'+c[0]+'" cy="'+c[1]+'" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>');
+      p.push('<text x="'+c[0]+'" y="'+(c[1]+4)+'" font-size="12" fill="#1f2328" text-anchor="middle">'+k+'</text>');
+    });
+    p.push('<text x="250" y="42" font-size="11" fill="#6b7280">并查集当前集合：</text>');
+    p.push('<text x="250" y="62" font-size="11" fill="#2563eb">'+st.sets.map(function(s){ return '{'+s.join(',')+'}'; }).join('  ')+'</text>');
+    p.push('<text x="250" y="96" font-size="11" fill="#374151">常驻边（蓝）：'+st.perm.map(function(i){ return '边'+i; }).join('、')+(st.perm.length ? '' : '无')+'</text>');
+    p.push('<text x="250" y="118" font-size="11" fill="#ea580c">临时边（橙）：'+st.tmp.map(function(i){ return '边'+i; }).join('、')+(st.tmp.length ? '' : '无')+'</text>');
+    if (st.q){
+      p.push('<text x="250" y="150" font-size="11" fill="#374151">当前查询：从点 '+st.q.nid+' 出发，车重 '+st.q.car+'</text>');
+    }
+    if (st.ans !== null){
+      p.push('<text x="250" y="176" font-size="11" fill="#2563eb">答案 = 所在集合大小 = '+st.ans+'</text>');
+    }
+    p.push('<text x="250" y="206" font-size="11" fill="#6b7280">撤销只弹到本次查询开始时的栈深，</text>');
+    p.push('<text x="250" y="224" font-size="11" fill="#6b7280">常驻边一次都不会被动</text>');
+    p.push('<text x="250" y="252" font-size="11" fill="#6b7280">块长取 sqrt(q · log₂n)，平衡扫边与临时边两项</text>');
+    p.push('<text x="40" y="278" font-size="11" fill="#9aa0a6">边 2 是本块里唯一被修改的边，全程只在临时阶段出现</text>');
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div><strong>' + st.t + '</strong><span>：</span></div><div>' + st.s + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if (at > 0){ at--; render(); } });
+  next.addEventListener('click', function(){ if (at < STEPS.length - 1){ at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

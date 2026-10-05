@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>莫队二次离线 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .mo1-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .mo1-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .mo1-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #mo1Svg text{font-size:11px;}
+  .mo1-step{font-size:13px;color:var(--muted);margin:0 0 10px;}
+  table.mo1tbl{border-collapse:collapse;font-size:14px;margin:14px 0;}
+  table.mo1tbl th,table.mo1tbl td{border:1px solid var(--border);padding:5px 12px;text-align:center;}
+  table.mo1tbl th{background:var(--bg-soft);font-weight:600;}
+  @media(max-width:760px){
+    .mo1-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>莫队二次离线</h1>
+    <p class="intro">普通莫队每挪动一个位置就要重算一次「这个位置带来的贡献」，当贡献无法 O(1) 维护时，总代价会变成「滑窗总距离 × 单次代价」。二次离线把窗口挪动产生的变化量拆成两份：一份能预先做成前缀和，当场就能算；另一份和窗口外的位置有关，先记成任务，等第二次离线时按扫描顺序一起算。两份都只花 O(n√n)。</p>
+
+    <h2>零、背景</h2>
+    <p>前置是序列分块和普通莫队；题目2 还要树状数组。本课讲第一种实现，对应题目1、题目2；下一页讲第二种实现，对应题目3、题目4，那一页的题目4 还要根号分治。</p>
+
+    <h2>一、题目1：k1 二元组计数</h2>
+    <p>给定一个长度为 n 的数组 arr 和非负整数 k。位置二元组 (i, j) 要满足 i ≠ j，且 arr[i] 异或 arr[j] 的二进制里有 k 个 1；i 和 j 换序算同一个。m 条查询，每条给出 l r，打印 arr[l..r] 上有多少这样的二元组。</p>
+    <p>1 ≤ n、m ≤ 10⁵，0 ≤ arr[i]、k &lt; 16384，测试链接 P4887。</p>
+    <p>比如 arr = [1, 3, 5, 7]、k = 1，[1, 4] 上的答案是 4：1 和 3、1 和 5、3 和 7、5 和 7 这四对，异或值分别是 2、4、4、2，二进制里都只有 1 个 1。</p>
+
+    <h2>二、普通莫队为什么卡住</h2>
+    <p>窗口右端右移一位，新元素 arr[i] 带来的新二元组数，等于窗口里已有元素中「与 arr[i] 异或后有 k 个 1」的个数。值域是 0 到 2¹⁴−1，与 v 配对的值一共有 C(14, k) 个，k = 7 时是 3432 个。</p>
+    <p>于是每次挪动一位要枚举 3432 个值，莫队滑窗的总距离是 O(n√n)，n = 10⁵ 时约 3 × 10⁷ 次挪动，乘下来 10¹¹ 量级，完全不能接受。题目2 的区间逆序对也一样：挪动一位要查「已有元素里有多少比它大」，树状数组是 O(log n)，乘上滑窗距离还是太慢。</p>
+    <p>可以发现瓶颈在「每次挪动都要现算一次和整个窗口的配对」。窗口是连续变化的，相邻两次查询的窗口差别不大，但普通莫队只利用了「位置相邻」，没利用「配对这件事可以批量算」。</p>
+
+    <h2>三、把变化量拆成两份</h2>
+    <p>设当前窗口是 [winl, winr]，右端要右移到 jobr &gt; winr，新增的位置是 winr+1 到 jobr。答案的变化由两部分构成：新增位置之间的配对，加上新增位置与老窗口 [winl, winr] 之间的配对。</p>
+    <p>预设 pre[i] 表示 arr[1..i] 上的配对总数，那么 pre[jobr] − pre[winr] 一次性给出了「涉及位置 &gt; winr 且 ≤ jobr 的全部配对」，它比要的变化量多算了「新增位置与 [1, winl−1] 之间」的那部分。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 244" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="窗口右端右移时变化量的三部分" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="none">
+          <rect x="30" y="50" width="160" height="46" rx="6" fill="#f6f7f9" stroke="#c9ced4" stroke-width="1.2"/>
+          <rect x="190" y="50" width="200" height="46" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
+          <rect x="390" y="50" width="250" height="46" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.3"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="110" y="78">1 … winl−1</text>
+          <text x="290" y="78">winl … winr 老窗口</text>
+          <text x="515" y="78">winr+1 … jobr 新增</text>
+        </g>
+        <g fill="none" stroke-width="1.4">
+          <path d="M470 96 Q515 128 560 96" stroke="#6b7280"/>
+          <path d="M430 96 Q340 156 250 96" stroke="#2563eb"/>
+          <path d="M410 96 Q230 196 90 96" stroke="#ea580c" stroke-dasharray="5 4"/>
+        </g>
+        <g font-size="11" fill="#374151" text-anchor="middle">
+          <text x="515" y="126">新增内部的配对</text>
+          <text x="352" y="152">和老窗口的配对：正是要的</text>
+          <text x="243" y="200">和窗口左侧的配对：多算了</text>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="515" y="146" fill="#6b7280">pre 差分自带</text>
+          <text x="352" y="172" fill="#2563eb">pre 差分自带</text>
+          <text x="243" y="220" fill="#ea580c">记成离线任务，第二次离线时减掉</text>
+        </g>
+        <text x="340" y="240" font-size="11" fill="#6b7280" text-anchor="middle">pre[jobr] − pre[winr] 一次给出三项，第三项由挂在 x = winl−1 上的任务扣回来</text>
+      </svg>
+      <figcaption>右端右移的三部分：内部与「和老窗口」是答案，与窗口左侧的多算，单独记成任务</figcaption>
+    </figure>
+
+    <p>因此右移这一步写成两笔：ans += pre[jobr] − pre[winr]，同时记一个任务 (x = winl−1, 区间 [winr+1, jobr], op = −1)，意思是将来减去 arr[1..x] 与 arr[winr+1..jobr] 之间的配对数。</p>
+    <p>左端移动对称。预设 suf[i] 表示 arr[i..n] 上的配对总数，winl 左移到 jobl 时新增的位置是 jobl 到 winl−1，ans += suf[jobl] − suf[winl]，并记任务 (x = winr+1, 区间 [jobl, winl−1], op = −1)，减去 arr[x..n] 与新增位置之间的配对。</p>
+    <p>反向移动（右端左移、左端右移）就是同一套公式取相反符号：pre / suf 的差分变成减号，任务的 op 变成 +1。四种情况合起来只有四行。</p>
+
+    <h2>四、pre 与 suf 怎么预处理</h2>
+    <p>两个数组都是一遍扫描，只装不删。以 pre 为例：维护一个值域计数 cnt，扫到位置 i 时，先读 cnt[arr[i]] 得到「已装进去的元素里与 arr[i] 配对的有几个」，累加进 pre[i]，再把所有与 arr[i] 配对的值 v 的 cnt[v] 加一。</p>
+    <p>题目1 里配对值最多 C(14, k) 个，所以这一遍是 O(n · C(14, k))；题目2 换成树状数组查「比它大的个数」，这一遍是 O(n log n)。两次扫描（pre、suf）各自一遍，比每次窗口挪动都现算一遍便宜得多。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 196" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="pre 与 suf 的扫描方向" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g>
+          <rect x="56" y="34" width="64" height="36" rx="5" fill="#eef4ff" stroke="#93b4f5" stroke-width="1.2"/>
+          <rect x="128" y="34" width="64" height="36" rx="5" fill="#eef4ff" stroke="#93b4f5" stroke-width="1.2"/>
+          <rect x="200" y="34" width="64" height="36" rx="5" fill="#eef4ff" stroke="#93b4f5" stroke-width="1.2"/>
+          <rect x="272" y="34" width="64" height="36" rx="5" fill="#eef4ff" stroke="#93b4f5" stroke-width="1.2"/>
+          <rect x="344" y="34" width="64" height="36" rx="5" fill="#eef4ff" stroke="#93b4f5" stroke-width="1.2"/>
+          <rect x="416" y="34" width="64" height="36" rx="5" fill="#eef4ff" stroke="#93b4f5" stroke-width="1.2"/>
+          <rect x="488" y="34" width="64" height="36" rx="5" fill="#eef4ff" stroke="#93b4f5" stroke-width="1.2"/>
+          <rect x="560" y="34" width="64" height="36" rx="5" fill="#eef4ff" stroke="#93b4f5" stroke-width="1.2"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="88" y="57">3</text><text x="160" y="57">1</text><text x="232" y="57">4</text><text x="304" y="57">1</text>
+          <text x="376" y="57">5</text><text x="448" y="57">9</text><text x="520" y="57">2</text><text x="592" y="57">6</text>
+        </g>
+        <g font-size="11" fill="#6b7280" text-anchor="middle">
+          <text x="88" y="84">1</text><text x="160" y="84">2</text><text x="232" y="84">3</text><text x="304" y="84">4</text>
+          <text x="376" y="84">5</text><text x="448" y="84">6</text><text x="520" y="84">7</text><text x="592" y="84">8</text>
+        </g>
+        <g font-size="11" fill="#2563eb" text-anchor="middle">
+          <text x="30" y="112">pre</text>
+          <text x="88" y="112">0</text><text x="160" y="112">1</text><text x="232" y="112">1</text><text x="304" y="112">3</text>
+          <text x="376" y="112">3</text><text x="448" y="112">3</text><text x="520" y="112">7</text><text x="592" y="112">8</text>
+        </g>
+        <g font-size="11" fill="#9aa0a6" text-anchor="middle">
+          <text x="124" y="130">→</text><text x="196" y="130">→</text><text x="268" y="130">→</text><text x="340" y="130">→</text>
+          <text x="412" y="130">→</text><text x="484" y="130">→</text><text x="556" y="130">→</text>
+        </g>
+        <g font-size="11" fill="#ea580c" text-anchor="middle">
+          <text x="30" y="162">suf</text>
+          <text x="88" y="162">8</text><text x="160" y="162">5</text><text x="232" y="162">5</text><text x="304" y="162">3</text>
+          <text x="376" y="162">3</text><text x="448" y="162">2</text><text x="520" y="162">0</text><text x="592" y="162">0</text>
+        </g>
+        <g font-size="11" fill="#9aa0a6" text-anchor="middle">
+          <text x="124" y="180">←</text><text x="196" y="180">←</text><text x="268" y="180">←</text><text x="340" y="180">←</text>
+          <text x="412" y="180">←</text><text x="484" y="180">←</text><text x="556" y="180">←</text>
+        </g>
+        <text x="340" y="194" font-size="11" fill="#6b7280" text-anchor="middle">以逆序对为例：pre 从左往右扫，suf 从右往左扫，两遍都只装不删</text>
+      </svg>
+      <figcaption>pre[i] 是 arr[1..i] 的答案，suf[i] 是 arr[i..n] 的答案，两遍扫描各 O(n) 次装元素</figcaption>
+    </figure>
+
+    <h2>五、第二次离线：任务挂在 x 上，扫一遍 x</h2>
+    <p>任务是一个五元组 (x, l, r, op, id)：求 arr[1..x]（左任务）或 arr[x..n]（右任务）与 arr[l..r] 之间的配对数，乘上 op 加到第 id 条查询上。所有任务按 x 挂成链表，挂在 headl[x] 或 headr[x] 上。</p>
+    <p>左任务随 x 从 0 扫到 n，一边扫一边把 arr[x] 装进值域结构，扫到某个 x 就把它上面挂的任务全处理掉；右任务随 x 从 n+1 扫到 1，装的是 arr[x..n]。扫描过程中值域结构只增不减，这是能批量算的关键。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 208" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="两类任务的链表与扫描方向" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="24" font-size="12" fill="#2563eb">左任务 headl[x]：x 从 0 扫到 n，装 arr[1..x]</text>
+        <g stroke="#2563eb" stroke-width="1.2" fill="#dbeafe">
+          <rect x="30" y="40" width="250" height="34" rx="6"/>
+          <rect x="30" y="82" width="250" height="34" rx="6"/>
+          <rect x="30" y="124" width="250" height="34" rx="6"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="155" y="61">x=0 · [1, 3] · op = −1</text>
+          <text x="155" y="103">x=1 · [6, 7] · op = −1</text>
+          <text x="155" y="145">x=1 · [8, 8] · op = −1</text>
+        </g>
+        <g stroke="#2563eb" stroke-width="1.4" fill="none">
+          <path d="M306 60 L306 152"/>
+          <path d="M301 147 L306 154 L311 147"/>
+        </g>
+        <text x="318" y="106" font-size="11" fill="#2563eb">x 递增</text>
+
+        <text x="370" y="24" font-size="12" fill="#ea580c">右任务 headr[x]：x 从 n+1 扫到 1，装 arr[x..n]</text>
+        <g stroke="#ea580c" stroke-width="1.2" fill="#ffedd5">
+          <rect x="370" y="40" width="250" height="34" rx="6"/>
+          <rect x="370" y="82" width="250" height="34" rx="6"/>
+          <rect x="370" y="124" width="250" height="34" rx="6"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="495" y="61">x=9 · [1, 1] · op = −1</text>
+          <text x="495" y="103">x=7 · [1, 3] · op = +1</text>
+          <text x="495" y="145">x=6 · [1, 1] · op = +1</text>
+        </g>
+        <g stroke="#ea580c" stroke-width="1.4" fill="none">
+          <path d="M646 152 L646 60"/>
+          <path d="M641 65 L646 58 L651 65"/>
+        </g>
+        <text x="626" y="106" font-size="11" fill="#ea580c" text-anchor="end">x 递减</text>
+        <text x="340" y="186" font-size="11" fill="#6b7280" text-anchor="middle">每个任务枚举区间里的位置，所有任务的区间长度之和 = 滑窗总距离 = O(n√n)</text>
+        <text x="340" y="204" font-size="11" fill="#6b7280" text-anchor="middle">装元素的代价另算：全程只装 n 次（左任务一遍、右任务一遍）</text>
+      </svg>
+      <figcaption>任务按 x 分桶，扫描一遍 x 就把同 x 的任务一起处理，值域结构只增不减</figcaption>
+    </figure>
+
+    <p>最后一步别忘了：ans 里存的是「从上一条查询到这条查询的变化量」，按莫队排好序的顺序做一遍前缀和，才是每条查询自己的答案。</p>
+
+    <h2>六、整个过程走一遍</h2>
+    <p>下面这个演示用 arr = [3, 1, 4, 1, 5, 9, 2, 6] 和五条查询，配对关系取「左边大右边小」的逆序对。前五步是第一次离线（莫队滑窗 + 生成任务），中间八步是第二次离线（扫 x 处理任务），最后一步做前缀和。点「下一步」跟着走。</p>
+
+    <div class="viz">
+      <div class="viz-title">莫队二次离线：五条查询的完整过程</div>
+      <p class="mo1-step" id="mo1Step">第 1 / 14 步</p>
+      <svg id="mo1Svg" viewBox="0 0 680 152" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="莫队二次离线过程演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="breakdown" id="mo1Info"></div>
+      <div class="viz-controls">
+        <button class="mo1-btn" id="mo1Prev" type="button">上一步</button>
+        <button class="mo1-btn" id="mo1Next" type="button">下一步</button>
+        <button class="mo1-btn" id="mo1Reset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>七、题目1 的完整实现</h2>
+    <p>pre、suf 两遍扫描，中间是莫队滑窗生成任务，最后两遍扫描处理任务。任务用链式前向星挂在 headl / headr 上，数组大小开 2m 就够。</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Query {
+        <span class="kw">int</span> l, r, id;
+    };
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100002;
+    <span class="kw">const</span> <span class="kw">int</span> MAXV = 1 &lt;&lt; 14;
+    <span class="kw">int</span> n, m, k;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> bi[MAXN];
+    <span class="kw">int</span> kOneArr[MAXV];
+    <span class="kw">int</span> cntk;
+
+    Query query[MAXN];
+
+    <span class="kw">int</span> headl[MAXN];
+    <span class="kw">int</span> headr[MAXN];
+    <span class="kw">int</span> nextq[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> ql[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> qr[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> qop[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> qid[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntq;
+
+    <span class="kw">int</span> cnt[MAXV];
+    <span class="kw">long</span> <span class="kw">long</span> pre[MAXN];
+    <span class="kw">long</span> <span class="kw">long</span> suf[MAXN];
+
+    <span class="kw">long</span> <span class="kw">long</span> ans[MAXN];
+
+    <span class="kw">bool</span> <span class="fn">QueryCmp</span>(Query &amp;a, Query &amp;b) {
+        <span class="kw">if</span> (bi[a.l] != bi[b.l]) {
+            <span class="kw">return</span> bi[a.l] &lt; bi[b.l];
+        }
+        <span class="kw">return</span> a.r &lt; b.r;
+    }
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> x &amp; -x;
+    }
+
+    <span class="kw">int</span> <span class="fn">countOne</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> ret = 0;
+        <span class="kw">while</span> (num &gt; 0) {
+            ret++;
+            num -= lowbit(num);
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">addLeftOffline</span>(<span class="kw">int</span> x, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> op, <span class="kw">int</span> id) {
+        nextq[++cntq] = headl[x];
+        headl[x] = cntq;
+        ql[cntq] = l;
+        qr[cntq] = r;
+        qop[cntq] = op;
+        qid[cntq] = id;
+    }
+
+    <span class="kw">void</span> <span class="fn">addRightOffline</span>(<span class="kw">int</span> x, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> op, <span class="kw">int</span> id) {
+        nextq[++cntq] = headr[x];
+        headr[x] = cntq;
+        ql[cntq] = l;
+        qr[cntq] = r;
+        qop[cntq] = op;
+        qid[cntq] = id;
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">int</span> blen = (<span class="kw">int</span>)sqrt(n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        sort(query + 1, query + m + 1, QueryCmp);
+        <span class="kw">for</span> (<span class="kw">int</span> v = 0; v &lt; MAXV; v++) {
+            <span class="kw">if</span> (countOne(v) == k) {
+                kOneArr[++cntk] = v;
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            pre[i] = pre[i - 1] + cnt[arr[i]];
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= cntk; j++) {
+                cnt[arr[i] ^ kOneArr[j]]++;
+            }
+        }
+        memset(cnt, 0, <span class="kw">sizeof</span>(cnt));
+        <span class="kw">for</span> (<span class="kw">int</span> i = n; i &gt;= 1; i--) {
+            suf[i] = suf[i + 1] + cnt[arr[i]];
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= cntk; j++) {
+                cnt[arr[i] ^ kOneArr[j]]++;
+            }
+        }
+        <span class="kw">int</span> winl = 1, winr = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> jobl = query[i].l;
+            <span class="kw">int</span> jobr = query[i].r;
+            <span class="kw">int</span> id = query[i].id;
+            <span class="kw">if</span> (winr &lt; jobr) {
+                addLeftOffline(winl - 1, winr + 1, jobr, -1, id);
+                ans[id] += pre[jobr] - pre[winr];
+            }
+            <span class="kw">if</span> (winr &gt; jobr) {
+                addLeftOffline(winl - 1, jobr + 1, winr, 1, id);
+                ans[id] -= pre[winr] - pre[jobr];
+            }
+            winr = jobr;
+            <span class="kw">if</span> (winl &gt; jobl) {
+                addRightOffline(winr + 1, jobl, winl - 1, -1, id);
+                ans[id] += suf[jobl] - suf[winl];
+            }
+            <span class="kw">if</span> (winl &lt; jobl) {
+                addRightOffline(winr + 1, winl, jobl - 1, 1, id);
+                ans[id] -= suf[winl] - suf[jobl];
+            }
+            winl = jobl;
+        }
+        memset(cnt, 0, <span class="kw">sizeof</span>(cnt));
+        <span class="kw">for</span> (<span class="kw">int</span> x = 0; x &lt;= n; x++) {
+            <span class="kw">if</span> (x &gt;= 1) {
+                <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= cntk; j++) {
+                    cnt[arr[x] ^ kOneArr[j]]++;
+                }
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> q = headl[x]; q &gt; 0; q = nextq[q]) {
+                <span class="kw">int</span> l = ql[q], r = qr[q], op = qop[q], id = qid[q];
+                <span class="kw">for</span> (<span class="kw">int</span> j = l; j &lt;= r; j++) {
+                    ans[id] += 1LL * op * cnt[arr[j]];
+                }
+            }
+        }
+        memset(cnt, 0, <span class="kw">sizeof</span>(cnt));
+        <span class="kw">for</span> (<span class="kw">int</span> x = n + 1; x &gt;= 1; x--) {
+            <span class="kw">if</span> (x &lt;= n) {
+                <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= cntk; j++) {
+                    cnt[arr[x] ^ kOneArr[j]]++;
+                }
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> q = headr[x]; q &gt; 0; q = nextq[q]) {
+                <span class="kw">int</span> l = ql[q], r = qr[q], op = qop[q], id = qid[q];
+                <span class="kw">for</span> (<span class="kw">int</span> j = l; j &lt;= r; j++) {
+                    ans[id] += 1LL * op * cnt[arr[j]];
+                }
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; k;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; query[i].l &gt;&gt; query[i].r;
+            query[i].id = i;
+        }
+        prepare();
+        compute();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= m; i++) {
+            ans[query[i].id] += ans[query[i - 1].id];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <p>这里有个细节：k = 0 时 C(14, 0) = 1，配对值只有自己，pre[i] 统计的就是「和 arr[i] 相等的元素个数」；k = 7 时配对值有 3432 个，两遍扫描各要 3.4 × 10⁸ 次加法，这也是本题卡常的原因，代码里把配对值先收进 kOneArr 就是为了这段循环尽量紧凑。</p>
+
+    <h2>八、题目2：区间逆序对</h2>
+    <p>给定一个长度为 n 的数组，i &lt; j 且 arr[i] &gt; arr[j] 的 (i, j) 叫逆序对。m 条查询，每条给出 l r，打印 arr[l..r] 上的逆序对数量。1 ≤ n、m ≤ 10⁵，0 ≤ arr[i] ≤ 10⁹，测试链接 P5047。</p>
+    <p>骨架和题目1 完全一样，差别只有两处。一是配对关系有方向：pre[i] 加的是「已装元素里比 arr[i] 大的个数」，suf[i] 加的是「已装元素里比 arr[i] 小的个数」。二是值域到 10⁹，先离散化，第二次离线里查「已装元素中大于 v 的个数」如果每次用树状数组是 O(log n)，乘上任务枚举量 O(n√n) 会到 10⁸ 量级，改成值域分块：装一个元素 O(√V)，查一次 O(1)。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 176" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="值域分块的整块计数与块内计数" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#c9ced4" stroke-width="1.2" fill="#f6f7f9">
+          <rect x="40" y="40" width="140" height="42" rx="5"/>
+          <rect x="190" y="40" width="140" height="42" rx="5"/>
+          <rect x="340" y="40" width="140" height="42" rx="5"/>
+          <rect x="490" y="40" width="140" height="42" rx="5"/>
+        </g>
+        <g font-size="11" fill="#6b7280" text-anchor="middle">
+          <text x="110" y="66">块 1</text><text x="260" y="66">块 2</text><text x="410" y="66">块 3</text><text x="560" y="66">块 4</text>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="110" y="98">blockCnt[1] = 3</text>
+          <text x="260" y="98">blockCnt[2] = 3</text>
+          <text x="410" y="98">blockCnt[3] = 1</text>
+          <text x="560" y="98">blockCnt[4] = 0</text>
+        </g>
+        <g stroke="#2563eb" stroke-width="1.3" fill="#dbeafe">
+          <rect x="340" y="112" width="140" height="34" rx="5"/>
+        </g>
+        <text x="410" y="133" font-size="11" fill="#1f2328" text-anchor="middle">块内逐个记 numCnt[i]</text>
+        <g stroke="#ea580c" stroke-width="1.4" fill="none">
+          <path d="M70 92 L70 112"/><path d="M220 92 L220 112"/><path d="M520 92 L520 112"/>
+          <path d="M65 107 L70 114 L75 107"/><path d="M215 107 L220 114 L225 107"/><path d="M515 107 L520 114 L525 107"/>
+        </g>
+        <text x="180" y="166" font-size="11" fill="#ea580c" text-anchor="middle">装一个值 v：整块只加块计数 O(√V)，只在自己所在块里逐个加</text>
+        <text x="180" y="176" font-size="11" fill="#6b7280" text-anchor="middle">查「大于 v 的个数」= blockCnt[块号] + numCnt[v]，O(1)</text>
+      </svg>
+      <figcaption>值域分块：整块一个计数、块内逐个计数，把修改压到 O(√V)、查询压到 O(1)</figcaption>
+    </figure>
+
+    <p>具体来说，装一个值 v 时，比 v 小的整块（块号小于 v 所在块）的 blockCnt 各加一，块内比 v 小的位置 numCnt 各加一；查询「已装元素里大于 x 的个数」时取 blockCnt[bi[x]] + numCnt[x]，一次加法就出来。块长取 √V，两边都是 O(√V) 和 O(1)。</p>
+
+    <p>离散化和分块的初始化：</p>
+
+        <pre class="code"><span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            sorted[i] = arr[i];
+        }
+        sort(sorted + 1, sorted + n + 1);
+        cntv = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            <span class="kw">if</span> (sorted[cntv] != sorted[i]) {
+                sorted[++cntv] = sorted[i];
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            arr[i] = kth(arr[i]);
+        }
+        <span class="kw">int</span> blen = (<span class="kw">int</span>)sqrt(n);
+        <span class="kw">int</span> bnum = (n + blen - 1) / blen;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= bnum; i++) {
+            bl[i] = (i - 1) * blen + 1;
+            br[i] = min(i * blen, cntv);
+        }
+        sort(query + 1, query + m + 1, QueryCmp);
+    }</pre>
+
+    <p>值域分块的三个函数，左任务用 addLeftCnt（查「大于 x 的个数」），右任务用 addRightCnt（查「小于 x 的个数」）：</p>
+
+        <pre class="code"><span class="kw">void</span> <span class="fn">addLeftCnt</span>(<span class="kw">int</span> val) {
+        <span class="kw">for</span> (<span class="kw">int</span> b = 1; b &lt;= bi[val] - 1; b++) {
+            blockCnt[b]++;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = bl[bi[val]]; i &lt; val; i++) {
+            numCnt[i]++;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">addRightCnt</span>(<span class="kw">int</span> val) {
+        <span class="kw">for</span> (<span class="kw">int</span> b = bi[val] + 1; b &lt;= bi[cntv]; b++) {
+            blockCnt[b]++;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = val + 1; i &lt;= br[bi[val]]; i++) {
+            numCnt[i]++;
+        }
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">getCnt</span>(<span class="kw">int</span> val) {
+        <span class="kw">return</span> blockCnt[bi[val]] + numCnt[val];
+    }</pre>
+
+    <p>compute 与题目1 同形，只把装值、查值换成上面三个函数：</p>
+
+        <pre class="code"><span class="kw">void</span> <span class="fn">compute</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            pre[i] = pre[i - 1] + sum(cntv) - sum(arr[i]);
+            add(arr[i], 1);
+        }
+        memset(tree + 1, 0, cntv * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        <span class="kw">for</span> (<span class="kw">int</span> i = n; i &gt;= 1; i--) {
+            suf[i] = suf[i + 1] + sum(arr[i] - 1);
+            add(arr[i], 1);
+        }
+        <span class="kw">int</span> winl = 1, winr = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> jobl = query[i].l;
+            <span class="kw">int</span> jobr = query[i].r;
+            <span class="kw">int</span> id = query[i].id;
+            <span class="kw">if</span> (winr &lt; jobr) {
+                addLeftOffline(winl - 1, winr + 1, jobr, -1, id);
+                ans[id] += pre[jobr] - pre[winr];
+            }
+            <span class="kw">if</span> (winr &gt; jobr) {
+                addLeftOffline(winl - 1, jobr + 1, winr, 1, id);
+                ans[id] -= pre[winr] - pre[jobr];
+            }
+            winr = jobr;
+            <span class="kw">if</span> (winl &gt; jobl) {
+                addRightOffline(winr + 1, jobl, winl - 1, -1, id);
+                ans[id] += suf[jobl] - suf[winl];
+            }
+            <span class="kw">if</span> (winl &lt; jobl) {
+                addRightOffline(winr + 1, winl, jobl - 1, 1, id);
+                ans[id] -= suf[winl] - suf[jobl];
+            }
+            winl = jobl;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> x = 0; x &lt;= n; x++) {
+            <span class="kw">if</span> (x &gt;= 1) {
+                addLeftCnt(arr[x]);
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> q = headl[x]; q &gt; 0; q = nextq[q]) {
+                <span class="kw">int</span> l = ql[q], r = qr[q], op = qop[q], id = qid[q];
+                <span class="kw">long</span> <span class="kw">long</span> ret = 0;
+                <span class="kw">for</span> (<span class="kw">int</span> j = l; j &lt;= r; j++) {
+                    ret += getCnt(arr[j]);
+                }
+                ans[id] += ret * op;
+            }
+        }
+        memset(blockCnt, 0, <span class="kw">sizeof</span>(blockCnt));
+        memset(numCnt, 0, <span class="kw">sizeof</span>(numCnt));
+        <span class="kw">for</span> (<span class="kw">int</span> x = n + 1; x &gt;= 1; x--) {
+            <span class="kw">if</span> (x &lt;= n) {
+                addRightCnt(arr[x]);
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> q = headr[x]; q &gt; 0; q = nextq[q]) {
+                <span class="kw">int</span> l = ql[q], r = qr[q], op = qop[q], id = qid[q];
+                <span class="kw">long</span> <span class="kw">long</span> ret = 0;
+                <span class="kw">for</span> (<span class="kw">int</span> j = l; j &lt;= r; j++) {
+                    ret += getCnt(arr[j]);
+                }
+                ans[id] += ret * op;
+            }
+        }
+    }</pre>
+
+    <h2>九、复杂度分析</h2>
+    <p>设块长为 √n，滑窗总距离 O((n + m)√n)，任务区间长度之和同样是这个量级。</p>
+
+    <table class="complexity">
+      <tr><th>环节</th><th>题目1（k1 二元组）</th><th>题目2（区间逆序对）</th></tr>
+      <tr><td>pre、suf 两遍扫描</td><td>O(n · C(14, k))</td><td>O(n log n)</td></tr>
+      <tr><td>莫队排序 + 滑窗生成任务</td><td>O(m log m + (n + m)√n)</td><td>O(m log m + (n + m)√n)</td></tr>
+      <tr><td>第二次离线：装元素</td><td>O(n · C(14, k))</td><td>O(n√n)</td></tr>
+      <tr><td>第二次离线：枚举任务区间</td><td>O((n + m)√n)</td><td>O((n + m)√n)</td></tr>
+      <tr><td>单次查询贡献</td><td>O(1)</td><td>O(1)</td></tr>
+      <tr><td>总计</td><td>O((n + m)√n + n · C(14, k))</td><td>O((n + m)√n)</td></tr>
+      <tr><td>空间</td><td>O(n + m + 2¹⁴)</td><td>O(n + m)</td></tr>
+    </table>
+
+    <p>空间主要是四个数组：pre、suf 各 O(n)，任务链表 O(m)，值域计数 O(V)。任务用链式前向星存，每条查询最多生成两个任务，开 2m 个槽位。</p>
+
+    <h2 id="last10">十、最后</h2>
+    <p>二次离线的核心就一句：把「和整个窗口的配对」从每次挪动里拆出来，攒成任务批量算。不做二次离线时题目1 是 O((n + m)√n · C(14, k))、题目2 是 O((n + m)√n · log n)；拆出来之后配对变成全程只做几遍扫描，滑窗部分只剩 O(1) 的加减。</p>
+
+    <p>代价是维护两份信息：pre、suf 各 O(n)，加一条任务链表 O(m)。下一页换第二种实现，只保留一份 pre，代码更少，代价是贡献的定义要重新设计。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var ARR = [3, 1, 4, 1, 5, 9, 2, 6];
+  var N = 8;
+  var steps = [];
+
+  function mo(title, from, to, addSeg, delSeg, rows, total){
+    steps.push({k:'mo', title:title, from:from, to:to, add:addSeg, del:delSeg, rows:rows, total:total});
+  }
+  function off(title, kind, x, l, r, op, id, val, acc){
+    steps.push({k:'off', title:title, kind:kind, x:x, l:l, r:r, op:op, id:id, val:val, acc:acc});
+  }
+
+  mo('q1 [1, 3]：窗口 [1, 0] → [1, 3]', [1, 0], [1, 3], [1, 3], null,
+     [['r 右移 0 → 3', '+（pre[3] − pre[0]）= +1'],
+      ['生成任务', 'L：x = 0，区间 [1, 3]，op = −1']],
+     '变化量 = +1');
+  mo('q5 [2, 5]：窗口 [1, 3] → [2, 5]', [1, 3], [2, 5], [4, 5], [1, 1],
+     [['r 右移 3 → 5', '+（pre[5] − pre[3]）= +2，任务 L：x = 0，[4, 5]，−1'],
+      ['l 右移 1 → 2', '−（suf[1] − suf[2]）= −3，任务 R：x = 6，[1, 1]，+1']],
+     '变化量 = −1');
+  mo('q2 [2, 7]：窗口 [2, 5] → [2, 7]', [2, 5], [2, 7], [6, 7], null,
+     [['r 右移 5 → 7', '+（pre[7] − pre[5]）= +4'],
+      ['生成任务', 'L：x = 1，区间 [6, 7]，op = −1']],
+     '变化量 = +4');
+  mo('q3 [1, 8]：窗口 [2, 7] → [1, 8]', [2, 7], [1, 8], [8, 8], [1, 1],
+     [['r 右移 7 → 8', '+（pre[8] − pre[7]）= +1，任务 L：x = 1，[8, 8]，−1'],
+      ['l 左移 2 → 1', '+（suf[1] − suf[2]）= +3，任务 R：x = 9，[1, 1]，−1']],
+     '变化量 = +4');
+  mo('q4 [4, 6]：窗口 [1, 8] → [4, 6]', [1, 8], [4, 6], null, [1, 8],
+     [['r 左移 8 → 6', '−（pre[8] − pre[6]）= −5，任务 L：x = 0，[7, 8]，+1'],
+      ['l 右移 1 → 4', '−（suf[1] − suf[4]）= −5，任务 R：x = 7，[1, 3]，+1']],
+     '变化量 = −10');
+
+  off('左任务 x = 0，[1, 3]，op = −1', 'L', 0, 1, 3, -1, 1, 0, 1);
+  off('左任务 x = 0，[4, 5]，op = −1', 'L', 0, 4, 5, -1, 5, 0, -1);
+  off('左任务 x = 0，[7, 8]，op = +1', 'L', 0, 7, 8, 1, 4, 0, -10);
+  off('左任务 x = 1，[6, 7]，op = −1', 'L', 1, 6, 7, -1, 2, -1, 3);
+  off('左任务 x = 1，[8, 8]，op = −1', 'L', 1, 8, 8, -1, 3, 0, 4);
+  off('右任务 x = 9，[1, 1]，op = −1', 'R', 9, 1, 1, -1, 3, 0, 4);
+  off('右任务 x = 7，[1, 3]，op = +1', 'R', 7, 1, 3, 1, 4, 2, -8);
+  off('右任务 x = 6，[1, 1]，op = +1', 'R', 6, 1, 1, 1, 5, 1, 0);
+
+  var FINAL = [['q1 [1, 3]', 1, 1], ['q5 [2, 5]', 0, 1], ['q2 [2, 7]', 3, 4], ['q3 [1, 8]', 4, 8], ['q4 [4, 6]', -8, 0]];
+
+  var svg = document.getElementById('mo1Svg');
+  var info = document.getElementById('mo1Info');
+  var stepEl = document.getElementById('mo1Step');
+  var cur = 0;
+
+  function cellX(i){ return 56 + (i - 1) * 72; }
+
+  function box(s, i, fill, stroke, dash){
+    var x = cellX(i);
+    s += '<rect x="' + x + '" y="40" width="64" height="40" rx="5" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.3"';
+    if (dash) { s += ' stroke-dasharray="4 3"'; }
+    s += '/>';
+    return s;
+  }
+
+  function draw(){
+    var st = steps[cur];
+    var s = '';
+    var i;
+    s += '<g font-size="11" fill="#6b7280" text-anchor="middle">';
+    for (i = 1; i <= N; i++) {
+      s += '<text x="' + (cellX(i) + 32) + '" y="30">' + i + '</text>';
+    }
+    s += '</g>';
+
+    if (st.k === 'mo') {
+      var inWin = [], isAdd = [], isDel = [];
+      for (i = 1; i <= N; i++) {
+        var w = (i >= st.to[0] && i <= st.to[1]);
+        var a = st.add && i >= st.add[0] && i <= st.add[1];
+        var d = st.del && i >= st.del[0] && i <= st.del[1];
+        if (a) { s = box(s, i, '#ffedd5', '#ea580c', false); }
+        else if (d) { s = box(s, i, '#f6f7f9', '#9aa0a6', true); }
+        else if (w) { s = box(s, i, '#dbeafe', '#2563eb', false); }
+        else { s = box(s, i, '#ffffff', '#e6e8eb', false); }
+      }
+      s += '<g font-size="13" fill="#1f2328" text-anchor="middle">';
+      for (i = 1; i <= N; i++) {
+        s += '<text x="' + (cellX(i) + 32) + '" y="66">' + ARR[i - 1] + '</text>';
+      }
+      s += '</g>';
+      var mid = (cellX(st.to[0]) + cellX(st.to[1]) + 64) / 2;
+      s += '<path d="M' + cellX(st.to[0]) + ' 84 L' + (cellX(st.to[1]) + 64) + ' 84" stroke="#2563eb" stroke-width="2" fill="none"/>';
+      s += '<text x="' + mid + '" y="98" font-size="11" fill="#2563eb" text-anchor="middle">窗口 [' + st.to[0] + ', ' + st.to[1] + ']</text>';
+      var h = '';
+      for (i = 0; i < st.rows.length; i++) {
+        h += '<div class="row">' + st.rows[i][0] + '　' + st.rows[i][1] + '</div>';
+      }
+      info.innerHTML = '<div class="row" style="font-weight:600">' + st.title + '</div>' + h + '<div class="total">' + st.total + '</div>';
+    } else if (st.k === 'off') {
+      var lo, hi;
+      if (st.kind === 'L') { lo = 1; hi = st.x; } else { lo = st.x; hi = N; }
+      for (i = 1; i <= N; i++) {
+        var inset = (i >= lo && i <= hi);
+        var inTask = (i >= st.l && i <= st.r);
+        if (inTask) { s = box(s, i, '#ffedd5', '#ea580c', false); }
+        else if (inset) { s = box(s, i, '#eef4ff', '#93b4f5', false); }
+        else { s = box(s, i, '#ffffff', '#e6e8eb', false); }
+      }
+      s += '<g font-size="13" fill="#1f2328" text-anchor="middle">';
+      for (i = 1; i <= N; i++) {
+        s += '<text x="' + (cellX(i) + 32) + '" y="66">' + ARR[i - 1] + '</text>';
+      }
+      s += '</g>';
+      var tx = (cellX(st.l) + cellX(st.r) + 64) / 2;
+      s += '<path d="M' + cellX(st.l) + ' 84 L' + (cellX(st.r) + 64) + ' 84" stroke="#ea580c" stroke-width="2" fill="none"/>';
+      s += '<text x="' + tx + '" y="98" font-size="11" fill="#ea580c" text-anchor="middle">任务区间 [' + st.l + ', ' + st.r + ']</text>';
+      var setTxt = st.x < 1 || st.x > N ? '空集' : (st.kind === 'L' ? '已装 arr[1..' + st.x + ']' : '已装 arr[' + st.x + '..' + N + ']');
+      s += '<text x="340" y="118" font-size="11" fill="#2563eb" text-anchor="middle">' + setTxt + '</text>';
+      var sign = st.op > 0 ? '+' : '−';
+      var h2 = '<div class="row" style="font-weight:600">' + st.title + '</div>';
+      h2 += '<div class="row">集合里与区间内配对的个数 = ' + Math.abs(st.val) + '</div>';
+      h2 += '<div class="row">op = ' + sign + '1　→　q' + st.id + ' 的变化量累加 ' + sign + Math.abs(st.val) + '</div>';
+      h2 += '<div class="total">q' + st.id + ' 变化量合计 = ' + st.acc + '</div>';
+      info.innerHTML = h2;
+    } else {
+      for (i = 1; i <= N; i++) { s = box(s, i, '#ffffff', '#e6e8eb', false); }
+      s += '<g font-size="13" fill="#1f2328" text-anchor="middle">';
+      for (i = 1; i <= N; i++) {
+        s += '<text x="' + (cellX(i) + 32) + '" y="66">' + ARR[i - 1] + '</text>';
+      }
+      s += '</g>';
+      s += '<text x="340" y="100" font-size="11" fill="#6b7280" text-anchor="middle">按莫队顺序做前缀和：q1 → q5 → q2 → q3 → q4</text>';
+      var h3 = '<div class="row" style="font-weight:600">变化量的前缀和就是答案</div>';
+      for (i = 0; i < FINAL.length; i++) {
+        h3 += '<div class="row">' + FINAL[i][0] + '　变化量 ' + (FINAL[i][1] > 0 ? '+' : '') + FINAL[i][1] + '　→　答案 ' + FINAL[i][2] + '</div>';
+      }
+      h3 += '<div class="total">与逐个暴力数出来的答案一致</div>';
+      info.innerHTML = h3;
+    }
+    svg.innerHTML = s;
+    stepEl.textContent = '第 ' + (cur + 1) + ' / ' + steps.length + ' 步';
+    document.getElementById('mo1Prev').disabled = (cur === 0);
+    document.getElementById('mo1Next').disabled = (cur === steps.length - 1);
+  }
+
+  steps.push({k:'final'});
+
+  document.getElementById('mo1Next').addEventListener('click', function(){
+    if (cur < steps.length - 1) { cur++; draw(); }
+  });
+  document.getElementById('mo1Prev').addEventListener('click', function(){
+    if (cur > 0) { cur--; draw(); }
+  });
+  document.getElementById('mo1Reset').addEventListener('click', function(){
+    cur = 0; draw();
+  });
+  draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>块状数组：有序副本与整块标记 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .cellrow{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;}
+  .bgroup{display:flex;flex-direction:column;align-items:center;gap:6px;}
+  .blabel{font-size:12px;color:var(--text-dim);}
+  .crow{display:flex;gap:4px;}
+  .cell{
+    width:38px;height:38px;display:flex;align-items:center;justify-content:center;
+    background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+    font-size:14px;font-variant-numeric:tabular-nums;transition:background .15s,border-color .15s;
+  }
+  .cell.full{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+  .cell.partial{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+  .cell.hit{background:#fef9c3;border-color:#ca8a04;color:#854d0e;font-weight:600;}
+  .cell.dim{opacity:.35;}
+  .sorted{
+    font-size:12px;color:var(--text-dim);background:var(--bg-soft);border:1px solid var(--border);
+    border-radius:6px;padding:2px 8px;font-variant-numeric:tabular-nums;
+  }
+  .sorted b{color:var(--accent);font-weight:600;}
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;}
+  .viz button{
+    font:inherit;font-size:14px;padding:6px 14px;border-radius:8px;cursor:pointer;
+    border:1px solid var(--border);background:var(--bg);color:var(--text);
+  }
+  .viz button:hover{border-color:var(--accent);color:var(--accent);}
+  .stepnote{margin-top:12px;font-size:14px;color:var(--text-dim);min-height:24px;}
+  .stepnote b{color:var(--accent);}
+  @media(max-width:760px){
+    .cell{width:32px;height:32px;font-size:12px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>块状数组：有序副本与整块标记</h1>
+    <p class="intro">序列分块那一节里，块内存的是区间和，整块查询是一次加法。这一节开始分块专题，先看块状数组：给每个块配一份块内有序的副本，再给整块配一个加法标记，就能回答「区间里大于等于 v 的数有几个」，这恰好是线段树最不擅长、分块最顺手的一类查询。</p>
+
+    <h2>零、背景</h2>
+    <p>分块专题一共四讲：专题 1 是块状数组、块状链表，就是本节；专题 2 是分块的几道好题和树上分块；专题 3 是双层分块、分块结合并查集；专题 4 是根号分治。专题结束后会进入莫队。</p>
+    <p>分块的原理可以压缩成四句话。数据规模为 n 时，让划分出来的块内大小和块的数量几乎相同，都是 √n 规模；块内的信息暴力维护，整块的信息修改标签即可；处理区间修改或区间查询时，最多处理左散块、右散块、中间若干整块；块内遍历 O(√n)，块间遍历也是 O(√n)。</p>
+    <p>适用场景也明确。区间信息不可合并时，线段树这类结构难维护，分块往往容易，因为块内信息本来就是暴力维护的；数据量允许的情况下，分块优于暴力，又比高级结构好实现、好分析；分块维护信息容易，会衍生出很多变体，专题后面的课大量涉及。</p>
+    <p>也要说清分块的地位：正式比赛中很少出现以分块作为最优解的题目，它的优势是好想、好写、常数小。一道思维难度大的题，如果分块的做法已经很难，更优结构的做法只会更难。所以分块非必需，但收益高。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="分块处理区间操作" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="20" y="20" font-size="11" fill="#6b7280">一次区间操作 [3,10]：左散块、右散块逐个算，中间整块整块地处理</text>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <rect x="40" y="36" width="38" height="28" fill="#f6f7f9" stroke="#e6e8eb"/><text x="59" y="54">5</text>
+          <rect x="81" y="36" width="38" height="28" fill="#f6f7f9" stroke="#e6e8eb"/><text x="100" y="54">2</text>
+          <rect x="122" y="36" width="38" height="28" fill="#ffedd5" stroke="#ea580c" stroke-width="1.3"/><text x="141" y="54">8</text>
+          <rect x="163" y="36" width="38" height="28" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/><text x="182" y="54">3</text>
+          <rect x="204" y="36" width="38" height="28" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/><text x="223" y="54">9</text>
+          <rect x="245" y="36" width="38" height="28" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/><text x="264" y="54">1</text>
+          <rect x="286" y="36" width="38" height="28" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/><text x="305" y="54">7</text>
+          <rect x="327" y="36" width="38" height="28" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/><text x="346" y="54">4</text>
+          <rect x="368" y="36" width="38" height="28" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/><text x="387" y="54">6</text>
+          <rect x="409" y="36" width="38" height="28" fill="#ffedd5" stroke="#ea580c" stroke-width="1.3"/><text x="428" y="54">2</text>
+          <rect x="450" y="36" width="38" height="28" fill="#f6f7f9" stroke="#e6e8eb"/><text x="469" y="54">9</text>
+          <rect x="491" y="36" width="38" height="28" fill="#f6f7f9" stroke="#e6e8eb"/><text x="510" y="54">5</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1">
+          <line x1="38" y1="78" x2="162" y2="78"/><line x1="38" y1="78" x2="38" y2="86"/><line x1="162" y1="78" x2="162" y2="86"/>
+          <line x1="161" y1="78" x2="406" y2="78"/><line x1="161" y1="78" x2="161" y2="86"/><line x1="406" y1="78" x2="406" y2="86"/>
+          <line x1="405" y1="78" x2="531" y2="78"/><line x1="405" y1="78" x2="405" y2="86"/><line x1="531" y1="78" x2="531" y2="86"/>
+        </g>
+        <g font-size="11" fill="#6b7280" text-anchor="middle">
+          <text x="100" y="100">块 1</text>
+          <text x="283" y="100">块 2</text>
+          <text x="466" y="100">块 3</text>
+        </g>
+        <text x="141" y="124" font-size="11" fill="#ea580c" text-anchor="middle">散块</text>
+        <text x="283" y="124" font-size="11" fill="#2563eb" text-anchor="middle">整块</text>
+        <text x="466" y="124" font-size="11" fill="#2563eb" text-anchor="middle">整块</text>
+        <text x="428" y="124" font-size="11" fill="#ea580c" text-anchor="middle">散块</text>
+        <text x="20" y="156" font-size="11" fill="#374151">块内大小 ≈ 块数量 ≈ √n：两端散块各扫 O(√n) 个元素，中间整块最多 O(√n) 个</text>
+        <text x="20" y="178" font-size="11" fill="#6b7280">整块统一处理是分块省时间的来源，散块暴力是分块好写的来源</text>
+      </svg>
+      <figcaption>任何区间操作都被切成三段：两端的散块加上中间的整块</figcaption>
+    </figure>
+
+    <h2>一、题目一：Give Away</h2>
+    <p>给定长度为 n 的数组，m 条操作。操作 <code class="inline">0 a b c</code> 打印 <code class="inline">arr[a..b]</code> 上大于等于 c 的数字个数；操作 <code class="inline">1 a b</code> 把 <code class="inline">arr[a]</code> 改成 b。n ≤ 5×10⁵，m ≤ 10⁵，值在 1 到 10⁹。测试链接：<a href="https://www.luogu.com.cn/problem/SP18185" target="_blank" rel="noopener">洛谷 SP18185</a>、<a href="https://www.spoj.com/problems/GIVEAWAY" target="_blank" rel="noopener">SPOJ GIVEAWAY</a>。</p>
+    <p>暴力查询一次 O(n)，总量 5×10¹⁰，超时。线段树也不好办：一个节点要回答「这段里 ≥ c 的有几个」，c 是查询临时给的，节点必须存下值的分布才答得出来，等于要写归并树或者树套树，门槛一下子上去了。</p>
+    <p>分块的解法是给每个块配一份有序副本 <code class="inline">sortv</code>。建块时把每块的元素拷进 <code class="inline">sortv</code> 排好序，块的答案就能二分：整块里 ≥ v 的个数，等于 <code class="inline">sortv</code> 中第一个 ≥ v 的位置到块尾的长度。散块部分没有副本可查，直接对 <code class="inline">arr</code> 暴力数。</p>
+    <p>单点修改也简单：改掉 <code class="inline">arr[i]</code> 之后，把这一块的 <code class="inline">sortv</code> 从 <code class="inline">arr</code> 重新拷一遍再排序。一块只有 √n 个数，代价 O(√n log√n)。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 196" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="arr 与每块的有序副本" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="20" y="18" font-size="11" fill="#6b7280">每个块两份数据：arr 原样保留，sortv 是块内排序后的副本</text>
+        <g font-size="10" fill="#1f2328" text-anchor="middle">
+          <text x="24" y="52">arr</text>
+          <rect x="50" y="36" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="68" y="53">5</text>
+          <rect x="88" y="36" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="106" y="53">2</text>
+          <rect x="126" y="36" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="144" y="53">8</text>
+          <rect x="176" y="36" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="194" y="53">3</text>
+          <rect x="214" y="36" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="232" y="53">9</text>
+          <rect x="252" y="36" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="270" y="53">1</text>
+          <rect x="302" y="36" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="320" y="53">7</text>
+          <rect x="340" y="36" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="358" y="53">4</text>
+          <rect x="378" y="36" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="396" y="53">6</text>
+        </g>
+        <g font-size="10" fill="#1f2328" text-anchor="middle">
+          <text x="24" y="120">sortv</text>
+          <rect x="50" y="104" width="36" height="26" fill="#f6f7f9" stroke="#e6e8eb"/><text x="68" y="121">2</text>
+          <rect x="88" y="104" width="36" height="26" fill="#f6f7f9" stroke="#e6e8eb"/><text x="106" y="121">5</text>
+          <rect x="126" y="104" width="36" height="26" fill="#ffedd5" stroke="#ea580c" stroke-width="1.3"/><text x="144" y="121">8</text>
+          <rect x="176" y="104" width="36" height="26" fill="#f6f7f9" stroke="#e6e8eb"/><text x="194" y="121">1</text>
+          <rect x="214" y="104" width="36" height="26" fill="#f6f7f9" stroke="#e6e8eb"/><text x="232" y="121">3</text>
+          <rect x="252" y="104" width="36" height="26" fill="#ffedd5" stroke="#ea580c" stroke-width="1.3"/><text x="270" y="121">9</text>
+          <rect x="302" y="104" width="36" height="26" fill="#f6f7f9" stroke="#e6e8eb"/><text x="320" y="121">4</text>
+          <rect x="340" y="104" width="36" height="26" fill="#f6f7f9" stroke="#e6e8eb"/><text x="358" y="121">6</text>
+          <rect x="378" y="104" width="36" height="26" fill="#ffedd5" stroke="#ea580c" stroke-width="1.3"/><text x="396" y="121">7</text>
+        </g>
+        <text x="440" y="52" font-size="11" fill="#374151">arr 顺序不变</text>
+        <text x="440" y="72" font-size="11" fill="#374151">查询、修改都对着 arr</text>
+        <text x="440" y="118" font-size="11" fill="#2563eb">sortv 只服务整块查询</text>
+        <text x="440" y="138" font-size="11" fill="#ea580c">查 ≥ 6：二分到位置，</text>
+        <text x="440" y="158" font-size="11" fill="#ea580c">橙色尾巴的长度就是答案</text>
+        <text x="20" y="180" font-size="11" fill="#6b7280">单点修改 arr[i] = v：这一块的 sortv 重拷、重排，其余块的副本不动</text>
+      </svg>
+      <figcaption>整块查询二分有序副本，散块查询暴力扫 arr，两条路各管一段</figcaption>
+    </figure>
+
+    <p>把流程过一遍。<code class="inline">build</code> 算出块长 <code class="inline">blen = √n</code>、块数 <code class="inline">bnum</code>，每个下标属于哪块记在 <code class="inline">bi[i]</code>，每块左右端点记在 <code class="inline">bl</code>、<code class="inline">br</code>。查询 <code class="inline">query(l, r, v)</code>：l、r 同块就整体暴力；否则左散块扫 <code class="inline">[l, br[bi[l]]]</code>，右散块扫 <code class="inline">[bl[bi[r]], r]</code>，中间每个整块调 <code class="inline">getCnt</code> 在 <code class="inline">sortv</code> 上二分。</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXB = 1001;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> sortv[MAXN];
+
+    <span class="kw">int</span> blen, bnum;
+    <span class="kw">int</span> bi[MAXN];
+    <span class="kw">int</span> bl[MAXB];
+    <span class="kw">int</span> br[MAXB];
+
+    <span class="kw">void</span> <span class="fn">build</span>() {
+        blen = (<span class="kw">int</span>)sqrt(n);
+        bnum = (n + blen - 1) / blen;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= bnum; i++) {
+            bl[i] = (i - 1) * blen + 1;
+            br[i] = min(i * blen, n);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            sortv[i] = arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= bnum; i++) {
+            sort(sortv + bl[i], sortv + br[i] + 1);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getCnt</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        <span class="kw">int</span> l = bl[i], r = br[i], m, ans = 0;
+        <span class="kw">while</span> (l &lt;= r) {
+            m = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (sortv[m] &gt;= v) {
+                ans += r - m + 1;
+                r = m - 1;
+            } <span class="kw">else</span> {
+                l = m + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> v) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">if</span> (bi[l] == bi[r]) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+                <span class="kw">if</span> (arr[i] &gt;= v) {
+                    ans++;
+                }
+            }
+        } <span class="kw">else</span> {
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= br[bi[l]]; i++) {
+                <span class="kw">if</span> (arr[i] &gt;= v) {
+                    ans++;
+                }
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = bl[bi[r]]; i &lt;= r; i++) {
+                <span class="kw">if</span> (arr[i] &gt;= v) {
+                    ans++;
+                }
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = bi[l] + 1; i &lt;= bi[r] - 1; i++) {
+                ans += getCnt(i, v);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">update</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        <span class="kw">int</span> l = bl[bi[i]];
+        <span class="kw">int</span> r = br[bi[i]];
+        arr[i] = v;
+        <span class="kw">for</span> (<span class="kw">int</span> j = l; j &lt;= r; j++) {
+            sortv[j] = arr[j];
+        }
+        sort(sortv + l, sortv + r + 1);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        build();
+        cin &gt;&gt; m;
+        <span class="kw">int</span> op, a, b, c;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; op &gt;&gt; a &gt;&gt; b;
+            <span class="kw">if</span> (op == 0) {
+                cin &gt;&gt; c;
+                cout &lt;&lt; query(a, b, c) &lt;&lt; '\n';
+            } <span class="kw">else</span> {
+                update(a, b);
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>二、题目二：教主的魔法</h2>
+    <p>给定长度为 n 的数组，m 条操作。操作 <code class="inline">A l r v</code> 打印 <code class="inline">arr[l..r]</code> 上大于等于 v 的数字个数；操作 <code class="inline">M l r v</code> 把 <code class="inline">arr[l..r]</code> 每个值都加 v。n ≤ 10⁶，m ≤ 3000，值在 1 到 10⁹。测试链接：<a href="https://www.luogu.com.cn/problem/P2801" target="_blank" rel="noopener">洛谷 P2801</a>。</p>
+    <p>与题目一的差别是多了一种修改：区间加。对整块来说，区间加是一个可以概括的量，挂标签就够了，每块加一个 <code class="inline">lazy[b]</code>，整块加 v 就是 <code class="inline">lazy[b] += v</code>，一个数都不用动。</p>
+    <p>这里有个细节：散块里的 <code class="inline">arr[i]</code> 存的是没加过 lazy 的存储值，真实值等于存储值加 lazy。所以散块加 v 时，先把 v 加到每个 <code class="inline">arr[i]</code> 上，再把这一块的 <code class="inline">sortv</code> 重构；整块查询二分前，先把 v 减掉 <code class="inline">lazy[b]</code> 再去和存储值比，两边是同一件事的两种写法。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="lazy 与整块加法" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="20" y="18" font-size="11" fill="#6b7280">整块加 v：lazy 挂账，sortv 一个都不动；查询时先减掉 lazy 再二分</text>
+        <g font-size="10" fill="#1f2328" text-anchor="middle">
+          <rect x="50" y="36" width="40" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="70" y="53">4</text>
+          <rect x="92" y="36" width="40" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="112" y="53">9</text>
+          <rect x="134" y="36" width="40" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="154" y="53">15</text>
+          <rect x="176" y="36" width="40" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="196" y="53">7</text>
+        </g>
+        <text x="228" y="53" font-size="11" fill="#374151">存储值 4 9 15 7</text>
+        <rect x="50" y="76" width="166" height="24" rx="6" fill="#ffedd5" stroke="#ea580c"/>
+        <text x="133" y="92" font-size="11" fill="#ea580c" text-anchor="middle">lazy = 20</text>
+        <text x="228" y="92" font-size="11" fill="#ea580c">整块加 20：只改这一个数</text>
+        <text x="50" y="132" font-size="11" fill="#374151">查「≥ 12 的个数」：12 − 20 = −8，四个存储值全部大于等于 −8，答案 4</text>
+        <text x="50" y="154" font-size="11" fill="#374151">查「≥ 30 的个数」：30 − 20 = 10，二分有序副本 4 7 9 15，答案 1</text>
+        <text x="50" y="176" font-size="11" fill="#6b7280">散块碰到区间加时没有捷径：arr 逐个加，块内 sortv 重构</text>
+      </svg>
+      <figcaption>整块加法 O(1) 挂在 lazy 上，查询时用 v − lazy 换算到存储值的世界</figcaption>
+    </figure>
+
+    <p>修改 <code class="inline">add(l, r, v)</code> 与查询完全对称：l、r 同块就 <code class="inline">innerAdd</code> 暴力加；否则左右散块各做一次 <code class="inline">innerAdd</code>（加完顺带重排该块副本），中间整块 <code class="inline">lazy[b] += v</code>。m 只有 3000，就算每次都触发两块散块重构，总量也很小，靠的就是分块常数小。</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 1000001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXB = 1001;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> sortv[MAXN];
+
+    <span class="kw">int</span> blen, bnum;
+    <span class="kw">int</span> bi[MAXN];
+    <span class="kw">int</span> bl[MAXB];
+    <span class="kw">int</span> br[MAXB];
+
+    <span class="kw">int</span> lazy[MAXB];
+
+    <span class="kw">void</span> <span class="fn">build</span>() {
+        blen = (<span class="kw">int</span>)sqrt(n);
+        bnum = (n + blen - 1) / blen;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= bnum; i++) {
+            bl[i] = (i - 1) * blen + 1;
+            br[i] = min(i * blen, n);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            sortv[i] = arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= bnum; i++) {
+            sort(sortv + bl[i], sortv + br[i] + 1);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getCnt</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        v -= lazy[i];
+        <span class="kw">int</span> l = bl[i], r = br[i], m, ans = 0;
+        <span class="kw">while</span> (l &lt;= r) {
+            m = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (sortv[m] &gt;= v) {
+                ans += r - m + 1;
+                r = m - 1;
+            } <span class="kw">else</span> {
+                l = m + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">innerQuery</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> v) {
+        v -= lazy[bi[l]];
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+            <span class="kw">if</span> (arr[i] &gt;= v) {
+                ans++;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> v) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">if</span> (bi[l] == bi[r]) {
+            ans = innerQuery(l, r, v);
+        } <span class="kw">else</span> {
+            ans += innerQuery(l, br[bi[l]], v);
+            ans += innerQuery(bl[bi[r]], r, v);
+            <span class="kw">for</span> (<span class="kw">int</span> i = bi[l] + 1; i &lt;= bi[r] - 1; i++) {
+                ans += getCnt(i, v);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">innerAdd</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> v) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+            arr[i] += v;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = bl[bi[l]]; i &lt;= br[bi[l]]; i++) {
+            sortv[i] = arr[i];
+        }
+        sort(sortv + bl[bi[l]], sortv + br[bi[l]] + 1);
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> v) {
+        <span class="kw">if</span> (bi[l] == bi[r]) {
+            innerAdd(l, r, v);
+        } <span class="kw">else</span> {
+            innerAdd(l, br[bi[l]], v);
+            innerAdd(bl[bi[r]], r, v);
+            <span class="kw">for</span> (<span class="kw">int</span> b = bi[l] + 1; b &lt;= bi[r] - 1; b++) {
+                lazy[b] += v;
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        build();
+        <span class="kw">char</span> op;
+        <span class="kw">int</span> l, r, v;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; op &gt;&gt; l &gt;&gt; r &gt;&gt; v;
+            <span class="kw">if</span> (op == 'A') {
+                cout &lt;&lt; query(l, r, v) &lt;&lt; '\n';
+            } <span class="kw">else</span> {
+                add(l, r, v);
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>三、一次查询的完整过程</h2>
+    <p>下面这个演示把两道题共用的查询骨架走一遍：12 个数、块长 3，查询区间 [2,11] 上 ≥ 6 的个数。左散块、右散块逐个检查，中间整块换成有序副本二分。最后再演示一次单点修改触发的块内重排。</p>
+
+    <div class="viz" id="viz">
+      <div class="cellrow" id="vRow"></div>
+      <div class="cellrow" id="vSort"></div>
+      <div class="btnrow">
+        <button id="vNext">下一步</button>
+        <button id="vReset">重置</button>
+      </div>
+      <p class="stepnote" id="vNote">数组分成 4 块，块长 3。点「下一步」开始查询 [2,11] 上 ≥ 6 的个数。</p>
+    </div>
+
+    <h2>四、复杂度分析</h2>
+    <p>设块长 B = √n，块数约 n/B。查询拆成三段：两端散块各扫 O(B)，中间最多 n/B 个整块，每块一次二分 O(log B)，合并起来 O(√n·log√n)。这也是两道题的总量：m 次操作就是 O(m·√n·log√n)。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>建块（拷贝并排序每块副本）</td><td><code class="inline">O(n·log√n)</code></td><td rowspan="4"><code class="inline">O(n)</code>：arr 与 sortv 各一份，lazy 每块一个，共 O(n + √n)</td></tr>
+        <tr><td>区间查询（散块暴力 + 整块二分）</td><td><code class="inline">O(√n·log√n)</code></td></tr>
+        <tr><td>单点修改（题目一，重排所在块）</td><td><code class="inline">O(√n·log√n)</code></td></tr>
+        <tr><td>区间加（题目二：散块重构 / 整块挂标记）</td><td><code class="inline">O(√n·log√n) / O(1)</code></td></tr>
+        <tr><td>全部操作</td><td><code class="inline">O(m·√n·log√n)</code></td><td></td></tr>
+      </tbody>
+    </table>
+    <p>题目一 n = 5×10⁵、m = 10⁵，这个界相当极限，但分块常数小，可以通过。题目二 n 达到 10⁶、m 只有 3000，更是宽裕。</p>
+
+    <h2>五、最后</h2>
+    <p>块内有序副本是块状数组最常用的一招：它让「按值统计」这类查询在整块上有了二分的能力，而代价只是每个数多存一份。整块挂加法标记则是序列分块里 lazy 思想的直接延续，两招可以叠加。</p>
+    <p>不过有序副本能帮上忙的前提是「有序性对查询有用」。下一节的查询换成区间众数，它连两块的答案都合并不出来，有序副本彻底失效，得换成「块与块之间的预处理表」。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var arr=[5,2,8,3,9,1,7,4,6,2,9,5];
+  var B=3, NB=4;
+  var row=document.getElementById('vRow');
+  var sortrow=document.getElementById('vSort');
+  var note=document.getElementById('vNote');
+  var next=document.getElementById('vNext');
+  var reset=document.getElementById('vReset');
+  var step=0;
+
+  function cellHTML(v,extra){
+    return '<div class="cell '+(extra||'')+'">'+v+'</div>';
+  }
+  function blockGroup(b,markHit,dimmed){
+    var s='<div class="bgroup"><div class="crow">';
+    for(var i=b*B+1;i<=(b+1)*B;i++){
+      var cls='';
+      if(dimmed)cls='dim';
+      if(markHit&&markHit.indexOf(i)>=0)cls='hit';
+      s+=cellHTML(arr[i-1],cls);
+    }
+    s+='</div><div class="blabel">块 '+(b+1)+'</div></div>';
+    return s;
+  }
+  function sortedBadge(b,hiFrom){
+    var vals=arr.slice(b*B,(b+1)*B).slice().sort(function(a,b){return a-b;});
+    var s='<div class="bgroup"><div class="crow" style="margin-top:2px;"><div class="sorted">';
+    for(var i=0;i<vals.length;i++){
+      if(i>0)s+=' ';
+      if(i>=hiFrom)s+='<b>'+vals[i]+'</b>';else s+=vals[i];
+    }
+    s+='</div></div><div class="blabel">&nbsp;</div></div>';
+    return s;
+  }
+  function draw(o){
+    var s='';
+    for(var b=0;b<NB;b++){
+      s+=blockGroup(b,o&&o.hits,o&&o.dim);
+    }
+    row.innerHTML=s;
+    if(o&&o.sorted!==undefined){
+      var t='';
+      for(var b=0;b<NB;b++){
+        if(o.sorted.indexOf(b)>=0)t+=sortedBadge(b,o.hiFrom&&o.hiFrom[b]!==undefined?o.hiFrom[b]:3);
+        else t+='<div class="bgroup" style="visibility:hidden">'+sortedBadge(0,3)+'</div>';
+      }
+      sortrow.innerHTML=t;
+    }else{
+      sortrow.innerHTML='';
+    }
+    if(o&&o.note)note.innerHTML=o.note;
+  }
+
+  var steps=[
+    function(){draw({hits:[2,3,10,11],note:'查询 [2,11] 上 ≥ 6 的个数：位置 2、3 是<b>左散块</b>，10、11 是<b>右散块</b>，中间的块 2、块 3 是<b>整块</b>。'});},
+    function(){draw({hits:[3],dim:[1,2,4,5,6,7,8,9,10,11,12],note:'左散块逐个检查：位置 2 的值 2 &lt; 6 不算，位置 3 的值 <b>8 ≥ 6</b>，左散块贡献 1。'});},
+    function(){draw({hits:[3,10],dim:[1,2,4,5,6,7,8,9,11,12],note:'右散块逐个检查：位置 10 的值 <b>9 ≥ 6</b>，位置 11 的值 2 &lt; 6 不算，右散块贡献 1。'});},
+    function(){draw({hits:[2,3,10,11],sorted:[1,2],hiFrom:{1:2,2:2},note:'整块不扫 arr，改成查有序副本：块 2 排序后 1 3 9，二分得 ≥ 6 的有 1 个；块 3 排序后 4 6 7，有 2 个。'});},
+    function(){draw({hits:[2,3,4,5,6,7,8,9,10,11],note:'三段相加：左散块 1 + 右散块 1 + 整块 1 + 2 = <b>5</b>。位置 2..11 里 8 9 7 6 9 共 5 个数 ≥ 6。'});},
+    function(){draw({dim:[2,3,4,5,6,7,8,9,10,11,12],note:'再来看单点修改：把 arr[4] 改成 10（值 1 到 10 之间随便挑的一个新值）。'});},
+    function(){arr[3]=10;draw({dim:[2,3,5,6,7,8,9,10,11,12],note:'arr[4] 改成 10 之后，块 2 的元素变成 10 9 1。散块和整块都不会自己更新副本。'});},
+    function(){draw({sorted:[1],hiFrom:{1:0},note:'把块 2 的 arr 重拷进 sortv 再排序，得到 1 9 10。其它块的副本完全不用动，这就是单点修改只花 O(√n log√n) 的原因。'});},
+  ];
+
+  next.onclick=function(){
+    if(step<steps.length){steps[step]();step++;}
+    else{note.innerHTML='演示已结束，点「重置」可以重来。';}
+  };
+  reset.onclick=function(){
+    arr=[5,2,8,3,9,1,7,4,6,2,9,5];
+    step=0;
+    draw({note:'数组分成 4 块，块长 3。点「下一步」开始查询 [2,11] 上 ≥ 6 的个数。'});
+  };
+  draw({note:'数组分成 4 块，块长 3。点「下一步」开始查询 [2,11] 上 ≥ 6 的个数。'});
+})();
+</script>
+</body>
+</html>

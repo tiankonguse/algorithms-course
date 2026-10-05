@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>点分治的容斥题型 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .pe-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .pe-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .pe-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #peSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .pe-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>点分治的容斥题型</h1>
+    <p class="intro">点分治的第二种统计姿势。上一页靠「按子树先配对后并入」防重复，这一页换成容斥：calc 把整个连通区的点全部收集、放开手统计，再把每棵子树内部多算的部分减掉。四道题：距离 ≤ k 的点对数量、相近点对、所有合法路径的魔力和、消息传递。</p>
+
+    <h2>零、背景</h2>
+    <p>上一页的三道模版题里，calc 都要按重心 u 的子树逐棵处理：当前子树先和已处理子树的累计信息配对，配完才并入。这个「增量」写法的好处是常数小，坏处是配对的逻辑被拆得比较碎。</p>
+    <p>容斥是另一种等价姿势：先把整个连通区当成一整份统计，再对每棵子树把「不该在本层算的」减掉。写起来更直，而且配对发生在完整的数组上，排序、双指针、树状数组这些工具都能直接接上。</p>
+
+    <h2>一、问题</h2>
+    <p>还是树上点对统计，但指标比模版题更进一步：距离和边数两个维度同时限制（相近点对）、路径上最大边权求和（魔魔力）、查询挂在点上带着参数走（消息传递）。n 到 10⁵。</p>
+    <p>共同点：每个点对的指标依赖完整路径，但只要能写成「到重心的两段信息拼在一起判定」，容斥的框架就套得上去。</p>
+
+    <h2>二、朴素做法（直接配对错在哪）</h2>
+    <p>最省事的 calc 长这样：dfs 收集整个连通区里每个点到重心 u 的距离（u 自己距离 0），全部放进一个数组，然后在这个数组上两两统计。</p>
+    <p>错在同一棵子树里的点对也被统计了。x、y 同在子树 a 里，它们的路径根本不经过 u；calc(u) 拿 dist(x) + dist(y) 判了一遍，递归进子树 a 时还会再判一遍。而且 dist(x) + dist(y) 是绕经 u 的长度，比真实路径只会更长，用它判「距离 ≤ k」，合法的照样合法，于是这一对被数了两遍。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="同一棵子树的点对被算两遍" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <circle cx="130" cy="100" r="18" fill="#ea580c" stroke="#c2410c" stroke-width="1.5"/>
+        <text x="130" y="105" font-size="12" fill="#ffffff" text-anchor="middle">u</text>
+        <g stroke="#c9ced4" stroke-width="1.5" fill="none">
+          <line x1="130" y1="100" x2="260" y2="100"/>
+          <line x1="260" y1="100" x2="330" y2="55"/>
+          <line x1="260" y1="100" x2="330" y2="145"/>
+          <line x1="130" y1="100" x2="60" y2="100"/>
+        </g>
+        <text x="195" y="90" font-size="11" fill="#6b7280">3</text>
+        <text x="295" y="68" font-size="11" fill="#6b7280">1</text>
+        <text x="295" y="130" font-size="11" fill="#6b7280">2</text>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="260" cy="100" r="14"/>
+          <circle cx="330" cy="55" r="14"/>
+          <circle cx="330" cy="145" r="14"/>
+        </g>
+        <circle cx="60" cy="100" r="14" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.2"/>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="260" y="104">a</text>
+          <text x="330" y="59">x</text>
+          <text x="330" y="149">y</text>
+        </g>
+        <path d="M 330 55 Q 365 100 330 145" stroke="#ea580c" stroke-width="2.2" fill="none"/>
+        <text x="395" y="60" font-size="11" fill="#ea580c">真实路径 x–y：1+2 = 3</text>
+        <text x="395" y="150" font-size="11" fill="#2563eb">calc(u) 里判的是 4+5 = 9</text>
+        <text x="395" y="100" font-size="11" fill="#6b7280">k = 9 时两遍都判过，数重了</text>
+        <text x="310" y="225" font-size="11" fill="#6b7280" text-anchor="middle">同一棵子树的点对：本层算一遍（按绕经 u 的距离），递归里再算一遍（按真实距离）</text>
+      </svg>
+      <figcaption>calc(u) 统计整份时，同一棵子树的点对也被算进去；它们不跨过重心，本层不该数。</figcaption>
+    </figure>
+
+    <h2>三、容斥</h2>
+    <p>修正的办法是减回去。solve 里对重心 u 先 ans += calc(u, 0)，整份统计；再对 u 的每棵子树 v，ans -= calc(v, w)，w 是边 u–v 的权。</p>
+    <p>calc(v, w) 的 dfs 从 v 出发但带着初始距离 w，也就是说收集到的仍然是「到 u 的距离」。这样同一棵子树内部的点对，在加的那份和减的那份里判定条件一字不差，加一次减一次，恰好抵消，净贡献为 0，完全留给递归处理。</p>
+    <p>剩下有净贡献的只有两种：两端在不同子树的点对，以及一端是 u 自己的点对（calc(u, 0) 里 u 以距离 0 参与，减去的子树份里没有 u）。这正是「跨过重心」的完整定义。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 640 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="容斥的加与减" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="12" fill="#1f2328">
+          <rect x="20" y="55" width="230" height="120" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+          <text x="135" y="95" text-anchor="middle" fill="#1f2328">calc(u, 0)</text>
+          <text x="135" y="120" text-anchor="middle" fill="#6b7280" font-size="11">整个连通区，含 u 自己</text>
+          <text x="135" y="145" text-anchor="middle" fill="#6b7280" font-size="11">距离全部从 u 起算</text>
+          <text x="135" y="40" text-anchor="middle" fill="#2563eb">+</text>
+        </g>
+        <g font-size="12">
+          <rect x="290" y="55" width="140" height="120" rx="10" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+          <text x="360" y="95" text-anchor="middle" fill="#1f2328">calc(v₁, w₁)</text>
+          <text x="360" y="125" text-anchor="middle" fill="#6b7280" font-size="11">子树 v₁ 一份</text>
+          <text x="360" y="40" text-anchor="middle" fill="#ea580c">−</text>
+          <rect x="470" y="55" width="140" height="120" rx="10" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+          <text x="540" y="95" text-anchor="middle" fill="#1f2328">calc(v₂, w₂)</text>
+          <text x="540" y="125" text-anchor="middle" fill="#6b7280" font-size="11">子树 v₂ 一份</text>
+          <text x="540" y="40" text-anchor="middle" fill="#ea580c">−</text>
+        </g>
+        <text x="320" y="205" font-size="11" fill="#6b7280" text-anchor="middle">子树内部点对在加、减两份里条件相同，全部抵消；剩下的恰好是跨过 u 的点对</text>
+      </svg>
+      <figcaption>先加整份、再减每棵子树一份，减的 dfs 带初始边权，距离口径和加的那份完全一致。</figcaption>
+    </figure>
+
+    <p>可以发现上一页的「先配对后并入」就是这份容斥的增量版：逐棵子树只算跨子树的配对，等价于先全算再减。两种写法结果相同，这一页的题都用容斥版，因为配对发生在完整数组上，排序之后双指针、树状数组才使得上劲。</p>
+    <p>先看最典型的一题，配对用双指针。</p>
+
+    <div class="viz">
+      <div class="viz-title">双指针统计距离和 ≤ k 的点对</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">数组是当前连通区所有点到重心的距离（升序，0 是重心自己），k = 10。点「下一步」看指针怎么移动。</p>
+      <svg id="peSvg" viewBox="0 0 620 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="双指针演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="breakdown" id="peInfo"></div>
+      <div class="viz-controls">
+        <button class="pe-btn" id="pePrev" type="button">上一步</button>
+        <button class="pe-btn" id="peNext" type="button">下一步</button>
+        <button class="pe-btn" id="peReset" type="button">重置</button>
+      </div>
+    </div>
+
+    <h2>四、题目1：距离 ≤ k 的点对数量</h2>
+    <p>n 个点组成一棵树，边有边权。求两点距离 ≤ k 的点对数量，(x, x) 不算点对，(x, y) 与 (y, x) 算同一个。1 ≤ n ≤ 4×10⁴，0 ≤ 边权 ≤ 10³，0 ≤ k ≤ 2×10⁴。</p>
+    <p>calc 把连通区所有点到重心的距离收进数组（含重心的 0），升序排序。双指针 l 在头、r 在尾：如果 dis[l] + dis[r] ≤ k，那么 l 到 l+1..r 之间任何一个点都能和 l 配，一次数出 r - l 对，l 右移；否则 r 太大，连最小的 l 都配不上，r 左移。l 追上 r 时结束。</p>
+    <p>自身配不上：每个点在数组里只出现一次，l = r 时 r - l = 0。容斥的部分照旧：ans += calc(u, 0)，每棵子树 ans -= calc(v, w)。</p>
+    <p>样例：5 个点，边 1-2(4)、1-3(4)、2-4(3)、2-5(1)，k = 7，答案是 7。</p>
+    <p>完整代码如下。</p>
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 50001;
+    <span class="kw">int</span> n, k;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> weight[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+
+    <span class="kw">int</span> disArr[MAXN];
+    <span class="kw">int</span> cnta;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        weight[cntg] = w;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">getSize</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[v]) {
+                getSize(v, u);
+                siz[u] += siz[v];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getCentroid</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        getSize(u, fa);
+        <span class="kw">int</span> half = siz[u] &gt;&gt; 1;
+        <span class="kw">bool</span> find = <span class="kw">false</span>;
+        <span class="kw">while</span> (!find) {
+            find = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                <span class="kw">if</span> (v != fa &amp;&amp; !vis[v] &amp;&amp; siz[v] &gt; half) {
+                    fa = u;
+                    u = v;
+                    find = <span class="kw">false</span>;
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+        <span class="kw">return</span> u;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">int</span> dis) {
+        <span class="kw">if</span> (dis &gt; k) {
+            <span class="kw">return</span>;
+        }
+        disArr[++cnta] = dis;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[v]) {
+                dfs(v, u, dis + weight[e]);
+            }
+        }
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">calc</span>(<span class="kw">int</span> u, <span class="kw">int</span> dis) {
+        cnta = 0;
+        dfs(u, 0, dis);
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        sort(disArr + 1, disArr + cnta + 1);
+        <span class="kw">for</span> (<span class="kw">int</span> l = 1, r = cnta; l &lt;= r; ) {
+            <span class="kw">if</span> (disArr[l] + disArr[r] &lt;= k) {
+                ans += r - l;
+                l++;
+            } <span class="kw">else</span> {
+                r--;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">solve</span>(<span class="kw">int</span> u) {
+        vis[u] = <span class="kw">true</span>;
+        <span class="kw">long</span> <span class="kw">long</span> ans = calc(u, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (!vis[v]) {
+                ans -= calc(v, weight[e]);
+                ans += solve(getCentroid(v, u));
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v, w; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v &gt;&gt; w;
+            addEdge(u, v, w);
+            addEdge(v, u, w);
+        }
+        cin &gt;&gt; k;
+        cout &lt;&lt; solve(getCentroid(1, 0)) &lt;&lt; '\n';
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>五、题目2：相近点对</h2>
+    <p>n 个点组成一棵树，1 号点是树头，从 2 号起每个点给父节点编号和边权。求同时满足路径权值和 ≤ limitw、路径边数 ≤ limitl 的点对数量，(x, x) 不算，(x, y) 与 (y, x) 同一个。1 ≤ limitl ≤ n ≤ 10⁵，0 ≤ limitw ≤ 10⁹，0 ≤ 边权 ≤ 10⁴。</p>
+    <p>限制变成了两个维度。到重心的信息相应升级成二元组 (dis, edge)：距离和边数。</p>
+    <p>按 dis 排序后，dis 这一维交给双指针：l 从头出发，只要 dis[l] + dis[r] &gt; limitw 就把 r 减进来（从树状数组里移除）；满足时处理 l，先把自己从树状数组移除，再查剩下点里 edge ≤ limitl - edge[l] 的个数。</p>
+    <p>edge 这一维交给树状数组：下标是边数，插一棵、查一次前缀和。两个维度一个靠指针收缩、一个靠前缀计数，互不干扰。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 640 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="二维限制的分工" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <line x1="70" y1="210" x2="420" y2="210" stroke="#9aa0a6" stroke-width="1.5"/>
+        <line x1="70" y1="210" x2="70" y2="30" stroke="#9aa0a6" stroke-width="1.5"/>
+        <text x="430" y="214" font-size="11" fill="#6b7280">dis →</text>
+        <text x="62" y="26" font-size="11" fill="#6b7280" text-anchor="end">edge ↑</text>
+        <rect x="70" y="80" width="230" height="130" rx="6" fill="#dbeafe" fill-opacity="0.55" stroke="#2563eb" stroke-width="1.6"/>
+        <line x1="300" y1="30" x2="300" y2="210" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="5 4"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="130" cy="170" r="8"/>
+          <circle cx="175" cy="120" r="8"/>
+          <circle cx="220" cy="160" r="8"/>
+          <circle cx="265" cy="95" r="8"/>
+        </g>
+        <g fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.2">
+          <circle cx="200" cy="60" r="8"/>
+          <circle cx="340" cy="140" r="8"/>
+          <circle cx="380" cy="90" r="8"/>
+        </g>
+        <circle cx="110" cy="135" r="10" fill="#ea580c" stroke="#c2410c" stroke-width="1.5"/>
+        <text x="110" y="139" font-size="10" fill="#ffffff" text-anchor="middle">l</text>
+        <text x="315" y="45" font-size="11" fill="#ea580c">dis ≤ limitw − dis[l]</text>
+        <text x="110" y="72" font-size="11" fill="#2563eb">edge ≤ limitl − edge[l]</text>
+        <text x="440" y="120" font-size="11" fill="#6b7280">灰色点 dis 超界，</text>
+        <text x="440" y="138" font-size="11" fill="#6b7280">被双指针移除；</text>
+        <text x="440" y="156" font-size="11" fill="#6b7280">蓝框内由树状数组计数</text>
+        <text x="310" y="238" font-size="11" fill="#6b7280" text-anchor="middle">dis 维交给双指针收缩上界，edge 维交给树状数组查前缀，互不干扰</text>
+      </svg>
+      <figcaption>二维限制拆开分工：横轴 dis 的右边界随 l 移动由双指针维护，纵轴 edge 的上界由树状数组前缀和回答。</figcaption>
+    </figure>
+
+    <p>容的部分和题 1 完全一样：calc(u, 0, 0) 加整份，calc(v, w, 1) 减子树份，初始边数 1 对应「从 u 出发已经走过一条边」。样例：3 个点链 1-2(3)、2-3(4)，limitl = 2、limitw = 5，合法点对是 (1,2)、(2,3) 两个，答案是 2。</p>
+    <p>完整代码如下。</p>
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> dis, edge;
+    };
+
+    <span class="kw">bool</span> <span class="fn">NodeCmp</span>(Node a, Node b) {
+        <span class="kw">return</span> a.dis &lt; b.dis;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100002;
+    <span class="kw">int</span> n, limitl, limitw;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> weight[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+
+    Node arr[MAXN];
+    <span class="kw">int</span> cnta;
+
+    <span class="kw">int</span> tree[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        weight[cntg] = w;
+        head[u] = cntg;
+    }
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &amp; -i;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        i++;
+        <span class="kw">while</span> (i &lt;= limitl + 1) {
+            tree[i] += v;
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">sum</span>(<span class="kw">int</span> i) {
+        i++;
+        <span class="kw">int</span> ret = 0;
+        <span class="kw">while</span> (i &gt; 0) {
+            ret += tree[i];
+            i -= lowbit(i);
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">getSize</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[v]) {
+                getSize(v, u);
+                siz[u] += siz[v];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getCentroid</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        getSize(u, fa);
+        <span class="kw">int</span> half = siz[u] &gt;&gt; 1;
+        <span class="kw">bool</span> find = <span class="kw">false</span>;
+        <span class="kw">while</span> (!find) {
+            find = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                <span class="kw">if</span> (v != fa &amp;&amp; !vis[v] &amp;&amp; siz[v] &gt; half) {
+                    fa = u;
+                    u = v;
+                    find = <span class="kw">false</span>;
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+        <span class="kw">return</span> u;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">int</span> dis, <span class="kw">int</span> edge) {
+        <span class="kw">if</span> (dis &gt; limitw || edge &gt; limitl) {
+            <span class="kw">return</span>;
+        }
+        arr[++cnta] = { dis, edge };
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[v]) {
+                dfs(v, u, dis + weight[e], edge + 1);
+            }
+        }
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">calc</span>(<span class="kw">int</span> u, <span class="kw">int</span> dis, <span class="kw">int</span> edge) {
+        cnta = 0;
+        dfs(u, 0, dis, edge);
+        sort(arr + 1, arr + cnta + 1, NodeCmp);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnta; i++) {
+            add(arr[i].edge, 1);
+        }
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> l = 1, r = cnta; l &lt;= r; ) {
+            <span class="kw">if</span> (arr[l].dis + arr[r].dis &lt;= limitw) {
+                add(arr[l].edge, -1);
+                ans += sum(limitl - arr[l].edge);
+                l++;
+            } <span class="kw">else</span> {
+                add(arr[r].edge, -1);
+                r--;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">solve</span>(<span class="kw">int</span> u) {
+        vis[u] = <span class="kw">true</span>;
+        <span class="kw">long</span> <span class="kw">long</span> ans = calc(u, 0, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (!vis[v]) {
+                ans -= calc(v, weight[e], 1);
+                ans += solve(getCentroid(v, u));
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; limitl &gt;&gt; limitw;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2, fa, w; i &lt;= n; i++) {
+            cin &gt;&gt; fa &gt;&gt; w;
+            addEdge(i, fa, w);
+            addEdge(fa, i, w);
+        }
+        cout &lt;&lt; solve(getCentroid(1, 0)) &lt;&lt; '\n';
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>六、题目3：所有合法路径的魔力和</h2>
+    <p>n 个点组成一棵树，边有边权。路径边数在 [l, r] 内则合法，一条路径的魔力值是路径上所有边权的最大值，求所有合法路径的魔力值之和，(x, y) 与 (y, x) 是不同的点对。1 ≤ n、边权 ≤ 10⁵。</p>
+    <p>收集的二元组换成 (maxv, edge)：到重心路径上的最大边权和边数。按 maxv 升序排序，逐个点先查后加：处理第 i 个点时，树状数组里是前 i-1 个点（maxv 都不超过它），查询边数落在 [l - edge[i], r - edge[i]] 的个数，乘上 maxv[i] 累加。排序保证了配出来的路径最大值恰好取 maxv[i]。</p>
+    <p>这里有个细节。calc(u, 0, 0) 把 u 自己以 (0, 0) 收进数组，配对区间是 [l - 0, r - 0]；题目保证 l ≥ 1，所以 u 只会和边数至少为 1 的点配，不会和自己配。最后输出时乘 2，把无序对翻成有序对。</p>
+    <p>样例：3 个点链 1-2(1)、2-3(2)，l = 2、r = 3。只有 (1,3) 这一对边数为 2 落在区间里，魔力值 2，有序化后答案是 4。</p>
+    <p>完整代码如下。</p>
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> maxv, edge;
+    };
+
+    <span class="kw">bool</span> <span class="fn">NodeCmp</span>(Node a, Node b) {
+        <span class="kw">return</span> a.maxv &lt; b.maxv;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100002;
+    <span class="kw">int</span> n, l, r;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> weight[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+
+    Node arr[MAXN];
+    <span class="kw">int</span> cnta;
+
+    <span class="kw">int</span> tree[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        weight[cntg] = w;
+        head[u] = cntg;
+    }
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &amp; -i;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        i++;
+        <span class="kw">while</span> (i &lt;= r + 1) {
+            tree[i] += v;
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">sum</span>(<span class="kw">int</span> i) {
+        i++;
+        <span class="kw">int</span> ret = 0;
+        <span class="kw">while</span> (i &gt; 0) {
+            ret += tree[i];
+            i -= lowbit(i);
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">getSize</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[v]) {
+                getSize(v, u);
+                siz[u] += siz[v];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getCentroid</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        getSize(u, fa);
+        <span class="kw">int</span> half = siz[u] &gt;&gt; 1;
+        <span class="kw">bool</span> find = <span class="kw">false</span>;
+        <span class="kw">while</span> (!find) {
+            find = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                <span class="kw">if</span> (v != fa &amp;&amp; !vis[v] &amp;&amp; siz[v] &gt; half) {
+                    fa = u;
+                    u = v;
+                    find = <span class="kw">false</span>;
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+        <span class="kw">return</span> u;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">int</span> maxv, <span class="kw">int</span> edge) {
+        <span class="kw">if</span> (edge &gt; r) {
+            <span class="kw">return</span>;
+        }
+        arr[++cnta] = { maxv, edge };
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[v]) {
+                dfs(v, u, max(maxv, weight[e]), edge + 1);
+            }
+        }
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">calc</span>(<span class="kw">int</span> u, <span class="kw">int</span> maxv, <span class="kw">int</span> edge) {
+        cnta = 0;
+        dfs(u, 0, maxv, edge);
+        sort(arr + 1, arr + cnta + 1, NodeCmp);
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnta; i++) {
+            ans += 1LL * arr[i].maxv * (sum(r - arr[i].edge) - sum(l - arr[i].edge - 1));
+            add(arr[i].edge, 1);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnta; i++) {
+            add(arr[i].edge, -1);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">solve</span>(<span class="kw">int</span> u) {
+        vis[u] = <span class="kw">true</span>;
+        <span class="kw">long</span> <span class="kw">long</span> ans = calc(u, 0, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (!vis[v]) {
+                ans -= calc(v, weight[e], 1);
+                ans += solve(getCentroid(v, u));
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; l &gt;&gt; r;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v, w; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v &gt;&gt; w;
+            addEdge(u, v, w);
+            addEdge(v, u, w);
+        }
+        <span class="kw">long</span> <span class="kw">long</span> ans = solve(getCentroid(1, 0));
+        cout &lt;&lt; (ans &lt;&lt; 1) &lt;&lt; '\n';
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>七、题目4：消息传递</h2>
+    <p>n 个点组成一棵树，边权全是 1。m 条查询 x k：打印有多少点与 x 的距离恰好为 k。1 ≤ n、m ≤ 10⁵，0 ≤ k &lt; n。</p>
+    <p>查询带着参数，不方便在配对时逐个扫。做法是把查询挂到点上：链表 addQuery(x, k, id)，dfs 经过 x 时把查询展开成一条记录 need = k - depth(x)，depth 是 x 到本次 dfs 起点的边数。</p>
+    <p>nodeCnt[d] 统计本次 dfs 里边数为 d 的点有几个。查询记录集中起来，统一用 ans[id] += nodeCnt[need] × effect 结算：加整份时 effect = +1，减子树份时 effect = -1，起算深度分别是 0 和 1。</p>
+    <p>距离为 0 的查询会把 x 自己数进去，这和题目「与 x 的距离恰好为 0」的语义一致。dfs 结束只清 nodeCnt[0..maxEdge]，不清整个数组，多组数据下才跑得动。</p>
+    <p>样例：链 1-2-3-4-5，查询 (1, 2) 的答案是 1（只有点 3），查询 (3, 4) 的答案是 0。</p>
+    <p>完整代码如下。</p>
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> need, qid;
+    };
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">int</span> t, n, m;
+
+    <span class="kw">int</span> headg[MAXN];
+    <span class="kw">int</span> nextg[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> tog[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> headq[MAXN];
+    <span class="kw">int</span> nextq[MAXN];
+    <span class="kw">int</span> dis[MAXN];
+    <span class="kw">int</span> qid[MAXN];
+    <span class="kw">int</span> cntq;
+
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+
+    <span class="kw">int</span> nodeCnt[MAXN];
+    <span class="kw">int</span> maxEdge;
+
+    Node arr[MAXN];
+    <span class="kw">int</span> cnta;
+
+    <span class="kw">int</span> ans[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nextg[++cntg] = headg[u];
+        tog[cntg] = v;
+        headg[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">addQuery</span>(<span class="kw">int</span> u, <span class="kw">int</span> k, <span class="kw">int</span> id) {
+        nextq[++cntq] = headq[u];
+        dis[cntq] = k;
+        qid[cntq] = id;
+        headq[u] = cntq;
+    }
+
+    <span class="kw">void</span> <span class="fn">getSize</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = headg[u]; e; e = nextg[e]) {
+            <span class="kw">int</span> v = tog[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[v]) {
+                getSize(v, u);
+                siz[u] += siz[v];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getCentroid</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        getSize(u, fa);
+        <span class="kw">int</span> half = siz[u] &gt;&gt; 1;
+        <span class="kw">bool</span> find = <span class="kw">false</span>;
+        <span class="kw">while</span> (!find) {
+            find = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> e = headg[u]; e; e = nextg[e]) {
+                <span class="kw">int</span> v = tog[e];
+                <span class="kw">if</span> (v != fa &amp;&amp; !vis[v] &amp;&amp; siz[v] &gt; half) {
+                    fa = u;
+                    u = v;
+                    find = <span class="kw">false</span>;
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+        <span class="kw">return</span> u;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">int</span> edge) {
+        nodeCnt[edge]++;
+        maxEdge = max(maxEdge, edge);
+        <span class="kw">for</span> (<span class="kw">int</span> e = headq[u]; e; e = nextq[e]) {
+            <span class="kw">if</span> (dis[e] &gt;= edge) {
+                arr[++cnta] = { dis[e] - edge, qid[e] };
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = headg[u]; e; e = nextg[e]) {
+            <span class="kw">int</span> v = tog[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[v]) {
+                dfs(v, u, edge + 1);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">calc</span>(<span class="kw">int</span> u, <span class="kw">int</span> edge, <span class="kw">int</span> effect) {
+        cnta = 0;
+        maxEdge = 0;
+        dfs(u, 0, edge);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnta; i++) {
+            ans[arr[i].qid] += nodeCnt[arr[i].need] * effect;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> v = 0; v &lt;= maxEdge; v++) {
+            nodeCnt[v] = 0;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">solve</span>(<span class="kw">int</span> u) {
+        vis[u] = <span class="kw">true</span>;
+        calc(u, 0, 1);
+        <span class="kw">for</span> (<span class="kw">int</span> e = headg[u]; e; e = nextg[e]) {
+            <span class="kw">int</span> v = tog[e];
+            <span class="kw">if</span> (!vis[v]) {
+                calc(v, 1, -1);
+                solve(getCentroid(v, u));
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        cntg = 0;
+        cntq = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            headg[i] = 0;
+            headq[i] = 0;
+            vis[i] = <span class="kw">false</span>;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            ans[i] = 0;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; t;
+        <span class="kw">for</span> (<span class="kw">int</span> c = 1; c &lt;= t; c++) {
+            cin &gt;&gt; n &gt;&gt; m;
+            prepare();
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+                cin &gt;&gt; u &gt;&gt; v;
+                addEdge(u, v);
+                addEdge(v, u);
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1, x, k; i &lt;= m; i++) {
+                cin &gt;&gt; x &gt;&gt; k;
+                addQuery(x, k, i);
+            }
+            solve(getCentroid(1, 0));
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+                cout &lt;&lt; ans[i] &lt;&lt; '\n';
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>八、复杂度分析</h2>
+    <p>容斥不改变分治的结构，层数还是 O(log n)；配对从增量换成「完整数组 + 数据结构」，每层的代价由排序或树状数组主导。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>找重心 + 收集信息（每层合计）</td><td><code class="inline">O(n)</code></td><td rowspan="5"><code class="inline">O(n + m)</code>（点对数组、树状数组按 n 开，查询记录按 m 开）</td></tr>
+        <tr><td>题 1 排序 + 双指针（每层）</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>题 2、题 3 排序 + 树状数组（每层）</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>题 4 查询展开（每层）</td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>四题总计</td><td><code class="inline">O(n log² n)</code>、题 4 为 <code class="inline">O((n+m) log n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>题 4 每层最多把每条查询展开两次（整份一次、所在子树份一次），查询的总量乘上 log n 层就是答案的规模，10⁵ 的 n、m 也扛得住。</p>
+
+    <h2>九、最后</h2>
+    <p>容斥版点分治的骨架比模版版更整齐：calc 收集整份、配对交给数据结构、减掉子树份。维度多了就加树状数组，查询多了就挂链表，配对的口径始终是「到重心的两段信息」。</p>
+    <p>下一讲还有静态点分治的更多题目；再往后，把每层的重心记下来组织成新树，就是点分树和动态点分治的地盘。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var svg = document.getElementById('peSvg');
+  var info = document.getElementById('peInfo');
+  var prev = document.getElementById('pePrev');
+  var next = document.getElementById('peNext');
+  var reset = document.getElementById('peReset');
+
+  var arr = [0, 2, 4, 5, 8, 9];
+  var k = 10;
+  var cellW = 76, gap = 14, x0 = 42, y0 = 80;
+
+  var STEPS = [
+    {l:0, r:5, ans:0, t:'初始', s:'距离数组升序排好，0 是重心自己。l 指向最小，r 指向最大，答案清零。'},
+    {l:0, r:5, ans:5, t:'0 + 9 = 9 ≤ 10', s:'a[l] 配得上 a[r]，那么 a[l+1..r] 全都配得上 a[l]，一次数出 r − l = 5 对，l 右移。'},
+    {l:1, r:5, ans:5, t:'2 + 9 = 11 > 10', s:'a[r] 连最小的 a[l] 都配不上，更配不上别人，r 左移。'},
+    {l:1, r:4, ans:8, t:'2 + 8 = 10 ≤ 10', s:'又数出 r − l = 3 对，累计 8，l 右移。'},
+    {l:2, r:4, ans:8, t:'4 + 8 = 12 > 10', s:'a[r] = 8 太大，r 左移。'},
+    {l:2, r:3, ans:9, t:'4 + 5 = 9 ≤ 10', s:'数出 1 对，累计 9，l 右移。'},
+    {l:3, r:3, ans:9, t:'l 与 r 相遇', s:'单点不成对，r − l = 0。双指针结束，共 9 对；其中 0 参与的 5 对以重心为端点，若数组里混进同一棵子树的点对，容斥减子树份时会一并抵消。'}
+  ];
+
+  function render(){
+    var at = window.__peAt = window.__peAt || 0;
+    var st = STEPS[at];
+    var p = [];
+    for (var i = 0; i < arr.length; i++) {
+      var cx = x0 + i * (cellW + gap);
+      var isL = (i === st.l), isR = (i === st.r);
+      var fill = '#dbeafe', stroke = '#2563eb', sw = 1.4;
+      if (isL) { fill = '#ea580c'; stroke = '#c2410c'; sw = 2; }
+      if (isR && !isL) { fill = '#ffedd5'; stroke = '#ea580c'; sw = 2; }
+      if (i > st.r || i < st.l) { fill = '#f6f7f9'; stroke = '#9aa0a6'; }
+      p.push('<rect x="'+cx+'" y="'+y0+'" width="'+cellW+'" height="52" rx="6" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+sw+'"/>');
+      p.push('<text x="'+(cx+cellW/2)+'" y="'+(y0+32)+'" text-anchor="middle" font-size="14" fill="'+(isL ? '#ffffff' : '#1f2328')+'">'+arr[i]+'</text>');
+      if (isL) p.push('<text x="'+(cx+cellW/2)+'" y="'+(y0+76)+'" text-anchor="middle" font-size="12" fill="#ea580c">l</text>');
+      if (isR) p.push('<text x="'+(cx+cellW/2)+'" y="'+(y0-12)+'" text-anchor="middle" font-size="12" fill="#ea580c">r</text>');
+    }
+    p.push('<rect x="'+x0+'" y="180" width="300" height="34" rx="6" fill="#f6f7f9" stroke="#e6e8eb"/>');
+    p.push('<text x="'+(x0+150)+'" y="202" text-anchor="middle" font-size="12" fill="#1f2328">a[l] + a[r] = '+arr[st.l]+' + '+arr[st.r]+'，k = 10</text>');
+    p.push('<text x="380" y="202" font-size="12" fill="#2563eb">已数出 '+st.ans+' 对</text>');
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div><strong>'+st.t+'</strong><span>：</span></div><div>'+st.s+'</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if (window.__peAt > 0){ window.__peAt--; render(); } });
+  next.addEventListener('click', function(){ if (window.__peAt < STEPS.length - 1){ window.__peAt++; render(); } });
+  reset.addEventListener('click', function(){ window.__peAt = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

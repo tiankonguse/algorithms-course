@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>莫队算法 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.arr-cell{
+  width:40px;height:40px;display:flex;align-items:center;justify-content:center;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+  font-size:15px;font-variant-numeric:tabular-nums;
+  transition:background .12s,border-color .12s;
+}
+.arr-cell.full{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.arr-cell.partial{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+.arr-cell.dim{opacity:.35;}
+.arr-cell.inwin{background:var(--accent-soft);border-color:var(--accent);}
+.mo-cells{display:flex;flex-direction:column;gap:4px;overflow-x:auto;}
+.mo-row{display:flex;gap:4px;align-items:flex-start;}
+.mo-idx{width:40px;height:18px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-dim);}
+.qchips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;}
+.qchip{border:1px solid var(--border);border-radius:16px;padding:3px 12px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--text-dim);}
+.qchip.now{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;}
+.qchip.done{background:var(--bg-soft);}
+.mo-btns{display:flex;gap:10px;margin-top:6px;}
+.mo-btn{border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;}
+.mo-btn:hover{border-color:var(--accent);color:var(--accent);}
+.mo-btn:disabled{opacity:.4;cursor:default;}
+
+
+@media(max-width:760px){
+  .arr-cell{width:34px;height:34px;font-size:13px;}
+  .mo-idx{width:34px;}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>莫队算法</h1>
+    <p class="intro">查询全部拿到手、顺序随便排。先按 l 所在块分组、块内按 r 排序，再让两个指针接力滑动，总耗时压到 O((n+m)√n)。</p>
+
+    <h2>零、背景</h2>
+    <p>前面几节处理的都是边改边查，来一个操作就答一个。</p>
+    <p>还有一类题不一样：所有查询一次性给你，顺序随便你安排，最后把答案交上去就行。这类叫离线查询。</p>
+    <p>既然顺序自由，就可以先排序再回答。莫队是这条路上最典型的一个：它把查询重新排个序，让两个指针接力滑动，把总耗时从 O(nm) 压到 O((n+m)√n)。</p>
+
+    <h2>一、问题</h2>
+    <p>长度为 n 的数组 a，要回答 m 次查询。每次给区间 [l, r]，问这个区间里不同的数字有多少个。</p>
+    <p>例如 a = [1, 2, 1, 3, 2, 4, 1, 3]，查询 [0, 3] 里有 1、2、3 三种，答案是 3。</p>
+    <p>这些查询是离线的，可以全部拿到手再一起回答。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>每个查询从 l 扫到 r，用计数数组 cnt 记每个数字出现几次，第一次出现时答案加一。</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+    <span class="kw">int</span> cnt[MAXV] = {0}, ans = 0;
+    <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+        <span class="kw">if</span> (cnt[a[i]] == 0) ans++;   <span class="cm">// 第一次出现，答案加一</span>
+        cnt[a[i]]++;
+    }
+    <span class="kw">return</span> ans;
+}</pre>
+    <p>单次 O(n)，m 次就是 O(nm)。n 和 m 都到 10⁵ 时是 10¹⁰，跑不完。</p>
+    <p>浪费全在重复扫描上。看下面这 6 个查询的区间。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>6 次查询的区间互相重叠，朴素做法每次从头扫一遍，重叠部分被反复计算</figcaption>
+    </figure>
+
+    <h2>三、移动窗口</h2>
+    <p>如果上一次查 [2, 5]，这一次查 [1, 6]，就没必要从头扫，只要把左端点从 2 挪到 1、右端点从 5 挪到 6。</p>
+    <p>于是维护一个当前窗口 [curL, curR]，以及这个窗口的计数和答案。回答新查询时逐步移动指针，每移一步更新答案。</p>
+    <p>移动一步只是增删一个元素，O(1)。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> x) {                <span class="cm">// 把 a[x] 加进窗口</span>
+    <span class="kw">if</span> (cnt[a[x]] == 0) ans++;   <span class="cm">// 之前没有，现在有了</span>
+    cnt[a[x]]++;
+}
+<span class="kw">void</span> <span class="fn">del</span>(<span class="kw">int</span> x) {                <span class="cm">// 把 a[x] 移出窗口</span>
+    cnt[a[x]]--;
+    <span class="kw">if</span> (cnt[a[x]] == 0) ans--;   <span class="cm">// 移走后一个不剩，答案减一</span>
+}</pre>
+    <p>可以发现，这样算下来总时间只取决于指针一共走了多少步。查询顺序乱，指针来回横跳，步数还是 O(nm)；顺序排得好，步数就少。</p>
+
+    <h2>四、给查询排序</h2>
+    <p>排序规则借分块的思路：把左端点 l 按块分组，块大小约 √n。第一关键字是 l 所在的块号，第二关键字是同一块内按 r 从小到大。</p>
+    <pre class="code"><span class="kw">int</span> BS = <span class="fn">sqrt</span>(n);                <span class="cm">// 块大小（约 √n）</span>
+<span class="kw">bool</span> <span class="fn">cmp</span>(Q a, Q b) {              <span class="cm">// 查询的排序规则</span>
+    <span class="kw">if</span> (a.l / BS != b.l / BS)     <span class="cm">// 先比较 l 所在的块</span>
+        <span class="kw">return</span> a.l / BS &lt; b.l / BS;
+    <span class="kw">return</span> a.r &lt; b.r;             <span class="cm">// 同一块内按 r 排</span>
+}
+<span class="fn">sort</span>(q, q + m, cmp);</pre>
+    <p>这么排的效果是：同一块内，l 只在块里摆动，最多 B 步；r 只增不减，一路向右。跨块时 r 会跳回左边一次，但块只有 n/B 个。</p>
+    <p>下面是示例数据排序后两个指针的走势，块大小取 3。</p>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>排序后 r 在每块内单调上升，只有跨块时才跳回；l 只在自己那块里摆动</figcaption>
+    </figure>
+
+    <p>点「下一步」，看指针怎么在排序后的查询之间接力。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　莫队算法：排序后逐步移动窗口（块大小 3）</div>
+      <div class="mo-cells" id="moCells"></div>
+      <div class="qchips" id="moChips"></div>
+      <div class="breakdown" id="moStatus"></div>
+      <div class="mo-btns">
+        <button class="mo-btn" id="moStep">下一步</button>
+        <button class="mo-btn" id="moAuto">自动播放</button>
+        <button class="mo-btn" id="moReset">重置</button>
+      </div>
+      <div class="legend" style="margin-top:10px;">
+        <span><span class="dot" style="background:var(--accent-soft);border-color:var(--accent);"></span>当前窗口 [curL, curR]</span>
+      </div>
+    </div>
+
+    <h2>五、代码</h2>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">const</span> <span class="kw">int</span> N = 100005, MAXV = 1000005;
+<span class="kw">int</span> a[N], cnt[MAXV], ans = 0;
+
+<span class="kw">struct</span> Q {
+    <span class="kw">int</span> l, r, id;       <span class="cm">// id 记住这是第几个查询</span>
+} q[N];
+<span class="kw">int</span> res[N];             <span class="cm">// 每个查询的最终答案</span>
+<span class="kw">int</span> BS;
+
+<span class="kw">bool</span> <span class="fn">cmp</span>(Q a, Q b) {    <span class="cm">// 排序规则</span>
+    <span class="kw">if</span> (a.l / BS != b.l / BS) <span class="kw">return</span> a.l / BS &lt; b.l / BS;
+    <span class="kw">return</span> a.r &lt; b.r;
+}
+
+<span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> x) {
+    <span class="kw">if</span> (cnt[a[x]] == 0) ans++;
+    cnt[a[x]]++;
+}
+<span class="kw">void</span> <span class="fn">del</span>(<span class="kw">int</span> x) {
+    cnt[a[x]]--;
+    <span class="kw">if</span> (cnt[a[x]] == 0) ans--;
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    <span class="kw">int</span> n, m;
+    cin &gt;&gt; n &gt;&gt; m;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) cin &gt;&gt; a[i];
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; m; i++) {
+        cin &gt;&gt; q[i].l &gt;&gt; q[i].r;
+        q[i].l--; q[i].r--;      <span class="cm">// 转成 0 下标</span>
+        q[i].id = i;
+    }
+    BS = <span class="fn">max</span>(1, (<span class="kw">int</span>)<span class="fn">sqrt</span>(n));
+    <span class="fn">sort</span>(q, q + m, cmp);
+
+    <span class="kw">int</span> curL = 0, curR = -1;    <span class="cm">// 初始空窗口</span>
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; m; i++) {
+        <span class="kw">int</span> l = q[i].l, r = q[i].r;
+        <span class="kw">while</span> (curL &gt; l) <span class="fn">add</span>(--curL);
+        <span class="kw">while</span> (curR &lt; r) <span class="fn">add</span>(++curR);
+        <span class="kw">while</span> (curL &lt; l) <span class="fn">del</span>(curL++);
+        <span class="kw">while</span> (curR &gt; r) <span class="fn">del</span>(curR--);
+        res[q[i].id] = ans;
+    }
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; m; i++) cout &lt;&lt; res[i] &lt;&lt; endl;
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <h2>六、复杂度分析</h2>
+    <p>设块大小为 B（约 √n），共 m 次查询，两个指针各自的移动量分开算。</p>
+    <p>左指针 curL：同一块内的查询，l 都落在这一块里，curL 每次最多移动 B 步，m 次查询合计 mB；跨块时最多从 n 跳回 0，块有 n/B 个，合计 n。加起来 O(mB + n)。</p>
+    <p>右指针 curR：同一块内 r 只增不减，最多走 n 步；块有 n/B 个，合计 n²/B。加起来 O(n²/B)。</p>
+    <p>取 B = √n，两项分别是 O(m√n) 和 O(n√n)，合起来就是 O((n + m)√n)。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>预处理 <code class="inline">sort</code></td><td><code class="inline">O(m log m)</code></td></tr>
+        <tr><td>移动一步（<code class="inline">add</code> / <code class="inline">del</code>）</td><td><code class="inline">O(1)</code></td></tr>
+        <tr><td>左指针总移动</td><td><code class="inline">O(m√n + n)</code></td></tr>
+        <tr><td>右指针总移动</td><td><code class="inline">O(n√n)</code></td></tr>
+        <tr><td>全部 m 次查询</td><td><code class="inline">O((n + m)√n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间上需要一个计数数组 cnt（大小是值域 V）和存查询的数组（大小 m），额外空间 O(V + m)。</p>
+    <p>对比朴素做法的 O(nm)：n 和 m 都是 10⁵ 时，nm 是 10¹⁰，(n+m)√n 约 6×10⁷，差了三个数量级。</p>
+    <p>这里有个常用的常数优化。块内按 r 升序排，跨块时右指针得从最右跳回最左，白走一趟。改成奇数块 r 升序、偶数块 r 降序，右指针跨块时就能顺着往回扫，省掉一半左右的移动。</p>
+
+    <h2>七、最后</h2>
+    <p>莫队能成立需要两个前提。一是查询离线，顺序能自己定；二是窗口能 O(1) 增删，也就是从一个区间挪到相邻区间时，答案可以增量维护。</p>
+    <p>不同数字个数、区间和、区间众数这些都满足。一旦查询中间夹着修改操作，指针就不只是在平面上滑动了，还多出一个时间维度，那个叫带修莫队，得再加一重分块。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  const A = [1,2,1,3,2,4,1,3];
+  const n = A.length;
+  const QS = [
+    {l:0,r:3},{l:2,r:5},{l:1,r:4},{l:4,r:7},{l:0,r:7},{l:3,r:6}
+  ];
+  const m = QS.length;
+  const BS = 3;
+  const order = QS.map((q,i)=>i).sort((x,y)=>{
+    const bx = Math.floor(QS[x].l/BS), by = Math.floor(QS[y].l/BS);
+    if (bx !== by) return bx - by;
+    return QS[x].r - QS[y].r;
+  });
+
+  let curL = 0, curR = -1, qi = 0, ans = 0, steps = 0;
+  const cnt = {}, res = new Array(m), done = new Array(m).fill(false);
+
+  function addIdx(i){ const v=A[i]; if(!cnt[v]) ans++; cnt[v]=(cnt[v]||0)+1; }
+  function delIdx(i){ const v=A[i]; cnt[v]--; if(!cnt[v]) ans--; }
+
+  function naiveSteps(){
+    let cL=0, cR=-1, s=0;
+    for(const q of QS){
+      while(cL>q.l){ cL--; s++; }
+      while(cR<q.r){ cR++; s++; }
+      while(cL<q.l){ cL++; s++; }
+      while(cR>q.r){ cR--; s++; }
+    }
+    return s;
+  }
+
+  const cellsEl = document.getElementById('moCells');
+  const chipsEl = document.getElementById('moChips');
+  const statusEl = document.getElementById('moStatus');
+  const btnStep = document.getElementById('moStep');
+  const btnReset = document.getElementById('moReset');
+  const btnAuto = document.getElementById('moAuto');
+
+  function render(){
+    let h = '<div class="mo-row">';
+    for(let i=0;i<n;i++){
+      let cls = 'arr-cell';
+      if(i>=curL && i<=curR) cls += ' inwin';
+      h += '<div class="'+cls+'">'+A[i]+'</div>';
+    }
+    h += '</div><div class="mo-row">';
+    for(let i=0;i<n;i++) h += '<div class="mo-idx">'+i+'</div>';
+    h += '</div>';
+    cellsEl.innerHTML = h;
+
+    let chips = '';
+    order.forEach((id,k)=>{
+      let cls = 'qchip';
+      if(k<qi) cls += ' done';
+      else if(k===qi) cls += ' now';
+      const q = QS[id];
+      chips += '<span class="'+cls+'">q'+id+' ['+q.l+','+q.r+']'+(done[id]?' = '+res[id]:'')+'</span>';
+    });
+    chipsEl.innerHTML = chips;
+
+    if(qi<m){
+      const id = order[qi], q = QS[id];
+      statusEl.innerHTML =
+        '<div class="row">莫队顺序第 '+(qi+1)+' / '+m+' 个：<strong>q'+id+'</strong>，目标区间 ['+q.l+', '+q.r+']</div>'+
+        '<div class="row">当前窗口 [<strong>'+curL+'</strong>, <strong>'+curR+'</strong>]　不同数字个数 = <strong>'+ans+'</strong></div>'+
+        '<div class="row" style="color:var(--text-dim)">已移动指针 <strong>'+steps+'</strong> 步</div>';
+    }else{
+      statusEl.innerHTML =
+        '<div class="row">全部查询处理完毕！</div>'+
+        '<div class="row">莫队顺序共移动 <strong>'+steps+'</strong> 步，原始顺序需 <strong>'+naiveSteps()+'</strong> 步</div>'+
+        '<div class="row" style="color:var(--text-dim)">n、m 越大，排序带来的优势越明显</div>';
+    }
+    btnStep.disabled = (qi >= m);
+  }
+
+  function step(){
+    if(qi>=m){ render(); return; }
+    const q = QS[order[qi]];
+    if(curL===q.l && curR===q.r){
+      res[order[qi]] = ans;
+      done[order[qi]] = true;
+      qi++;
+      render();
+      return;
+    }
+    if(curL>q.l) addIdx(--curL);
+    else if(curR<q.r) addIdx(++curR);
+    else if(curL<q.l) delIdx(curL++);
+    else if(curR>q.r) delIdx(curR--);
+    steps++;
+    render();
+  }
+
+  let timer = null;
+  function stopAuto(){ if(timer){ clearInterval(timer); timer=null; } btnAuto.textContent='自动播放'; }
+  function toggleAuto(){
+    if(timer){ stopAuto(); return; }
+    btnAuto.textContent='暂停';
+    timer = setInterval(()=>{ if(qi>=m) stopAuto(); else step(); }, 450);
+  }
+  function reset(){
+    curL=0; curR=-1; qi=0; ans=0; steps=0;
+    for(const k in cnt) delete cnt[k];
+    done.fill(false);
+    stopAuto();
+    render();
+  }
+
+  btnStep.addEventListener('click', step);
+  btnReset.addEventListener('click', reset);
+  btnAuto.addEventListener('click', toggleAuto);
+  render();
+
+  /* ---------- 图示 ---------- */
+  /* 图①：6 个查询的区间互相重叠 */
+  const fig1 = document.getElementById('fig1');
+  if (fig1) {
+    const GX0 = 100, GStep = 62, GW = 60, gridW = n * GStep - 2;   // 494
+    const cellCX = j => GX0 + (j - 1) * GStep + GW / 2;
+    const segX = j => GX0 + (j - 1) * GStep;
+    let s = '<svg viewBox="0 0 680 244" role="img" aria-label="查询区间重叠示意图">';
+    // 数组行
+    for (let j = 1; j <= n; j++) {
+      s += '<rect x="' + segX(j) + '" y="26" width="' + GW + '" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>';
+      s += '<text x="' + cellCX(j) + '" y="42" text-anchor="middle" font-size="13" fill="#1f2328">' + A[j - 1] + '</text>';
+      s += '<text x="' + cellCX(j) + '" y="62" text-anchor="middle" font-size="10" fill="#9aa0a6">' + (j - 1) + '</text>';
+    }
+    // 6 条查询
+    QS.forEach(function(q, k){
+      const y = 76 + k * 22;
+      s += '<text x="88" y="' + (y + 14) + '" text-anchor="end" font-size="11" fill="#6b7280">q' + k + '</text>';
+      s += '<rect x="' + GX0 + '" y="' + y + '" width="' + gridW + '" height="18" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>';
+      s += '<rect x="' + segX(q.l + 1) + '" y="' + y + '" width="' + ((q.r - q.l + 1) * GStep - 2) +
+           '" height="18" rx="4" fill="#dbeafe" stroke="#2563eb"/>';
+      s += '<text x="' + (segX(q.l + 1) + ((q.r - q.l + 1) * GStep - 2) / 2) + '" y="' + (y + 13) +
+           '" text-anchor="middle" font-size="11" fill="#2563eb">[' + q.l + ',' + q.r + ']</text>';
+    });
+    const lens = QS.map(q => q.r - q.l + 1);
+    s += '<text x="340" y="224" text-anchor="middle" font-size="13" fill="#6b7280">朴素做法共扫 ' +
+         lens.join(' + ') + ' = <tspan font-weight="600" fill="#1f2328">' + lens.reduce((a, b) => a + b, 0) +
+         '</tspan> 个元素，数组只有 ' + n + ' 个</text>';
+    s += '</svg>';
+    fig1.innerHTML = s;
+  }
+
+  /* 图②：排序后两个指针的走势 */
+  const fig2 = document.getElementById('fig2');
+  if (fig2) {
+    const PX = k => 80 + k * 100;
+    const PY = v => 165 - v * 17;
+    let s = '<svg viewBox="0 0 680 212" role="img" aria-label="排序后指针走势示意图">';
+    // 网格与纵轴刻度
+    for (let v = 0; v <= 7; v++) {
+      s += '<line x1="72" y1="' + PY(v) + '" x2="620" y2="' + PY(v) + '" stroke="#eef0f2" stroke-width="1"/>';
+      s += '<text x="66" y="' + (PY(v) + 4) + '" text-anchor="end" font-size="10" fill="#9aa0a6">' + v + '</text>';
+    }
+    // 块分界
+    s += '<line x1="430" y1="30" x2="430" y2="176" stroke="#c8ccd1" stroke-width="1" stroke-dasharray="4 3"/>';
+    s += '<text x="230" y="22" text-anchor="middle" font-size="12" fill="#2563eb">块 0（l 落在 0..2）</text>';
+    s += '<text x="530" y="22" text-anchor="middle" font-size="12" fill="#2563eb">块 1（l 落在 3..5）</text>';
+    // 两条折线
+    const Ls = [], Rs = [];
+    order.forEach(function(id, k){
+      Ls.push(PX(k) + ',' + PY(QS[id].l));
+      Rs.push(PX(k) + ',' + PY(QS[id].r));
+    });
+    s += '<polyline points="' + Rs.join(' ') + '" fill="none" stroke="#2563eb" stroke-width="2"/>';
+    s += '<polyline points="' + Ls.join(' ') + '" fill="none" stroke="#ea580c" stroke-width="2"/>';
+    order.forEach(function(id, k){
+      const x = PX(k);
+      s += '<circle cx="' + x + '" cy="' + PY(QS[id].r) + '" r="4.5" fill="#2563eb"/>';
+      s += '<circle cx="' + x + '" cy="' + PY(QS[id].l) + '" r="4.5" fill="#ea580c"/>';
+      s += '<text x="' + x + '" y="' + (PY(QS[id].r) - 10) + '" text-anchor="middle" font-size="10" fill="#2563eb">r=' + QS[id].r + '</text>';
+      s += '<text x="' + x + '" y="' + (PY(QS[id].l) + 18) + '" text-anchor="middle" font-size="10" fill="#ea580c">l=' + QS[id].l + '</text>';
+      s += '<text x="' + x + '" y="196" text-anchor="middle" font-size="11" fill="#6b7280">q' + id + '</text>';
+    });
+    s += '</svg>';
+    fig2.innerHTML = s;
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>最小栈 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.mn-sel,.mn-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.mn-sel:focus{outline:none;border-color:var(--accent);}
+.mn-btn{cursor:pointer;}
+.mn-btn:hover{border-color:var(--accent);color:var(--accent);}
+.mn-btn:disabled{opacity:.4;cursor:default;}
+.mn-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.mn-ctl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--text-dim);}
+.mn-slider{width:120px;}
+.legend .dot.err{background:#fee2e2;border-color:#dc2626;}
+.ms-stack{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-end;}
+.ms-col{min-width:120px;}
+.ms-col-h{font-size:12px;color:var(--text-dim);margin-bottom:6px;text-align:center;}
+.ms-cells{display:flex;flex-direction:column-reverse;gap:3px;}
+.ms-cell{
+  border:1px solid var(--border);border-radius:5px;background:var(--bg);
+  padding:5px 0;text-align:center;font-size:14px;min-width:52px;
+  font-variant-numeric:tabular-nums;
+}
+.ms-cell.top{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);}
+.ms-cell.min{border-color:var(--partial);background:var(--partial-soft);color:var(--partial);}
+.ms-cell.err{background:#fee2e2;border-color:#dc2626;color:#b91c1c;}
+.ms-cell.gone{opacity:.35;}
+.ms-tag{font-size:11px;color:var(--text-dim);margin-top:5px;text-align:center;}
+.ms-read{font-size:13px;color:var(--text-dim);margin-top:4px;min-height:20px;}
+.ms-read b{color:var(--accent);font-weight:600;}
+.ms-read.bad b{color:#dc2626;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>最小栈</h1>
+      <p class="intro">栈只有一个口，手只能伸进栈顶。上一讲把队列和栈互相实现的写法都过了一遍，这一讲往栈上加一个要求：随时问「栈里现在最小的数是多少」，而且每次都要在常数时间里答出来。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>栈里压了 10 万个数，现在问一句最小值是多少。最直白的办法是从底到顶全看一遍，代价是 O(n)。问一次无所谓，问 10 万次就是 10<sup>10</sup> 次比较。</p>
+      <p>实测一遍（<code>min_element</code> 扫全栈，栈里 n 个、问 n 次）：</p>
+      <table class="complexity">
+        <tr><th>栈内元素 n</th><th>问 n 次，全扫</th><th>问 n 次，min 栈</th><th>比值</th></tr>
+        <tr><td>1 000</td><td>1.137 ms</td><td>0.0042 ms</td><td>273 倍</td></tr>
+        <tr><td>10 000</td><td>52.008 ms</td><td>0.0170 ms</td><td>3 067 倍</td></tr>
+        <tr><td>100 000</td><td>2 499.650 ms</td><td>0.0250 ms</td><td>100 154 倍</td></tr>
+      </table>
+      <p>比值是随着 n 一起涨的，因为一边是 n<sup>2</sup> 一边是 n。不过反过来也要说一句：如果从头到尾只问一次，栈里 100 万个数全扫一遍只要 0.250 毫秒，这时候专门维护一个 min 栈就是白费力气。要不要维护，先看问多少次。</p>
+
+      <h2 id="problem">一、问题</h2>
+      <p>LeetCode 155，设计一个栈，四个操作全部 O(1)：</p>
+      <ul>
+        <li><code>push(val)</code>：把 val 压进栈顶</li>
+        <li><code>pop()</code>：删掉栈顶</li>
+        <li><code>top()</code>：返回栈顶</li>
+        <li><code>getMin()</code>：返回栈里最小的元素</li>
+      </ul>
+      <p>前三个是栈本来就有的动作，第四个才是要解决的问题。</p>
+
+      <figure class="fig" id="figScan"></figure>
+      <figcaption>getMin 全扫一遍是 O(n)；配上 mn 栈后读栈顶就是 O(1)，代价是空间翻倍</figcaption>
+
+      <p>难点在于栈会弹。如果只往里加，用一个变量记最小值就够了；弹出去的那个正好是当前最小值时，新的最小值没人知道是多少，得提前留好。</p>
+
+      <h2 id="sync">二、每个深度存一份答案</h2>
+      <p>既然弹回去之后还得知道答案，那就别只存一个值，改成每一层都存一份：开两个栈，<code>data</code> 存真正的数，<code>mn</code> 存「压到这一层为止见过的最小值」。</p>
+      <p>写下来就是一条不变式：<code>mn[i] = min(data[0], data[1], …, data[i])</code>。第 i 层的 mn 永远等于从第 0 层到第 i 层的最小值。</p>
+      <p>有了这条，push 和 pop 该干什么就是被逼出来的：push 时新一层的 mn 等于 <code>min(val, 上一层 mn)</code>，pop 时两个栈一起弹，长度始终相同。<code>getMin()</code> 直接读 <code>mn</code> 的栈顶。</p>
+
+      <figure class="fig" id="figSync"></figure>
+      <figcaption>mn[i] 记「压到第 i 层为止的最小值」，push 和 pop 两个栈同步走</figcaption>
+
+      <p>代码短得有点意外：</p>
+          <pre class="code"><span class="kw">struct</span> MinStack {
+        vector&lt;<span class="kw">int</span>&gt; data, mn;
+
+        <span class="kw">void</span> <span class="fn">push</span>(<span class="kw">int</span> val) {
+            data.push_back(val);
+            <span class="kw">if</span> (mn.empty() || val &lt;= mn.back()) {
+                mn.push_back(val);
+            } <span class="kw">else</span> {
+                mn.push_back(mn.back());
+            }
+        }
+
+        <span class="kw">void</span> <span class="fn">pop</span>() {
+            data.pop_back();
+            mn.pop_back();
+        }
+
+        <span class="kw">int</span> <span class="fn">top</span>() { <span class="kw">return</span> data.back(); }
+
+        <span class="kw">int</span> <span class="fn">getMin</span>() { <span class="kw">return</span> mn.back(); }
+    };</pre>
+
+      <p><code>val &lt;= mn.back()</code> 经常被人写成 <code>val &lt; mn.back()</code>，写错的人不少，但两种写法结果完全一样：else 分支压的是 <code>mn.back()</code>，val 等于它的时候，压 val 和压 <code>mn.back()</code> 落进栈的是同一个数。跑了 20 000 组随机序列，两个版本 mn 栈的内容零次不同。</p>
+      <p>真正要紧的等号在下一节的省空间版里，那里 mn 栈不再跟 data 等长，重复的最小值会被记漏。</p>
+
+      <h2 id="compact">三、mn 栈只记刷新过的那些</h2>
+      <p>同步版每层都存一份，mn 栈和 data 一样长，空间是 2n。可 mn 栈里大部分是重复值：压进来的数比当前最小值大时，mn 栈只是把上一个值又抄了一遍。</p>
+      <p>换个记法：mn 栈只在「来了个严格更小的值」时压栈，弹出时靠 data 的值判断要不要一起弹。重复出现的最小值必须记份数，所以再配一个 <code>cnt</code> 栈，跟 mn 栈一起长一起短。</p>
+          <pre class="code"><span class="kw">struct</span> MinStack {
+        vector&lt;<span class="kw">int</span>&gt; data, mn, cnt;
+
+        <span class="kw">void</span> <span class="fn">push</span>(<span class="kw">int</span> val) {
+            data.push_back(val);
+            <span class="kw">if</span> (mn.empty() || val &lt; mn.back()) {
+                mn.push_back(val);
+                cnt.push_back(1);
+            } <span class="kw">else</span> <span class="kw">if</span> (val == mn.back()) {
+                cnt.back()++;
+            }
+        }
+
+        <span class="kw">void</span> <span class="fn">pop</span>() {
+            <span class="kw">int</span> val = data.back();
+            data.pop_back();
+            <span class="kw">if</span> (val == mn.back()) {
+                <span class="kw">if</span> (--cnt.back() == 0) {
+                    mn.pop_back();
+                    cnt.pop_back();
+                }
+            }
+        }
+
+        <span class="kw">int</span> <span class="fn">top</span>() { <span class="kw">return</span> data.back(); }
+
+        <span class="kw">int</span> <span class="fn">getMin</span>() { <span class="kw">return</span> mn.back(); }
+    };</pre>
+
+      <p><code>pop</code> 里那个 <code>--cnt.back() == 0</code> 就是关键：只有最后一个同值元素被弹走，这一档最小值才真的消失。</p>
+
+      <figure class="fig" id="figDup"></figure>
+      <figcaption>不记份数时，重复的最小值会被 pop 误删：第一个 1 弹走后 mn 栈空了，data 里还剩一个 1</figcaption>
+
+      <p>拿 <code>push 3, 1, 1, 2</code> 再 <code>pop, pop</code> 走一遍就明白了。正确写法里 mn 栈是 <code>[3, 1]</code>、cnt 是 <code>[1, 2]</code>，弹掉一个 1 之后 cnt 从 2 变 1，栈里还剩 <code>[3, 1]</code>，getMin 答 1。省略计数、只压严格更小值的写法里 mn 栈只有 <code>[3, 1]</code> 这一份 1，弹第一个 1 时它被当作唯一的最小值弹掉了，getMin 答 3。</p>
+      <p>这个错有多容易被随机数据抓到？序列长度 ≤ 20，边弹边查，每组值域跑 20 000 次：</p>
+      <table class="complexity">
+        <tr><th>值域 V</th><th>2</th><th>3</th><th>5</th><th>10</th><th>100</th></tr>
+        <tr><td>出错序列占比</td><td>45.22%</td><td>58.55%</td><td>60.22%</td><td>50.22%</td><td>8.94%</td></tr>
+      </table>
+      <p>值域越小、重复越多，越容易撞上；值域拉到 100，重复值少了，八成序列都看不出错。顺便量了另一种常见错法：同步版 <code>pop</code> 忘了弹 mn 栈，20 000 组里 76.36% 会现形。</p>
+
+      <div class="viz" id="vizStack"></div>
+
+      <h2 id="length">四、mn 栈到底有多长</h2>
+      <p>省空间版的 mn 栈长度等于「前缀最小值被刷新的次数 + 1」。随机数据下这个次数是调和级数的量级：第 i 个数刷新前缀最小值的概率是 1/i，所以期望刷新次数是 H<sub>n</sub> = 1 + 1/2 + … + 1/n ≈ ln n。</p>
+      <p>值域有限时刷新迟早会停，实际长度更接近 H<sub>min(n, V)</sub>。实测（每组 300 次）：</p>
+      <table class="complexity">
+        <tr><th>n</th><th>值域 V</th><th>实测 mn 栈长度</th><th>H<sub>min(n,V)</sub></th><th>占 n 的比例</th></tr>
+        <tr><td>100</td><td>10</td><td>2.97</td><td>2.93</td><td>2.97%</td></tr>
+        <tr><td>1 000</td><td>10</td><td>2.99</td><td>2.93</td><td>0.30%</td></tr>
+        <tr><td>10 000</td><td>1 000</td><td>7.49</td><td>7.49</td><td>0.07%</td></tr>
+        <tr><td>100 000</td><td>1 000</td><td>7.37</td><td>7.48</td><td>0.01%</td></tr>
+      </table>
+      <p>100 000 个数、值域 1 000 时，mn 栈平均只有 7 项出头。同步版这时要开 100 000 个 int，省空间版只开 7 个，加上 cnt 也不过 14 个。</p>
+      <p>三种极端形状也值得记一下（n = 1 000）：全相等时 mn 栈恒为 1 项；严格递增时最小值在最底下，mn 栈还是 1 项；严格递减时每来一个都刷新，mn 栈长到 1 000，等于退回了同步版。</p>
+
+      <figure class="fig" id="figLen"></figure>
+      <figcaption>随机数据下 mn 栈长度是对数级，严格递减时每个数都刷新最小值，退化回同步版</figcaption>
+
+      <div class="viz" id="vizLen"></div>
+
+      <h2 id="diff">五、一个变量加一个栈</h2>
+      <p>还有种写法连 mn 栈都不开，只用一个变量 <code>curMin</code> 记当前最小值，栈里存差值 <code>diff = val - curMin</code>。</p>
+      <p>压栈时 diff 非负表示这个数没刷新最小值，负数表示它成了新的最小值。</p>
+      <p>弹栈时如果 diff 是负的，说明弹走的正是当前最小值，得把旧的那个算回来：<code>oldMin = curMin - diff</code>。diff 本来就是 <code>val - oldMin</code>，而 val 就是现在的 curMin，移项即可。</p>
+      <p>读栈顶时同理：<code>diff &lt;= 0</code> 说明这个数就是 curMin，否则是 <code>curMin + diff</code>。</p>
+          <pre class="code"><span class="kw">struct</span> MinStack {
+        vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt; diff;
+        <span class="kw">long</span> <span class="kw">long</span> curMin;
+
+        <span class="kw">void</span> <span class="fn">push</span>(<span class="kw">long</span> <span class="kw">long</span> val) {
+            <span class="kw">if</span> (diff.empty()) {
+                diff.push_back(0);
+                curMin = val;
+            } <span class="kw">else</span> {
+                diff.push_back(val - curMin);
+                <span class="kw">if</span> (val &lt; curMin) curMin = val;
+            }
+        }
+
+        <span class="kw">void</span> <span class="fn">pop</span>() {
+            <span class="kw">if</span> (diff.back() &lt; 0) {
+                curMin = curMin - diff.back();
+            }
+            diff.pop_back();
+        }
+
+        <span class="kw">long</span> <span class="kw">long</span> <span class="fn">top</span>() {
+            <span class="kw">return</span> diff.back() &lt;= 0 ? curMin : curMin + diff.back();
+        }
+
+        <span class="kw">long</span> <span class="kw">long</span> <span class="fn">getMin</span>() { <span class="kw">return</span> curMin; }
+    };</pre>
+
+      <figure class="fig" id="figDiff"></figure>
+      <figcaption>栈里存 val − curMin 的差值，负数就是最小值的刷新点，弹出时用 oldMin = curMin − diff 算回旧答案</figcaption>
+
+      <p>一个坑：差值要用 <code>long long</code>。<code>INT_MAX - INT_MIN</code> 在 int 里算出来是 <code>-1</code>，符号直接反过来，后面的判断全错，换成 64 位才是 4 294 967 295。</p>
+
+      <h2 id="array">六、预先开好定长数组</h2>
+      <p>笔试和竞赛里常见的写法是两个定长数组加一个 <code>size</code>，省掉动态扩容：</p>
+          <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXN = 8001;
+
+    <span class="kw">struct</span> MinStack {
+        <span class="kw">int</span> data[MAXN], mn[MAXN], size;
+
+        MinStack() { size = 0; }
+
+        <span class="kw">void</span> <span class="fn">push</span>(<span class="kw">int</span> val) {
+            data[size] = val;
+            <span class="kw">if</span> (size == 0 || val &lt;= mn[size - 1]) {
+                mn[size] = val;
+            } <span class="kw">else</span> {
+                mn[size] = mn[size - 1];
+            }
+            size++;
+        }
+
+        <span class="kw">void</span> <span class="fn">pop</span>() { size--; }
+
+        <span class="kw">int</span> <span class="fn">top</span>() { <span class="kw">return</span> data[size - 1]; }
+
+        <span class="kw">int</span> <span class="fn">getMin</span>() { <span class="kw">return</span> mn[size - 1]; }
+    };</pre>
+
+      <p>这里 MAXN 要按题目给的上界开，开小了越界，开大了浪费。至于扩容本身有多贵：vector 从空长到 1 000 000，扩容 21 次，累计搬走 1 048 575 个 int，正好约等于 n 个，摊到每次 push 上是一次拷贝。实测 300 万次混合操作，定长数组版 30.27 ms、vector 版 33.10 ms。差别不大，定长版的价值是写法简单、上限写死了不会突然 realloc，别指望靠它提速。</p>
+
+      <h2 id="complexity">七、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>写法</th><th>push</th><th>pop</th><th>getMin</th><th>额外空间</th></tr>
+        <tr><td>全扫</td><td>O(1)</td><td>O(1)</td><td>O(n)</td><td>O(1)</td></tr>
+        <tr><td>同步 mn 栈</td><td>O(1)</td><td>O(1)</td><td>O(1)</td><td>O(n)</td></tr>
+        <tr><td>省空间版（mn + cnt）</td><td>O(1)</td><td>O(1)</td><td>O(1)</td><td>期望 O(log n)，最坏 O(n)</td></tr>
+        <tr><td>差值法</td><td>O(1)</td><td>O(1)</td><td>O(1)</td><td>O(n) 个 64 位整数</td></tr>
+        <tr><td>定长数组版</td><td>O(1)</td><td>O(1)</td><td>O(1)</td><td>O(MAXN)，编译期定死</td></tr>
+      </table>
+      <p>时间上四个版本都是 O(1)，拼的是空间。省空间版在随机数据下 mn 栈只有 H<sub>min(n,V)</sub> 项，实测 n = 10<sup>5</sup>、值域 10<sup>3</sup> 时是 7 项；差值法省掉了 mn 栈，但每个元素从 4 字节变 8 字节，n = 10<sup>6</sup> 时算下来正好和同步版打平，白折腾。</p>
+      <p>栈本身存 n 个元素的空间是省不掉的，所有写法都要开 O(n)。</p>
+
+      <h2 id="summary">八、总结</h2>
+      <p>几个要点：</p>
+      <ul>
+        <li>同步 mn 栈靠一条不变式成立：<code>mn[i]</code> 等于从第 0 层到第 i 层的最小值，push 和 pop 都必须同步，漏掉 pop 里的弹栈在 20 000 组随机序列里有 76.36% 会现形。</li>
+        <li>同步版里 <code>&lt;=</code> 写成 <code>&lt;</code> 无所谓，两种写法压进去的是同一个数。等号要紧的地方是省空间版，那里重复的最小值要记份数。</li>
+        <li>省空间版的 mn 栈期望长度是 H<sub>min(n,V)</sub> ≈ ln n，严格递减时退化回 n。</li>
+        <li>差值法的 <code>diff</code> 必须开 <code>long long</code>，int 下 <code>INT_MAX - INT_MIN</code> 会溢出成 -1。</li>
+        <li>只问一次最小值时全扫就够了（100 万个只要 0.250 ms），别一上来就上 mn 栈。</li>
+      </ul>
+      <p>这套「每一层存一份前缀答案、弹出时同步回滚」的思路后面还会遇到：单调栈、直方图最大矩形、滑动窗口的最大值，用的都是同一个记账办法。下一讲换成问最大值的窗口，栈要换成能两头出队的双端队列。</p>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = {
+    blue: '#2563eb', blueBg: '#dbeafe', blueSoft: '#eef4ff',
+    orange: '#ea580c', orangeBg: '#ffedd5',
+    gray: '#9aa0a6', grayBg: '#f6f7f9', border: '#e6e8eb',
+    red: '#dc2626', redBg: '#fee2e2',
+    text: '#333', dim: '#6b7280'
+  };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function svg(inner, w, h) {
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" ' +
+      'style="width:100%;height:auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif">' +
+      '<style>text{font-size:12px;fill:' + C.text + '}</style>' + inner + '</svg>';
+  }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '"' +
+      (o.anchor ? ' text-anchor="' + o.anchor + '"' : '') +
+      (o.size ? ' font-size="' + o.size + '"' : '') +
+      (o.fill ? ' fill="' + o.fill + '"' : '') +
+      (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function box(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" ' +
+      'fill="' + (o.fill || C.grayBg) + '" stroke="' + (o.stroke || C.border) + '" stroke-width="1"' +
+      (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function put(id, html) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  }
+
+  // ============ 图 1：全扫 vs min 栈 ============
+  (function () {
+    var g = '';
+    var cw = 48, chh = 30, gap = 5, x0 = 130;
+    var vals = [5, 9, 2, 7, 1, 8, 3, 6];
+    var mnVals = [5, 5, 2, 2, 1, 1, 1, 1];
+    function row(y, label, fill, stroke, color) {
+      g += txt(20, y + 20, label, { size: 12, weight: 600, fill: color || C.text });
+      for (var i = 0; i < 8; i++) {
+        var x = x0 + i * (cw + gap);
+        g += box(x, y, cw, chh, { fill: fill, stroke: stroke });
+        g += txt(x + cw / 2, y + 20, vals[i], { anchor: 'middle', fill: color || C.text });
+      }
+    }
+    // 上半：全扫
+    row(24, '全扫一遍', C.orangeBg, C.orange, C.orange);
+    g += '<defs><marker id="arScan" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">' +
+      '<path d="M0,0 L6,3 L0,6 z" fill="' + C.orange + '"/></marker></defs>';
+    g += '<path d="M 130 66 L 546 66" stroke="' + C.orange + '" stroke-width="1.4" fill="none" marker-end="url(#arScan)"/>';
+    g += txt(330, 86, 'getMin() 从底到顶走一遍，比较 8 次才知道答案是 1：O(n)', { anchor: 'middle', size: 12, fill: C.orange });
+
+    // 下半：带 mn 栈
+    row(112, '带 mn 栈', C.grayBg, C.border, C.text);
+    g += txt(20, 166, 'mn', { size: 12, weight: 600 });
+    for (var i = 0; i < 8; i++) {
+      var x = x0 + i * (cw + gap);
+      var top = (i === 7);
+      g += box(x, 148, cw, chh, { fill: top ? C.blueBg : C.blueSoft, stroke: top ? C.blue : '#c7d7fe' });
+      g += txt(x + cw / 2, 168, mnVals[i], { anchor: 'middle', fill: top ? C.blue : C.dim });
+    }
+    g += txt(330, 196, 'mn 栈顶直接给出答案，比较 0 次：O(1)', { anchor: 'middle', size: 12, fill: C.blue });
+    g += txt(330, 214, 'mn[i] 等于前 i+1 个数里的最小值，所以第 i 层的答案与栈有多深无关', { anchor: 'middle', size: 11, fill: C.dim });
+    put('figScan', svg(g, 660, 226));
+  })();
+
+  // ============ 图 2：同步 mn 栈不变式 ============
+  (function () {
+    var g = '';
+    var data = [3, -1, 2, 0];
+    var mn = [3, -1, -1, -1];
+    var cw = 54, chh = 32, gap = 4;
+    function stack(x, baseY, vals, opt) {
+      for (var i = 0; i < vals.length; i++) {
+        var y = baseY - (i + 1) * (chh + gap);
+        var isTop = i === vals.length - 1;
+        var isMin = opt.isMin ? opt.isMin(i) : false;
+        g += box(x, y, cw, chh, {
+          fill: isTop ? C.blueBg : (isMin ? C.orangeBg : C.grayBg),
+          stroke: isTop ? C.blue : (isMin ? C.orange : C.border)
+        });
+        g += txt(x + cw / 2, y + 21, vals[i], {
+          anchor: 'middle',
+          fill: isTop ? C.blue : (isMin ? C.orange : C.text)
+        });
+        g += txt(x + cw + 8, y + 21, '#' + i, { size: 11, fill: C.dim });
+      }
+      g += txt(x + cw / 2, baseY + 18, opt.name, { anchor: 'middle', size: 12, weight: 600 });
+      // 底部横线
+      g += '<path d="M ' + x + ' ' + baseY + ' L ' + (x + cw) + ' ' + baseY + '" stroke="' + C.border + '" stroke-width="1"/>';
+    }
+    var baseY = 196;
+    g += txt(300, 22, '不变式：mn[i] = min(data[0], …, data[i])，两个栈同长', { anchor: 'middle', size: 13, weight: 600 });
+    stack(60, baseY, data, { name: 'data', isMin: function (i) { return data[i] === -1; } });
+    stack(190, baseY, mn, { name: 'mn', isMin: function (i) { return mn[i] === -1; } });
+    // 层间虚线
+    for (var i = 0; i < 4; i++) {
+      var y = baseY - (i + 1) * (chh + gap) + chh / 2;
+      g += '<path d="M 114 ' + y + ' L 190 ' + y + '" stroke="' + C.border + '" stroke-width="1" stroke-dasharray="3 3" fill="none"/>';
+      g += txt(300, y + 4, 'mn[' + i + '] = min(data[0..' + i + ']) = ' + mn[i], { size: 11, fill: C.dim });
+    }
+    // 右侧：pop 两次
+    var bx = 500;
+    stack(bx, baseY, [3, -1], { name: 'data', isMin: function (i) { return [3, -1][i] === -1; } });
+    stack(bx + 80, baseY, [3, -1], { name: 'mn', isMin: function (i) { return [3, -1][i] === -1; } });
+    g += txt(bx + 40, baseY + 36, 'pop 两次后', { anchor: 'middle', size: 11, fill: C.dim });
+    g += txt(bx + 40, baseY + 52, '两个栈一起弹', { anchor: 'middle', size: 11, fill: C.dim });
+    g += txt(190, baseY + 36, 'push 3, -1, 2, 0 之后', { anchor: 'middle', size: 11, fill: C.dim });
+    put('figSync', svg(g, 660, 258));
+  })();
+
+  // ============ 图 3：重复最小值的坑 ============
+  (function () {
+    var g = '';
+    var cw = 46, chh = 30, gap = 4, baseY = 170;
+    function stack(x, vals, cntVals, opt) {
+      for (var i = 0; i < vals.length; i++) {
+        var y = baseY - (i + 1) * (chh + gap);
+        var bad = opt.bad && opt.bad(i);
+        g += box(x, y, cw, chh, {
+          fill: bad ? C.redBg : (i === vals.length - 1 ? C.blueBg : C.grayBg),
+          stroke: bad ? C.red : (i === vals.length - 1 ? C.blue : C.border)
+        });
+        g += txt(x + cw / 2, y + 20, vals[i], { anchor: 'middle', fill: bad ? '#b91c1c' : (i === vals.length - 1 ? C.blue : C.text) });
+        if (cntVals) g += txt(x + cw + 9, y + 20, '×' + cntVals[i], { size: 11, fill: bad ? C.red : C.dim });
+      }
+      g += txt(x + cw / 2, baseY + 18, opt.name, { anchor: 'middle', size: 12, weight: 600 });
+      g += '<path d="M ' + x + ' ' + baseY + ' L ' + (x + cw) + ' ' + baseY + '" stroke="' + C.border + '" stroke-width="1"/>';
+    }
+    g += txt(330, 22, 'push 3, 1, 1, 2 之后 pop 两次：栈里还剩 [3, 1]', { anchor: 'middle', size: 13, weight: 600 });
+    // 正确版
+    stack(60, [3, 1], [1, 1], { name: 'mn（记份数）' });
+    g += txt(60 + 23, baseY + 40, 'getMin = 1，cnt 显示每档份数', { anchor: 'middle', size: 12, fill: C.blue });
+    // bug 版
+    stack(250, [3], null, { name: 'mn（不记份数）', bad: function () { return true; } });
+    g += txt(250 + 23, baseY + 40, 'getMin = 3', { anchor: 'middle', size: 12, fill: C.red });
+    g += txt(250 + 23, baseY + 58, '第二个 1 还在 data 里', { anchor: 'middle', size: 11, fill: C.red });
+    // data
+    stack(450, [3, 1], null, { name: 'data' });
+    g += txt(450 + 23, baseY + 40, '正确答案 1', { anchor: 'middle', size: 12, fill: C.orange });
+
+    put('figDup', svg(g, 660, 240));
+  })();
+
+  // ============ 图 4：mn 栈长度柱图 ============
+  (function () {
+    var g = '';
+    var items = [
+      { name: '随机 n=1e5 V=10', v: 2.88 },
+      { name: '随机 n=1e5 V=1000', v: 7.37 },
+      { name: '随机 n=1e4 V=1000', v: 7.49 },
+      { name: '全相等', v: 1 },
+      { name: '严格递增', v: 1 },
+      { name: '严格递减', v: 1000 }
+    ];
+    var maxV = 1000, H = 150, baseY = 200, bw = 74, gap = 22, x0 = 40;
+    // 对数刻度
+    function yOf(v) { return baseY - Math.log10(Math.max(1, v)) / Math.log10(maxV) * H; }
+    g += txt(330, 22, 'mn 栈平均长度（对数刻度），n = 100 000', { anchor: 'middle', size: 13, weight: 600 });
+    for (var t = 0; t <= 3; t++) {
+      var v = Math.pow(10, t);
+      var y = yOf(v);
+      g += '<path d="M ' + x0 + ' ' + y + ' L 640 ' + y + '" stroke="' + C.border + '" stroke-width="1" stroke-dasharray="2 3" fill="none"/>';
+      g += txt(x0 - 8, y + 4, v >= 1000 ? '1000' : String(v), { anchor: 'end', size: 11, fill: C.dim });
+    }
+    for (var i = 0; i < items.length; i++) {
+      var x = x0 + 12 + i * (bw + gap);
+      var y = yOf(items[i].v);
+      var isMax = items[i].v >= 1000;
+      g += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + (baseY - y) + '" rx="3" ' +
+        'fill="' + (isMax ? C.orangeBg : C.blueBg) + '" stroke="' + (isMax ? C.orange : C.blue) + '" stroke-width="1"/>';
+      g += txt(x + bw / 2, y - 6, items[i].v >= 100 ? String(Math.round(items[i].v)) : items[i].v.toFixed(2), {
+        anchor: 'middle', size: 11, fill: isMax ? C.orange : C.blue, weight: 600
+      });
+      var nm = items[i].name;
+      var parts = nm.split(' ');
+      for (var p = 0; p < parts.length; p++) {
+        g += txt(x + bw / 2, baseY + 16 + p * 14, parts[p], { anchor: 'middle', size: 11, fill: C.dim });
+      }
+    }
+    g += '<path d="M ' + x0 + ' ' + baseY + ' L 640 ' + baseY + '" stroke="' + C.border + '" stroke-width="1"/>';
+    g += txt(330, baseY + 58, '随机数据的期望长度 ≈ H(min(n, V))：V=10 时 H₁₀ = 2.93，V=1000 时 H₁₀₀₀ = 7.48', { anchor: 'middle', size: 11, fill: C.dim });
+    put('figLen', svg(g, 660, 268));
+  })();
+
+  // ============ 图 5：差值法 ============
+  (function () {
+    var g = '';
+    var vals = [5, 2, 7, 1];
+    var diff = [0, -3, 5, -1];
+    var cur = [5, 2, 2, 1];
+    var cw = 58, chh = 32, gap = 5, baseY = 190;
+    function col(x, arr, name, opt) {
+      opt = opt || {};
+      for (var i = 0; i < arr.length; i++) {
+        var y = baseY - (i + 1) * (chh + gap);
+        var neg = opt.neg ? opt.neg(i) : false;
+        var isTop = i === arr.length - 1;
+        g += box(x, y, cw, chh, {
+          fill: neg ? C.orangeBg : (isTop ? C.blueBg : C.grayBg),
+          stroke: neg ? C.orange : (isTop ? C.blue : C.border)
+        });
+        g += txt(x + cw / 2, y + 21, arr[i], { anchor: 'middle', fill: neg ? C.orange : (isTop ? C.blue : C.text) });
+      }
+      g += txt(x + cw / 2, baseY + 18, name, { anchor: 'middle', size: 12, weight: 600 });
+      g += '<path d="M ' + x + ' ' + baseY + ' L ' + (x + cw) + ' ' + baseY + '" stroke="' + C.border + '" stroke-width="1"/>';
+    }
+    g += txt(300, 22, 'push 5, 2, 7, 1：栈里存 val − curMin，curMin 单独记', { anchor: 'middle', size: 13, weight: 600 });
+    col(70, vals, '真实值');
+    col(190, diff, 'diff', { neg: function (i) { return diff[i] < 0; } });
+    // 每步的 curMin
+    g += txt(300, 48, '每一步之后的 curMin', { size: 12, weight: 600 });
+    for (var i = 0; i < 4; i++) {
+      var y = baseY - (i + 1) * (chh + gap) + 21;
+      var msg;
+      if (i === 0) msg = '第一个数：diff 记 0，curMin = 5';
+      else msg = '#' + i + ' push ' + vals[i] + ' → diff = ' + vals[i] + ' − ' + cur[i - 1] + ' = ' + diff[i] +
+        (diff[i] < 0 ? '，刷新 curMin = ' + cur[i] : '');
+      g += txt(300, y, msg, { size: 11, fill: diff[i] < 0 ? C.orange : C.dim });
+    }
+    g += box(30, 220, 600, 46, { fill: C.grayBg, stroke: C.border });
+    g += txt(44, 238, '弹栈时 diff < 0 说明弹走的是当前最小值：oldMin = curMin − diff。', { size: 11, fill: C.text });
+    g += txt(44, 256, '读栈顶：diff ≤ 0 时就是 curMin，否则是 curMin + diff。', { size: 11, fill: C.text });
+    put('figDiff', svg(g, 660, 272));
+  })();
+
+  // ============ 演示 2：mn 栈长度 ============
+  (function () {
+    var wrap = document.getElementById('vizLen');
+    if (!wrap) return;
+    wrap.innerHTML =
+      '<div class="viz-title">mn 栈长度：改 n、值域、数据形状，看同步版和省空间版各开多少格子</div>' +
+      '<div class="viz-body"></div>' +
+      '<div class="viz-controls"></div>';
+    var body = wrap.querySelector('.viz-body');
+    var ctl = wrap.querySelector('.viz-controls');
+    var st = { n: 10000, V: 1000, shape: 'rand' };
+
+    function harmonic(k) { var s = 0; for (var i = 1; i <= k; i++) s += 1 / i; return s; }
+    function lenOf() {
+      if (st.shape === 'eq') return 1;
+      if (st.shape === 'inc') return 1;
+      if (st.shape === 'dec') return st.n;
+      return Math.min(st.n, harmonic(Math.min(st.n, st.V)));
+    }
+    function render() {
+      var L = lenOf();
+      var ratio = L / st.n * 100;
+      var g = '';
+      var baseY = 96, H = 66, x0 = 96, maxW = 500;
+      g += '<svg viewBox="0 0 620 150" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">' +
+        '<style>text{font-size:12px;fill:#333}</style>';
+      // 同步版条
+      var y1 = 40;
+      g += '<text x="8" y="' + (y1 + 17) + '" font-size="12">同步版</text>';
+      g += '<rect x="' + x0 + '" y="' + y1 + '" width="' + maxW + '" height="26" rx="4" fill="' + C.blueBg + '" stroke="' + C.blue + '"/>';
+      g += '<text x="' + (x0 + maxW / 2) + '" y="' + (y1 + 17) + '" text-anchor="middle" fill="' + C.blue + '">' + st.n + ' 项</text>';
+      // 省空间版条
+      var y2 = 96;
+      var w = Math.max(3, Math.min(maxW, Math.log10(Math.max(1, L) + 1) / Math.log10(st.n + 1) * maxW));
+      g += '<text x="8" y="' + (y2 + 17) + '" font-size="12">省空间版</text>';
+      g += '<rect x="' + x0 + '" y="' + y2 + '" width="' + maxW + '" height="26" rx="4" fill="' + C.grayBg + '" stroke="' + C.border + '" stroke-dasharray="3 3"/>';
+      g += '<rect x="' + x0 + '" y="' + y2 + '" width="' + w + '" height="26" rx="4" fill="' + C.orangeBg + '" stroke="' + C.orange + '"/>';
+      var lab = L >= 10 ? L.toFixed(1) : L.toFixed(2);
+      g += '<text x="' + (x0 + w + 10) + '" y="' + (y2 + 17) + '" font-size="12" fill="' + C.orange + '">' + lab + ' 项</text>';
+      g += '</svg>';
+      var note = st.shape === 'rand'
+        ? '随机数据下 mn 栈长度 ≈ H<sub>min(n, V)</sub> = ' + harmonic(Math.min(st.n, st.V)).toFixed(2) + '，占 n 的 ' + ratio.toFixed(3) + '%'
+        : (st.shape === 'dec' ? '严格递减时每个数都刷新最小值，mn 栈长回 ' + st.n + '，省空间版退化成同步版'
+          : '最小值一次没被刷新过，mn 栈恒为 1 项');
+      body.innerHTML = g +
+        '<div class="breakdown" style="margin-top:8px">' +
+        '<div>n = ' + st.n + '，值域 V = ' + st.V + '</div>' +
+        '<div>' + note + '</div>' +
+        '</div>';
+    }
+    var selN = document.createElement('select');
+    selN.className = 'mn-sel';
+    [[100, '100'], [1000, '1 000'], [10000, '10 000'], [100000, '100 000'], [1000000, '1 000 000']].forEach(function (p) {
+      var o = document.createElement('option'); o.value = p[0]; o.textContent = 'n = ' + p[1];
+      if (p[0] === st.n) o.selected = true;
+      selN.appendChild(o);
+    });
+    selN.addEventListener('change', function () { st.n = +selN.value; render(); });
+    var selV = document.createElement('select');
+    selV.className = 'mn-sel';
+    [[2, '2'], [10, '10'], [100, '100'], [1000, '1 000'], [100000, '100 000']].forEach(function (p) {
+      var o = document.createElement('option'); o.value = p[0]; o.textContent = '值域 V = ' + p[1];
+      if (p[0] === st.V) o.selected = true;
+      selV.appendChild(o);
+    });
+    selV.addEventListener('change', function () { st.V = +selV.value; render(); });
+    var selS = document.createElement('select');
+    selS.className = 'mn-sel';
+    [['rand', '随机数据'], ['inc', '严格递增'], ['dec', '严格递减'], ['eq', '全部相等']].forEach(function (p) {
+      var o = document.createElement('option'); o.value = p[0]; o.textContent = p[1];
+      if (p[0] === st.shape) o.selected = true;
+      selS.appendChild(o);
+    });
+    selS.addEventListener('change', function () { st.shape = selS.value; render(); });
+    ctl.appendChild(selN); ctl.appendChild(selV); ctl.appendChild(selS);
+    render();
+  })();
+
+  // ============ 演示 1：最小栈操作台 ============
+  (function () {
+    var wrap = document.getElementById('vizStack');
+    if (!wrap) return;
+    wrap.innerHTML =
+      '<div class="viz-title">最小栈操作台：单步执行，三个版本对照；不记份数的版本第一次答错时格子标红</div>' +
+      '<div class="viz-body"></div>' +
+      '<div class="viz-controls"></div>';
+    var body = wrap.querySelector('.viz-body');
+    var ctl = wrap.querySelector('.viz-controls');
+
+    var SEQS = {
+      a: { name: '重复最小值', ops: [['push', 3], ['push', 1], ['push', 1], ['push', 2], ['pop'], ['pop'], ['getMin'], ['pop'], ['getMin']] },
+      b: { name: 'LeetCode 样例', ops: [['push', -2], ['push', 0], ['push', -3], ['getMin'], ['pop'], ['top'], ['getMin']] },
+      c: { name: '全相等', ops: [['push', 5], ['push', 5], ['push', 5], ['pop'], ['getMin'], ['pop'], ['getMin']] },
+      d: { name: '先小后大', ops: [['push', 2], ['push', 3], ['push', 1], ['pop'], ['getMin'], ['pop'], ['getMin']] }
+    };
+    var VERSIONS = {
+      sync: '同步 mn 栈',
+      compact: '省空间版（记份数）',
+      bug: '省空间版（不记份数）'
+    };
+    var st = { seq: 'a', ver: 'sync', step: 0, steps: [] };
+
+    function mulberry32(a) {
+      return function () {
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        var t = Math.imul(a ^ (a >>> 15), a | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    function genRandom() {
+      var rnd = mulberry32(20261004 + Math.floor(Math.random() * 1000));
+      var ops = [];
+      var depth = 0;
+      for (var i = 0; i < 10; i++) {
+        if (depth === 0 || (rnd() < 0.62 && depth < 5)) { ops.push(['push', Math.floor(rnd() * 6)]); depth++; }
+        else if (rnd() < 0.5) { ops.push(['pop']); depth--; }
+        else ops.push([rnd() < 0.5 ? 'getMin' : 'top']);
+      }
+      return ops;
+    }
+    function build() {
+      var ops = st.seq === 'rnd' ? genRandom() : SEQS[st.seq].ops;
+      var steps = [];
+      var d = [], m = [], c = [];
+      steps.push({ op: '（空栈）', data: d.slice(), mn: m.slice(), cnt: c.slice(), got: null, want: null, note: '初始状态' });
+      for (var i = 0; i < ops.length; i++) {
+        var op = ops[i][0], val = ops[i][1];
+        var got = null, want = null, note = '';
+        if (op === 'push') {
+          d.push(val);
+          if (st.ver === 'sync') {
+            m.push(m.length === 0 || val <= m[m.length - 1] ? val : m[m.length - 1]);
+          } else {
+            if (m.length === 0 || val < m[m.length - 1]) { m.push(val); c.push(1); }
+            else if (val === m[m.length - 1]) { c[c.length - 1]++; }
+          }
+          note = 'push ' + val + '，' + (st.ver === 'sync' ? 'mn 压 min(' + val + ', 上一层 mn)' : (m[m.length - 1] === val && c[c.length - 1] > 1 ? '值相等，份数 +1' : 'mn 压 ' + val));
+        } else if (op === 'pop') {
+          var v = d[d.length - 1]; d.pop();
+          if (st.ver === 'sync') m.pop();
+          else if (m.length && v === m[m.length - 1]) {
+            if (st.ver === 'compact') { if (--c[c.length - 1] === 0) { m.pop(); c.pop(); } }
+            else { m.pop(); }
+          }
+          note = 'pop ' + v + (st.ver === 'sync' ? '，mn 一起弹' : (v === (m.length ? m[m.length - 1] : null) ? '，mn 栈顶档位动' : '，mn 不动'));
+        } else if (op === 'top') {
+          got = d[d.length - 1]; want = d[d.length - 1];
+          note = 'top() = ' + got;
+        } else {
+          got = m.length ? m[m.length - 1] : null;
+          want = d.length ? Math.min.apply(null, d) : null;
+          note = 'getMin() = ' + got + '，正确答案 ' + want;
+        }
+        steps.push({ op: op === 'push' ? 'push ' + val : op, data: d.slice(), mn: m.slice(), cnt: c.slice(), got: got, want: want, note: note, ask: (op === 'getMin' || op === 'top') });
+      }
+      st.steps = steps;
+      st.step = 0;
+      render();
+    }
+    function cellsHtml(arr, cls, cntArr) {
+      var h = '<div class="ms-cells">';
+      for (var i = 0; i < arr.length; i++) {
+        var isTop = i === arr.length - 1;
+        h += '<div class="ms-cell ' + cls + (isTop ? ' top' : '') + '">' + arr[i] +
+          (cntArr ? '<span style="font-size:11px;opacity:.7"> ×' + cntArr[i] + '</span>' : '') + '</div>';
+      }
+      if (!arr.length) h += '<div class="ms-cell gone">空</div>';
+      return h + '</div>';
+    }
+    function render() {
+      var s = st.steps[st.step];
+      var bad = s.ask && s.got !== null && s.got !== s.want;
+      var h = '<div class="breakdown" style="margin-bottom:8px">' +
+        '<div>第 ' + st.step + ' / ' + (st.steps.length - 1) + ' 步　操作：<b>' + s.op + '</b></div>' +
+        '<div>' + s.note + '</div>' +
+        '</div>';
+      h += '<div class="ms-stack">';
+      h += '<div class="ms-col"><div class="ms-col-h">data（真实值）</div>' + cellsHtml(s.data, '') + '<div class="ms-tag">栈内 ' + s.data.length + ' 个</div></div>';
+      h += '<div class="ms-col"><div class="ms-col-h">mn（最小值记录）</div>' +
+        cellsHtml(s.mn, bad ? 'err' : 'min', st.ver === 'compact' ? s.cnt : null) +
+        '<div class="ms-tag">mn 栈 ' + s.mn.length + ' 项' + (st.ver === 'compact' ? '，cnt 同步' : '') + '</div></div>';
+      h += '</div>';
+      if (s.ask) {
+        var gotTxt = (s.got === null || s.got === undefined)
+          ? '（mn 栈已空，真实实现会越界崩溃）'
+          : s.got;
+        h += '<div class="ms-read' + (bad ? ' bad' : '') + '">' +
+          (s.op === 'getMin' ? 'getMin()' : 'top()') + ' = <b>' + gotTxt + '</b>' +
+          (s.op === 'getMin' && s.want !== null ? '　正确答案 <b>' + s.want + '</b>' : '') +
+          (bad ? '　← 答错了' : '') + '</div>';
+      } else {
+        h += '<div class="ms-read">&nbsp;</div>';
+      }
+      if (bad) {
+        h += '<div class="breakdown" style="margin-top:8px;border-color:' + C.red + '">' +
+          '<div>反例：栈里是 [' + s.data.join(', ') + ']，最小值应是 ' + s.want + '，这一版答了 ' +
+          (s.got === null || s.got === undefined ? '空' : s.got) + '。</div>' +
+          '</div>';
+      }
+      body.innerHTML = h;
+      ctl.querySelectorAll('button')[0].disabled = (st.step >= st.steps.length - 1);
+      ctl.querySelectorAll('button')[1].disabled = (st.step <= 0);
+    }
+    var selS = document.createElement('select');
+    selS.className = 'mn-sel';
+    [['a', '重复最小值'], ['b', 'LeetCode 样例'], ['c', '全相等'], ['d', '先小后大'], ['rnd', '随机序列']].forEach(function (p) {
+      var o = document.createElement('option'); o.value = p[0]; o.textContent = p[1];
+      if (p[0] === st.seq) o.selected = true;
+      selS.appendChild(o);
+    });
+    selS.addEventListener('change', function () { st.seq = selS.value; build(); });
+    var selV = document.createElement('select');
+    selV.className = 'mn-sel';
+    Object.keys(VERSIONS).forEach(function (k) {
+      var o = document.createElement('option'); o.value = k; o.textContent = VERSIONS[k];
+      if (k === st.ver) o.selected = true;
+      selV.appendChild(o);
+    });
+    selV.addEventListener('change', function () { st.ver = selV.value; build(); });
+    var bNext = document.createElement('button');
+    bNext.className = 'mn-btn'; bNext.textContent = '下一步';
+    bNext.addEventListener('click', function () { if (st.step < st.steps.length - 1) { st.step++; render(); } });
+    var bPrev = document.createElement('button');
+    bPrev.className = 'mn-btn'; bPrev.textContent = '上一步';
+    bPrev.addEventListener('click', function () { if (st.step > 0) { st.step--; render(); } });
+    var bReset = document.createElement('button');
+    bReset.className = 'mn-btn'; bReset.textContent = '重置';
+    bReset.addEventListener('click', function () { st.step = 0; render(); });
+    var bRnd = document.createElement('button');
+    bRnd.className = 'mn-btn'; bRnd.textContent = '换一组随机';
+    bRnd.addEventListener('click', function () { st.seq = 'rnd'; selS.value = 'rnd'; build(); });
+    ctl.appendChild(selS); ctl.appendChild(selV);
+    ctl.appendChild(bNext); ctl.appendChild(bPrev); ctl.appendChild(bReset); ctl.appendChild(bRnd);
+    build();
+  })();
+})();
+</script>
+</body>
+</html>

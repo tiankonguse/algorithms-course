@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线段树分治 + 线性基：异或最短路、八纵八横 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .xr-wrap{font-size:13px;}
+  .xr-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0;}
+  .xr-lab{color:#6b7280;font-size:12px;margin-right:2px;}
+  .xr-box{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
+    min-width:76px;height:44px;border:1px solid var(--border);border-radius:6px;background:var(--bg);
+    font-size:12px;line-height:1.3;padding:0 6px;}
+  .xr-box .xr-sub{font-size:10px;color:#9aa0a6;}
+  .xr-box.on{border-color:#2563eb;background:#dbeafe;}
+  .xr-box.set{border-color:#ea580c;background:#ffedd5;}
+  .xr-box.dim{opacity:.4;}
+  .xr-tag{display:inline-block;border:1px solid #2563eb;color:#2563eb;background:#eef4ff;
+    border-radius:4px;padding:1px 8px;font-size:12px;}
+  .xr-tag.o{border-color:#ea580c;color:#ea580c;background:#ffedd5;}
+  .xr-tag.g{border-color:var(--border);color:#6b7280;background:var(--bg);}
+  .xr-eq{font-size:13px;color:#1f2328;}
+  @media(max-width:640px){.xr-box{min-width:64px;font-size:11px;}}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>线段树分治 + 线性基：异或最短路、八纵八横</h1>
+    <p class="intro">图上的边加加减减，维护「x 到 y 的所有路径中，沿途边权异或起来的最小值（或最大值）」。这件事单独用带权并查集做不出来（它只能给一条路径的值），加上线性基收集所有环之后就完整了。边有生效区间，于是再套一层线段树分治。</p>
+
+    <h2>零、背景</h2>
+    <p>前置有三块：线性基的基础以及它的题目4；带权并查集；可撤销并查集。线段树分治的原理，上一节（同组前一页）讲过时间轴线段树加背包。</p>
+    <p>这一页的两道题都是同一个组合套路：带权并查集给出一条参考路径的异或值，线性基里装着所有环的异或值，两者拼起来就能自由调整。区别在于题 4 的边随时可能被删，所以要连并查集一起回滚；题 5 的初始边永不删除，只有后加的边在区间里生效，因此初始部分用经典带权并查集就够了。</p>
+
+    <h2>一、两个零件怎么拼</h2>
+    <p>先看不带修改时的样子。带权并查集里 eor[u] 记 u 到代表元的路径异或和，路径压缩时要同步压缩权值。加入一条 x 到 y、权值 w 的边时：</p>
+    <p>如果 x 和 y 已经在同一个集合里，这条边一定产生一个环。环的异或值是 getEor(x) ^ getEor(y) ^ w，前两项把各自到根的路径异或值拼出来，第三项是这条新边本身。把环扔进线性基。</p>
+    <p>如果不在同一集合，按大小把其中一个集合挂到另一个下面，并把新代表的 eor 值设成上面算出来的那个 w'。这一步不产生环。</p>
+    <p>查询的时候，getEor(x) ^ getEor(y) 是某一条 x 到 y 路径的异或值，而任意两条 x 到 y 的路径之差都是一个环的组合，所以答案就是这个值在线性基张成的空间里能取到的极值。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="带权并查集给出路径、线性基收集环" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="14" y="20" font-size="12" fill="#6b7280">① 原图：三条边</text>
+        <g stroke="#9aa0a6" stroke-width="1.6" fill="none">
+          <path d="M60 96 L130 96"/><path d="M130 96 L95 152"/><path d="M95 152 L60 96"/>
+        </g>
+        <g fill="#fff" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="60" cy="96" r="15"/><circle cx="130" cy="96" r="15"/><circle cx="95" cy="152" r="15"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="60" y="100">1</text><text x="130" y="100">2</text><text x="95" y="156">3</text>
+          <text x="95" y="90" font-size="11" fill="#2563eb">7</text>
+          <text x="122" y="128" font-size="11" fill="#2563eb">2</text>
+          <text x="66" y="128" font-size="11" fill="#ea580c">4</text>
+        </g>
+        <text x="14" y="182" font-size="11" fill="#9aa0a6">先连 1-2(7)、2-3(2)，</text>
+        <text x="14" y="198" font-size="11" fill="#9aa0a6">再加入 1-3(4) 时成环</text>
+
+        <line x1="180" y1="30" x2="180" y2="270" stroke="#e6e8eb" stroke-width="1"/>
+        <text x="200" y="20" font-size="12" fill="#6b7280">② 带权并查集的状态</text>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.2">
+          <rect x="200" y="38" width="150" height="34" rx="6"/>
+          <rect x="200" y="86" width="150" height="34" rx="6"/>
+          <rect x="200" y="134" width="150" height="34" rx="6"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="start">
+          <text x="212" y="59">点 1：代表元</text>
+          <text x="212" y="107">点 2：父亲 1，eor = 7</text>
+          <text x="212" y="155">点 3：父亲 1，eor = 5</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.2" fill="none">
+          <path d="M275 86 L275 72"/><path d="M275 134 L275 120"/>
+        </g>
+        <text x="200" y="196" font-size="11" fill="#6b7280">环 = getEor(1) ^ getEor(3) ^ 4</text>
+        <text x="200" y="212" font-size="11" fill="#6b7280">   = 0 ^ 5 ^ 4 = 1，送进线性基</text>
+        <text x="200" y="240" font-size="11" fill="#6b7280">getEor(1) ^ getEor(3) = 5</text>
+        <text x="200" y="256" font-size="11" fill="#6b7280">只代表 1-2-3 这一条路径</text>
+
+        <line x1="380" y1="30" x2="380" y2="270" stroke="#e6e8eb" stroke-width="1"/>
+        <text x="400" y="20" font-size="12" fill="#6b7280">③ 线性基与查询</text>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.2">
+          <rect x="400" y="38" width="250" height="34" rx="6"/>
+          <rect x="400" y="86" width="250" height="34" rx="6"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="start">
+          <text x="412" y="59">bit 0：1　（环的异或值）</text>
+          <text x="412" y="107">bit 1 以上：空</text>
+        </g>
+        <g fill="#eef4ff" stroke="#2563eb" stroke-width="1.2">
+          <rect x="400" y="140" width="250" height="86" rx="6"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="start">
+          <text x="412" y="162">查询 x=1、y=3：</text>
+          <text x="412" y="182" fill="#2563eb">min(5, 5 ^ 1) = min(5, 4) = 4</text>
+          <text x="412" y="206" font-size="11" fill="#6b7280">绕一圈 1-3 再走 1-2-3，得到更小的 4</text>
+        </g>
+        <text x="14" y="290" font-size="11" fill="#9aa0a6">路径异或 = 5；答案 = 4</text>
+      </svg>
+      <figcaption>带权并查集只负责给一条参考路径的异或值，线性基负责把它调整到极值，两者合起来才是答案。</figcaption>
+    </figure>
+
+    <h2>二、题目4 异或最短路</h2>
+    <p>一共有 n 个点、m 条边，每条边有边权。接下来 q 个操作：操作 1 x y d 加入一条 x 到 y、权值 d 的边；操作 2 x y 删除这条边；操作 3 x y 询问，x 到 y 的路上随便走，沿途边权异或起来，最小值是多少。保证 x &lt; y，且任意操作后图连通、无重边、无自环。数据范围 1 ≤ n、m、q ≤ 2 · 10⁵（测试链接：https://www.luogu.com.cn/problem/CF938G）。</p>
+    <p>所有边权不超过 2^30，所以线性基开到 bit 29 就够。把这棵线段树建在时间戳 0 到 q 上：初始的 m 条边时间戳为 0，之后每个加入/删除操作都有它自己的时间戳。</p>
+
+    <h3>2.1 同一个端点的多次出现要切成区间</h3>
+    <p>处理方式是：把每条「边的一次出现」看成一个事件 (x, y, t, w)，按 (x, y) 排序、同一组里再按 t 排序。注意 x、y 在说法上保证 x &lt; y，删除操作只给出端点，所以删除操作本身不带权值，它的时间戳只表示「这一次生效结束」。</p>
+    <p>于是同一组事件里，第 1 个和第 2 个之间是该边的第 1 段生效期，第 3 个和第 4 个之间是第 2 段，以此类推；如果最后一个事件落单（只有出现没有删除），它的生效期一直延到 q。这里有个细节：这条边两次出现的权值完全可以不同，所以每段生效期要带上自己那次出现的权值。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 236" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="同一条边的多次出现被切成生效区间" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="11" fill="#6b7280" text-anchor="middle">
+          <text x="90" y="24">t=0</text><text x="200" y="24">t=2</text><text x="310" y="24">t=5</text><text x="420" y="24">t=7</text><text x="530" y="24">t=9</text>
+        </g>
+        <g stroke="#e6e8eb" stroke-width="1" fill="none">
+          <path d="M90 32 L90 46" stroke-dasharray="3 3"/><path d="M200 32 L200 46" stroke-dasharray="3 3"/>
+          <path d="M310 32 L310 46" stroke-dasharray="3 3"/><path d="M420 32 L420 46" stroke-dasharray="3 3"/>
+          <path d="M530 32 L530 46" stroke-dasharray="3 3"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="90" y="60">初始有边</text>
+          <text x="200" y="60">操作删除</text>
+          <text x="310" y="60">操作加入</text>
+          <text x="420" y="60">操作删除</text>
+          <text x="530" y="60">操作加入</text>
+        </g>
+        <g font-size="11" fill="#9aa0a6" text-anchor="middle">
+          <text x="90" y="76">权值 3</text>
+          <text x="310" y="76">权值 9</text>
+          <text x="530" y="76">权值 5</text>
+        </g>
+        <rect x="30" y="96" width="120" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+        <text x="90" y="115" font-size="11" fill="#1f2328" text-anchor="middle">生效 [0, 1]，w = 3</text>
+        <rect x="250" y="136" width="160" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+        <text x="330" y="155" font-size="11" fill="#1f2328" text-anchor="middle">生效 [5, 6]，w = 9</text>
+        <rect x="470" y="176" width="180" height="30" rx="5" fill="#eef4ff" stroke="#2563eb"/>
+        <text x="560" y="195" font-size="11" fill="#1f2328" text-anchor="middle">生效 [9, q]，w = 5</text>
+      </svg>
+      <figcaption>按 (x, y) 把事件分组之后，相邻两次事件之间就是该边的一段生效期，每段带上它自己那次的权值。</figcaption>
+    </figure>
+
+    <p>代码里把这个分组 + 配对的过程写在 prepare 中，event 数组先填 m 条初始边（时间戳 0）再填每个非查询操作（时间戳是它的操作序号），排序之后每两个一组拆出线段：</p>
+
+    <pre class="code">    <pre class="code"><span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            father[i] = i;
+            siz[i] = 1;
+        }
+        sort(event + 1, event + eventCnt + 1, EventCmp);
+        <span class="kw">int</span> x, y, start, end, d;
+        <span class="kw">for</span> (<span class="kw">int</span> l = 1, r = 1; l &lt;= eventCnt; l = ++r) {
+            x = event[l].x;
+            y = event[l].y;
+            <span class="kw">while</span> (r + 1 &lt;= eventCnt &amp;&amp; event[r + 1].x == x &amp;&amp; event[r + 1].y == y) {
+                r++;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i += 2) {
+                start = event[i].t;
+                end = (i + 1 &lt;= r) ? (event[i + 1].t - 1) : q;
+                d = event[i].w;
+                add(start, end, x, y, d, 0, q, 1);
+            }
+        }
+    }</pre></pre>
+
+    <h3>2.2 可撤销的带权并查集</h3>
+    <p>不路径压缩（压缩了就不好撤销），所以 find 是循环往上走，getEor 把沿途的 eor 全部异或起来。合并只按大小挂，同时往 rollback 栈里记 (fu, fv)，撤销时把 fv 重新指向自己、fu 的大小减回去。</p>
+    <p>返回 true 表示这次 Union 真的合并了两个集合（需要回滚），false 表示这条边产生了一个环（只往线性基里插东西，不用回滚）。dfs 里数一数 true 的次数就知道要 undo 几步。</p>
+
+    <pre class="code">    <pre class="code"><span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+        <span class="kw">while</span> (i != father[i]) {
+            i = father[i];
+        }
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">int</span> <span class="fn">getEor</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> res = 0;
+        <span class="kw">while</span> (i != father[i]) {
+            res ^= eor[i];
+            i = father[i];
+        }
+        <span class="kw">return</span> res;
+    }
+
+    <span class="kw">bool</span> <span class="fn">Union</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        <span class="kw">int</span> fu = find(u);
+        <span class="kw">int</span> fv = find(v);
+        w = getEor(u) ^ getEor(v) ^ w;
+        <span class="kw">if</span> (fu == fv) {
+            insert(w);
+            <span class="kw">return</span> <span class="kw">false</span>;
+        }
+        <span class="kw">if</span> (siz[fu] &lt; siz[fv]) {
+            <span class="kw">int</span> tmp = fu;
+            fu = fv;
+            fv = tmp;
+        }
+        father[fv] = fu;
+        siz[fu] += siz[fv];
+        eor[fv] = w;
+        rollback[++opsize][0] = fu;
+        rollback[opsize][1] = fv;
+        <span class="kw">return</span> <span class="kw">true</span>;
+    }
+
+    <span class="kw">void</span> <span class="fn">undo</span>() {
+        <span class="kw">int</span> fu = rollback[opsize][0];
+        <span class="kw">int</span> fv = rollback[opsize--][1];
+        father[fv] = fv;
+        eor[fv] = 0;
+        siz[fu] -= siz[fv];
+    }</pre></pre>
+
+    <h3>2.3 可撤销的线性基</h3>
+    <p>和先前提到的思想一模一样：线性基难做的是撤销，而「一个点位被几个不同元素先后插入」这个问题可以转成，按插入顺序把这些元素排成一个队列，撤销时把队尾弹出。这里的实现用 inspos 记录每次插入落在哪个 bit 上，basiz 是插入计数，cancel(oldsiz) 把 basiz 退回到 oldsiz，并把对应位置清零。</p>
+    <p>需要注意的是，这种「记录每个插入的最小时间点」的写法比撤销到「插入前的整份拷贝」省空间：只需要一个 bit 位的下表 + 一个计数。</p>
+
+    <pre class="code">    <pre class="code"><span class="kw">void</span> <span class="fn">insert</span>(<span class="kw">int</span> num) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = BIT; i &gt;= 0; i--) {
+            <span class="kw">if</span> (num &gt;&gt; i == 1) {
+                <span class="kw">if</span> (basis[i] == 0) {
+                    basis[i] = num;
+                    inspos[basiz++] = i;
+                    <span class="kw">return</span>;
+                }
+                num ^= basis[i];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">minEor</span>(<span class="kw">int</span> num) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = BIT; i &gt;= 0; i--) {
+            num = min(num, num ^ basis[i]);
+        }
+        <span class="kw">return</span> num;
+    }
+
+    <span class="kw">void</span> <span class="fn">cancel</span>(<span class="kw">int</span> oldsiz) {
+        <span class="kw">while</span> (basiz &gt; oldsiz) {
+            basis[inspos[--basiz]] = 0;
+        }
+    }</pre></pre>
+
+    <h3>2.4 分治主体</h3>
+    <p>dfs 到节点时，把挂在这个节点上的所有边依次处理：能合并就合并并记下次数，成环就把环的异或值插进线性基；叶子上是查询就用 getEor 拼出参考路径，再交给线性基贪心：</p>
+
+    <pre class="code">    <pre class="code"><span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> oldsiz = basiz;
+        <span class="kw">int</span> unionCnt = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[i]; e; e = nxt[e]) {
+            <span class="kw">if</span> (Union(tox[e], toy[e], tow[e])) {
+                unionCnt++;
+            }
+        }
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">if</span> (op[l] == 3) {
+                ans[l] = minEor(getEor(x[l]) ^ getEor(y[l]));
+            }
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            dfs(l, mid, i &lt;&lt; 1);
+            dfs(mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        cancel(oldsiz);
+        <span class="kw">for</span> (<span class="kw">int</span> k = 1; k &lt;= unionCnt; k++) {
+            undo();
+        }
+    }</pre></pre>
+
+    <p>注意回滚顺序：先 cancel(oldsiz) 清掉本节点插进线性基的环，再按 unionCnt 次 undo 退回并查集。二者没有先后依赖，不过按「后插入的先清」的习惯写成这样更直观。</p>
+
+    <div class="viz" id="xrDfs">
+      <p class="viz-title">异或最短路：一次 dfs 中的并入、成环、回答与撤销</p>
+      <div class="xr-wrap">
+        <div class="xr-row"><span class="xr-lab">当前范围</span><span id="xrRange"></span></div>
+        <div class="xr-row"><span class="xr-lab">并查集</span><span id="xrDsu"></span></div>
+        <div class="xr-row"><span class="xr-lab">线性基</span><span id="xrBasis"></span></div>
+        <div class="xr-row"><span class="xr-lab">回答</span><span id="xrAns"></span></div>
+      </div>
+      <div class="viz-controls">
+        <button id="xrPrev" type="button">上一步</button>
+        <button id="xrNext" type="button">下一步</button>
+        <button id="xrReset" type="button">重置</button>
+      </div>
+      <p class="note" id="xrInfo"></p>
+    </div>
+
+    <p>总代价：平均一条边产生 O(log q) 次插入，每次插入是一次 find + getEor（不路径压缩，最坏 O(log n)）加一次线性基插入 O(30)，摊下来 O((n + m + q) · log q · log n)，实际跑得很轻。</p>
+
+    <h2>三、题目5 八纵八横</h2>
+    <p>一共有 n 个点、m 条边，每条边的边权用一个 01 字符串表示，初始就保证图连通。初始的 m 条边永不删除。接下来 q 个操作：Add x y z 加入 x 到 y、边权为 z 的边（第 k 条添加操作时该边编号为 k）；Cancel k 删除编号为 k 的边；Change k z 把编号为 k 的边的边权改成 z。每次操作后要打印：从 1 号点出发最后回到 1 号点，边随便走，沿途所有边权异或起来的最大值。数据范围 1 ≤ n、m ≤ 500，0 ≤ q ≤ 1000，边权字符串长度 ≤ 1000（测试链接：https://www.luogu.com.cn/problem/P3733）。</p>
+    <p>和题 4 的差别有两点：一是初始边永不消失，它属于「全局都存在」的部分；二是边权不是整数而是最多 1000 位的 01 串。前者让初始部分可以完全不进线段树；后者让线性基的每一位都得用 bitset&lt;1000&gt; 表示。</p>
+    <p>具体做法：初始边用经典带权并查集合进去，不做任何回滚，因为这些边在所有时刻都存在，dfs 一路上它们的影响一直有效。后面每条 Add / Change 出来的边才切成区间挂到时间树：Add 时记 last[k] = 当前操作序号 i；Cancel k 时把旧权值的区间 [last[k], i-1] 挂上并把 last[k] 置 0；Change k z 时同样先挂旧权值的 [last[k], i-1]，然后把当前权值改成 z、last[k] 改成 i。最后还没被 Cancel 或 Change 的边，补上 [last[k], q]。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 214" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Add、Change、Cancel 三种操作切出的生效区间" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="11" fill="#6b7280" text-anchor="middle">
+          <text x="90" y="24">操作 1</text><text x="230" y="24">操作 3</text><text x="370" y="24">操作 5</text><text x="510" y="24">操作 8</text>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="90" y="42">Add 边1 z₁</text>
+          <text x="230" y="42">Change 边1 z₂</text>
+          <text x="370" y="42">Add 边2 z₃</text>
+          <text x="510" y="42">Cancel 边2</text>
+        </g>
+        <rect x="30" y="58" width="180" height="28" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+        <text x="120" y="76" font-size="11" fill="#1f2328" text-anchor="middle">边 1 第一段：操作 [1, 2]，权值 z₁</text>
+        <rect x="200" y="94" width="380" height="28" rx="5" fill="#eef4ff" stroke="#2563eb"/>
+        <text x="390" y="112" font-size="11" fill="#1f2328" text-anchor="middle">边 1 第二段：操作 [3, q]，权值 z₂</text>
+        <rect x="340" y="130" width="230" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+        <text x="455" y="148" font-size="11" fill="#1f2328" text-anchor="middle">边 2：操作 [5, 7]，权值 z₃</text>
+        <rect x="30" y="166" width="620" height="32" rx="6" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="340" y="186" font-size="11" fill="#6b7280" text-anchor="middle">初始的 m 条边不进线段树：它们对所有时刻都成立，直接合进经典带权并查集</text>
+      </svg>
+      <figcaption>Change 是「旧权值到此为止 + 新权值从此开始」，所以它和 Cancel 一样会切出一段区间；初始边永远有效，不需要分治。</figcaption>
+    </figure>
+
+    <pre class="code">    <pre class="code">    ans[0] = maxEor();
+        <span class="kw">string</span> op;
+        <span class="kw">int</span> k;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++) {
+            cin &gt;&gt; op;
+            <span class="kw">if</span> (op == "Add") {
+                ++edgeCnt;
+                cin &gt;&gt; x[edgeCnt] &gt;&gt; y[edgeCnt] &gt;&gt; w[edgeCnt];
+                last[edgeCnt] = i;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == "Cancel") {
+                cin &gt;&gt; k;
+                add(last[k], i - 1, x[k], y[k], w[k], 1, q, 1);
+                last[k] = 0;
+            } <span class="kw">else</span> {
+                cin &gt;&gt; k;
+                add(last[k], i - 1, x[k], y[k], w[k], 1, q, 1);
+                cin &gt;&gt; w[k];
+                last[k] = i;
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= edgeCnt; i++) {
+            <span class="kw">if</span> (last[i] != 0) {
+                add(last[i], q, x[i], y[i], w[i], 1, q, 1);
+            }
+        }
+        <span class="kw">if</span> (q &gt; 0) {
+            dfs(1, q, 1);
+        }</pre></pre>
+
+    <p>线性基与并查集都换成 bitset 版本：插入、求最大值、撤销的规则和整数版一字不差，只是每个「元素」从 int 变成 bitset&lt;1000&gt;。经典带权并查集可以放心做路径压缩（初始边不用回滚），getEor 里先 find 一次拿到最新的 eor。</p>
+
+    <pre class="code">    <pre class="code"><span class="kw">void</span> <span class="fn">insert</span>(bs&amp; num) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = BIT; i &gt;= 0; i--) {
+            <span class="kw">if</span> (num[i] == 1) {
+                <span class="kw">if</span> (basis[i][i] == 0) {
+                    basis[i] = num;
+                    inspos[basiz++] = i;
+                    <span class="kw">return</span>;
+                }
+                num ^= basis[i];
+            }
+        }
+    }
+
+    bs maxEor() {
+        bs ret;
+        <span class="kw">for</span> (<span class="kw">int</span> i = BIT; i &gt;= 0; i--) {
+            <span class="kw">if</span> (ret[i] == 0 &amp;&amp; basis[i][i] == 1) {
+                ret ^= basis[i];
+            }
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">cancel</span>(<span class="kw">int</span> oldsiz) {
+        <span class="kw">while</span> (basiz &gt; oldsiz) {
+            basis[inspos[--basiz]].reset();
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (i != father[i]) {
+            <span class="kw">int</span> tmp = father[i];
+            father[i] = find(tmp);
+            eor[i] ^= eor[tmp];
+        }
+        <span class="kw">return</span> father[i];
+    }
+
+    bs getEor(<span class="kw">int</span> i) {
+        find(i);
+        <span class="kw">return</span> eor[i];
+    }
+
+    <span class="kw">void</span> <span class="fn">Union</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, bs&amp; w) {
+        <span class="kw">int</span> fu = find(u);
+        <span class="kw">int</span> fv = find(v);
+        bs weight = getEor(u) ^ getEor(v) ^ w;
+        <span class="kw">if</span> (fu == fv) {
+            insert(weight);
+        } <span class="kw">else</span> {
+            father[fv] = fu;
+            eor[fv] = weight;
+        }
+    }</pre></pre>
+
+    <p>分治主体与题 4 几乎一致，区别是每次只挂 Union 而没有回滚动作（本节点上的操作在回溯时只需要清线性基）：</p>
+
+    <pre class="code">    <pre class="code"><span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> oldsiz = basiz;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[i]; e; e = nxt[e]) {
+            Union(tox[e], toy[e], tow[e]);
+        }
+        <span class="kw">if</span> (l == r) {
+            ans[l] = maxEor();
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            dfs(l, mid, i &lt;&lt; 1);
+            dfs(mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        cancel(oldsiz);
+    }</pre></pre>
+
+    <p>输出一共有 q + 1 行：第 0 行是只有初始边时的答案（ans[0] 在 main 里建完初始并查集就直接算好），之后每一行是对应操作结束后的答案。二进制输出要去掉前导零，全零时打印一个 0。</p>
+    <p>这里有个细节：Union 之前先 find 两次拿代表元，即使已经在同一集合里也要把环的 weight 算出来插进线性基。这与题 4 的 insert(w) 是同一个动作；区别只在题 4 的 Union 返回 true / false 来告诉 dfs 要不要记一笔 undo，而题 5 的时间树节点上不需要并查集回滚，dfs 里也就少了一步。</p>
+
+    <h2>四、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>环节</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>题目4 事件排序分组（(n + q) 个事件）</td><td><code class="inline">O((m + q) · log(m + q))</code></td><td rowspan="3"><code class="inline">O((m + q) · log q)</code> 条链边；<code class="inline">O(BIT)</code> 的线性基，<code class="inline">O(n)</code> 的并查集与回滚栈</td></tr>
+        <tr><td>题目4 dfs（每个节点各执行一次合并 + 插入）</td><td><code class="inline">O((m + q) · log q · (log n + BIT))</code></td></tr>
+        <tr><td>题目4 回答（一次路径查询 + 线性基贪心）</td><td><code class="inline">O(查询数 · (log n + BIT))</code></td></tr>
+        <tr><td>题目5 初始 m 条边进经典带权并查集</td><td><code class="inline">O(m · (α + L / 64))</code>，L 为串长</td><td rowspan="3"><code class="inline">O((m + q) · (log q + L / 64))</code>：链边与 bitset 权值的存储</td></tr>
+        <tr><td>题目5 dfs（bitset 线性基插入 O(L/64 · L)）</td><td><code class="inline">O(q · log q · L² / 64)</code></td></tr>
+        <tr><td>题目5 输出 q + 1 行 01 串</td><td><code class="inline">O(q · L)</code></td></tr>
+      </tbody>
+    </table>
+    <h2 id="last5">五、最后</h2>
+    <p>这道题的框架是三件东西拼起来：带权并查集给出路径异或，线性基收集环的信息，线段树分治处理边的生效区间。三件工具各自独立，接口只碰两次：加边时插入线性基，查询时先路径异或再和线性基取极值。</p>
+
+    <p>两题相比：题 4 规模大但权值只有 30 位，瓶颈在线段树的节点个数；题 5 规模小但权值有 1000 位，瓶颈在 bitset 线性基的插入。同一套框架，换的是挂在每个节点上的那件「工具」。</p>
+
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var tag = function(s){ return '<span class="xr-tag">' + s + '</span>'; };
+  var tagO = function(s){ return '<span class="xr-tag o">' + s + '</span>'; };
+  var tagG = function(s){ return '<span class="xr-tag g">' + s + '</span>'; };
+  // DSU 状态用 fa: {1:1,2:1,3:1}，eor: {2:7,3:5}
+  var steps = [
+    { range:'进入 [0, 4]', fa:[1,1,1], eor:[0,0,0], basis:[], ans:'—', note:0,
+      t:'起始状态：每个点各自独立，eor 全 0，线性基为空。根节点挂着两条常驻边。' },
+    { range:'[0, 4]：并入 (1, 2, 7)', fa:[1,1,3], eor:[0,7,0], basis:[], ans:'—', note:0,
+      t:'加入 1-2：不同集合，把 2 挂到 1 下面，eor[2] = 7。这一次 Union 需要在回溯时 undo。' },
+    { range:'[0, 4]：并入 (2, 3, 2)', fa:[1,1,1], eor:[0,7,5], basis:[], ans:'—', note:0,
+      t:'加入 2-3：算出 eor 值 = getEor(2) ^ getEor(3) ^ 2 = 7 ^ 0 ^ 2 = 5，把 3 挂到 1 下面。' },
+    { range:'进入覆盖 t=1、t=2 的节点', fa:[1,1,1], eor:[0,7,5], basis:[], ans:'—', note:0,
+      t:'往下走：边 1-3 的生效区间是 [1, 2]，它挂在覆盖这两个时刻的节点上。' },
+    { range:'并入 (1, 3, 4)', fa:[1,1,1], eor:[0,7,5], basis:[1], ans:'—', note:0,
+      t:'加入 1-3：两点已在同一集合，于是成环。环的异或值 = 0 ^ 5 ^ 4 = 1，插进线性基的 bit 0。这次不用 undo。' },
+    { range:'叶子 t = 2，查询 (1, 3)', fa:[1,1,1], eor:[0,7,5], basis:[1], ans:'4', note:1,
+      t:'参考路径 = getEor(1) ^ getEor(3) = 5，再拿线性基贪心：min(5, 5 ^ 1) = 4。这就是这一时刻的答案。' },
+    { range:'回溯：撤销本节点', fa:[1,1,1], eor:[0,7,5], basis:[], ans:'4', note:1,
+      t:'离开节点：先 cancel 把线性基清空（环 1 随之消失），本次没有真正合并，所以不用 undo。' },
+    { range:'叶子 t = 4，查询 (1, 3)', fa:[1,1,1], eor:[0,7,5], basis:[], ans:'5', note:1,
+      t:'t = 4 时边 1-3 已经不在了（删除操作在 t = 3），线性基为空，答案就是参考路径本身 5。' }
+  ];
+  var cur = 0;
+  function dsuHtml(s){
+    var h = '';
+    for (var i = 1; i <= 3; i++) {
+      h += '<span class="xr-box' + (s.fa[i - 1] === i ? ' set' : ' on') + '">点 ' + i +
+           '<span class="xr-sub">父 ' + s.fa[i - 1] + '　eor ' + s.eor[i - 1] + '</span></span>';
+    }
+    return h;
+  }
+  function render(){
+    var s = steps[cur];
+    document.getElementById('xrRange').innerHTML = tagO(s.range);
+    document.getElementById('xrDsu').innerHTML = dsuHtml(s);
+    document.getElementById('xrBasis').innerHTML = s.basis.length
+      ? s.basis.map(function(b){ return tag('bit ' + b + ' 位：1'); }).join('')
+      : tagG('空');
+    document.getElementById('xrAns').innerHTML = (s.ans === '—') ? tagG('本次不是查询') : tag('答案 = ' + s.ans);
+    document.getElementById('xrPrev').disabled = (cur === 0);
+    document.getElementById('xrNext').disabled = (cur === steps.length - 1);
+    document.getElementById('xrInfo').textContent = '第 ' + (cur + 1) + ' / ' + steps.length + ' 步：' + s.t;
+  }
+  document.getElementById('xrPrev').addEventListener('click', function(){ if (cur > 0) { cur--; render(); } });
+  document.getElementById('xrNext').addEventListener('click', function(){ if (cur < steps.length - 1) { cur++; render(); } });
+  document.getElementById('xrReset').addEventListener('click', function(){ cur = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

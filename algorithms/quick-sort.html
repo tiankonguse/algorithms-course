@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>随机快速排序 - 算法课程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.demo-array { display:flex; gap:4px; margin:12px 0; flex-wrap:wrap; }
+.demo-cell { width:44px; height:44px; display:flex; align-items:center; justify-content:center; border:2px solid #cbd5e1; border-radius:6px; font-family:monospace; font-size:16px; position:relative; background:#f8fafc; }
+.demo-cell.lt { background:#dbeafe; border-color:#2563eb; }
+.demo-cell.eq { background:#dcfce7; border-color:#16a34a; }
+.demo-cell.gt { background:#ffedd5; border-color:#ea580c; }
+.demo-cell.pivot { outline:3px solid #7c3aed; outline-offset:1px; }
+.demo-label { position:absolute; top:-18px; font-size:11px; font-weight:bold; }
+.demo-label.first { color:#2563eb; left:50%; transform:translateX(-50%); }
+.demo-label.last { color:#ea580c; left:50%; transform:translateX(-50%); }
+.demo-label.i { color:#7c3aed; left:50%; transform:translateX(-50%); }
+.demo-stats { font-family:monospace; font-size:13px; color:#475569; margin:8px 0; }
+.demo-msg { font-size:14px; color:#334155; min-height:20px; margin:4px 0; }
+.call-stack { display:flex; flex-direction:column-reverse; gap:2px; margin:8px 0; }
+.stack-frame { padding:4px 10px; border-radius:4px; font-family:monospace; font-size:12px; border:1px solid #cbd5e1; }
+.stack-frame.active { background:#dbeafe; border-color:#2563eb; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>随机快速排序</h1>
+      <p class="intro">快速排序的核心是 partition：选一个数 x，把比 x 小的放左边、比 x 大的放右边，再对左右递归。选固定位置当 x，已排序数组每次只搞定一个元素，时间退化成 O(n²)；随机选一个位置当 x，期望时间收敛到 O(n log n)。荷兰国旗优化把等于 x 的元素一次全部搞定，全相等数组从 O(n²) 变成 O(n)。</p>
+
+      <h2>零、背景</h2>
+      <p>先看一个具体的坑。数组已经排好序了，比如 [1,2,3,4,5,6,7]，如果每次选最右边的元素当 x，第一轮 x=7，partition 之后 7 在最后，左边还是 [1,2,3,4,5,6]；第二轮 x=6，6 又在最后，左边 [1,2,3,4,5]。每一轮只搞定一个元素，n 个元素要 n 轮，每轮扫 n 个元素，总共 n(n-1)/2 次比较，O(n²)。</p>
+      <p>快排本身没问题，选 x 的方式才是坑。如果 x 是随机选的，大概率选到中间位置的数，左右各分一半，递归深度就是 log n，每层总共处理 n 个元素，总时间 O(n log n)。随机这一下常数时间不小，但只有这一下随机，才能在概率上把复杂度收敛住。</p>
+      <p>还有一个坑：大量相等元素。数组里全是同一个数，经典版 partition 每次只把一个 x 放到分界处，剩下的全是 <=x，还是只搞定一个，递归深度 n，直接爆栈。荷兰国旗优化把等于 x 的全部放到中间，一次搞定，递归只处理小于和大于的部分，全相等数组一轮就结束。</p>
+
+      <h2>一、经典版 partition（两段划分）</h2>
+      <p>经典版把数组分成两段：<=x 放左边，>x 放右边。用一个指针 a 跟踪 <=x 区域的末尾，遍历整个区间，遇到 <=x 的就和 a 位置交换、a 往前走。</p>
+      <p>这里有个细节：partition 结束后要确保 x 在分界处。遍历过程中用 xi 记录任意一个 x 在 <=x 区域里的位置，最后把 xi 和 a-1 交换，x 就到了 <=x 区域的最后一个位置，也就是分界处。返回 a-1，递归左边 [l, mid-1]、右边 [mid+1, r]。</p>
+
+      <figure class="fig" id="fig-partition1">
+        <figcaption>经典 partition：a 跟踪 <=x 区域末尾，xi 跟踪 x 的位置，遍历结束后把 x 换到分界处。</figcaption>
+      </figure>
+
+      <p>经典版的代码不长，但有个致命弱点：全相等数组。每次 partition 只把一个 x 放到分界处，剩下的 n-1 个全是 <=x，递归左边还是 n-1 个元素，深度 n-1。n=10000 时递归深度 9999 层，macOS 默认栈 8176KB、约 32 字节一帧，26 万层就段错误了，一万层虽然能过但已经很危险。</p>
+
+          <pre class="code"><span class="kw">int</span> <span class="fn">partition1</span>(<span class="kw">int</span> arr[], <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> x) {
+        <span class="kw">int</span> a = l, xi = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+            <span class="kw">if</span> (arr[i] &lt;= x) {
+                swap(arr[a], arr[i]);
+                <span class="kw">if</span> (arr[a] == x) xi = a;
+                a++;
+            }
+        }
+        swap(arr[xi], arr[a - 1]);
+        <span class="kw">return</span> a - 1;
+    }</pre>
+
+      <h2>二、荷兰国旗优化（三段划分）</h2>
+      <p>荷兰国旗优化把数组分成三段：<x 放左边，==x 放中间，>x 放右边。三个指针 first、last、i：first 是 <x 区域的末尾+1，last 是 >x 区域的开头-1，i 是当前扫描位置。</p>
+      <p>扫描规则只有三条：arr[i]==x 时 i 往前走（已经在中间区）；arr[i]<x 时和 first 交换、first 和 i 都往前走（换到左边区）；arr[i]>x 时和 last 交换、last 往后退（换到右边区，i 不动因为换过来的元素还没看）。</p>
+
+      <figure class="fig" id="fig-partition2">
+        <figcaption>荷兰国旗 partition：first/last/i 三指针，<x 蓝、==x 绿、>x 橙，一轮扫描搞定所有等于 x 的元素。</figcaption>
+      </figure>
+
+      <p>partition 结束后，first 到 last 之间全是等于 x 的元素，已经在最终位置上了，不需要再处理。递归只处理左边 [l, first-1] 和右边 [last+1, r]。全相等数组时，一轮扫描后 first=l、last=r，左右都是空区间，递归直接结束，深度只有 1。</p>
+
+          <pre class="code"><span class="kw">void</span> <span class="fn">partition2</span>(<span class="kw">int</span> arr[], <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> x) {
+        first = l;
+        last = r;
+        <span class="kw">int</span> i = l;
+        <span class="kw">while</span> (i &lt;= last) {
+            <span class="kw">if</span> (arr[i] == x) {
+                i++;
+            } <span class="kw">else</span> <span class="kw">if</span> (arr[i] &lt; x) {
+                swap(arr[first++], arr[i++]);
+            } <span class="kw">else</span> {
+                swap(arr[i], arr[last--]);
+            }
+        }
+    }</pre>
+
+      <h2>三、随机选 pivot 与递归驱动</h2>
+      <p>递归驱动的逻辑很简单：如果区间只有一个元素或空，直接返回；否则在 [l, r] 里随机选一个位置，取它的值当 x，跑荷兰国旗 partition，拿到 ==x 区域的左右边界 first 和 last，再递归左边和右边。</p>
+      <p>有个容易踩的坑：first 和 last 是全局变量（或者类的静态变量），递归调用会覆盖它们。所以 partition 之后要用临时变量 left 和 right 把 first、last 存下来，再传进递归。代码里注释写的「为了防止底层的递归过程覆盖全局变量」就是这个意思。</p>
+
+          <pre class="code"><span class="kw">void</span> <span class="fn">quickSort2</span>(<span class="kw">int</span> arr[], <span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l &gt;= r) <span class="kw">return</span>;
+        <span class="kw">int</span> x = arr[l + rand() % (r - l + 1)];
+        partition2(arr, l, r, x);
+        <span class="kw">int</span> left = first, right = last;
+        quickSort2(arr, l, left - 1);
+        quickSort2(arr, right + 1, r);
+    }</pre>
+
+      <figure class="fig" id="fig-recursive">
+        <figcaption>递归分治树：随机 pivot 大概率把区间分成两半，深度 log n；每层 partition 总共处理 n 个元素，总时间 O(n log n)。</figcaption>
+      </figure>
+
+      <h2>四、为什么荷兰国旗版更好</h2>
+      <p>最直接的对比是全相等数组的递归深度。经典版 n=10000 时深度 9999 层，荷兰国旗版只有 1 层。差别是实打实的：经典版会爆栈，荷兰国旗版一轮结束。洛谷上经典版甚至因为递归开太多层会爆栈导致出错，课程代码里注释直接写了「不推荐」。</p>
+
+      <figure class="fig" id="fig-depth">
+        <figcaption>全相等数组递归深度：经典版随 n 线性增长（n=10000 → 9999 层），荷兰国旗版恒为 1 层。随机数据下两者都约 log n。</figcaption>
+      </figure>
+
+      <p>随机数据下两者差别不大，递归深度都在 log n 附近（n=10000 时约 29-30 层）。荷兰国旗版的交换次数更多一些（n=10000 随机数据：经典版 89407 次交换，荷兰国旗版 156161 次），因为等于 x 的元素也会被交换，但换来的是全相等场景不爆栈，这笔买卖划算得很。</p>
+
+      <h2>五、复杂度分析与对比</h2>
+      <p>时间复杂度：随机 pivot 的期望是 O(n log n)。最坏情况还是 O(n²)，但概率极低，每次都选到最小或最大元素的概率是 2/n!，可以忽略。空间复杂度：递归栈的期望深度是 O(log n)，最坏 O(n)。</p>
+
+      <figure class="fig" id="fig-compare">
+        <figcaption>四种排序比较次数（对数刻度）：n=10000 时快排约 16 万次、归并 12 万次、插入 2483 万次。插入排序是 O(n²)，n 翻倍比较次数翻四倍。</figcaption>
+      </figure>
+
+      <p>和归并排序对比：快排是原地排序（不需要额外数组），但不稳定（交换会打乱相等元素的相对顺序）；归并排序稳定，但需要 O(n) 的额外空间。实际计时 n=100 万时，快排约 58-66ms，std::sort 约 43ms。std::sort 不是纯快排，是 introsort：快排递归深度超过 log n 时切到堆排序，小区间切到插入排序，比纯快排稳。</p>
+      <p>比较次数上归并比快排少一些（n=10000 时归并 120400 次 vs 快排 162842 次），因为归并每次比较都锁定一个元素的位置，快排的 partition 里等于 x 的元素会被重复比较。但快排是原地交换、缓存友好，实际跑起来不一定比归并慢。</p>
+
+      <h2>六、交互演示</h2>
+
+      <div class="viz" id="demo1">
+        <h3>演示一：荷兰国旗 partition 逐帧</h3>
+        <div class="viz-controls">
+          <select id="demo1-preset"></select>
+          <button id="demo1-next">下一步</button>
+          <button id="demo1-reset">重置</button>
+        </div>
+        <div class="demo-msg" id="demo1-msg"></div>
+        <div class="demo-array" id="demo1-array"></div>
+        <div class="demo-stats" id="demo1-stats"></div>
+      </div>
+
+      <div class="viz" id="demo2">
+        <h3>演示二：快速排序全流程</h3>
+        <div class="viz-controls">
+          <select id="demo2-preset"></select>
+          <button id="demo2-next">下一步</button>
+          <button id="demo2-reset">重置</button>
+        </div>
+        <div class="demo-msg" id="demo2-msg"></div>
+        <div class="demo-array" id="demo2-array"></div>
+        <div class="call-stack" id="demo2-stack"></div>
+        <div class="demo-stats" id="demo2-stats"></div>
+      </div>
+
+      <h2>七、总结</h2>
+      <p>1. 随机选 pivot 是快排的灵魂，固定位置选 pivot 在已排序数组上会退化成 O(n²)。</p>
+      <p>2. 荷兰国旗优化把等于 pivot 的元素一次全部搞定，全相等数组递归深度从 n 降到 1，经典版会爆栈的场景它一轮结束。</p>
+      <p>3. partition 之后要用临时变量存 first/last，递归调用会覆盖全局变量。</p>
+      <p>4. 快排原地但不稳定，归并稳定但需要 O(n) 额外空间，各有适用场景。</p>
+      <p>5. 标准库的 std::sort 是 introsort，不是纯快排，递归过深切堆排序、小区间切插入排序。</p>
+      <p>下一讲用 partition 过程去解决更复杂的问题。</p>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  // ===== SVG helpers =====
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function text(x, y, str, attrs) {
+    var t = svgEl('text', attrs || {});
+    t.setAttribute('x', x); t.setAttribute('y', y);
+    t.textContent = str;
+    return t;
+  }
+  function rect(x, y, w, h, attrs) {
+    var r = svgEl('rect', attrs || {});
+    r.setAttribute('x', x); r.setAttribute('y', y);
+    r.setAttribute('width', w); r.setAttribute('height', h);
+    return r;
+  }
+  function line(x1, y1, x2, y2, attrs) {
+    var l = svgEl('line', attrs || {});
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1);
+    l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    return l;
+  }
+
+  var BLUE='#2563eb', BLUE_L='#dbeafe', GREEN='#16a34a', GREEN_L='#dcfce7',
+      ORANGE='#ea580c', ORANGE_L='#ffedd5', PURPLE='#7c3aed', GRAY='#94a3b8',
+      DARK='#334155', LIGHT='#f8fafc';
+
+  // ===== Figure 1: classic partition =====
+  (function(){
+    var fig = document.getElementById('fig-partition1');
+    if(!fig) return;
+    var W=660, H=220;
+    var svg = svgEl('svg',{viewBox:'0 0 '+W+' '+H,width:'100%'});
+    var data=[3,2,1,5,4];
+    var x=3;
+    var cellW=54, cellH=40, gap=4, startX=120, startY=50;
+    var colors=['lt','lt','lt','gt','gt'];
+    for(var i=0;i<data.length;i++){
+      var cx=startX+i*(cellW+gap);
+      var fill=LIGHT, stroke='#cbd5e1';
+      if(colors[i]==='lt'){fill=BLUE_L;stroke=BLUE;}
+      if(colors[i]==='gt'){fill=ORANGE_L;stroke=ORANGE;}
+      svg.appendChild(rect(cx,startY,cellW,cellH,{fill:fill,stroke:stroke,'stroke-width':2,rx:6}));
+      svg.appendChild(text(cx+cellW/2,startY+26,String(data[i]),{'text-anchor':'middle','font-size':18,'font-family':'monospace',fill:DARK}));
+    }
+    // a pointer at index 3
+    var ax=startX+3*(cellW+gap)+cellW/2;
+    svg.appendChild(text(ax,startY+cellH+18,'a',{'text-anchor':'middle','font-size':14,fill:BLUE,'font-weight':'bold'}));
+    svg.appendChild(line(ax,startY+cellH+4,ax,startY+cellH+14,{stroke:BLUE,'stroke-width':2}));
+    // xi pointer at index 0 (x=3 is at index 0, NOT at boundary)
+    var xix=startX+0*(cellW+gap)+cellW/2;
+    svg.appendChild(text(xix,startY-10,'xi',{'text-anchor':'middle','font-size':12,fill:GREEN,'font-weight':'bold'}));
+    svg.appendChild(line(xix,startY-4,xix,startY-1,{stroke:GREEN,'stroke-width':2}));
+    // x value label
+    svg.appendChild(text(40,startY+26,'x=3',{'font-size':14,fill:PURPLE,'font-weight':'bold'}));
+    // divider line between index 2 and 3
+    var divX=startX+3*(cellW+gap)-gap/2;
+    svg.appendChild(line(divX,startY-4,divX,startY+cellH+4,{stroke:GRAY,'stroke-width':1,'stroke-dasharray':'4,3'}));
+    // explanation
+    svg.appendChild(text(40,startY+cellH+48,'遍历结束：<=3 的 [3,2,1] 在左边，>3 的 [5,4] 在右边，a=3。',{'font-size':13,fill:DARK}));
+    svg.appendChild(text(40,startY+cellH+68,'xi 记录 x=3 在 index 0，最后 swap(xi=0, a-1=2) 把 x 换到分界处。',{'font-size':13,fill:GRAY}));
+    fig.appendChild(svg);
+  })();
+
+  // ===== Figure 2: Dutch flag partition =====
+  (function(){
+    var fig = document.getElementById('fig-partition2');
+    if(!fig) return;
+    var W=660, H=240;
+    var svg = svgEl('svg',{viewBox:'0 0 '+W+' '+H,width:'100%'});
+    var data=[3,2,1,4,7,5,6];
+    var x=4;
+    var cellW=54, cellH=40, gap=4, startX=80, startY=55;
+    var colors=['lt','lt','lt','eq','gt','gt','gt'];
+    for(var i=0;i<data.length;i++){
+      var cx=startX+i*(cellW+gap);
+      var fill=LIGHT, stroke='#cbd5e1';
+      if(colors[i]==='lt'){fill=BLUE_L;stroke=BLUE;}
+      if(colors[i]==='eq'){fill=GREEN_L;stroke=GREEN;}
+      if(colors[i]==='gt'){fill=ORANGE_L;stroke=ORANGE;}
+      svg.appendChild(rect(cx,startY,cellW,cellH,{fill:fill,stroke:stroke,'stroke-width':2,rx:6}));
+      svg.appendChild(text(cx+cellW/2,startY+26,String(data[i]),{'text-anchor':'middle','font-size':18,'font-family':'monospace',fill:DARK}));
+    }
+    // first/last both at index 3 (==x region is just one element)
+    var fx=startX+3*(cellW+gap)+cellW/2;
+    svg.appendChild(text(fx,startY+cellH+18,'first/last',{'text-anchor':'middle','font-size':12,fill:GREEN,'font-weight':'bold'}));
+    // x value label
+    svg.appendChild(text(30,startY+26,'x=4',{'font-size':14,fill:PURPLE,'font-weight':'bold'}));
+    // region labels above
+    svg.appendChild(text(startX+1*(cellW+gap),startY-10,'<x',{'text-anchor':'middle','font-size':12,fill:BLUE}));
+    svg.appendChild(text(fx,startY-10,'==x',{'text-anchor':'middle','font-size':12,fill:GREEN}));
+    svg.appendChild(text(startX+5*(cellW+gap),startY-10,'>x',{'text-anchor':'middle','font-size':12,fill:ORANGE}));
+    // explanation
+    svg.appendChild(text(40,startY+cellH+48,'一轮扫描结束：<x=[3,2,1]，==x=[4]（index 3），>x=[7,5,6]。',{'font-size':13,fill:DARK}));
+    svg.appendChild(text(40,startY+cellH+68,'==x 已经在最终位置，递归只处理左边 [0..2] 和右边 [4..6]。',{'font-size':13,fill:GRAY}));
+    fig.appendChild(svg);
+  })();
+
+  // ===== Figure 3: recursive tree =====
+  (function(){
+    var fig = document.getElementById('fig-recursive');
+    if(!fig) return;
+    var W=660, H=280;
+    var svg = svgEl('svg',{viewBox:'0 0 '+W+' '+H,width:'100%'});
+    // Tree: [0..7] -> [0..3],[4..7] -> [0..1],[2..3],[4..5],[6..7] -> leaves
+    var nodes=[
+      {x:330,y:30,label:'[0..7]',w:70},
+      {x:165,y:90,label:'[0..3]',w:70},
+      {x:495,y:90,label:'[4..7]',w:70},
+      {x:80,y:150,label:'[0..1]',w:60},
+      {x:250,y:150,label:'[2..3]',w:60},
+      {x:410,y:150,label:'[4..5]',w:60},
+      {x:580,y:150,label:'[6..7]',w:60},
+    ];
+    var leaves=[
+      {x:40,y:210,label:'[0]'},{x:120,y:210,label:'[1]'},
+      {x:210,y:210,label:'[2]'},{x:290,y:210,label:'[3]'},
+      {x:370,y:210,label:'[4]'},{x:450,y:210,label:'[5]'},
+      {x:540,y:210,label:'[6]'},{x:620,y:210,label:'[7]'},
+    ];
+    // edges
+    var edges=[[0,1],[0,2],[1,3],[1,4],[2,5],[2,6],
+      [3,0],[3,1],[4,2],[4,3],[5,4],[5,5],[6,6],[6,7]];
+    // Actually draw edges from internal nodes to children
+    function nodeCx(n){return n.x;}
+    function nodeCy(n){return n.y;}
+    // root to level1
+    svg.appendChild(line(nodes[0].x,nodes[0].y+14,nodes[1].x,nodes[1].y-14,{stroke:BLUE,'stroke-width':1.5}));
+    svg.appendChild(line(nodes[0].x,nodes[0].y+14,nodes[2].x,nodes[2].y-14,{stroke:BLUE,'stroke-width':1.5}));
+    // level1 to level2
+    svg.appendChild(line(nodes[1].x,nodes[1].y+14,nodes[3].x,nodes[3].y-14,{stroke:BLUE,'stroke-width':1.5}));
+    svg.appendChild(line(nodes[1].x,nodes[1].y+14,nodes[4].x,nodes[4].y-14,{stroke:BLUE,'stroke-width':1.5}));
+    svg.appendChild(line(nodes[2].x,nodes[2].y+14,nodes[5].x,nodes[5].y-14,{stroke:BLUE,'stroke-width':1.5}));
+    svg.appendChild(line(nodes[2].x,nodes[2].y+14,nodes[6].x,nodes[6].y-14,{stroke:BLUE,'stroke-width':1.5}));
+    // level2 to leaves
+    for(var li=0;li<8;li++){
+      var parentIdx=3+Math.floor(li/2);
+      svg.appendChild(line(nodes[parentIdx].x,nodes[parentIdx].y+14,leaves[li].x,leaves[li].y-14,{stroke:GREEN,'stroke-width':1.5}));
+    }
+    // internal nodes
+    for(var ni=0;ni<nodes.length;ni++){
+      var n=nodes[ni];
+      svg.appendChild(rect(n.x-n.w/2,n.y-14,n.w,28,{fill:BLUE_L,stroke:BLUE,'stroke-width':1.5,rx:5}));
+      svg.appendChild(text(n.x,n.y+5,n.label,{'text-anchor':'middle','font-size':13,'font-family':'monospace',fill:BLUE}));
+    }
+    // leaves
+    for(var lj=0;lj<leaves.length;lj++){
+      var lv=leaves[lj];
+      svg.appendChild(rect(lv.x-22,lv.y-14,44,28,{fill:GREEN_L,stroke:GREEN,'stroke-width':1.5,rx:5}));
+      svg.appendChild(text(lv.x,lv.y+5,lv.label,{'text-anchor':'middle','font-size':13,'font-family':'monospace',fill:GREEN}));
+    }
+    // depth arrow on right
+    svg.appendChild(line(640,30,640,224,{stroke:ORANGE,'stroke-width':2,'marker-end':'url(#arrow)'}));
+    svg.appendChild(text(648,130,'深度 log n',{'font-size':12,fill:ORANGE,'font-weight':'bold','transform':'rotate(90,648,130)'}));
+    // bottom text
+    svg.appendChild(text(330,255,'每层 partition 总共处理 n 个元素，共 log n 层 → O(n log n)。',{'text-anchor':'middle','font-size':13,fill:DARK}));
+    svg.appendChild(text(330,273,'叶子即单元素，天然有序；随机 pivot 大概率平衡，最坏链概率极低。',{'text-anchor':'middle','font-size':12,fill:GRAY}));
+    fig.appendChild(svg);
+  })();
+
+  // ===== Figure 4: comparison count bar chart =====
+  (function(){
+    var fig = document.getElementById('fig-compare');
+    if(!fig) return;
+    var W=660, H=280;
+    var svg = svgEl('svg',{viewBox:'0 0 '+W+' '+H,width:'100%'});
+    var data=[
+      {n:10, qs:35, merge:20, insert:38},
+      {n:100, qs:763, merge:530, insert:2606},
+      {n:1000, qs:11484, merge:8675, insert:253192},
+      {n:10000, qs:162842, merge:120400, insert:24827938},
+    ];
+    var chartX=80, chartY=40, chartW=540, chartH=180;
+    var maxVal=25000000;
+    // log scale: map log10(val) to height
+    function barH(val){ return (Math.log10(val)/Math.log10(maxVal))*chartH; }
+    // y axis grid lines (log)
+    var gridVals=[10,100,1000,10000,100000,1000000,10000000];
+    for(var gi=0;gi<gridVals.length;gi++){
+      var gy=chartY+chartH-barH(gridVals[gi]);
+      svg.appendChild(line(chartX,gy,chartX+chartW,gy,{stroke:'#e2e8f0','stroke-width':1}));
+      svg.appendChild(text(chartX-8,gy+4,String(gridVals[gi]),{'text-anchor':'end','font-size':10,fill:GRAY,'font-family':'monospace'}));
+    }
+    // bars
+    var groupW=chartW/data.length;
+    var barW=14;
+    for(var di=0;di<data.length;di++){
+      var gx=chartX+di*groupW+groupW/2;
+      // quicksort
+      var bh1=barH(data[di].qs);
+      svg.appendChild(rect(gx-barW*1.8,chartY+chartH-bh1,barW,bh1,{fill:BLUE,rx:2}));
+      // merge
+      var bh2=barH(data[di].merge);
+      svg.appendChild(rect(gx-barW*0.5,chartY+chartH-bh2,barW,bh2,{fill:GREEN,rx:2}));
+      // insertion
+      var bh3=barH(data[di].insert);
+      svg.appendChild(rect(gx+barW*0.8,chartY+chartH-bh3,barW,bh3,{fill:ORANGE,rx:2}));
+      // x label
+      svg.appendChild(text(gx,chartY+chartH+18,'n='+data[di].n,{'text-anchor':'middle','font-size':11,fill:DARK}));
+    }
+    // legend
+    var legY=20;
+    svg.appendChild(rect(chartX,legY,12,12,{fill:BLUE,rx:2}));
+    svg.appendChild(text(chartX+18,legY+10,'快排(荷兰)',{'font-size':11,fill:DARK}));
+    svg.appendChild(rect(chartX+110,legY,12,12,{fill:GREEN,rx:2}));
+    svg.appendChild(text(chartX+128,legY+10,'归并',{'font-size':11,fill:DARK}));
+    svg.appendChild(rect(chartX+170,legY,12,12,{fill:ORANGE,rx:2}));
+    svg.appendChild(text(chartX+188,legY+10,'插入',{'font-size':11,fill:DARK}));
+    // annotation for n=10000
+    svg.appendChild(text(chartX+3*groupW+groupW/2,chartY+10,'2483万',{'text-anchor':'middle','font-size':10,fill:ORANGE,'font-weight':'bold'}));
+    svg.appendChild(text(chartX+3*groupW+groupW/2-30,chartY+50,'16万',{'text-anchor':'middle','font-size':10,fill:BLUE,'font-weight':'bold'}));
+    // title
+    svg.appendChild(text(330,265,'比较次数（对数刻度，y 轴每格 10 倍）',{'text-anchor':'middle','font-size':12,fill:GRAY}));
+    fig.appendChild(svg);
+  })();
+
+  // ===== Figure 5: recursion depth comparison =====
+  (function(){
+    var fig = document.getElementById('fig-depth');
+    if(!fig) return;
+    var W=660, H=240;
+    var svg = svgEl('svg',{viewBox:'0 0 '+W+' '+H,width:'100%'});
+    var data=[
+      {n:10, classic:9, dutch:1},
+      {n:100, classic:99, dutch:1},
+      {n:1000, classic:999, dutch:1},
+      {n:10000, classic:9999, dutch:1},
+    ];
+    var chartX=100, chartY=30, chartW=500, chartH=160;
+    var maxVal=10000;
+    function barH(val){ return (val/maxVal)*chartH; }
+    // grid
+    for(var gv=0;gv<=10000;gv+=2000){
+      var gy=chartY+chartH-barH(gv);
+      svg.appendChild(line(chartX,gy,chartX+chartW,gy,{stroke:'#e2e8f0','stroke-width':1}));
+      svg.appendChild(text(chartX-8,gy+4,String(gv),{'text-anchor':'end','font-size':10,fill:GRAY,'font-family':'monospace'}));
+    }
+    var groupW=chartW/data.length;
+    var barW=30;
+    for(var di=0;di<data.length;di++){
+      var gx=chartX+di*groupW+groupW/2;
+      // classic
+      var bh1=barH(data[di].classic);
+      svg.appendChild(rect(gx-barW-4,chartY+chartH-bh1,barW,bh1,{fill:ORANGE,rx:3}));
+      svg.appendChild(text(gx-barW/2-4,chartY+chartH-bh1-6,String(data[di].classic),{'text-anchor':'middle','font-size':10,fill:ORANGE,'font-weight':'bold'}));
+      // dutch
+      var bh2=barH(data[di].dutch);
+      svg.appendChild(rect(gx+4,chartY+chartH-bh2,barW,bh2,{fill:GREEN,rx:3}));
+      svg.appendChild(text(gx+barW/2+4,chartY+chartH-bh2-6,'1',{'text-anchor':'middle','font-size':10,fill:GREEN,'font-weight':'bold'}));
+      // x label
+      svg.appendChild(text(gx,chartY+chartH+18,'n='+data[di].n,{'text-anchor':'middle','font-size':11,fill:DARK}));
+    }
+    // legend
+    svg.appendChild(rect(chartX,8,12,12,{fill:ORANGE,rx:2}));
+    svg.appendChild(text(chartX+18,18,'经典版(两段)',{'font-size':11,fill:DARK}));
+    svg.appendChild(rect(chartX+120,8,12,12,{fill:GREEN,rx:2}));
+    svg.appendChild(text(chartX+138,18,'荷兰国旗(三段)',{'font-size':11,fill:DARK}));
+    // warning annotation
+
+    fig.appendChild(svg);
+  })();
+
+  // ===== Demo 1: Dutch flag partition step-by-step =====
+  (function(){
+    var presets=[
+      {name:'示例 [3,6,2,7,1,4,5] x=4', arr:[3,6,2,7,1,4,5], x:4},
+      {name:'全相等 [5,5,5,5,5] x=5', arr:[5,5,5,5,5], x:5},
+      {name:'已排序 [1,2,3,4,5] x=3', arr:[1,2,3,4,5], x:3},
+      {name:'逆序 [5,4,3,2,1] x=3', arr:[5,4,3,2,1], x:3},
+    ];
+    var sel=document.getElementById('demo1-preset');
+    for(var pi=0;pi<presets.length;pi++){
+      var opt=document.createElement('option');
+      opt.value=pi; opt.textContent=presets[pi].name;
+      sel.appendChild(opt);
+    }
+    var arrEl=document.getElementById('demo1-array');
+    var msgEl=document.getElementById('demo1-msg');
+    var statsEl=document.getElementById('demo1-stats');
+    var state={steps:[], step:0};
+
+    function buildSteps(arr, x){
+      var a=arr.slice();
+      var first=0, last=a.length-1, i=0;
+      var steps=[{arr:a.slice(),first:first,last:last,i:i,msg:'初始状态，x='+x,cmp:0,swp:0}];
+      var cmp=0, swp=0;
+      while(i<=last){
+        cmp++;
+        if(a[i]===x){
+          steps.push({arr:a.slice(),first:first,last:last,i:i,msg:'arr['+i+']='+a[i]+' == x，i++，已经在中间区',cmp:cmp,swp:swp,action:'eq',idx:i});
+          i++;
+        }else if(a[i]<x){
+          steps.push({arr:a.slice(),first:first,last:last,i:i,msg:'arr['+i+']='+a[i]+' < x，和 first='+first+' 交换，first++ i++',cmp:cmp,swp:swp,action:'lt',idx:i,swapWith:first});
+          var t=a[first]; a[first]=a[i]; a[i]=t; swp++;
+          first++; i++;
+        }else{
+          steps.push({arr:a.slice(),first:first,last:last,i:i,msg:'arr['+i+']='+a[i]+' > x，和 last='+last+' 交换，last--，i 不动',cmp:cmp,swp:swp,action:'gt',idx:i,swapWith:last});
+          var t2=a[i]; a[i]=a[last]; a[last]=t2; swp++;
+          last--;
+        }
+      }
+      steps.push({arr:a.slice(),first:first,last:last,i:i,msg:'完成！==x 区域 ['+first+'..'+last+']，递归只处理左右',cmp:cmp,swp:swp,done:true});
+      return steps;
+    }
+
+    function render(){
+      var s=state.steps[state.step];
+      arrEl.innerHTML='';
+      for(var k=0;k<s.arr.length;k++){
+        var cell=document.createElement('div');
+        cell.className='demo-cell';
+        if(k<s.first) cell.classList.add('lt');
+        else if(k<=s.last && k>=s.first){
+          // determine if processed as eq
+          if(k<s.i) cell.classList.add('eq');
+        }
+        if(k>s.last) cell.classList.add('gt');
+        cell.textContent=s.arr[k];
+        // labels
+        if(k===s.first && !s.done){
+          var lbl=document.createElement('span');
+          lbl.className='demo-label first'; lbl.textContent='first';
+          cell.appendChild(lbl);
+        }
+        if(k===s.last && !s.done && s.last!==s.first){
+          var lbl2=document.createElement('span');
+          lbl2.className='demo-label last'; lbl2.textContent='last';
+          cell.appendChild(lbl2);
+        }
+        if(k===s.i && !s.done){
+          var lbl3=document.createElement('span');
+          lbl3.className='demo-label i'; lbl3.textContent='i';
+          cell.appendChild(lbl3);
+        }
+        arrEl.appendChild(cell);
+      }
+      msgEl.textContent=s.msg;
+      statsEl.textContent='比较 '+s.cmp+' 次 | 交换 '+s.swp+' 次 | 步骤 '+(state.step+1)+'/'+state.steps.length;
+    }
+
+    function reset(){
+      var p=presets[sel.value];
+      state.steps=buildSteps(p.arr, p.x);
+      state.step=0;
+      render();
+    }
+    document.getElementById('demo1-next').addEventListener('click',function(){
+      if(state.step<state.steps.length-1){state.step++;render();}
+    });
+    document.getElementById('demo1-reset').addEventListener('click',reset);
+    sel.addEventListener('change',reset);
+    reset();
+  })();
+
+  // ===== Demo 2: quick sort full process =====
+  (function(){
+    var presets=[
+      {name:'[3,6,2,7,1,4,5]', arr:[3,6,2,7,1,4,5]},
+      {name:'[5,5,5,5,5] 全相等', arr:[5,5,5,5,5]},
+      {name:'[1,2,3,4,5] 已排序', arr:[1,2,3,4,5]},
+      {name:'[5,4,3,2,1] 逆序', arr:[5,4,3,2,1]},
+    ];
+    var sel=document.getElementById('demo2-preset');
+    for(var pi=0;pi<presets.length;pi++){
+      var opt=document.createElement('option');
+      opt.value=pi; opt.textContent=presets[pi].name;
+      sel.appendChild(opt);
+    }
+    var arrEl=document.getElementById('demo2-array');
+    var msgEl=document.getElementById('demo2-msg');
+    var stackEl=document.getElementById('demo2-stack');
+    var statsEl=document.getElementById('demo2-stats');
+    var state={steps:[], step:0};
+    var maxDepth=0;
+
+    function partition(a,l,r,x){
+      var first=l,last=r,i=l;
+      while(i<=last){
+        if(a[i]===x) i++;
+        else if(a[i]<x){var t=a[first];a[first]=a[i];a[i]=t;first++;i++;}
+        else{var t2=a[i];a[i]=a[last];a[last]=t2;last--;}
+      }
+      return [first,last];
+    }
+
+    function buildSteps(orig){
+      var a=orig.slice();
+      var steps=[];
+      var stack=[];
+      var cmp=0, swp=0;
+      function qs(l,r,depth){
+        if(l>=r){
+          if(l===r) steps.push({arr:a.slice(),stack:stack.slice(),msg:'区间 ['+l+'..'+r+'] 只有一个元素，返回',cmp:cmp,swp:swp,depth:depth});
+          return;
+        }
+        stack.push('['+l+'..'+r+']');
+        if(stack.length>maxDepth) maxDepth=stack.length;
+        var x=a[l+Math.floor(Math.random()*(r-l+1))];
+        // count comparisons for this partition (approximate)
+        var localCmp=0;
+        var first=l,last=r,i=l;
+        while(i<=last){
+          localCmp++;
+          if(a[i]===x) i++;
+          else if(a[i]<x){var t=a[first];a[first]=a[i];a[i]=t;first++;i++;swp++;}
+          else{var t2=a[i];a[i]=a[last];a[last]=t2;last--;swp++;}
+        }
+        cmp+=localCmp;
+        steps.push({arr:a.slice(),stack:stack.slice(),msg:'partition ['+l+'..'+r+']，随机选 x='+x+'，==x 区域 ['+first+'..'+last+']',cmp:cmp,swp:swp,depth:depth,first:first,last:last,l:l,r:r});
+        var left=first, right=last;
+        qs(l,left-1,depth+1);
+        qs(right+1,r,depth+1);
+        stack.pop();
+      }
+      steps.push({arr:a.slice(),stack:[],msg:'初始数组',cmp:0,swp:0,depth:0});
+      // Need to rebuild with proper ordering - the first step should be initial
+      // Actually let me restructure: collect all steps then sort
+      var allSteps=[{arr:orig.slice(),stack:[],msg:'初始数组，开始快速排序',cmp:0,swp:0,depth:0}];
+      cmp=0; swp=0; stack=[];
+      function qs2(l,r,depth){
+        if(l>=r){
+          if(l===r) allSteps.push({arr:a.slice(),stack:stack.slice(),msg:'区间 ['+l+'..'+r+'] 单元素，直接返回',cmp:cmp,swp:swp,depth:depth});
+          return;
+        }
+        stack.push('['+l+'..'+r+']');
+        if(stack.length>maxDepth) maxDepth=stack.length;
+        var x=a[l+Math.floor(Math.random()*(r-l+1))];
+        var first=l,last=r,i=l;
+        var localCmp=0;
+        while(i<=last){
+          localCmp++;
+          if(a[i]===x) i++;
+          else if(a[i]<x){var t=a[first];a[first]=a[i];a[i]=t;first++;i++;swp++;}
+          else{var t2=a[i];a[i]=a[last];a[last]=t2;last--;swp++;}
+        }
+        cmp+=localCmp;
+        allSteps.push({arr:a.slice(),stack:stack.slice(),msg:'partition ['+l+'..'+r+']，x='+x+'，==x 区 ['+first+'..'+last+']',cmp:cmp,swp:swp,depth:depth,first:first,last:last,l:l,r:r});
+        var left=first,right=last;
+        qs2(l,left-1,depth+1);
+        qs2(right+1,r,depth+1);
+        stack.pop();
+      }
+      qs2(0,a.length-1,0);
+      allSteps.push({arr:a.slice(),stack:[],msg:'排序完成！',cmp:cmp,swp:swp,depth:0,done:true});
+      return allSteps;
+    }
+
+    function render(){
+      var s=state.steps[state.step];
+      arrEl.innerHTML='';
+      for(var k=0;k<s.arr.length;k++){
+        var cell=document.createElement('div');
+        cell.className='demo-cell';
+        if(s.first!==undefined && k>=s.first && k<=s.last) cell.classList.add('eq');
+        else if(s.first!==undefined && k<s.l) cell.classList.add('lt');
+        else if(s.last!==undefined && k>s.r) cell.classList.add('gt');
+        cell.textContent=s.arr[k];
+        arrEl.appendChild(cell);
+      }
+      msgEl.textContent=s.msg;
+      stackEl.innerHTML='';
+      for(var si=0;si<s.stack.length;si++){
+        var frame=document.createElement('div');
+        frame.className='stack-frame'+(si===s.stack.length-1?' active':'');
+        frame.textContent=s.stack[si];
+        stackEl.appendChild(frame);
+      }
+      statsEl.textContent='比较 '+s.cmp+' 次 | 交换 '+s.swp+' 次 | 递归深度 '+maxDepth+' | 步骤 '+(state.step+1)+'/'+state.steps.length;
+    }
+
+    function reset(){
+      var p=presets[sel.value];
+      maxDepth=0;
+      state.steps=buildSteps(p.arr);
+      state.step=0;
+      render();
+    }
+    document.getElementById('demo2-next').addEventListener('click',function(){
+      if(state.step<state.steps.length-1){state.step++;render();}
+    });
+    document.getElementById('demo2-reset').addEventListener('click',reset);
+    sel.addEventListener('change',reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>基环树 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .g-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .g-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .g-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  @media(max-width:760px){
+    .g-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>基环树</h1>
+    <p class="intro">树上的算法写顺手之后，多出一条边就卡住了。基环树刚好是多这一条边的连通图：n 个点、n 条边，结构固定成「一个环 + 环上挂树」。麻烦只有一处，环上两点之间不再只有一条路。这一节先把环找出来，再连做四道题。</p>
+
+    <h2>零、背景</h2>
+    <p>无向基环树就是「n 个点、n 条边、连通」的图。边数比树多一条，多出来的那一条必然把某个区间闭合成环。</p>
+    <p>所以形状是定死的：一个环，环上的每个点挂一棵树。环长记 k，树边就有 n − k 条。</p>
+    <p>有向的情形分两类。每个点的出度都是 1，边从外面一路指进环，叫内向树；每个点的入度都是 1，边从环一路指出去，叫外向树。两种也都是 n 点 n 边、也只有一个环。</p>
+    <p>处理套路跟着形状走：先用一次 dfs 把环上的点标记出来，再对环上每个点挂的那棵树（下称分树）单独建信息，最后在环上整合。树形 DP、树剖、单调队列这些工具在分树上照用不误。</p>
+    <p>环上的整合通常先做一步变形：把环断开成链，或者把环倍长成两圈。前者服务「删掉一条环边最优化」的问题，后者服务「环上任意两点配对」的问题，下一节的四道题都在用。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="基环树结构：一个环加环上挂树" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="150" y1="92" x2="212" y2="140"/>
+          <line x1="212" y1="140" x2="150" y2="188"/>
+          <line x1="150" y1="188" x2="88" y2="140"/>
+          <line x1="88" y1="140" x2="150" y2="92"/>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.6" fill="none">
+          <line x1="150" y1="92" x2="150" y2="44"/>
+          <line x1="150" y1="44" x2="96" y2="30"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="150" cy="92" r="16"/>
+          <circle cx="212" cy="140" r="16"/>
+          <circle cx="150" cy="188" r="16"/>
+          <circle cx="88" cy="140" r="16"/>
+        </g>
+        <g fill="#ffffff" stroke="#9aa0a6" stroke-width="1.3">
+          <circle cx="150" cy="44" r="15"/>
+          <circle cx="96" cy="30" r="15"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="150" y="96">1</text>
+          <text x="212" y="144">2</text>
+          <text x="150" y="192">3</text>
+          <text x="88" y="144">4</text>
+          <text x="150" y="48">5</text>
+          <text x="96" y="34">6</text>
+        </g>
+        <text x="150" y="216" font-size="11" fill="#6b7280" text-anchor="middle">蓝色四点是环，环长 k = 4</text>
+        <text x="150" y="234" font-size="11" fill="#6b7280" text-anchor="middle">灰色的 5、6 是挂在点 1 下面的树</text>
+
+        <rect x="330" y="34" width="276" height="182" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="348" y="60" font-size="12" fill="#374151">环上的每个点挂一棵分树</text>
+        <text x="348" y="84" font-size="11" fill="#6b7280">分树：树形 DP、树剖、单调队列</text>
+        <text x="348" y="104" font-size="11" fill="#6b7280">环上：先把环变成链再加起来</text>
+        <text x="348" y="130" font-size="11" fill="#2563eb">环长 k，树边 n − k</text>
+        <text x="348" y="152" font-size="11" fill="#6b7280">环上的点和环的顺序，一次 dfs 就能拿到</text>
+        <text x="348" y="180" font-size="11" fill="#6b7280">有向基环树另算：出度全是 1 是内向树，</text>
+        <text x="348" y="198" font-size="11" fill="#6b7280">入度全是 1 是外向树</text>
+      </svg>
+      <figcaption>基环树 = 一个环 + 环上挂树，所有做法都围着「分树各自建信息、环上整合」这句展开</figcaption>
+    </figure>
+
+    <h2>一、dfs 找环</h2>
+    <p>找环有三条路。dfs 最常用，能一次拿到环上点的顺序、环上的边、环上边的权值。并查集只适用于无向图，边一条条加入，遇到两端已经连通的边就是闭环边，拿不到环上的全部点。拓扑排序把度数为 1 的点一层层消掉，剩下的点就是环上的点，也只能回答「谁在环上」。</p>
+    <p>这里只讲 dfs。两件事：给每个点一个 dfn 序号，dfn[u] 是第一次走到 u 时拿到的号；再记 from[u]，表示当前 dfs 路径上 u 是从哪个点进来的。</p>
+    <p>走到 u，枚举它的所有出边看邻点 v。v 没访问过，就记 from[v] = u 继续往下走。</p>
+    <p>v 已经访问过，比较 dfn：只有 <code class="inline">dfn[u] &lt; dfn[v]</code> 才算数。满足这个条件说明 v 是在 u 之后被访问、又已经先回来的点，它只能是 u 子树里的点，而这条边不是走下来的那条，于是 u 到 v 的树路径加上这条边正好是一个环。</p>
+    <p>这时 u 是环上最浅的点，v 是环的另一头。沿着 from 从 v 一路退到 u，路过的点加上 u，就是环上的全部点。</p>
+    <p>要找环上的边和边权，把 from 拆成 fromNode 和 fromWeight 两个数组就行：往下走时顺手记下这条边的权值，收集环的时候一起收进数组，环上第 i 条边的权值就落在 val[i] 上。题目 5、6 都要用到这套信息。</p>
+    <p>有个细节容易踩：发现环之后不要直接 return 退出整个 dfs，要把当前连通块剩下的点也走完。基环树可以有多个连通块（题目 1、3、6 都是），dfn 全部标上号，外层才能靠 <code class="inline">dfn[i] == 0</code> 找到下一个连通块。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="dfs 找环：dfn 序号、from 指针、闭合边" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="56" y1="120" x2="126" y2="120"/>
+          <line x1="126" y1="120" x2="196" y2="120"/>
+          <line x1="196" y1="120" x2="276" y2="55"/>
+          <line x1="276" y1="55" x2="276" y2="185"/>
+          <line x1="276" y1="185" x2="356" y2="185"/>
+        </g>
+        <line x1="276" y1="185" x2="196" y2="120" stroke="#ea580c" stroke-width="2.2" stroke-dasharray="7 4"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="56" cy="120" r="16"/>
+          <circle cx="126" cy="120" r="16"/>
+          <circle cx="196" cy="120" r="16"/>
+          <circle cx="276" cy="55" r="16"/>
+          <circle cx="276" cy="185" r="16"/>
+          <circle cx="356" cy="185" r="16"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="56" y="124">1</text>
+          <text x="126" y="124">2</text>
+          <text x="196" y="124">3</text>
+          <text x="276" y="59">4</text>
+          <text x="276" y="189">5</text>
+          <text x="356" y="189">6</text>
+        </g>
+        <g font-size="10" fill="#6b7280" text-anchor="middle">
+          <text x="56" y="96">dfn 1</text>
+          <text x="126" y="96">dfn 2</text>
+          <text x="196" y="96">dfn 3</text>
+          <text x="300" y="40">dfn 4</text>
+          <text x="300" y="208">dfn 5</text>
+          <text x="380" y="208">dfn 6</text>
+        </g>
+        <text x="16" y="158" font-size="11" fill="#ea580c">u = 3，环上最浅的点</text>
+        <text x="300" y="152" font-size="11" fill="#ea580c">v = 5</text>
+        <text x="16" y="178" font-size="11" fill="#ea580c">橙色虚线：闭合边 5-3</text>
+        <text x="40" y="232" font-size="11" fill="#6b7280">沿 from 从 5 退到 3：经过 5、4，加上 3 得到环 {3,4,5}</text>
+      </svg>
+      <figcaption>满足 dfn[u] &lt; dfn[v] 的那条边就是闭合边，沿 from 从 v 退回 u 得到整个环</figcaption>
+    </figure>
+
+    <p>通用的找环骨架如下，四道题都在它上面补东西：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">int</span> n;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> cntd;
+    <span class="kw">int</span> from[MAXN];
+
+    <span class="kw">int</span> cycle[MAXN];
+    <span class="kw">int</span> cntc;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u) {
+        dfn[u] = ++cntd;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                from[v] = u;
+                dfs(v);
+            } <span class="kw">else</span> <span class="kw">if</span> (dfn[u] &lt; dfn[v]) {
+                cycle[++cntc] = u;
+                <span class="kw">for</span> (<span class="kw">int</span> i = v; i != u; i = from[i]) {
+                    cycle[++cntc] = i;
+                }
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= n; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                dfs(i);
+            }
+        }
+        cout &lt;&lt; cntc &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <div class="viz">
+      <div class="viz-title">dfs 找环走一遍</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">图上有一个三元环 3-4-5，另外挂着 1-2 和 6。点「下一步」，看 dfn 怎么标、from 怎么指、环在哪一步被认出来。</p>
+      <svg id="gfSvg" viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="dfs 找环过程演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot partial"></span>当前访问的点</span>
+        <span><span class="dot full"></span>已访问</span>
+        <span><span class="dot skip"></span>还没走到</span>
+        <span><span class="dot dup"></span>闭合边 / 环上的边</span>
+      </div>
+      <div class="breakdown" id="gfInfo"></div>
+      <div class="viz-controls">
+        <button class="g-btn" id="gfPrev" type="button">上一步</button>
+        <button class="g-btn" id="gfNext" type="button">下一步</button>
+        <button class="g-btn" id="gfReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>二、题目1：定向道路</h2>
+    <p>n 个点、n 条无向边，图可能有多个连通块，保证每个连通块都是一棵基环树。给每条边定一个方向，要求得到的有向图里不能出现环，求方案数，对 1000000007 取余（CF711D）。</p>
+    <p>先看一个连通块。n 条边各自独立选方向，一共 2 的 n 次方种。</p>
+    <p>哪些定向会造出环？树边本身连环都组不成，把环缩成一个点之后剩下的是一片森林，森林里的边永远造不出有向环。所以有向环只可能整圈落在原环上：环上的 k 条边如果全部朝着同一个绕行方向，就是一个有向环。</p>
+    <p>环上全同向只有 2 种（顺时针、逆时针），此时剩下的 n − k 条树边随便定，都是坏方案，一共 2 · 2 的 (n−k) 次方，也就是 2 的 (n−k+1) 次方。</p>
+    <p>一个连通块的答案就是 2 的 n 次方减去 2 的 (n−k+1) 次方，多个连通块相乘。这里的 k 正是找环时收集到的环上点数，直接拿来用。</p>
+    <p>取模做减法要写成 <code class="inline">(a - b + MOD) % MOD</code>，不然会出现负数。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="环上全同向才产生有向环" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="ah199a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c"/>
+          </marker>
+          <marker id="ah199b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+          </marker>
+        </defs>
+        <g stroke="#ea580c" stroke-width="1.8" fill="none">
+          <line x1="112" y1="76" x2="164" y2="76" marker-end="url(#ah199a)"/>
+          <line x1="168" y1="82" x2="146" y2="122" marker-end="url(#ah199a)"/>
+          <line x1="138" y1="126" x2="110" y2="84" marker-end="url(#ah199a)"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.4">
+          <circle cx="104" cy="70" r="15"/>
+          <circle cx="172" cy="70" r="15"/>
+          <circle cx="138" cy="132" r="15"/>
+        </g>
+        <text x="138" y="166" font-size="11" fill="#ea580c" text-anchor="middle">环上全同向：出现有向环</text>
+        <text x="138" y="184" font-size="11" fill="#6b7280" text-anchor="middle">这样的定向有 2 种</text>
+
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="332" y1="76" x2="384" y2="76" marker-end="url(#ah199b)"/>
+          <line x1="392" y1="82" x2="374" y2="118" marker-end="url(#ah199b)"/>
+          <line x1="352" y1="126" x2="326" y2="84" marker-end="url(#ah199b)"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="324" cy="70" r="15"/>
+          <circle cx="392" cy="70" r="15"/>
+          <circle cx="358" cy="132" r="15"/>
+        </g>
+        <text x="358" y="166" font-size="11" fill="#2563eb" text-anchor="middle">环上有一处对冲：没有环</text>
+        <text x="358" y="184" font-size="11" fill="#6b7280" text-anchor="middle">底部的点两条环边都往外走</text>
+
+        <rect x="440" y="40" width="166" height="120" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="456" y="64" font-size="11" fill="#374151">一个连通块：</text>
+        <text x="456" y="86" font-size="11" fill="#2563eb">答案 = 2ⁿ − 2^(n−k+1)</text>
+        <text x="456" y="108" font-size="11" fill="#6b7280">k 是环上点数</text>
+        <text x="456" y="130" font-size="11" fill="#6b7280">坏方案 = 环的 2 种方向</text>
+        <text x="456" y="150" font-size="11" fill="#6b7280">乘 2^(n−k) 条树边自由</text>
+      </svg>
+      <figcaption>有向环只可能来自原环整圈同向，树边怎么定都不影响</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">using</span> <span class="kw">ll</span> = <span class="kw">long</span> <span class="kw">long</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MOD = 1000000007;
+    <span class="kw">int</span> n, cntb;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> from[MAXN];
+    <span class="kw">int</span> all[MAXN];
+    <span class="kw">int</span> cycle[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">ll</span> <span class="fn">power</span>(<span class="kw">ll</span> x, <span class="kw">ll</span> p) {
+        <span class="kw">ll</span> ans = 1;
+        <span class="kw">while</span> (p &gt; 0) {
+            <span class="kw">if</span> ((p &amp; 1) == 1) {
+                ans = (ans * x) % MOD;
+            }
+            x = (x * x) % MOD;
+            p &gt;&gt;= 1;
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u) {
+        dfn[u] = ++cntd;
+        all[cntb]++;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                from[v] = u;
+                dfs(v);
+            } <span class="kw">else</span> <span class="kw">if</span> (dfn[u] &lt; dfn[v]) {
+                cycle[cntb]++;
+                <span class="kw">for</span> (<span class="kw">int</span> i = v; i != u; i = from[i]) {
+                    cycle[cntb]++;
+                }
+            }
+        }
+    }
+
+    <span class="kw">ll</span> <span class="fn">compute</span>() {
+        <span class="kw">ll</span> ans = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                cntb++;
+                dfs(i);
+                <span class="kw">ll</span> a = power(2, all[cntb]);
+                <span class="kw">ll</span> b = power(2, all[cntb] - cycle[cntb] + 1);
+                ans = ans * ((a - b + MOD) % MOD) % MOD;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x; i &lt;= n; i++) {
+            cin &gt;&gt; x;
+            addEdge(i, x);
+            addEdge(x, i);
+        }
+        <span class="kw">ll</span> ans = compute();
+        cout &lt;&lt; ans &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>三、题目2：简单路径数量</h2>
+    <p>n 个点、n 条无向边，连通、没有重边和自环的基环树。简单路径是点不重复、边数至少 1 的路径。方向相反的两条算同一条，比如 (a, b, c) 和 (c, b, a) 只数一次。求简单路径总数（CF1454E）。</p>
+    <p>先回忆树上的结论：任意两点之间恰好一条简单路径，总数就是 C(n, 2)。</p>
+    <p>基环树多出来的只有一个来源：两点之间的路径要是能「绕环两侧各走一遍」，就有了第二条。什么样的点对会这样？</p>
+    <p>把环上的点标记出来，删掉环上的边，每个环上点 i 连着自己挂的那棵树，记这棵外向树的大小为 siz[i]，也就是 i 自己加上挂在它下面的所有点。因为环上的边都删了，各棵外向树两两不重叠，所有 siz[i] 加起来正好是 n。</p>
+    <p>两端点落在同一棵外向树里：路径只能在这棵树里走，唯一一条。落在两棵不同的外向树里：必须借道环，而环上有两个方向可选，于是有两条。</p>
+    <p>按这个分类直接数。对每个环上点 i，它的外向树内部的路径有 C(siz[i], 2) 条；一端在 siz[i] 里、另一端在树外的点对有 siz[i] · (n − siz[i]) 个，每个贡献两条路径，而它会被两端的树各数一次，合起来正好一次不多不少。</p>
+    <p>于是答案 = Σ [ C(siz[i], 2) + siz[i] · (n − siz[i]) ]，对每个环上点求和。统计 siz 时从环上点出发往下跑一次树形 dfs，碰到环上点就停，累加子树大小即可。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="环上点连同挂树的外向树大小，以及两类路径" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <circle cx="140" cy="105" r="52" stroke="#2563eb" stroke-width="1.8" fill="none"/>
+        <g stroke="#9aa0a6" stroke-width="1.5" fill="none">
+          <line x1="192" y1="105" x2="246" y2="66"/>
+          <line x1="88" y1="105" x2="38" y2="70"/>
+          <line x1="140" y1="157" x2="102" y2="200"/>
+          <line x1="140" y1="157" x2="182" y2="200"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="140" cy="53" r="15"/>
+          <circle cx="192" cy="105" r="15"/>
+          <circle cx="140" cy="157" r="15"/>
+          <circle cx="88" cy="105" r="15"/>
+        </g>
+        <g fill="#ffffff" stroke="#9aa0a6" stroke-width="1.3">
+          <circle cx="250" cy="62" r="13"/>
+          <circle cx="36" cy="66" r="13"/>
+          <circle cx="100" cy="204" r="13"/>
+          <circle cx="184" cy="204" r="13"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="140" y="57">A</text>
+          <text x="192" y="109">B</text>
+          <text x="140" y="161">C</text>
+          <text x="88" y="109">D</text>
+        </g>
+        <text x="140" y="130" font-size="10" fill="#6b7280" text-anchor="middle">环</text>
+        <text x="240" y="98" font-size="10" fill="#9aa0a6">B 的树</text>        <text x="16" y="52" font-size="10" fill="#9aa0a6">D 的树</text>
+        <text x="60" y="224" font-size="10" fill="#9aa0a6">C 的树</text>
+
+        <rect x="320" y="30" width="286" height="176" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="336" y="54" font-size="12" fill="#374151">siz：A 1、B 2、C 3、D 2，合计 n = 8</text>
+        <text x="336" y="76" font-size="11" fill="#6b7280">siz 是环上点连同它挂的树的大小</text>
+        <text x="336" y="100" font-size="11" fill="#2563eb">同一棵外向树内：1 条路径</text>
+        <text x="336" y="122" font-size="11" fill="#ea580c">跨两棵外向树：环上两条弧，2 条</text>
+        <text x="336" y="150" font-size="11" fill="#374151">ans = Σ C(siz, 2) + siz · (n − siz)</text>
+        <text x="336" y="172" font-size="11" fill="#6b7280">前一项数树内，后一项数跨树</text>
+        <text x="336" y="192" font-size="11" fill="#6b7280">一个跨树点对由两端各数一次，正好 2 条</text>
+      </svg>
+      <figcaption>路径只分两类，按环上点的外向树大小求和即可，不需要枚举点对</figcaption>
+    </figure>
+
+    <p>完整代码（多组数据，注意每组清空）：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">using</span> <span class="kw">ll</span> = <span class="kw">long</span> <span class="kw">long</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">int</span> t, n;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> from[MAXN];
+    <span class="kw">bool</span> cycle[MAXN];
+
+    <span class="kw">ll</span> siz[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u) {
+        dfn[u] = ++cntd;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                from[v] = u;
+                dfs(v);
+            } <span class="kw">else</span> <span class="kw">if</span> (dfn[u] &lt; dfn[v]) {
+                cycle[u] = <span class="kw">true</span>;
+                <span class="kw">for</span> (<span class="kw">int</span> i = v; i != u; i = from[i]) {
+                    cycle[i] = <span class="kw">true</span>;
+                }
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dpOnTree</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !cycle[v]) {
+                dpOnTree(v, u);
+                siz[u] += siz[v];
+            }
+        }
+    }
+
+    <span class="kw">ll</span> <span class="fn">compute</span>() {
+        dfs(1);
+        <span class="kw">ll</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (cycle[i]) {
+                dpOnTree(i, 0);
+                ans += siz[i] * (siz[i] - 1) / 2 + siz[i] * (n - siz[i]);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        cntg = cntd = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            head[i] = dfn[i] = 0;
+            cycle[i] = <span class="kw">false</span>;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; t;
+        <span class="kw">for</span> (<span class="kw">int</span> c = 1; c &lt;= t; c++) {
+            cin &gt;&gt; n;
+            prepare();
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= n; i++) {
+                cin &gt;&gt; u &gt;&gt; v;
+                addEdge(u, v);
+                addEdge(v, u);
+            }
+            <span class="kw">ll</span> ans = compute();
+            cout &lt;&lt; ans &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>四、题目3：骑士</h2>
+    <p>n 个点、n 条无向边，每个点有点权，图可能有多个连通块，保证每个连通块都是基环树。任意相邻两点不能同时选，求能选出的最大点权和（洛谷 P2607）。</p>
+    <p>树上的做法是入门 DP：dp[u][0] 表示不选 u 时子树的最优值，dp[u][1] 表示选 u。转移是不选 u 时孩子随便，<code class="inline">dp[u][0] += max(dp[v][0], dp[v][1])</code>；选了 u 时孩子必须不选，<code class="inline">dp[u][1] += dp[v][0]</code>。</p>
+    <p>基环树只多一条环上的边。找环时触发发现环的那条闭合边就顺手拿到，记作 (x, y)，把它的编号存进 skip。</p>
+    <p>原问题的最优解里，x 和 y 不可能同时被选，所以只有两种情况：x 不选，或者 y 不选。</p>
+    <p>把 skip 这条边在转移里跳过，整个连通块就变成一棵普通的树。以 x 为根跑一次树形 DP，dp[x][0] 正是「x 不选」时的最优值；以 y 为根再跑一次，dp[y][0] 就是「y 不选」时的最优值。两者取较大者，就是这一个连通块的答案。</p>
+    <p>多个连通块分别处理再累加。每个连通块都要重新找一次环，x、y、skip 三个量记得在进入新连通块前清零。</p>
+    <p>题目4 城市环路（洛谷 P1453）是同一道题：n 缩到 10 万，点权范围小，dp 用 int 就够；算完最大点权和之后再乘题目给的系数 k，输出保留一位小数。代码上只有三处不同，读入的下标加一、最后乘 k、用 double 打印。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="断开环上一条边，跑两次树形 DP" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="140" y1="38" x2="196" y2="116"/>
+          <line x1="196" y1="116" x2="84" y2="116"/>
+        </g>
+        <line x1="84" y1="116" x2="140" y2="38" stroke="#ea580c" stroke-width="2.2" stroke-dasharray="7 4"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="140" cy="38" r="16"/>
+          <circle cx="196" cy="116" r="16"/>
+          <circle cx="84" cy="116" r="16"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="140" y="42">x</text>
+          <text x="196" y="120">y</text>
+          <text x="84" y="120">z</text>
+        </g>
+        <text x="24" y="72" font-size="11" fill="#ea580c">skip：这条边先不管</text>
+        <text x="30" y="150" font-size="11" fill="#6b7280">去掉 skip 后整棵树成了一棵普通的树，</text>
+        <text x="30" y="168" font-size="11" fill="#6b7280">树形 DP 一次就能算完，不用再管环</text>
+
+        <rect x="300" y="24" width="306" height="172" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="316" y="50" font-size="12" fill="#374151">最优解里 x、y 不可能同时选</text>
+        <text x="316" y="78" font-size="11" fill="#2563eb">以 x 为根跑一次 → dp[x][0]（x 不选）</text>
+        <text x="316" y="100" font-size="11" fill="#2563eb">以 y 为根跑一次 → dp[y][0]（y 不选）</text>
+        <text x="316" y="128" font-size="11" fill="#374151">答案 = max(dp[x][0], dp[y][0])</text>
+        <text x="316" y="154" font-size="11" fill="#6b7280">两种情况覆盖全部可行解，两次 DP 各 O(n)</text>
+        <text x="316" y="176" font-size="11" fill="#6b7280">多连通块分别算完再相加</text>
+      </svg>
+      <figcaption>环上只需断一条边，两种「必有一端不选」的情况各跑一次树形 DP，取较大者</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">using</span> <span class="kw">ll</span> = <span class="kw">long</span> <span class="kw">long</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 1000001;
+    <span class="kw">int</span> n;
+    <span class="kw">int</span> arr[MAXN];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> x, y, skip;
+
+    <span class="kw">ll</span> dp[MAXN][2];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u) {
+        dfn[u] = ++cntd;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                dfs(v);
+            } <span class="kw">else</span> <span class="kw">if</span> (dfn[u] &lt; dfn[v]) {
+                x = u;
+                y = v;
+                skip = (e + 1) &gt;&gt; 1;
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dpOnTree</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        dp[u][0] = 0;
+        dp[u][1] = arr[u];
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; (e + 1) &gt;&gt; 1 != skip) {
+                dpOnTree(v, u);
+                dp[u][0] += max(dp[v][0], dp[v][1]);
+                dp[u][1] += dp[v][0];
+            }
+        }
+    }
+
+    <span class="kw">ll</span> <span class="fn">compute</span>() {
+        <span class="kw">ll</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                x = y = 0;
+                dfs(i);
+                dpOnTree(x, 0);
+                <span class="kw">ll</span> cur = dp[x][0];
+                dpOnTree(y, 0);
+                cur = max(cur, dp[y][0]);
+                ans += cur;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> x = 1, y; x &lt;= n; x++) {
+            cin &gt;&gt; arr[x];
+            cin &gt;&gt; y;
+            addEdge(x, y);
+            addEdge(y, x);
+        }
+        <span class="kw">ll</span> ans = compute();
+        cout &lt;&lt; ans &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>五、复杂度分析</h2>
+    <p>四道题共用同一个 dfs 骨架，环在发现的那一刻被整体收走，每个点进出各一次，每条边看两遍。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>步骤</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>dfs 找环</td><td><code class="inline">O(n)</code></td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>题目1 定向道路</td><td><code class="inline">O(n + c · log MOD)</code>，c 是连通块数</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>题目2 简单路径数量</td><td><code class="inline">O(n)</code></td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>题目3 / 题目4 最大权独立集</td><td><code class="inline">O(n)</code>，每个连通块两次树形 DP</td><td><code class="inline">O(n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>题目1 里唯一的额外开销是快速幂，每个连通块调用两次，模数固定成 10⁹+7，每次只要 30 步左右。</p>
+    <p>题目2 统计 siz 时从环上点往下走，每条树边只被走一次；题目3 的两次树形 DP 会让树边最多走四遍，仍是线性。空间是邻接表 2n 条边加几个 n 长的数组，n 到 2 × 10⁵ 完全够用。</p>
+
+    <h2>六、最后</h2>
+    <p>这一节的四道题骨架完全一样：dfn 定序、from 记路，最后那条满足 dfn[u] &lt; dfn[v] 的非树边就是环的闭合边。变化的只是拿到环之后往里面填什么，数两个方向、数环上的弧、断一条边跑两次 DP。</p>
+    <p>还有一件事这一节一直绕过去了：环上的信息从来不是一遍扫下来的。树形 DP 靠「孩子算完再合并父亲」，环上没有这个天然的先后，两点之间永远有两条路。</p>
+    <p>下一节把环变成链。指标是「分树的高度减去环上前缀和」，工具从前后缀最值一路换到单调队列。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var NODES = {
+    '1':{x:56,  y:150, lx:56,  ly:124, an:'middle'},
+    '2':{x:126, y:150, lx:126, ly:124, an:'middle'},
+    '3':{x:196, y:150, lx:196, ly:126, an:'middle'},
+    '4':{x:276, y:80,  lx:300, ly:76,  an:'start'},
+    '5':{x:276, y:220, lx:300, ly:224, an:'start'},
+    '6':{x:356, y:220, lx:382, ly:224, an:'start'}
+  };
+  var EDGES = [
+    {a:'1',b:'2',type:'tree'},
+    {a:'2',b:'3',type:'tree'},
+    {a:'3',b:'4',type:'tree'},
+    {a:'4',b:'5',type:'tree'},
+    {a:'5',b:'6',type:'tree'},
+    {a:'5',b:'3',type:'back'}
+  ];
+  // 访问顺序 1→2→3→4→5→6，6 先回退，5 的邻居 4、3 都访问过且 dfn 更大不成立，
+  // 回到 3 时才在邻居 5 上撞到 dfn[3] < dfn[5]，闭合边 5-3，沿 from 退得环 {3,4,5}
+  var STEPS = [
+    {cur:'1', dfn:{1:1}, walked:[], back:null, ring:[],
+     info:'从 1 号点出发，dfn[1] = 1。此时还没有 from 可言，整张图上只有这一个访问标记。'},
+    {cur:'2', dfn:{1:1,2:2}, walked:['1-2'], back:null, ring:[],
+     info:'1 的邻居 2 没访问过，记 from[2] = 1，往下走到 2，dfn[2] = 2。'},
+    {cur:'3', dfn:{1:1,2:2,3:3}, walked:['1-2','2-3'], back:null, ring:[],
+     info:'2 的邻居 1 已访问但 dfn[1] = 1 < dfn[2]，不满足条件，跳过。接着走到 3，dfn[3] = 3。'},
+    {cur:'4', dfn:{1:1,2:2,3:3,4:4}, walked:['1-2','2-3','3-4'], back:null, ring:[],
+     info:'3 先走到 4，dfn[4] = 4。这条边是走下来的树边，不是回边。'},
+    {cur:'5', dfn:{1:1,2:2,3:3,4:4,5:5}, walked:['1-2','2-3','3-4','4-5'], back:null, ring:[],
+     info:'4 走到 5，dfn[5] = 5，from[5] = 4。'},
+    {cur:'6', dfn:{1:1,2:2,3:3,4:4,5:5,6:6}, walked:['1-2','2-3','3-4','4-5','5-6'], back:null, ring:[],
+     info:'5 走到 6，dfn[6] = 6。'},
+    {cur:'5', dfn:{1:1,2:2,3:3,4:4,5:5,6:6}, walked:['1-2','2-3','3-4','4-5','5-6'], back:null, ring:[],
+     info:'6 没有别的邻居，回退到 5。5 剩下两条边通向 4 和 3，两个点都访问过了：dfn[5] = 5 并不小于 dfn[3] = 3，条件不成立，跳过。'},
+    {cur:'4', dfn:{1:1,2:2,3:3,4:4,5:5,6:6}, walked:['1-2','2-3','3-4','4-5','5-6'], back:null, ring:[],
+     info:'回退到 4，邻居 3 和 5 都访问过，dfn[4] = 4 也不小于它们，继续回退。'},
+    {cur:'3', dfn:{1:1,2:2,3:3,4:4,5:5,6:6}, walked:['1-2','2-3','3-4','4-5','5-6'], back:'5-3', ring:[3,4,5],
+     info:'回到 3，枚举到邻居 5：已访问，而且 dfn[3] = 3 < dfn[5] = 5，条件成立，发现环。u = 3 是环上最浅的点，v = 5 是另一头，闭合边就是 5-3。'},
+    {cur:null, dfn:{1:1,2:2,3:3,4:4,5:5,6:6}, walked:['1-2','2-3','3-4','4-5','5-6'], back:'5-3', ring:[3,4,5],
+     info:'沿 from 从 v = 5 往回退：5、4，再往上是 3 也就是 u，停手。环上的点是 {3,4,5}，环长 3。继续把 3 剩下的边扫完，整个连通块走完，一个环也没漏。'}
+  ];
+
+  var svg = document.getElementById('gfSvg');
+  var info = document.getElementById('gfInfo');
+  var prev = document.getElementById('gfPrev');
+  var next = document.getElementById('gfNext');
+  var reset = document.getElementById('gfReset');
+  var at = 0;
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+
+    EDGES.forEach(function(e){
+      var walked = st.walked.indexOf(e.a + '-' + e.b) >= 0;
+      var isBack = st.back === e.a + '-' + e.b;
+      var a = NODES[e.a], b = NODES[e.b];
+      var stroke = '#e6e8eb', w = 1.4, dash = '4 3';
+      if (walked) { stroke = '#2563eb'; w = 2; dash = 'none'; }
+      if (isBack) { stroke = '#ea580c'; w = 2.4; dash = '7 4'; }
+      p.push('<line x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '" stroke="' + stroke + '" stroke-width="' + w + '"' +
+             (dash === 'none' ? '' : ' stroke-dasharray="' + dash + '"') + '/>');
+    });
+
+    Object.keys(NODES).forEach(function(k){
+      var n = NODES[k];
+      var isCur = st.cur === k;
+      var d = st.dfn[k];
+      var fill = '#ffffff', stroke = '#e6e8eb', tc = '#9aa0a6';
+      if (d) { fill = '#dbeafe'; stroke = '#2563eb'; tc = '#1f2328'; }
+      if (st.ring.indexOf(parseInt(k, 10)) >= 0) { fill = '#ffedd5'; stroke = '#ea580c'; tc = '#ea580c'; }
+      if (isCur) { fill = '#ffedd5'; stroke = '#ea580c'; tc = '#ea580c'; }
+      p.push('<circle cx="' + n.x + '" cy="' + n.y + '" r="16" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + (isCur ? 2.4 : 1.4) + '"/>');
+      p.push('<text x="' + n.x + '" y="' + (n.y + 4) + '" font-size="12" fill="' + tc + '" text-anchor="middle">' + k + '</text>');
+      if (d) {
+        p.push('<text x="' + n.lx + '" y="' + n.ly + '" font-size="10" fill="#6b7280" text-anchor="' + n.an + '">dfn ' + d + '</text>');
+      }
+    });
+
+    p.push('<rect x="16" y="240" width="588" height="70" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>');
+    p.push('<text x="32" y="262" font-size="11" fill="#374151">dfn：1→2  2→3  3→4  4→5  5→6</text>');
+    p.push('<text x="32" y="282" font-size="11" fill="#6b7280">from：2←1  3←2  4←3  5←4  6←5</text>');
+    var ringTxt = st.ring.length ? '环 {3,4,5}，闭合边 5-3，环长 3' : '还没有发现环';
+    p.push('<text x="32" y="302" font-size="11" fill="' + (st.ring.length ? '#ea580c' : '#9aa0a6') + '">' + ringTxt + '</text>');
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div>' + st.info + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if (at > 0) { at--; render(); } });
+  next.addEventListener('click', function(){ if (at < STEPS.length - 1) { at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

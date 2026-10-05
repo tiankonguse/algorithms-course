@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>强连通分量与缩点 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .sc-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .sc-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .sc-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #scSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .sc-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>强连通分量与缩点</h1>
+    <p class="intro">有向图比无向图难的地方，就在「可达」是单向的。一族点如果彼此都能走到，它们就是一个强连通分量；把每个分量揉成一个点，整张图的环就全没了，剩下一个 DAG。这一节先讲清楚 Tarjan 怎么找分量，再讲缩点之后那些出度入度的基础题。</p>
+
+    <h2>零、背景</h2>
+    <p>无向图的连通性很直白，能走过去就是连通。有向图不一样，u 能到 v、v 不一定能到 u。于是「互相可达」这个关系才是好用的那一半。</p>
+    <p>一个强连通分量，简称 SCC，是极大的一族点：族里任意两点 u、v，u 能到 v，v 也能到 u。极大是指再往里加任何一个点，这个性质就破坏了。</p>
+    <p>单个点也算 SCC，只要它不和其他点互相可达。所以任何有向图都能被拆成若干个 SCC，每个点恰好属于一个。</p>
+
+    <h2>一、什么是强连通分量</h2>
+    <p>看下面这张图。1、2、3 两两之间绕着圈走，彼此都能到达，是一个 SCC；4、5 也绕着一个圈，是另一个 SCC。3 到 4 有一条边，但 4 回不到 3，所以它们不在同一个分量里。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="有向图中的两个强连通分量" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="sc1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="sc1o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <rect x="72" y="28" width="200" height="180" rx="10" fill="#eef4ff" stroke="#9aa0a6" stroke-width="1.2" stroke-dasharray="6 4"/>
+        <text x="80" y="22" font-size="10" fill="#6b7280">SCC 1</text>
+        <rect x="372" y="88" width="160" height="70" rx="10" fill="#ffedd5" stroke="#9aa0a6" stroke-width="1.2" stroke-dasharray="6 4"/>
+        <text x="380" y="82" font-size="10" fill="#6b7280">SCC 2</text>
+        <g stroke="#9aa0a6" stroke-width="1.5" fill="none" marker-end="url(#sc1)">
+          <line x1="128" y1="72" x2="212" y2="72"/>
+          <line x1="222" y1="86" x2="182" y2="159"/>
+          <line x1="156" y1="161" x2="118" y2="86"/>
+        </g>
+        <path d="M 186 178 L 392 128" stroke="#9aa0a6" stroke-width="1.5" fill="none" marker-end="url(#sc1)"/>
+        <g stroke="#ea580c" stroke-width="1.8" fill="none" marker-end="url(#sc1o)">
+          <path d="M 400 112 Q 452 94 504 112"/>
+          <path d="M 504 130 Q 452 148 400 130"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+          <circle cx="110" cy="72" r="17"/>
+          <circle cx="230" cy="72" r="17"/>
+          <circle cx="170" cy="176" r="17"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.5">
+          <circle cx="400" cy="121" r="17"/>
+          <circle cx="504" cy="121" r="17"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="110" y="76">1</text>
+          <text x="230" y="76">2</text>
+          <text x="170" y="180">3</text>
+          <text x="400" y="125">4</text>
+          <text x="504" y="125">5</text>
+        </g>
+        <text x="300" y="126" font-size="10" fill="#9aa0a6">3 → 4</text>
+        <text x="452" y="90" font-size="10" fill="#ea580c" text-anchor="middle">4 ⇄ 5</text>
+        <text x="30" y="238" font-size="11" fill="#6b7280">1、2、3 互相可达；4、5 互相可达；但 3 到 4 之后回不来</text>
+      </svg>
+      <figcaption>同一个圈里的点互相可达，构成一个强连通分量；一条单向的边把两个分量连成了先后关系</figcaption>
+    </figure>
+
+    <p>把每个 SCC 揉成一个点，原来分量内部那些边就消失了。剩下的边只连接不同的分量，而跨分量的边不可能绕回来，否则两个分量就会合成一个。所以缩点后的图没有环。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="缩点后的有向无环图" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="sc2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+          </marker>
+        </defs>
+        <g stroke="#2563eb" stroke-width="1.5" fill="none" marker-end="url(#sc2)">
+          <path d="M 178 110 Q 234 70 288 62"/>
+          <path d="M 178 112 Q 234 152 288 168"/>
+          <path d="M 368 60 Q 430 74 488 100"/>
+          <path d="M 362 170 Q 430 152 488 122"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+          <rect x="90" y="93" width="88" height="34" rx="8"/>
+          <rect x="290" y="44" width="78" height="32" rx="8"/>
+          <rect x="290" y="154" width="72" height="32" rx="8"/>
+          <rect x="490" y="94" width="80" height="32" rx="8"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="134" y="115">{1,2,3}</text>
+          <text x="329" y="65">{4,5}</text>
+          <text x="326" y="175">{6}</text>
+          <text x="530" y="115">{7,8}</text>
+        </g>
+        <g font-size="10" fill="#6b7280" text-anchor="middle">
+          <text x="134" y="86">SCC 1</text>
+          <text x="329" y="37">SCC 2</text>
+          <text x="326" y="200">SCC 3</text>
+          <text x="530" y="87">SCC 4</text>
+        </g>
+        <text x="30" y="26" font-size="11" fill="#374151">缩点后：4 个 SCC 变成 4 个点，边只在分量之间</text>
+        <text x="30" y="212" font-size="11" fill="#6b7280">缩点图上没有环，任何一条路径都不会绕回起点</text>
+      </svg>
+      <figcaption>缩点把环压成点，得到的 DAG 上可以直接拓扑排序、求最长路、数入度出度</figcaption>
+    </figure>
+
+    <p>缩点之后的好处很实在：DAG 上没有环，很多在图上有环时没法定义的东西，一下就清楚了。谁必须先做、谁需要先被满足，全看边指的方向。</p>
+    <p>要保证答案不变，缩点时必须把同一个分量里所有点看成一个整体。分量内部的点权求和、取最小值、计数，都要在这时候一次性算出来。</p>
+
+    <h2>二、Tarjan：dfn、low 与栈</h2>
+    <p>求 SCC 的主流办法是 Tarjan。它在一次 dfs 的过程中，用两个数组加一个栈就把所有分量分出来。</p>
+    <p><code class="inline">dfn[u]</code> 是 u 被访问的时间戳，dfs 到 u 时递增分配。它同时也是 u 在 dfs 树里的深度顺序。</p>
+    <p><code class="inline">low[u]</code> 的定义要背准：在 u 的子树里，从 u 出发、最多往上走一条回边，能到达的、dfs 树里最靠上的那个点的 dfn 值。换句更直白的话，low[u] 是 u 这棵子树「能倒着爬回多高」。</p>
+    <p>遍历时还要准备一个栈。每个点第一次被访问就进栈，只有当一个点确定了所属的分量，才会被弹出栈。</p>
+    <p>dfs 中遇到的边分三种。指向没访问过的点的，是树边，先递归下去；指向栈内点的，是回边，说明绕回了祖先；指向已经出栈的点的，是弃边，说明去的是别的分量，什么都不用做。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="dfs 树、回边与 dfn low" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="sc3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="sc3o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <g stroke="#9aa0a6" stroke-width="1.5" fill="none" marker-end="url(#sc3)">
+          <line x1="100" y1="70" x2="190" y2="70"/>
+          <line x1="220" y1="70" x2="310" y2="70"/>
+          <line x1="340" y1="70" x2="430" y2="70"/>
+          <line x1="460" y1="70" x2="550" y2="70"/>
+        </g>
+        <path d="M 325 55 Q 205 12 85 55" stroke="#ea580c" stroke-width="1.6" fill="none" stroke-dasharray="5 3" marker-end="url(#sc3o)"/>
+        <path d="M 565 85 Q 505 138 445 85" stroke="#ea580c" stroke-width="1.6" fill="none" stroke-dasharray="5 3" marker-end="url(#sc3o)"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+          <circle cx="85" cy="70" r="15"/>
+          <circle cx="205" cy="70" r="15"/>
+          <circle cx="325" cy="70" r="15"/>
+          <circle cx="445" cy="70" r="15"/>
+          <circle cx="565" cy="70" r="15"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="85" y="74">1</text>
+          <text x="205" y="74">2</text>
+          <text x="325" y="74">3</text>
+          <text x="445" y="74">4</text>
+          <text x="565" y="74">5</text>
+        </g>
+        <g font-size="10" fill="#6b7280" text-anchor="middle">
+          <text x="85" y="106">dfn1 low1</text>
+          <text x="205" y="106">dfn2 low1</text>
+          <text x="325" y="106">dfn3 low1</text>
+          <text x="445" y="106">dfn4 low4</text>
+          <text x="565" y="106">dfn5 low4</text>
+        </g>
+        <text x="205" y="12" font-size="10" fill="#ea580c" text-anchor="middle">回边 3 → 1</text>
+        <text x="505" y="152" font-size="10" fill="#ea580c" text-anchor="middle">回边 5 → 4</text>
+        <text x="30" y="182" font-size="11" fill="#374151">栈（自底向上）：1　2　3　4　5　　5 在栈顶</text>
+        <text x="30" y="202" font-size="11" fill="#6b7280">橙色虚线是回边，它把 low 拉回到栈内祖先的 dfn</text>
+      </svg>
+      <figcaption>树边按 dfs 顺序连成一棵树，回边把 low 拉低；low 记的是「最多走一条回边能爬回的最上面那个点」</figcaption>
+    </figure>
+
+    <p>看这张图。dfs 的顺序是 1 → 2 → 3 → 4 → 5。3 有一条回边指向 1，所以 3 的子树能爬回 1，low[3] = dfn[1] = 1；2 也跟着变 low[2] = 1。5 有一条回边指向 4，low[5] = dfn[4] = 4，回溯后 low[4] = 4。</p>
+    <p>代码里对应三句话。遇到树边，先递归再 <code class="inline">low[u] = min(low[u], low[v])</code>；遇到回边，<code class="inline">low[u] = min(low[u], dfn[v])</code>；遇到弃边，跳过。</p>
+
+    <h2>三、扎口袋：什么时候弹栈</h2>
+    <p>dfs 完 u 的所有出边之后，比较 dfn[u] 和 low[u]。两者相等，说明 u 的子树里没有任何一条回边能爬到 u 的上面去，u 就是这个分量的「根」，于是把栈顶一路弹到 u 为止，这批点构成一个分量。</p>
+    <p>不等就说明 u 上面还有祖先在兼容它，这时候不能弹，把 low 继续往回传。</p>
+    <p>这个过程很像扎口袋：dfs 一路向下，把点按顺序塞进栈；能爬回去的分量要等到爬不动的那个根出现，口袋才在根这里扎紧，一次性倒出来。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 252" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="dfn 等于 low 时弹栈形成分量" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="60" y="30" font-size="11" fill="#374151" text-anchor="middle">栈</text>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <rect x="110" y="66" width="90" height="30" rx="5"/>
+          <rect x="110" y="98" width="90" height="30" rx="5"/>
+          <rect x="110" y="130" width="90" height="30" rx="5"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.4">
+          <rect x="110" y="162" width="90" height="30" rx="5"/>
+          <rect x="110" y="194" width="90" height="30" rx="5"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="155" y="86">1</text>
+          <text x="155" y="118">2</text>
+          <text x="155" y="150">3</text>
+          <text x="155" y="182">4</text>
+          <text x="155" y="214">5</text>
+        </g>
+        <text x="230" y="66" font-size="10" fill="#9aa0a6">← 栈顶在下方</text>
+        <path d="M 300 110 L 300 216" stroke="#ea580c" stroke-width="1.6" fill="none" stroke-dasharray="5 3"/>
+        <path d="M 300 110 L 372 110" stroke="#ea580c" stroke-width="1.6" fill="none" stroke-dasharray="5 3"/>
+        <path d="M 300 216 L 372 216" stroke="#ea580c" stroke-width="1.6" fill="none" stroke-dasharray="5 3"/>
+        <rect x="372" y="92" width="216" height="140" rx="10" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+        <text x="386" y="116" font-size="11" fill="#ea580c">dfn[4] == low[4] = 4</text>
+        <text x="386" y="140" font-size="11" fill="#374151">在 4 这里扎口袋</text>
+        <text x="386" y="166" font-size="11" fill="#374151">弹出 5、4，到 4 停</text>
+        <text x="386" y="192" font-size="11" fill="#374151">得到 SCC {4, 5}</text>
+        <text x="386" y="218" font-size="11" fill="#6b7280">栈里还剩 1、2、3</text>
+        <text x="30" y="246" font-size="11" fill="#6b7280">橙色是两个点被倒出来，剩下的继续等着自己的根出现</text>
+      </svg>
+      <figcaption>dfn[u] 等于 low[u] 时，u 是分量的根，栈顶到 u 的这批点一次性弹出，组成一个强连通分量</figcaption>
+    </figure>
+
+    <p>回边那一步有个流传很广的疑问：到底写 <code class="inline">low[u] = min(low[u], dfn[v])</code>，还是 <code class="inline">low[u] = min(low[u], low[v])</code>？两种写法的运行结果都对。推荐第一种，因为它忠实于 low 的定义，low 记的是爬回某个祖先的 dfn；用 low[v] 会把「爬回祖先」和「爬回某个更深的后代」混在一起，让 low 的含义变模糊。</p>
+    <p>还有两个细节。访问每个点之前要先判 dfn 是否为 0，没访问过才从这里起一次 dfs，因为图不一定连通。另外，回边只对「还在栈里」的点生效，所以判断条件里要写 <code class="inline">belong[v] == 0</code>，把已经出栈的弃边挡掉。</p>
+
+    <div class="viz">
+      <div class="viz-title">Tarjan 在这个图上跑一遍</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">点「下一步」，按 dfs 顺序走：看每个点的 dfn、low 怎么定，栈怎么进，最后在哪两个地方扎口袋。</p>
+      <svg id="scSvg" viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Tarjan 求强连通分量演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>当前访问的点</span>
+        <span><span class="dot partial"></span>已扎口袋的分量</span>
+        <span><span class="dot skip"></span>还没走到</span>
+      </div>
+      <div class="breakdown" id="scInfo"></div>
+      <div class="viz-controls">
+        <button class="sc-btn" id="scPrev" type="button">上一步</button>
+        <button class="sc-btn" id="scNext" type="button">下一步</button>
+        <button class="sc-btn" id="scReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>四、缩点</h2>
+    <p>有了 belong 数组，缩点就是一件笨活：把每个分量看成一个新点，原来是 1 到 sccCnt 的编号，直接拿来用。原图里每条边 u → v，如果 belong[u] 和 belong[v] 不同，就在缩点图上连一条 belong[u] → belong[v] 的边。</p>
+    <p>连完之后缩点图一定没有环。如果它还有环，环上那些分量之间彼此可达，早就该被合并成一个分量了，矛盾。</p>
+    <p>接下来多数题的套路都一样：先 tarjan 求分量，把每个分量的信息（点权之和、最小值、计数）算出来，再扫一遍原边统计缩点图上的入度和出度。</p>
+
+    <h2>五、题目1：强连通分量模版题1</h2>
+    <p>n 个点 m 条边的有向图，要求打印分量个数；然后按 1 号点、2 号点……的顺序，打印每个点所在的分量，同一个分量只打印一次，每行内节点编号从小到大。</p>
+    <p>「同一个分量只打印一次」这句话，等于让我们输出分量的节点集合，而且按分量里最小点在原序列中的位置排序。做法是 tarjan 弹栈时把点依次记进一个数组，同时记下每个分量的左右下标；输出时按节点编号 1 到 n 扫一遍，遇到新分量就把它那一段排序后打印。</p>
+    <p>完整代码：</p>
+
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 10001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 100001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sccArr[MAXN];
+    <span class="kw">int</span> sccl[MAXN];
+    <span class="kw">int</span> sccr[MAXN];
+    <span class="kw">int</span> idx;
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">bool</span> sccPrint[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            sccl[sccCnt] = idx + 1;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+                sccArr[++idx] = pop;
+            } <span class="kw">while</span> (pop != u);
+            sccr[sccCnt] = idx;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= m; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        cout &lt;&lt; sccCnt &lt;&lt; "\n";
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            sort(sccArr + sccl[i], sccArr + sccr[i] + 1);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">int</span> scc = belong[i];
+            <span class="kw">if</span> (!sccPrint[scc]) {
+                sccPrint[scc] = <span class="kw">true</span>;
+                <span class="kw">for</span> (<span class="kw">int</span> j = sccl[scc]; j &lt;= sccr[scc]; j++) {
+                    cout &lt;&lt; sccArr[j] &lt;&lt; " ";
+                }
+                cout &lt;&lt; "\n";
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+
+    <h2>六、题目2：强连通分量模版题2</h2>
+    <p>同样求所有分量，只是输出换成了「先打印分量大小，再打印分量的点」，点的顺序任意。</p>
+    <p>因为顺序不再有要求，就不必维护 sccArr 那套左右下标，弹栈时直接把 size 累加、点排在第几段里顺手记下即可。代码比题 1 短一截，是更常见的模版形态。</p>
+    <p>完整代码：</p>
+
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 50001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 100001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sccArr[MAXN];
+    <span class="kw">int</span> sccSiz[MAXN];
+    <span class="kw">int</span> sccl[MAXN];
+    <span class="kw">int</span> sccr[MAXN];
+    <span class="kw">int</span> idx;
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            sccl[sccCnt] = idx + 1;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+                sccArr[++idx] = pop;
+                sccSiz[sccCnt]++;
+            } <span class="kw">while</span> (pop != u);
+            sccr[sccCnt] = idx;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= m; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        cout &lt;&lt; sccCnt &lt;&lt; "\n";
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            cout &lt;&lt; sccSiz[i] &lt;&lt; " ";
+            <span class="kw">for</span> (<span class="kw">int</span> j = sccl[i]; j &lt;= sccr[i]; j++) {
+                cout &lt;&lt; sccArr[j] &lt;&lt; " ";
+            }
+            cout &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+
+    <h2>七、题目3：强连通分量模版题3</h2>
+    <p>n 个点 m 条边，边带类型：t 为 1 是 a 到 b 的单向边，t 为 2 是双向边。求最大的分量，先打印大小，再按编号从小到大打印节点；若有多个同样大的分量，取字典序最小的那个。</p>
+    <p>双向边就是正反两条有向边，建图时照着连即可，其余照旧。找最大分量靠一遍 sccSiz。字典序最小的处理有个小技巧：按节点编号从小到大扫，第一个落在最大分量里的点，它所在的分量就是字典序最小的，因为比较字典序看的正是最小节点。</p>
+    <p>完整代码：</p>
+
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 5001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 100001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sccSiz[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+                sccSiz[sccCnt]++;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, a, b, t; i &lt;= m; i++) {
+            cin &gt;&gt; a &gt;&gt; b &gt;&gt; t;
+            <span class="kw">if</span> (t == 1) {
+                addEdge(a, b);
+            } <span class="kw">else</span> {
+                addEdge(a, b);
+                addEdge(b, a);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        <span class="kw">int</span> largest = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            largest = max(largest, sccSiz[i]);
+        }
+        cout &lt;&lt; largest &lt;&lt; "\n";
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (sccSiz[belong[i]] == largest) {
+                <span class="kw">int</span> scc = belong[i];
+                <span class="kw">for</span> (<span class="kw">int</span> j = i; j &lt;= n; j++) {
+                    <span class="kw">if</span> (belong[j] == scc) {
+                        cout &lt;&lt; j &lt;&lt; " ";
+                    }
+                }
+                <span class="kw">break</span>;
+            }
+        }
+        cout &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+
+    <h2>八、复杂度分析</h2>
+    <p>三道题都是纯模版，一遍 tarjan 加一遍收尾扫描，没有额外的数据结构。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>tarjan 求所有强连通分量</td><td><code class="inline">O(n + m)</code></td><td rowspan="3"><code class="inline">O(n + m)</code>（链式前向星 + dfn/low/栈/belong 各一个数组）</td></tr>
+        <tr><td>题目1 打印（含每段排序）</td><td><code class="inline">O(n log n)</code> 最坏</td></tr>
+        <tr><td>题目2 / 题目3 收尾扫描</td><td><code class="inline">O(n + m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>tarjan 里每个点进栈出栈各一次，每条边只看一次，所以主体是线性的。题目1 要给每个分量的节点排序，最坏是 O(n log n)，注意题目保证 n 到 10⁴ 所以排序不吃紧。递归深度最坏是 n 层，n 到 10⁴ 时栈空间够用；如果 n 更大，就得把 dfs 改成迭代版。</p>
+
+    <h2>九、最后</h2>
+    <p>这一节的核心只有一件事：Tarjan 用一次 dfs 求出所有分量，靠的是 dfn 记时间、low 记能爬回多高、栈记还没归属的点。dfn 等于 low 的地方就是分量的根。</p>
+    <p>真正的题目不会只让你数分量，而是缩点之后在 DAG 上做题。下一节把出度入度、点权、拓扑这几类基础题逐个过一遍，看缩点之后每道题到底在看哪个量。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var svg = document.getElementById('scSvg');
+  if (!svg) return;
+  var info = document.getElementById('scInfo');
+  var prev = document.getElementById('scPrev');
+  var next = document.getElementById('scNext');
+  var reset = document.getElementById('scReset');
+
+  var N = {1:[110,75],2:[240,62],3:[170,176],4:[420,96],5:[420,206]};
+  var BACK = [[3,1],[5,4]];
+
+  var STEPS = [
+    {t:'从 1 号点开始', s:'dfn[1] = low[1] = 1，1 进栈。', dfn:{1:1}, low:{1:1}, stack:[1], done:[]},
+    {t:'走到 2 号点', s:'1 → 2 是树边，dfn[2] = low[2] = 2，2 进栈。', dfn:{1:1,2:2}, low:{1:1,2:2}, stack:[1,2], done:[]},
+    {t:'走到 3 号点', s:'2 → 3 是树边，dfn[3] = low[3] = 3，3 进栈。', dfn:{1:1,2:2,3:3}, low:{1:1,2:2,3:3}, stack:[1,2,3], done:[]},
+    {t:'3 遇到回边 3 → 1', s:'1 还在栈里，low[3] = min(3, dfn[1]) = 1。', dfn:{1:1,2:2,3:3}, low:{1:1,2:2,3:1}, stack:[1,2,3], done:[]},
+    {t:'3 → 4 是树边', s:'走到 4，dfn[4] = low[4] = 4，4 进栈。', dfn:{1:1,2:2,3:3,4:4}, low:{1:1,2:2,3:1,4:4}, stack:[1,2,3,4], done:[]},
+    {t:'4 → 5 是树边', s:'走到 5，dfn[5] = low[5] = 5，5 进栈。', dfn:{1:1,2:2,3:3,4:4,5:5}, low:{1:1,2:2,3:1,4:4,5:5}, stack:[1,2,3,4,5], done:[]},
+    {t:'5 遇到回边 5 → 4', s:'low[5] = min(5, dfn[4]) = 4；回溯后 low[4] = min(4, low[5]) = 4。', dfn:{1:1,2:2,3:3,4:4,5:5}, low:{1:1,2:2,3:1,4:4,5:4}, stack:[1,2,3,4,5], done:[]},
+    {t:'4 扎第一个口袋', s:'dfn[4] == low[4] == 4，弹 5、4 到 4 停，得到 SCC {4,5}。', dfn:{1:1,2:2,3:3,4:4,5:5}, low:{1:1,2:2,3:1,4:4,5:4}, stack:[1,2,3], done:['4,5']},
+    {t:'回到 3', s:'low[3] = min(1, low[4]) = 1；dfn[3] = 3 不等于 low[3]，不弹。', dfn:{1:1,2:2,3:3,4:4,5:5}, low:{1:1,2:2,3:1,4:4,5:4}, stack:[1,2,3,4,5], done:['4,5']},
+    {t:'回到 2、1', s:'low[2] = min(2, low[3]) = 1，low[1] = min(1, low[2]) = 1。dfn[1] == low[1]，扎口袋，弹 3、2、1，得到 SCC {1,2,3}。', dfn:{1:1,2:2,3:3,4:4,5:5}, low:{1:1,2:2,3:1,4:4,5:4}, stack:[], done:['4,5','1,2,3']}
+  ];
+  var at = 0;
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+    p.push('<defs><marker id="scv1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#c9ced4"/></marker><marker id="scv2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/></marker></defs>');
+    p.push('<rect x="10" y="8" width="600" height="284" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+
+    // 树边：显式给出圆边上的一点到另一点，箭头不被圆盖住
+    var TREE_SEG = [
+      [126,73,224,64],
+      [231,77,179,161],
+      [186,171,404,101],
+      [420,112,420,190]
+    ];
+    TREE_SEG.forEach(function(c){
+      p.push('<line x1="'+c[0]+'" y1="'+c[1]+'" x2="'+c[2]+'" y2="'+c[3]+'" stroke="#c9ced4" stroke-width="1.5" marker-end="url(#scv1)"/>');
+    });
+    // 回边：3 → 1 绕左侧，5 → 4 绕右侧
+    var BACK_D = ['M 170 161 Q 36 132 98 90', 'M 436 200 Q 560 155 436 110'];
+    BACK.forEach(function(e, i){
+      var seen = st.dfn[e[0]] !== undefined;
+      p.push('<path d="'+BACK_D[i]+'" fill="none" stroke="'+(seen?'#ea580c':'#d7dade')+'" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#'+(seen?'scv2':'scv1')+')"/>');
+    });
+
+    Object.keys(N).forEach(function(k){
+      var c = N[k];
+      var done = false;
+      st.done.forEach(function(g){ if (g.split(',').indexOf(k) >= 0) done = true; });
+      var visited = st.dfn[k] !== undefined;
+      var fill = '#f6f7f9', stroke = '#9aa0a6';
+      if (visited && !done){ fill = '#dbeafe'; stroke = '#2563eb'; }
+      if (done){ fill = '#ffedd5'; stroke = '#ea580c'; }
+      p.push('<circle cx="'+c[0]+'" cy="'+c[1]+'" r="16" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.6"/>');
+      p.push('<text x="'+c[0]+'" y="'+(c[1]+4)+'" font-size="12" fill="#1f2328" text-anchor="middle">'+k+'</text>');
+      if (st.dfn[k] !== undefined){
+        var right = (k==='4' || k==='5');
+        var lx = right ? c[0]-20 : c[0];
+        var ly = right ? c[1]+4 : c[1]+34;
+        var anch = right ? 'end' : 'middle';
+        p.push('<text x="'+lx+'" y="'+ly+'" font-size="10" fill="#6b7280" text-anchor="'+anch+'">dfn'+st.dfn[k]+' low'+st.low[k]+'</text>');
+      }
+    });
+
+    var inStack = st.stack;
+    p.push('<text x="24" y="268" font-size="11" fill="#374151">栈（自底向上）：</text>');
+    if (inStack.length === 0){
+      p.push('<text x="150" y="268" font-size="11" fill="#9aa0a6">空</text>');
+    } else {
+      var sx = 150;
+      inStack.forEach(function(v, i){
+        var last = i === inStack.length-1;
+        p.push('<rect x="'+sx+'" y="254" width="30" height="18" rx="4" fill="'+(last?'#ffedd5':'#dbeafe')+'" stroke="'+(last?'#ea580c':'#2563eb')+'" stroke-width="1.2"/>');
+        p.push('<text x="'+(sx+15)+'" y="267" font-size="11" fill="#1f2328" text-anchor="middle">'+v+'</text>');
+        sx += 34;
+      });
+      p.push('<text x="'+(sx+4)+'" y="267" font-size="10" fill="#6b7280">← 栈顶</text>');
+    }
+    var dn = st.done;
+    if (dn.length){
+      p.push('<text x="380" y="268" font-size="11" fill="#ea580c">已弹出的分量：'+dn.join('、')+'</text>');
+    }
+    p.push('<text x="24" y="290" font-size="10" fill="#9aa0a6">橙色虚线为回边，橙色点为已归属的分量</text>');
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div><strong>' + st.t + '</strong></div><div>' + st.s + '</div>';
+  }
+
+  function upd(){
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+    render();
+  }
+  prev.addEventListener('click', function(){ if (at > 0){ at--; upd(); } });
+  next.addEventListener('click', function(){ if (at < STEPS.length - 1){ at++; upd(); } });
+  reset.addEventListener('click', function(){ at = 0; upd(); });
+  upd();
+})();
+</script>
+</body>
+</html>

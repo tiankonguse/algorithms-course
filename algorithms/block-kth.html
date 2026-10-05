@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分块好题（一）：区间第 k 小与时间分块 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.cellrow{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;}
+.bgroup{display:flex;flex-direction:column;align-items:center;gap:6px;}
+.blabel{font-size:12px;color:var(--text-dim);}
+.crow{display:flex;gap:4px;}
+.cell{
+  width:38px;height:38px;display:flex;align-items:center;justify-content:center;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+  font-size:14px;font-variant-numeric:tabular-nums;
+}
+.cell.full{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.cell.partial{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+.cell.dim{opacity:.35;}
+.sorted{
+  font-size:12px;color:var(--text-dim);background:var(--bg-soft);border:1px solid var(--border);
+  border-radius:6px;padding:2px 8px;font-variant-numeric:tabular-nums;
+}
+.sorted b{color:var(--accent);font-weight:600;}
+.tlrow{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;}
+.tcell{
+  min-width:56px;padding:8px 6px;border-radius:8px;border:1px solid var(--border);
+  background:var(--bg-soft);text-align:center;font-variant-numeric:tabular-nums;
+}
+.tcell.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;}
+.tcell.hit{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.tcell .tv{font-size:16px;}
+.tcell .tk{font-size:11px;color:var(--text-dim);}
+.tcell.hit .tk,.tcell.on .tk{color:inherit;opacity:.75;}
+.btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;}
+.viz button{
+  font:inherit;font-size:14px;padding:6px 14px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--border);background:var(--bg);color:var(--text);
+}
+.viz button:hover{border-color:var(--accent);color:var(--accent);}
+.viz button.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+.stepnote{margin-top:12px;font-size:14px;color:var(--text-dim);min-height:24px;}
+.stepnote b{color:var(--accent);}
+@media(max-width:760px){
+  .cell{width:32px;height:32px;font-size:12px;}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>分块好题（一）：区间第 k 小与时间分块</h1>
+    <p class="intro">分块的骨架是「整块一步取、散块逐个算」。这一节看两道变形：一道把块内存的东西从和换成了有序副本，另一道换了个维度，分的是时间。</p>
+
+    <h2>零、背景</h2>
+    <p>序列分块那一节里，块内存的是区间和，查询一次 O(√n)。</p>
+    <p>块内其实可以存任何「能快速重建、能快速回答整块」的信息。存和，就能回答区间和；存有序副本，就能回答整块里有多少个数不超过某个值。</p>
+    <p>这一节第一道题就是这么来的：区间加、查区间第 k 小。第二道题换个方向，把分块用在时间轴上。</p>
+
+    <h2>一、问题：由乃打扑克</h2>
+    <p>一个长度为 n 的数组 arr，m 条操作。</p>
+    <ul>
+      <li>操作 1 l r v：查询 arr[l..r] 上第 v 小的数。</li>
+      <li>操作 2 l r v：arr[l..r] 上每个数加 v，v 可能是负数。</li>
+    </ul>
+    <p>1 ≤ n、m ≤ 10⁵，数组中的值在 -2 * 10⁴ 到 +2 * 10⁴。</p>
+    <p>测试链接：<a href="https://www.luogu.com.cn/problem/P5356" target="_blank" rel="noopener">洛谷 P5356</a>。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>查询的时候把 [l, r] 拷出来排序，取第 v 个。</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> k) {
+    <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) tmp[i] = arr[i];
+    <span class="fn">sort</span>(tmp + l, tmp + r + 1);
+    <span class="kw">return</span> tmp[l + k - 1];
+}</pre>
+    <p>一次查询 O(len log len)，len 是区间长度。区间拉满就是 O(n log n)，做 10⁵ 次显然不行。</p>
+    <p>可以发现，慢在每次都要重新排序。区间加这种修改，并不改变块内元素的相对顺序，排序结果是可以复用的。</p>
+
+    <h2>三、块内存一份有序副本</h2>
+    <p>沿用序列分块的骨架，把数组按位置切成块，块长 B，块数 n/B。</p>
+    <p>每个块额外存一份排好序的副本 sortv，以及一个 lazy，表示整块统一加了多少。</p>
+    <p>整块加 v 时，块内所有数都加 v，相对顺序不变，所以只写 lazy += v，sortv 不动。</p>
+    <p>散块加 v 时，只有块内一部分元素变了，sortv 失效，就把这块的 arr 拷回 sortv 重新排一遍，O(B log B)。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>整块加只动 lazy，散块加要重建所在块的有序副本</figcaption>
+    </figure>
+
+    <p>有了 sortv 和 lazy，整块内「有多少个数 ≤ v」可以二分得到：在 sortv 里找 v - lazy 的位置。</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">blockCnt</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {        <span class="cm">// 第 i 块内 ≤ v 的个数</span>
+    v -= lazy[i];                       <span class="cm">// 去掉整块加成，回到副本里的值</span>
+    <span class="kw">int</span> l = bl[i], r = br[i];
+    <span class="kw">if</span> (sortv[l] &gt; v) <span class="kw">return</span> 0;
+    <span class="kw">if</span> (sortv[r] &lt;= v) <span class="kw">return</span> r - l + 1;
+    <span class="kw">int</span> find = l;
+    <span class="kw">while</span> (l &lt;= r) {                     <span class="cm">// 二分找最后一个 ≤ v 的位置</span>
+        <span class="kw">int</span> m = (l + r) &gt;&gt; 1;
+        <span class="kw">if</span> (sortv[m] &lt;= v) { find = m; l = m + 1; }
+        <span class="kw">else</span> r = m - 1;
+    }
+    <span class="kw">return</span> find - bl[i] + 1;
+}</pre>
+    <p>散块仍然逐个扫，整块走二分。于是「[l, r] 里有多少个数 ≤ v」就是两端的散块暴力加中间的整块二分。</p>
+
+    <h2>四、二分答案</h2>
+    <p>第 k 小不好直接算，但「有多少个数 ≤ v」能算。</p>
+    <p>这个计数随 v 单调不减，所以可以二分答案：找一个最小的 v，使得 [l, r] 里 ≤ v 的个数 ≥ k，这个 v 就是第 k 小。</p>
+    <p>二分的上下界取 [l, r] 的最小值和最大值。最小值是每块 sortv 的首元素加 lazy 再取 min，最大值是每块 sortv 的尾元素加 lazy 再取 max，散块逐个比。</p>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>值域上二分：计数 ≥ k 就把右端收过来，否则抬左端，收敛处就是第 k 小</figcaption>
+    </figure>
+
+    <p>这里有个细节：二分的是值，不是下标，所以答案一定落在真实出现过的值上，循环结束时的 ans 就是答案。</p>
+
+    <h2>五、块长取多少</h2>
+    <p>一次操作的时间可以写成这样，x 是块长。</p>
+    <pre class="code">y = a * (n / x) + b * x</pre>
+    <p>前一项是块间操作，块数 n/x 乘上每块的常数 a；后一项是块内操作，块长 x 乘上每个元素的常数 b。</p>
+    <p>这个函数开口向上，导数为 0 时取最小值。</p>
+    <pre class="code">x最优 = √(n * a / b)</pre>
+    <p>块间操作的常数大，就适当加大块长；块内操作的常数大，就适当减小块长。</p>
+    <p>本题查询比修改贵得多（查询要做一轮值域二分，每轮还有若干次块内二分），修改次数又多于查询次数，所以块长取小一点更划算，代码里取 √(n / 2)。</p>
+    <p>这种调块长的技巧只在卡常的时候有意义，正式比赛现在很少卡，了解即可。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ①　区间加与查询第 k 小</div>
+      <div class="cellrow" id="viz1"></div>
+      <div class="viz-controls">
+        <div class="ctl"><label>l</label><input type="range" id="pl" min="0" max="11" value="2"><span class="val" id="plv">2</span></div>
+        <div class="ctl"><label>r</label><input type="range" id="pr" min="0" max="11" value="9"><span class="val" id="prv">9</span></div>
+        <div class="ctl"><label>v</label><input type="range" id="pv" min="-5" max="5" value="2"><span class="val" id="pvv">2</span></div>
+        <div class="ctl"><label>k</label><input type="range" id="pk" min="1" max="12" value="4"><span class="val" id="pkv">4</span></div>
+      </div>
+      <div class="btnrow">
+        <button id="btnAdd">区间加 v</button>
+        <button class="primary" id="btnQuery">查询第 k 小</button>
+        <button id="btnReset">重置</button>
+      </div>
+      <div class="breakdown" id="bd1"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>整块（二分副本）</span>
+        <span><span class="dot partial"></span>散块（逐个扫）</span>
+      </div>
+    </div>
+
+    <h2>六、代码</h2>
+    <p>完整代码如下，块长取 (int)sqrt(n / 2)。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXB = 1001;
+
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> sortv[MAXN];
+
+    <span class="kw">int</span> blen, bnum;
+    <span class="kw">int</span> bi[MAXN];
+    <span class="kw">int</span> bl[MAXB];
+    <span class="kw">int</span> br[MAXB];
+    <span class="kw">int</span> lazy[MAXB];
+
+    <span class="kw">void</span> <span class="fn">innerAdd</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> v) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+            arr[i] += v;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = bl[bi[l]]; i &lt;= br[bi[l]]; i++) {
+            sortv[i] = arr[i];
+        }
+        sort(sortv + bl[bi[l]], sortv + br[bi[l]] + 1);
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> v) {
+        <span class="kw">if</span> (bi[l] == bi[r]) {
+            innerAdd(l, r, v);
+        } <span class="kw">else</span> {
+            innerAdd(l, br[bi[l]], v);
+            innerAdd(bl[bi[r]], r, v);
+            <span class="kw">for</span> (<span class="kw">int</span> i = bi[l] + 1; i &lt;= bi[r] - 1; i++) {
+                lazy[i] += v;
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getMin</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> lb = bi[l], rb = bi[r], ans = 10000000;
+        <span class="kw">if</span> (lb == rb) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+                ans = min(ans, arr[i] + lazy[lb]);
+            }
+        } <span class="kw">else</span> {
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= br[lb]; i++) {
+                ans = min(ans, arr[i] + lazy[lb]);
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = bl[rb]; i &lt;= r; i++) {
+                ans = min(ans, arr[i] + lazy[rb]);
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = lb + 1; i &lt;= rb - 1; i++) {
+                ans = min(ans, sortv[bl[i]] + lazy[i]);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">getMax</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> lb = bi[l], rb = bi[r], ans = -10000000;
+        <span class="kw">if</span> (lb == rb) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+                ans = max(ans, arr[i] + lazy[lb]);
+            }
+        } <span class="kw">else</span> {
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= br[lb]; i++) {
+                ans = max(ans, arr[i] + lazy[lb]);
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = bl[rb]; i &lt;= r; i++) {
+                ans = max(ans, arr[i] + lazy[rb]);
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = lb + 1; i &lt;= rb - 1; i++) {
+                ans = max(ans, sortv[br[i]] + lazy[i]);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">blockCnt</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        v -= lazy[i];
+        <span class="kw">int</span> l = bl[i], r = br[i];
+        <span class="kw">if</span> (sortv[l] &gt; v) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (sortv[r] &lt;= v) {
+            <span class="kw">return</span> r - l + 1;
+        }
+        <span class="kw">int</span> find = l;
+        <span class="kw">while</span> (l &lt;= r) {
+            <span class="kw">int</span> m = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (sortv[m] &lt;= v) {
+                find = m;
+                l = m + 1;
+            } <span class="kw">else</span> {
+                r = m - 1;
+            }
+        }
+        <span class="kw">return</span> find - bl[i] + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">getCnt</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> v) {
+        <span class="kw">int</span> lb = bi[l], rb = bi[r], ans = 0;
+        <span class="kw">if</span> (lb == rb) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+                <span class="kw">if</span> (arr[i] + lazy[lb] &lt;= v) {
+                    ans++;
+                }
+            }
+        } <span class="kw">else</span> {
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= br[lb]; i++) {
+                <span class="kw">if</span> (arr[i] + lazy[lb] &lt;= v) {
+                    ans++;
+                }
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = bl[rb]; i &lt;= r; i++) {
+                <span class="kw">if</span> (arr[i] + lazy[rb] &lt;= v) {
+                    ans++;
+                }
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = lb + 1; i &lt;= rb - 1; i++) {
+                ans += blockCnt(i, v);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> k) {
+        <span class="kw">if</span> (k &lt; 1 || k &gt; r - l + 1) {
+            <span class="kw">return</span> -1;
+        }
+        <span class="kw">int</span> minv = getMin(l, r);
+        <span class="kw">int</span> maxv = getMax(l, r);
+        <span class="kw">int</span> ans = -1;
+        <span class="kw">while</span> (minv &lt;= maxv) {
+            <span class="kw">int</span> midv = minv + (maxv - minv) / 2;
+            <span class="kw">if</span> (getCnt(l, r, midv) &gt;= k) {
+                ans = midv;
+                maxv = midv - 1;
+            } <span class="kw">else</span> {
+                minv = midv + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        blen = (<span class="kw">int</span>)sqrt(n / 2);
+        bnum = (n + blen - 1) / blen;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= bnum; i++) {
+            bl[i] = (i - 1) * blen + 1;
+            br[i] = min(i * blen, n);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            sortv[i] = arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= bnum; i++) {
+            sort(sortv + bl[i], sortv + br[i] + 1);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        prepare();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, l, r, v; i &lt;= m; i++) {
+            cin &gt;&gt; op &gt;&gt; l &gt;&gt; r &gt;&gt; v;
+            <span class="kw">if</span> (op == 1) {
+                cout &lt;&lt; query(l, r, v) &lt;&lt; '\n';
+            } <span class="kw">else</span> {
+                add(l, r, v);
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>七、换一维：时间分块</h2>
+    <p>再看另一道题，表面上和上面没什么关系。</p>
+    <p>长度为 n 的数组 arr，初始是第 0 秒，第 i 条操作发生在第 i 秒，共 m 条。</p>
+    <ul>
+      <li>操作 1 l r v：arr[l..r] 上每个数加 v。</li>
+      <li>操作 2 x v：不含当前这一秒，查询过去多少秒的时间里 arr[x] ≥ v。</li>
+    </ul>
+    <p>2 ≤ n、m ≤ 10⁵，测试链接：<a href="https://www.luogu.com.cn/problem/P3863" target="_blank" rel="noopener">洛谷 P3863</a>。</p>
+    <p>第二条操作说的是个数：在第 t 秒查询，就数一数第 0 到第 t-1 秒里，有多少个时刻满足 arr[x] ≥ v。</p>
+    <p>如果只有一个数（n = 1），这个问题很清楚：维护每个时刻这个数的值，查询就是「[0, t-1] 这段时间内有多少个时刻 ≥ v」，正好是序列分块的形状，块内存有序副本，区间加 + 区间计数。</p>
+    <p>n 个数时，直接对每个位置都维护一条时间轴，是 n 条长度 m 的轴，存不下，也没法一次改一段区间。</p>
+
+    <figure class="fig">
+      <div id="fig3"></div>
+      <figcaption>把要分块的轴从「位置」换成「时间」，位置改成扫描顺序，修改用差分挂到两端</figcaption>
+    </figure>
+
+    <h2>八、按位置扫描</h2>
+    <p>换一维来看。以位置为扫描顺序，以时间为下标维护一条数组 tim。</p>
+    <p>第 t 秒的修改 [l, r] 加 v，对位置 x 的影响是：x 落在 [l, r] 里才生效。所以把它拆成两个事件挂在位置上：位置 l 处加 v，位置 r + 1 处加 -v。这就是差分。</p>
+    <p>扫描到位置 x 时，把挂在 x 上的修改事件作用到时间轴上：修改发生在第 t 秒，影响 t 及以后所有时刻，于是时间轴 [t, m] 整体加 v。</p>
+    <p>于是 tim[i] 就是「位置 x 在时刻 i 相对初始值的加成」，查询时再和 arr[x] 拼起来。</p>
+    <p>具体来说，查询 (x, t, v) 要数 [1, t-1] 里有多少个时刻 i 满足 tim[i] + arr[x] ≥ v，也就是 tim[i] ≥ v - arr[x]。这正是时间轴上的区间计数，分块照做。</p>
+    <p>所有事件按 (位置, 时刻) 排序，扫一遍即可。答案按问题编号存回去，最后按输入顺序输出。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ②　时间轴上的事件推进（样例：n=3，arr = [1, 3, 5]）</div>
+      <div class="tlrow" id="viz2"></div>
+      <div class="btnrow">
+        <button class="primary" id="btnNext">下一步</button>
+        <button id="btnReset2">重置</button>
+      </div>
+      <div class="stepnote" id="note2"></div>
+      <div class="breakdown" id="bd2"></div>
+    </div>
+
+    <h2>九、代码</h2>
+    <p>时间轴长度是 m + 1（第 0 秒也要占一个位置），块长按 m 取。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Event {
+        <span class="kw">int</span> op, x, t, v, q;
+    };
+
+    <span class="kw">bool</span> <span class="fn">EventCmp</span>(Event &amp;a, Event &amp;b) {
+        <span class="kw">return</span> a.x != b.x ? a.x &lt; b.x : a.t &lt; b.t;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXB = 501;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+
+    Event event[MAXN &lt;&lt; 2];
+    <span class="kw">int</span> cnte, cntq;
+
+    <span class="kw">long</span> <span class="kw">long</span> tim[MAXN];
+    <span class="kw">long</span> <span class="kw">long</span> sortv[MAXN];
+
+    <span class="kw">int</span> blen, bnum;
+    <span class="kw">int</span> bi[MAXN];
+    <span class="kw">int</span> bl[MAXB];
+    <span class="kw">int</span> br[MAXB];
+    <span class="kw">long</span> <span class="kw">long</span> lazy[MAXB];
+
+    <span class="kw">int</span> ans[MAXN];
+
+    <span class="kw">void</span> <span class="fn">innerAdd</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">long</span> <span class="kw">long</span> v) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+            tim[i] += v;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = bl[bi[l]]; i &lt;= br[bi[l]]; i++) {
+            sortv[i] = tim[i];
+        }
+        sort(sortv + bl[bi[l]], sortv + br[bi[l]] + 1);
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">long</span> <span class="kw">long</span> v) {
+        <span class="kw">if</span> (l &gt; r) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">if</span> (bi[l] == bi[r]) {
+            innerAdd(l, r, v);
+        } <span class="kw">else</span> {
+            innerAdd(l, br[bi[l]], v);
+            innerAdd(bl[bi[r]], r, v);
+            <span class="kw">for</span> (<span class="kw">int</span> i = bi[l] + 1; i &lt;= bi[r] - 1; i++) {
+                lazy[i] += v;
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">innerQuery</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">long</span> <span class="kw">long</span> v) {
+        v -= lazy[bi[l]];
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+            <span class="kw">if</span> (tim[i] &gt;= v) {
+                ans++;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">getCnt</span>(<span class="kw">int</span> i, <span class="kw">long</span> <span class="kw">long</span> v) {
+        v -= lazy[i];
+        <span class="kw">int</span> l = bl[i], r = br[i], m, pos = br[i] + 1;
+        <span class="kw">while</span> (l &lt;= r) {
+            m = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (sortv[m] &gt;= v) {
+                pos = m;
+                r = m - 1;
+            } <span class="kw">else</span> {
+                l = m + 1;
+            }
+        }
+        <span class="kw">return</span> br[i] - pos + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">long</span> <span class="kw">long</span> v) {
+        <span class="kw">if</span> (l &gt; r) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">if</span> (bi[l] == bi[r]) {
+        	ans = innerQuery(l, r, v);
+        } <span class="kw">else</span> {
+        	ans += innerQuery(l, br[bi[l]], v);
+        	ans += innerQuery(bl[bi[r]], r, v);
+            <span class="kw">for</span> (<span class="kw">int</span> i = bi[l] + 1; i &lt;= bi[r] - 1; i++) {
+                ans += getCnt(i, v);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">addChange</span>(<span class="kw">int</span> x, <span class="kw">int</span> t, <span class="kw">int</span> v) {
+        event[++cnte].op = 1;
+        event[cnte].x = x;
+        event[cnte].t = t;
+        event[cnte].v = v;
+    }
+
+    <span class="kw">void</span> <span class="fn">addQuery</span>(<span class="kw">int</span> x, <span class="kw">int</span> t, <span class="kw">int</span> v) {
+        event[++cnte].op = 2;
+        event[cnte].x = x;
+        event[cnte].t = t;
+        event[cnte].v = v;
+        event[cnte].q = ++cntq;
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        blen = (<span class="kw">int</span>)sqrt(m);
+        bnum = (m + blen - 1) / blen;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= bnum; i++) {
+            bl[i] = (i - 1) * blen + 1;
+            br[i] = min(i * blen, m);
+        }
+        sort(event + 1, event + cnte + 1, EventCmp);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        m++;
+        <span class="kw">for</span> (<span class="kw">int</span> t = 2, op, l, r, v, x; t &lt;= m; t++) {
+            cin &gt;&gt; op;
+            <span class="kw">if</span> (op == 1) {
+                cin &gt;&gt; l &gt;&gt; r &gt;&gt; v;
+                addChange(l, t, v);
+                addChange(r + 1, t, -v);
+            } <span class="kw">else</span> {
+                cin &gt;&gt; x &gt;&gt; v;
+                addQuery(x, t, v);
+            }
+        }
+        prepare();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnte; i++) {
+            <span class="kw">if</span> (event[i].op == 1) {
+                add(event[i].t, m, event[i].v);
+            } <span class="kw">else</span> {
+                ans[event[i].q] = query(1, event[i].t - 1, 1LL * event[i].v - arr[event[i].x]);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntq; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>十、复杂度分析</h2>
+    <p>设 n 为数组长度，m 为操作条数，B 为块长，块数 n/B。第一道题的值域跨度记为 V。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>预处理（建块 + 块内排序）</td><td><code class="inline">O(n log B)</code></td></tr>
+        <tr><td>题 1 区间加</td><td><code class="inline">O(B log B + n/B)</code></td></tr>
+        <tr><td>题 1 查询第 k 小</td><td><code class="inline">O(log V · (B + (n/B) log B))</code></td></tr>
+        <tr><td>题 2 每个事件</td><td><code class="inline">O(B log B + m/B)</code></td></tr>
+        <tr><td>题 2 总计</td><td><code class="inline">O(m(B log B + m/B))</code>，B = √m 时是 <code class="inline">O(m√m log m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>题 1 查询里那一项 log V 是值域二分的轮数，V = 最大值减最小值，题目数据下在 30 上下。</p>
+    <p>空间上，题 1 只多了 sortv（长度 n）和 lazy（长度 n/B），是 O(n)；题 2 多了 tim、sortv（长度都是 m 量级）和事件数组（长度 2m），也是 O(n + m)。</p>
+    <p>题 2 的时间复杂度看着比题 1 高，是因为它一条操作要当成一个事件做一次区间加或区间查询，而题 1 的单次是 O(√n) 量级。</p>
+
+    <h2>十一、最后</h2>
+    <p>两道题共用的还是那个骨架：整块一步、散块逐个，区别只在块内存什么、以及分的是哪条轴。</p>
+    <p>下一部分块的好题，是分块和 bfs、和逆序对统计放在一起的两道。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  /* ================= 演示①：区间第 k 小 ================= */
+  const A0 = [5,2,9,1,7,3,8,4,6,11,0,10];
+  const N = A0.length, B = 4;
+  const BN = Math.ceil(N / B);
+  let arr, lazy, sortv, lastHi = null;
+
+  function reset1(){
+    arr = A0.slice();
+    lazy = new Array(BN).fill(0);
+    sortv = [];
+    for (let b=0;b<BN;b++){
+      const s = arr.slice(b*B, Math.min(b*B+B, N)).sort((x,y)=>x-y);
+      sortv.push(s);
+    }
+    lastHi = null;
+  }
+  function bi(i){ return Math.floor(i / B); }
+  function rebuild(b){
+    sortv[b] = [];
+    for (let i=b*B;i<Math.min(b*B+B,N);i++) sortv[b].push(arr[i]);
+    sortv[b].sort((x,y)=>x-y);
+  }
+  function add(l, r, v){
+    const lb = bi(l), rb = bi(r);
+    if (lb === rb){
+      for (let i=l;i<=r;i++) arr[i] += v;
+      rebuild(lb);
+    } else {
+      for (let i=l;i<(lb+1)*B && i<N;i++) arr[i] += v;
+      rebuild(lb);
+      for (let i=rb*B;i<=r;i++) arr[i] += v;
+      rebuild(rb);
+      for (let b=lb+1;b<rb;b++) lazy[b] += v;
+    }
+  }
+  function blockCnt(b, v){
+    v -= lazy[b];
+    const s = sortv[b];
+    let lo=0, hi=s.length-1, find=-1;
+    while (lo<=hi){ const m=(lo+hi)>>1; if (s[m]<=v){ find=m; lo=m+1; } else hi=m-1; }
+    return find+1;
+  }
+  function getCnt(l, r, v){
+    const lb=bi(l), rb=bi(r);
+    let ans=0;
+    if (lb===rb){
+      for (let i=l;i<=r;i++) if (arr[i]+lazy[lb] <= v) ans++;
+    } else {
+      for (let i=l;i<(lb+1)*B && i<N;i++) if (arr[i]+lazy[lb] <= v) ans++;
+      for (let i=rb*B;i<=r;i++) if (arr[i]+lazy[rb] <= v) ans++;
+      for (let b=lb+1;b<rb;b++) ans += blockCnt(b, v);
+    }
+    return ans;
+  }
+  function getMin(l, r){
+    const lb=bi(l), rb=bi(r);
+    let ans=Infinity;
+    if (lb===rb){ for (let i=l;i<=r;i++) ans=Math.min(ans, arr[i]+lazy[lb]); }
+    else {
+      for (let i=l;i<(lb+1)*B && i<N;i++) ans=Math.min(ans, arr[i]+lazy[lb]);
+      for (let i=rb*B;i<=r;i++) ans=Math.min(ans, arr[i]+lazy[rb]);
+      for (let b=lb+1;b<rb;b++) ans=Math.min(ans, sortv[b][0]+lazy[b]);
+    }
+    return ans;
+  }
+  function getMax(l, r){
+    const lb=bi(l), rb=bi(r);
+    let ans=-Infinity;
+    if (lb===rb){ for (let i=l;i<=r;i++) ans=Math.max(ans, arr[i]+lazy[lb]); }
+    else {
+      for (let i=l;i<(lb+1)*B && i<N;i++) ans=Math.max(ans, arr[i]+lazy[lb]);
+      for (let i=rb*B;i<=r;i++) ans=Math.max(ans, arr[i]+lazy[rb]);
+      for (let b=lb+1;b<rb;b++) ans=Math.max(ans, sortv[b][sortv[b].length-1]+lazy[b]);
+    }
+    return ans;
+  }
+  function kth(l, r, k){
+    let lo=getMin(l,r), hi=getMax(l,r), ans=null;
+    const trace=[];
+    while (lo<=hi){
+      const mid = lo + Math.floor((hi-lo)/2);
+      const c = getCnt(l,r,mid);
+      trace.push({mid:mid, c:c});
+      if (c>=k){ ans=mid; hi=mid-1; } else lo=mid+1;
+    }
+    return {ans:ans, trace:trace, lo0:getMin(l,r), hi0:getMax(l,r)};
+  }
+
+  const viz1=document.getElementById('viz1');
+  const pl=document.getElementById('pl'), pr=document.getElementById('pr');
+  const pv=document.getElementById('pv'), pk=document.getElementById('pk');
+  const bd1=document.getElementById('bd1');
+
+  function render1(){
+    let l=parseInt(pl.value,10), r=parseInt(pr.value,10);
+    if (l>r){ const t=l;l=r;r=t; }
+    pl.value=l; pr.value=r;
+    document.getElementById('plv').textContent=l;
+    document.getElementById('prv').textContent=r;
+    document.getElementById('pvv').textContent=pv.value;
+    document.getElementById('pkv').textContent=pk.value;
+
+    const lb=bi(l), rb=bi(r), full=new Set();
+    for (let b=lb+1;b<rb;b++) full.add(b);
+
+    viz1.innerHTML='';
+    for (let b=0;b<BN;b++){
+      const g=document.createElement('div'); g.className='bgroup';
+      const lab=document.createElement('div'); lab.className='blabel';
+      lab.textContent='块 '+b+(lazy[b]?'  lazy='+lazy[b]:'');
+      g.appendChild(lab);
+      const row=document.createElement('div'); row.className='crow';
+      for (let i=b*B;i<Math.min(b*B+B,N);i++){
+        const c=document.createElement('div'); c.className='cell';
+        c.textContent=arr[i]+lazy[b];
+        if (i<l||i>r) c.classList.add('dim');
+        else if (full.has(b)) c.classList.add('full');
+        else c.classList.add('partial');
+        row.appendChild(c);
+      }
+      g.appendChild(row);
+      const sp=document.createElement('div'); sp.className='sorted';
+      sp.innerHTML='有序副本 '+sortv[b].map(x=>x).join(' ');
+      g.appendChild(sp);
+      viz1.appendChild(g);
+    }
+  }
+
+  function showQuery(){
+    let l=parseInt(pl.value,10), r=parseInt(pr.value,10);
+    if (l>r){ const t=l;l=r;r=t; }
+    const k=parseInt(pk.value,10);
+    const res=kth(l,r,k);
+    let s='<div class="row">值域二分：下界 '+res.lo0+'，上界 '+res.hi0+'</div>';
+    res.trace.forEach(function(t){
+      s+='<div class="row">试 v = <span class="num">'+t.mid+'</span>，≤ v 的个数 '+t.c+
+         (t.c>=k?' ≥ '+k+'，右端收过来':' &lt; '+k+'，左端抬上去')+'</div>';
+    });
+    s+='<div class="total">['+l+', '+r+'] 上第 '+k+' 小 = '+res.ans+'</div>';
+    bd1.innerHTML=s;
+  }
+
+  document.getElementById('btnAdd').addEventListener('click', function(){
+    let l=parseInt(pl.value,10), r=parseInt(pr.value,10);
+    if (l>r){ const t=l;l=r;r=t; }
+    const v=parseInt(pv.value,10);
+    add(l,r,v);
+    render1();
+    bd1.innerHTML='<div class="row">['+l+', '+r+'] 每个数加 '+v+'，散块所在块重建了有序副本</div>';
+  });
+  document.getElementById('btnQuery').addEventListener('click', function(){ render1(); showQuery(); });
+  document.getElementById('btnReset').addEventListener('click', function(){ reset1(); render1(); bd1.innerHTML=''; });
+  [pl,pr,pv,pk].forEach(function(e){ e.addEventListener('input', render1); });
+
+  reset1(); render1();
+
+  /* ================= 演示②：时间轴 ================= */
+  // 样例：n=3 arr=[1,3,5]，第1秒查询(1,2)，第2秒[1,2]加-3，第3秒查询(1,1)
+  const TL = 4;                 // 时刻 1..4 对应第 0..3 秒
+  const ARR = [1,3,5];
+  const events = [
+    {type:'q', t:2, sec:1, x:1, v:2, lo:1, hi:1, thr:1, ans:0, desc:'第 1 秒：查询位置 1，值 ≥ 2 的时刻有几个'},
+    {type:'u', t:3, sec:2, v:-3, l:3, r:4, desc:'第 2 秒：[1, 2] 加 -3 → 时间轴 [3, 4] 加 -3'},
+    {type:'q', t:4, sec:3, x:1, v:1, lo:1, hi:3, thr:0, ans:2, desc:'第 3 秒：查询位置 1，值 ≥ 1 的时刻有几个'}
+  ];
+  let tim, step;
+  function reset2(){ tim = new Array(TL+1).fill(0); step = 0; }
+  const viz2=document.getElementById('viz2');
+  const note2=document.getElementById('note2');
+  const bd2=document.getElementById('bd2');
+
+  function render2(){
+    const cur = step>0 ? events[step-1] : null;
+    const hits = new Set();
+    if (cur && cur.type==='q'){
+      for (let i=cur.lo;i<=cur.hi;i++) if (tim[i] >= cur.thr) hits.add(i);
+    }
+    viz2.innerHTML='';
+    for (let i=1;i<=TL;i++){
+      const d=document.createElement('div');
+      let cls='tcell';
+      const inRange = cur && cur.type==='q' && i>=cur.lo && i<=cur.hi;
+      if (inRange) cls += hits.has(i) ? ' hit' : ' on';
+      else if (cur && cur.type==='u' && i>=cur.l && i<=cur.r) cls += ' on';
+      d.className=cls;
+      d.innerHTML='<div class="tv">'+(tim[i]>0?'+':'')+tim[i]+'</div><div class="tk">第 '+(i-1)+' 秒</div>';
+      viz2.appendChild(d);
+    }
+    if (!cur){
+      note2.innerHTML='位置 1 的时刻轴上，每个时刻存的是相对初始值的加成，现在全是 0。点「下一步」推进事件。';
+    } else if (cur.type==='u'){
+      note2.innerHTML=cur.desc;
+    } else {
+      note2.innerHTML=cur.desc+'　→　阈值 v - arr[1] = <b>'+cur.thr+'</b>，统计时刻 ['+cur.lo+', '+cur.hi+'] 中 ≥ 阈值的个数 = <b>'+cur.ans+'</b>';
+    }
+    let s='<div class="row">arr[1] = '+ARR[0]+'，当前时刻轴上 ≥ 阈值的时刻数就是答案</div>';
+    if (step>=1 && events[0].type==='q') s+='<div class="row">第 1 个查询的答案：0</div>';
+    if (step>=3) s+='<div class="row">第 2 个查询的答案：2</div>';
+    bd2.innerHTML=s;
+  }
+  document.getElementById('btnNext').addEventListener('click', function(){
+    if (step>=events.length) return;
+    const e=events[step];
+    if (e.type==='u'){ for (let i=e.l;i<=e.r;i++) tim[i]+=e.v; }
+    step++;
+    render2();
+  });
+  document.getElementById('btnReset2').addEventListener('click', function(){ reset2(); render2(); });
+  reset2(); render2();
+
+  /* ================= 图示 ================= */
+  const CW=34, CG=3, BG=12, X0=14;
+
+  /* 图①：整块加只动 lazy，散块加要重建 */
+  const fig1=document.getElementById('fig1');
+  if (fig1){
+    const demo=[5,2,9,1,7,3,8,4], FB=4, NB=2;
+    const BW=FB*CW+(FB-1)*CG;
+    const cellX=i=>X0+Math.floor(i/FB)*(BW+BG)+(i%FB)*(CW+CG);
+    const blockX=b=>X0+b*(BW+BG);
+    let s='<svg viewBox="0 0 680 210" role="img" aria-label="整块加与散块加的区别">';
+    function drawRow(y, title, hi){
+      s+='<text x="14" y="'+(y-6)+'" font-size="12" fill="#6b7280">'+title+'</text>';
+      for (let b=0;b<NB;b++){
+        const bx=blockX(b);
+        s+='<rect x="'+(bx-6)+'" y="'+y+'" width="'+(BW+12)+'" height="44" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>';
+        for (let j=b*FB;j<b*FB+FB;j++){
+          let fill='#ffffff', stroke='#e6e8eb', tc='#1f2328';
+          if (hi && hi.has(j)){ fill='#ffedd5'; stroke='#ea580c'; tc='#ea580c'; }
+          s+='<rect x="'+cellX(j)+'" y="'+(y+6)+'" width="'+CW+'" height="'+CW+'" rx="6" fill="'+fill+'" stroke="'+stroke+'"/>';
+          s+='<text x="'+(cellX(j)+CW/2)+'" y="'+(y+28)+'" text-anchor="middle" font-size="14" font-weight="600" fill="'+tc+'">'+demo[j]+'</text>';
+        }
+        s+='<rect x="'+bx+'" y="'+(y+52)+'" width="'+BW+'" height="24" rx="6" fill="#dbeafe" stroke="#2563eb"/>';
+        s+='<text x="'+(bx+BW/2)+'" y="'+(y+69)+'" text-anchor="middle" font-size="12" fill="#2563eb">sortv 块 '+b+'</text>';
+      }
+    }
+    drawRow(24, '初始：每个块存一份有序副本', null);
+    drawRow(112, '整块加 3：只写 lazy，副本不动', null);
+    s+='<text x="340" y="196" text-anchor="middle" font-size="12" fill="#6b7280">散块加会破坏副本的有序性，要把该块重排一遍，代价 O(B log B)</text>';
+    s+='</svg>';
+    fig1.innerHTML=s;
+  }
+
+  /* 图②：值域二分 */
+  const fig2=document.getElementById('fig2');
+  if (fig2){
+    const vals=[1,2,3,4,5,7,8,9], k=4, ans=4;
+    const x0=40, x1=640, y=110;
+    const px=v=>x0+(v-vals[0])/(vals[vals.length-1]-vals[0])*(x1-x0);
+    let s='<svg viewBox="0 0 680 190" role="img" aria-label="值域上二分答案">';
+    s+='<line x1="'+x0+'" y1="'+y+'" x2="'+x1+'" y2="'+y+'" stroke="#e6e8eb" stroke-width="2"/>';
+    vals.forEach(function(v){
+      s+='<circle cx="'+px(v)+'" cy="'+y+'" r="7" fill="#dbeafe" stroke="#2563eb"/>';
+      s+='<text x="'+px(v)+'" y="'+(y-16)+'" text-anchor="middle" font-size="12" fill="#6b7280">'+v+'</text>';
+    });
+    s+='<text x="'+x0+'" y="'+(y+34)+'" text-anchor="middle" font-size="12" fill="#9aa0a6">min</text>';
+    s+='<text x="'+x1+'" y="'+(y+34)+'" text-anchor="middle" font-size="12" fill="#9aa0a6">max</text>';
+    // 三次试探
+    const tries=[{v:5,c:5,ok:true,dy:-52},{v:3,c:3,ok:false,dy:-30},{v:4,c:4,ok:true,dy:-74}];
+    tries.forEach(function(t){
+      s+='<line x1="'+px(t.v)+'" y1="'+(y+14)+'" x2="'+px(t.v)+'" y2="'+(y+t.dy+14)+'" stroke="'+(t.ok?'#2563eb':'#ea580c')+'" stroke-width="1.5" stroke-dasharray="3 3"/>';
+      s+='<text x="'+px(t.v)+'" y="'+(y+t.dy+8)+'" text-anchor="middle" font-size="12" fill="'+(t.ok?'#2563eb':'#ea580c')+'">v='+t.v+' : '+t.c+(t.ok?' ≥ ':' < ')+k+'</text>';
+    });
+    s+='<circle cx="'+px(ans)+'" cy="'+y+'" r="11" fill="none" stroke="#ea580c" stroke-width="2"/>';
+    s+='<text x="340" y="172" text-anchor="middle" font-size="13" fill="#1f2328">计数 ≥ k 就把右端收过来，否则抬左端，最终停在 <tspan fill="#ea580c" font-weight="600">'+ans+'</tspan></text>';
+    s+='</svg>';
+    fig2.innerHTML=s;
+  }
+
+  /* 图③：换维 */
+  const fig3=document.getElementById('fig3');
+  if (fig3){
+    let s='<svg viewBox="0 0 680 230" role="img" aria-label="把分块的轴从位置换成时间">';
+    // 左：原视角 位置 × 时间
+    s+='<text x="150" y="20" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">原来的视角</text>';
+    s+='<text x="150" y="40" text-anchor="middle" font-size="12" fill="#6b7280">修改横跨一段位置，只在一个时刻生效</text>';
+    for (let r=0;r<4;r++){
+      for (let c=0;c<4;c++){
+        const x=30+c*62, y=56+r*32;
+        let fill='#f6f7f9', stroke='#e6e8eb';
+        if (r===2 && c>=1 && c<=3){ fill='#ffedd5'; stroke='#ea580c'; }   // 修改影响的位置
+        if (r===1 && c===0){ fill='#dbeafe'; stroke='#2563eb'; }          // 查询
+        s+='<rect x="'+x+'" y="'+y+'" width="56" height="26" rx="5" fill="'+fill+'" stroke="'+stroke+'"/>';
+      }
+    }
+    for (let c=0;c<4;c++){
+      s+='<text x="'+(58+c*62)+'" y="196" text-anchor="middle" font-size="11" fill="#9aa0a6">位置 '+(c+1)+'</text>';
+    }
+    for (let r=0;r<4;r++){
+      s+='<text x="48" y="'+(74+r*32)+'" text-anchor="end" font-size="11" fill="#9aa0a6">第 '+r+' 秒</text>';
+    }
+    // 箭头
+    s+='<path d="M320 120 L370 120" stroke="#9aa0a6" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>';
+    s+='<defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#9aa0a6"/></marker></defs>';
+    s+='<text x="345" y="110" text-anchor="middle" font-size="12" fill="#6b7280">换维</text>';
+    // 右：扫描位置，时间轴分块
+    s+='<text x="520" y="20" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">换维之后</text>';
+    s+='<text x="520" y="40" text-anchor="middle" font-size="12" fill="#6b7280">位置是扫描顺序，时间轴被切成块</text>';
+    for (let i=0;i<8;i++){
+      const x=400+i*34;
+      let fill='#ffffff', stroke='#e6e8eb';
+      if (i>=4){ fill='#ffedd5'; stroke='#ea580c'; }
+      s+='<rect x="'+x+'" y="60" width="30" height="30" rx="5" fill="'+fill+'" stroke="'+stroke+'"/>';
+    }
+    s+='<rect x="398" y="98" width="128" height="22" rx="6" fill="#dbeafe" stroke="#2563eb"/>';
+    s+='<rect x="534" y="98" width="136" height="22" rx="6" fill="#dbeafe" stroke="#2563eb"/>';
+    s+='<text x="462" y="113" text-anchor="middle" font-size="12" fill="#2563eb">时间块 1</text>';
+    s+='<text x="602" y="113" text-anchor="middle" font-size="12" fill="#2563eb">时间块 2</text>';
+    s+='<text x="520" y="146" text-anchor="middle" font-size="12" fill="#6b7280">修改 = 时间轴后缀加，查询 = 时间轴前缀计数</text>';
+    s+='<text x="520" y="170" text-anchor="middle" font-size="12" fill="#9aa0a6">两端散块逐个算，中间整块用块内有序副本二分</text>';
+    s+='<text x="340" y="218" text-anchor="middle" font-size="12" fill="#6b7280">修改挂到位置 l 处加 v、位置 r+1 处加 -v，扫描到该位置时才会作用到时间轴上</text>';
+    s+='</svg>';
+    fig3.innerHTML=s;
+  }
+})();
+</script>
+</body>
+</html>

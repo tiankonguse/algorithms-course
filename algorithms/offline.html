@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>离线查询 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  :root{
+    --added:#16a34a;
+    --added-bg:#dcfce7;
+    --query:#d97706;
+    --query-bg:#fef3c7;
+  }
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 12px;}
+  .arr-cell{
+    width:40px;height:40px;display:flex;align-items:center;justify-content:center;
+    background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+    font-size:15px;font-variant-numeric:tabular-nums;
+    transition:background .12s,border-color .12s;
+  }
+  .arr-cell.full{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+  .arr-cell.partial{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+  .arr-cell.dim{opacity:.35;}
+  .arr-cell.added{background:var(--added-bg);border-color:var(--added);color:var(--added);font-weight:600;}
+  .arr-cell.qrange{box-shadow:inset 0 0 0 2px var(--query);}
+  .arr-cell.idx{font-size:11px;color:var(--text-dim);background:transparent;border:none;height:18px;}
+  .arr-row{display:flex;gap:4px;align-items:center;}
+  .arr-row + .arr-row{margin-top:4px;}
+  .dot.added{background:var(--added-bg);border-color:var(--added);}
+  .dot.qrange{background:#fff7ed;border-color:var(--query);}
+  .mo-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .mo-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .mo-btn:disabled{opacity:.4;cursor:default;}
+  .mo-btns{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;}
+  .seg-bar{display:flex;align-items:center;gap:6px;margin:8px 0;flex-wrap:wrap;}
+  .seg-label{width:64px;flex:0 0 64px;font-size:12px;color:var(--text-dim);text-align:right;}
+  .qrow{
+    display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:13px;
+    font-variant-numeric:tabular-nums;
+  }
+  .qchip{
+    display:inline-flex;align-items:center;gap:6px;
+    border:1px solid var(--border);border-radius:6px;
+    padding:4px 10px;background:var(--bg);
+  }
+  .qchip.active{border-color:var(--query);background:var(--query-bg);font-weight:600;}
+  .qchip.done{border-color:var(--added);background:var(--added-bg);color:var(--added);}
+  @media(max-width:760px){
+    .arr-cell{width:34px;height:34px;font-size:13px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>离线查询</h1>
+    <p class="intro">m 个询问「区间 a[l..r] 里大于 v 的数有几个」，把询问按 v 排序后只扫一遍数组，用树状数组在 O((n+m) log n) 内把所有答案一起算出来。</p>
+
+    <h2>零、背景</h2>
+    <p>前面几节的写法都是「来一个答一个」：分块、树状数组、线段树，接到查询就立刻算，算完再等下一个。这种叫在线。</p>
+    <p>这一节反过来：所有询问先全部读进来，按自己方便的顺序处理，算完再按原顺序输出。这种叫离线。</p>
+    <p>莫队也是离线，它重排的是询问的「处理次序」，换来两个指针少走点路。这里要重排的是另一个东西，询问里的阈值 <code class="inline">v</code>，换来的是数组的扫描状态能在询问之间接着用。</p>
+
+    <h2>一、问题</h2>
+    <p>有一个长度为 <code class="inline">n</code> 的数组 <code class="inline">a</code>，给 <code class="inline">m</code> 个询问，每个询问是三元组 <code class="inline">(l, r, v)</code>：</p>
+    <p style="text-align:center;font-size:17px;"><code class="inline">a[l..r] 中，有多少个数严格大于 v？</code></p>
+    <p>例子还是那个数组，下标从 1 开始：</p>
+    <p style="text-align:center;font-size:17px;"><code class="inline">a = [3, 1, 4, 1, 5, 9, 2, 6]</code></p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 272" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="三个区间询问" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g>
+          <rect x="136" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="158" y="69" text-anchor="middle" font-size="15" fill="#1f2328">3</text>
+          <rect x="188" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="210" y="69" text-anchor="middle" font-size="15" fill="#1f2328">1</text>
+          <rect x="240" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="262" y="69" text-anchor="middle" font-size="15" fill="#1f2328">4</text>
+          <rect x="292" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="314" y="69" text-anchor="middle" font-size="15" fill="#1f2328">1</text>
+          <rect x="344" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="366" y="69" text-anchor="middle" font-size="15" fill="#1f2328">5</text>
+          <rect x="396" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="418" y="69" text-anchor="middle" font-size="15" fill="#1f2328">9</text>
+          <rect x="448" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="470" y="69" text-anchor="middle" font-size="15" fill="#1f2328">2</text>
+          <rect x="500" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="522" y="69" text-anchor="middle" font-size="15" fill="#1f2328">6</text>
+        </g>
+        <g font-size="10" fill="#9aa0a6" text-anchor="middle">
+          <text x="158" y="100">1</text><text x="210" y="100">2</text><text x="262" y="100">3</text><text x="314" y="100">4</text>
+          <text x="366" y="100">5</text><text x="418" y="100">6</text><text x="470" y="100">7</text><text x="522" y="100">8</text>
+        </g>
+
+        <g font-size="12" fill="#6b7280" text-anchor="end">
+          <text x="126" y="145">#1 (1, 5, 2)</text>
+          <text x="126" y="181">#2 (2, 8, 4)</text>
+          <text x="126" y="217">#3 (3, 8, 5)</text>
+        </g>
+        <rect x="136" y="132" width="252" height="18" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+        <rect x="188" y="168" width="356" height="18" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+        <rect x="240" y="204" width="304" height="18" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+        <g font-size="12" fill="#ea580c" text-anchor="start">
+          <text x="396" y="145">答案 3</text>
+          <text x="552" y="181">答案 3</text>
+          <text x="552" y="217">答案 2</text>
+        </g>
+        <text x="340" y="254" text-anchor="middle" font-size="13" fill="#6b7280">三个询问的答案依次是 3、3、2</text>
+      </svg>
+      <figcaption>每个询问给一个区间和一个阈值，问区间里大于这个阈值的数有几个</figcaption>
+    </figure>
+
+    <p>逐个看：#1 的区间是 <code class="inline">[3, 1, 4, 1, 5]</code>，大于 2 的是 3、4、5；#2 的区间是 <code class="inline">[1, 4, 1, 5, 9, 2, 6]</code>，大于 4 的是 5、9、6；#3 大于 5 的只剩 9 和 6。</p>
+    <p>要求的是 <code class="inline">m</code> 个询问一起给答案，而且 <code class="inline">m</code> 和 <code class="inline">n</code> 都能到 10⁵。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>最直接的想法：每个询问都把 <code class="inline">[l, r]</code> 走一遍，数一数大于 <code class="inline">v</code> 的。</p>
+    <pre class="code"><span class="kw">for</span> (<span class="kw">int</span> k = 0; k &lt; m; k++) {
+    <span class="kw">int</span> ans = 0;
+    <span class="kw">for</span> (<span class="kw">int</span> i = q[k].l; i &lt;= q[k].r; i++)
+        <span class="kw">if</span> (a[i] &gt; q[k].v) ans++;
+    out[k] = ans;
+}</pre>
+    <p>把每个询问扫过的范围画出来：</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="朴素做法的重复扫描" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g>
+          <rect x="136" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="158" y="69" text-anchor="middle" font-size="15" fill="#1f2328">3</text>
+          <rect x="188" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="210" y="69" text-anchor="middle" font-size="15" fill="#1f2328">1</text>
+          <rect x="240" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="262" y="69" text-anchor="middle" font-size="15" fill="#1f2328">4</text>
+          <rect x="292" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="314" y="69" text-anchor="middle" font-size="15" fill="#1f2328">1</text>
+          <rect x="344" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="366" y="69" text-anchor="middle" font-size="15" fill="#1f2328">5</text>
+          <rect x="396" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="418" y="69" text-anchor="middle" font-size="15" fill="#1f2328">9</text>
+          <rect x="448" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="470" y="69" text-anchor="middle" font-size="15" fill="#1f2328">2</text>
+          <rect x="500" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="522" y="69" text-anchor="middle" font-size="15" fill="#1f2328">6</text>
+        </g>
+        <g font-size="10" fill="#9aa0a6" text-anchor="middle">
+          <text x="158" y="100">1</text><text x="210" y="100">2</text><text x="262" y="100">3</text><text x="314" y="100">4</text>
+          <text x="366" y="100">5</text><text x="418" y="100">6</text><text x="470" y="100">7</text><text x="522" y="100">8</text>
+        </g>
+
+        <g font-size="12" fill="#6b7280" text-anchor="end">
+          <text x="126" y="139">#1 扫 5 个</text>
+          <text x="126" y="175">#2 扫 7 个</text>
+          <text x="126" y="211">#3 扫 6 个</text>
+        </g>
+        <rect x="136" y="126" width="252" height="18" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+        <rect x="188" y="162" width="356" height="18" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+        <rect x="240" y="198" width="304" height="18" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+
+        <g>
+          <rect x="136" y="234" width="44" height="28" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="158" y="253" text-anchor="middle" font-size="13" fill="#6b7280">1</text>
+          <rect x="188" y="234" width="44" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="210" y="253" text-anchor="middle" font-size="13" fill="#ea580c">2</text>
+          <rect x="240" y="234" width="44" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="262" y="253" text-anchor="middle" font-size="13" fill="#ea580c">3</text>
+          <rect x="292" y="234" width="44" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="314" y="253" text-anchor="middle" font-size="13" fill="#ea580c">3</text>
+          <rect x="344" y="234" width="44" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="366" y="253" text-anchor="middle" font-size="13" fill="#ea580c">3</text>
+          <rect x="396" y="234" width="44" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="418" y="253" text-anchor="middle" font-size="13" fill="#ea580c">2</text>
+          <rect x="448" y="234" width="44" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="470" y="253" text-anchor="middle" font-size="13" fill="#ea580c">2</text>
+          <rect x="500" y="234" width="44" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="522" y="253" text-anchor="middle" font-size="13" fill="#ea580c">2</text>
+        </g>
+        <text x="126" y="253" font-size="12" fill="#6b7280" text-anchor="end">被扫次数</text>
+        <text x="340" y="284" text-anchor="middle" font-size="13" fill="#6b7280">1 + 2 + 3 + 3 + 3 + 2 + 2 + 2 = 18 次，而数组一共只有 8 个元素</text>
+      </svg>
+      <figcaption>朴素做法 m 个询问各扫一遍，重叠的部分被反复扫描</figcaption>
+    </figure>
+
+    <p>每个询问 <code class="inline">O(n)</code>，总共 <code class="inline">O(n·m)</code>。<code class="inline">n = m = 10⁵</code> 时是 10¹⁰，做不动。</p>
+    <p>浪费在重复上：位置 3 被三个询问各扫了一次，但它是 4 这件事从头到尾没变过。</p>
+
+    <h2>三、先把「大于 v」翻过来</h2>
+    <p>在区间 <code class="inline">[l, r]</code> 里，「大于 v」和「小于等于 v」刚好互补：</p>
+    <p style="text-align:center;font-size:17px;"><code class="inline">「&gt; v」的个数 = (r − l + 1) − 「≤ v」的个数</code></p>
+    <p>区间长度一眼就能算出来，于是问题变成求「<code class="inline">a[l..r]</code> 里有多少个数 ≤ v」。</p>
+    <p>这一步看着只是换个说法，其实很关键。「大于 v」这个集合随着 <code class="inline">v</code> 变大是缩小的，元素只能往外删；「小于等于 v」随着 <code class="inline">v</code> 变大是扩大的，元素只增不减。只增不减的集合，才好用「一个个加进来」的方式维护。</p>
+
+    <h2>四、按 v 排序，只扫一遍</h2>
+    <p>把所有询问按 <code class="inline">v</code> 从小到大排，把数组元素也按 <code class="inline">a[i]</code> 从小到大排，然后用一根指针在元素序列上从左往右走。</p>
+    <p>处理一个询问时，指针把值 ≤ <code class="inline">v</code> 的元素全部加进来；因为 v 是递增的，加进来的东西对后面的询问依然有效，指针从不回头。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 276" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="元素按值升序与指针推进" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="140" y="30" font-size="12" fill="#6b7280">元素按值升序排好（格子里是值，下面小字是它原来的位置）</text>
+        <g>
+          <rect x="140" y="44" width="56" height="44" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="168" y="63" text-anchor="middle" font-size="15" fill="#1f2328">1</text>
+          <text x="168" y="79" text-anchor="middle" font-size="10" fill="#9aa0a6">位置 2</text>
+          <rect x="202" y="44" width="56" height="44" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="230" y="63" text-anchor="middle" font-size="15" fill="#1f2328">1</text>
+          <text x="230" y="79" text-anchor="middle" font-size="10" fill="#9aa0a6">位置 4</text>
+          <rect x="264" y="44" width="56" height="44" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="292" y="63" text-anchor="middle" font-size="15" fill="#1f2328">2</text>
+          <text x="292" y="79" text-anchor="middle" font-size="10" fill="#9aa0a6">位置 7</text>
+          <rect x="326" y="44" width="56" height="44" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="354" y="63" text-anchor="middle" font-size="15" fill="#1f2328">3</text>
+          <text x="354" y="79" text-anchor="middle" font-size="10" fill="#9aa0a6">位置 1</text>
+          <rect x="388" y="44" width="56" height="44" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="416" y="63" text-anchor="middle" font-size="15" fill="#1f2328">4</text>
+          <text x="416" y="79" text-anchor="middle" font-size="10" fill="#9aa0a6">位置 3</text>
+          <rect x="450" y="44" width="56" height="44" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="478" y="63" text-anchor="middle" font-size="15" fill="#1f2328">5</text>
+          <text x="478" y="79" text-anchor="middle" font-size="10" fill="#9aa0a6">位置 5</text>
+          <rect x="512" y="44" width="56" height="44" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-dasharray="4 3"/>
+          <text x="540" y="63" text-anchor="middle" font-size="15" fill="#9aa0a6">6</text>
+          <text x="540" y="79" text-anchor="middle" font-size="10" fill="#9aa0a6">位置 8</text>
+          <rect x="574" y="44" width="56" height="44" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-dasharray="4 3"/>
+          <text x="602" y="63" text-anchor="middle" font-size="15" fill="#9aa0a6">9</text>
+          <text x="602" y="79" text-anchor="middle" font-size="10" fill="#9aa0a6">位置 6</text>
+        </g>
+
+        <g font-size="12" fill="#6b7280" text-anchor="end">
+          <text x="126" y="132">#1 v = 2</text>
+          <text x="126" y="172">#2 v = 4</text>
+          <text x="126" y="212">#3 v = 5</text>
+        </g>
+        <rect x="140" y="118" width="180" height="18" rx="5" fill="#dcfce7" stroke="#16a34a"/>
+        <rect x="140" y="158" width="304" height="18" rx="5" fill="#dcfce7" stroke="#16a34a"/>
+        <rect x="140" y="198" width="366" height="18" rx="5" fill="#dcfce7" stroke="#16a34a"/>
+        <g font-size="12" fill="#16a34a" text-anchor="start">
+          <text x="328" y="132">加入 3 个：1、1、2</text>
+          <text x="452" y="172">再补 2 个：3、4</text>
+          <text x="514" y="212">再补 1 个：5</text>
+        </g>
+        <text x="20" y="248" font-size="13" fill="#6b7280">绿色是「已经加进来的元素」，每个询问只在上一轮的基础上往右补，指针从不回头</text>
+        <text x="20" y="268" font-size="12" fill="#9aa0a6">值 6（位置 8）和 9（位置 6）始终没被加入，因为最大的 v 只到 5</text>
+      </svg>
+      <figcaption>询问按 v 升序处理，元素也按值升序，一根指针只往右走</figcaption>
+    </figure>
+
+    <p>可以发现，8 个元素在这三个询问里一共只被加入 6 次，剩下的两个压根没碰过。不是每个询问重新扫一遍，而是所有询问合起来扫一遍。</p>
+
+    <h2>五、加进来的是位置，问的是区间</h2>
+    <p>加进来的东西是「元素的位置」，不是元素的值。于是「<code class="inline">[l, r]</code> 里 ≤ v 的个数」就变成「已加入的位置里，落在 <code class="inline">[l, r]</code> 的有几个」。</p>
+    <p>这是个前缀和的事：把位置 <code class="inline">i</code> 记成 1，求区间和就是 <code class="inline">sum(r) − sum(l−1)</code>。而位置是动态加进来的，所以前缀和结构用树状数组，单点加 1、查前缀和都是 <code class="inline">O(log n)</code>。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 216" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="处理询问 v=4 时的快照" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="155" y="38" width="422" height="52" rx="8" fill="none" stroke="#ea580c" stroke-dasharray="5 4"/>
+        <text x="366" y="30" text-anchor="middle" font-size="12" fill="#ea580c">询问区间 [2, 8]</text>
+        <g>
+          <rect x="100" y="44" width="52" height="40" rx="6" fill="#dcfce7" stroke="#16a34a"/>
+          <text x="126" y="69" text-anchor="middle" font-size="15" fill="#16a34a" font-weight="600">3</text>
+          <rect x="160" y="44" width="52" height="40" rx="6" fill="#dcfce7" stroke="#16a34a"/>
+          <text x="186" y="69" text-anchor="middle" font-size="15" fill="#16a34a" font-weight="600">1</text>
+          <rect x="220" y="44" width="52" height="40" rx="6" fill="#dcfce7" stroke="#16a34a"/>
+          <text x="246" y="69" text-anchor="middle" font-size="15" fill="#16a34a" font-weight="600">4</text>
+          <rect x="280" y="44" width="52" height="40" rx="6" fill="#dcfce7" stroke="#16a34a"/>
+          <text x="306" y="69" text-anchor="middle" font-size="15" fill="#16a34a" font-weight="600">1</text>
+          <rect x="340" y="44" width="52" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="366" y="69" text-anchor="middle" font-size="15" fill="#1f2328">5</text>
+          <rect x="400" y="44" width="52" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="426" y="69" text-anchor="middle" font-size="15" fill="#1f2328">9</text>
+          <rect x="460" y="44" width="52" height="40" rx="6" fill="#dcfce7" stroke="#16a34a"/>
+          <text x="486" y="69" text-anchor="middle" font-size="15" fill="#16a34a" font-weight="600">2</text>
+          <rect x="520" y="44" width="52" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="546" y="69" text-anchor="middle" font-size="15" fill="#1f2328">6</text>
+        </g>
+        <g font-size="10" fill="#9aa0a6" text-anchor="middle">
+          <text x="126" y="100">1</text><text x="186" y="100">2</text><text x="246" y="100">3</text><text x="306" y="100">4</text>
+          <text x="366" y="100">5</text><text x="426" y="100">6</text><text x="486" y="100">7</text><text x="546" y="100">8</text>
+        </g>
+        <g font-size="11" text-anchor="middle">
+          <text x="126" y="116" fill="#16a34a">已加入</text>
+          <text x="186" y="116" fill="#16a34a">已加入</text>
+          <text x="246" y="116" fill="#16a34a">已加入</text>
+          <text x="306" y="116" fill="#16a34a">已加入</text>
+          <text x="366" y="116" fill="#9aa0a6">未加入</text>
+          <text x="426" y="116" fill="#9aa0a6">未加入</text>
+          <text x="486" y="116" fill="#16a34a">已加入</text>
+          <text x="546" y="116" fill="#9aa0a6">未加入</text>
+        </g>
+        <text x="20" y="148" font-size="13" fill="#6b7280">已加入的是值 ≤ 4 的五个位置：1、2、3、4、7</text>
+        <text x="20" y="170" font-size="13" fill="#6b7280">落在 [2, 8] 里的有 4 个（位置 2、3、4、7），即 sum(8) − sum(1) = 4</text>
+        <text x="20" y="192" font-size="13" fill="#6b7280">区间长度 8 − 2 + 1 = 7，所以大于 4 的个数 = 7 − 4 = 3</text>
+        <text x="20" y="212" font-size="12" fill="#9aa0a6">大于 4 的正是 5、9、6 这三个，与第一节一致</text>
+      </svg>
+      <figcaption>树状数组里记的是位置，用前缀和之差就得到区间内 ≤ v 的个数</figcaption>
+    </figure>
+
+    <p>写下来就是这几行：</p>
+    <pre class="code"><span class="cm">// 1. 数组元素按值升序排，记下每个元素原来的位置</span>
+<span class="cm">// 2. 询问按 v 升序排</span>
+<span class="cm">// 3. 一根指针扫过去</span>
+ptr = 0;
+<span class="kw">for</span> 每个询问 q (按 v 升序):
+    <span class="kw">while</span> (ptr &lt; n <span class="kw">and</span> 元素[ptr].值 ≤ q.v):
+        tree.add(元素[ptr].位置, 1);    <span class="cm">// 把这个位置标进树状数组</span>
+        ptr++;
+    le = tree.sum(q.r) - tree.sum(q.l - 1);  <span class="cm">// ≤ v 的个数</span>
+    q.答案 = (q.r - q.l + 1) - le;            <span class="cm">// &gt; v 的个数</span></pre>
+
+    <h2>六、演示</h2>
+    <p>点「下一步」看三个询问怎么一步步算出来：绿色是已经加进树状数组的位置，橙色框是当前询问的区间。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　离线扫描过程</div>
+      <div id="offQ" class="qrow"></div>
+      <div id="offCells"></div>
+      <div id="offFen"></div>
+      <div class="breakdown" id="offStatus"></div>
+      <div class="mo-btns">
+        <button class="mo-btn" id="offStep">下一步</button>
+        <button class="mo-btn" id="offAuto">自动播放</button>
+        <button class="mo-btn" id="offReset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot added"></span>已加入树状数组（值 ≤ 当前询问 v）</span>
+        <span><span class="dot qrange"></span>当前询问的区间 [l, r]</span>
+      </div>
+    </div>
+
+    <h2>七、代码</h2>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">const</span> <span class="kw">int</span> N = 100005;
+<span class="kw">int</span> n, m;
+<span class="kw">int</span> a[N];
+<span class="kw">int</span> c[N];                     <span class="cm">// 树状数组</span>
+
+<span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> x) { <span class="kw">return</span> x &amp; (-x); }
+
+<span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">int</span> delta) {
+    <span class="kw">while</span> (i &lt;= n) { c[i] += delta; i += lowbit(i); }
+}
+
+<span class="kw">int</span> <span class="fn">sum</span>(<span class="kw">int</span> i) {
+    <span class="kw">int</span> s = 0;
+    <span class="kw">while</span> (i &gt; 0) { s += c[i]; i -= lowbit(i); }
+    <span class="kw">return</span> s;
+}
+
+<span class="kw">struct</span> Elem { <span class="kw">int</span> val, pos; };             <span class="cm">// (值, 位置)</span>
+<span class="kw">struct</span> Query { <span class="kw">int</span> l, r, v, id; };         <span class="cm">// (l, r, v, 原询问编号)</span>
+
+<span class="kw">bool</span> <span class="fn">cmpE</span>(<span class="kw">const</span> Elem&amp; x, <span class="kw">const</span> Elem&amp; y) { <span class="kw">return</span> x.val &lt; y.val; }
+<span class="kw">bool</span> <span class="fn">cmpQ</span>(<span class="kw">const</span> Query&amp; x, <span class="kw">const</span> Query&amp; y) { <span class="kw">return</span> x.v &lt; y.v; }
+
+<span class="kw">int</span> ans[N];
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    cin &gt;&gt; n &gt;&gt; m;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) cin &gt;&gt; a[i];
+    vector&lt;Elem&gt; elems;
+    elems.reserve(n);
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) elems.push_back({a[i], i});
+    sort(elems.begin(), elems.end(), cmpE);
+
+    vector&lt;Query&gt; qs;
+    qs.reserve(m);
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; m; i++) {
+        <span class="kw">int</span> l, r, v; cin &gt;&gt; l &gt;&gt; r &gt;&gt; v;
+        qs.push_back({l, r, v, i});
+    }
+    sort(qs.begin(), qs.end(), cmpQ);
+
+    <span class="kw">int</span> ptr = 0;
+    <span class="kw">for</span> (<span class="kw">const</span> <span class="kw">auto</span>&amp; q : qs) {
+        <span class="kw">while</span> (ptr &lt; n &amp;&amp; elems[ptr].val &lt;= q.v) {
+            add(elems[ptr].pos, 1);
+            ptr++;
+        }
+        <span class="kw">int</span> le = sum(q.r) - sum(q.l - 1);   <span class="cm">// 区间 [l, r] 内 ≤ v 的个数</span>
+        ans[q.id] = (q.r - q.l + 1) - le;  <span class="cm">// &gt; v 的个数</span>
+    }
+
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; m; i++) cout &lt;&lt; ans[i] &lt;&lt; '\n';
+    <span class="kw">return</span> 0;
+}</pre>
+    <p>三个示例询问跑出来是 3、3、2，和第一节那张图一样。</p>
+
+    <h2>八、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>元素按值排序</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>询问按 v 排序</td><td><code class="inline">O(m log m)</code></td></tr>
+        <tr><td>加入元素（共 n 次，每次 <code class="inline">add</code>）</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>回答 m 个询问（每个两次 <code class="inline">sum</code>）</td><td><code class="inline">O(m log n)</code></td></tr>
+        <tr><td>总时间</td><td><code class="inline">O((n + m) log n)</code></td></tr>
+        <tr><td>朴素做法（对照）</td><td><code class="inline">O(n·m)</code></td></tr>
+        <tr><td>额外空间</td><td><code class="inline">O(n + m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>加入元素那一步为什么不乘 <code class="inline">m</code>：内层 <code class="inline">while</code> 看着像嵌套在询问循环里，但指针 <code class="inline">ptr</code> 全程只从 0 走到 <code class="inline">n</code>，加起来是 <code class="inline">n</code> 次，不是 <code class="inline">m·n</code> 次。</p>
+    <p>空间上，树状数组 <code class="inline">O(n)</code>，元素副本 <code class="inline">O(n)</code>，询问副本 <code class="inline">O(m)</code>，加起来 <code class="inline">O(n + m)</code>。</p>
+    <p><code class="inline">n = m = 10⁵</code> 时，从朴素的 10¹⁰ 降到 3×10⁶ 上下，差了三个多数量级。</p>
+
+    <h2>九、换个问法</h2>
+    <p>问「大于等于 v」「小于 v」的个数，改的是 <code class="inline">while</code> 里的比较符号和最后的减法，骨架不动。</p>
+    <p>问「等于 v」的个数，跑两遍：一遍算 ≤ v，一遍算 &lt; v，两个结果相减。或者干脆按值相等分组，排序时把值相同的元素放在一块，用两个指针相减，一遍就够。</p>
+    <p>如果题目还带单点修改，就得把修改也一起离线下来，加一维时间，那是 CDQ 分治的事，已经超出这一节。</p>
+
+    <h2>十、最后</h2>
+    <p>这一套能成立，靠的是两个东西：一是把「大于 v」翻成「小于等于 v」，让集合随 v 单调增长；二是把这个增长过程摊到所有询问上，指针只走一遍。剩下的只是「区间内有多少个已加入的位置」，交给树状数组。</p>
+    <p>和莫队放一起看会更清楚：两者都是离线，都是重排询问，只是重排的维度不同。莫队按 <code class="inline">l</code> 所在的块和 <code class="inline">r</code> 排，省的是指针移动；这里按 <code class="inline">v</code> 排，省的是重复扫描。遇到「一堆询问 + 一个可以排序的维度」时，先想想能不能这样重排，往往就是突破口。</p>
+    <p>它的边界也明显：必须能先把所有询问读进来。如果题目要求「边改边问」、必须立刻回答，离线就用不上了。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  const A = [3,1,4,1,5,9,2,6]; // a[1..8]
+  const n = A.length;
+  const QUERIES = [
+    {l:1, r:5, v:2}, // 期望 3
+    {l:2, r:8, v:4}, // 期望 3
+    {l:3, r:8, v:5}  // 期望 2
+  ];
+
+  // 元素按值升序：(值, 位置)
+  const elems = [];
+  for (let i = 1; i <= n; i++) elems.push({val: A[i-1], pos: i});
+  elems.sort((x, y) => x.val - y.val);
+
+  // 询问按 v 升序，并保留原顺序用于显示
+  const qSorted = QUERIES.map((q, idx) => ({...q, id: idx}));
+  qSorted.sort((x, y) => x.v - y.v);
+
+  // 构造每一步演示帧
+  const steps = [];
+  steps.push({phase:'init'});
+
+  // 模拟：每处理一个询问前，先把所有值 ≤ v 的元素加入
+  let ptr = 0;
+  const addedAt = new Array(n + 1).fill(0); // 1..n
+  const ansAt = new Array(QUERIES.length).fill(null);
+
+  for (let qi = 0; qi < qSorted.length; qi++) {
+    const q = qSorted[qi];
+    const addedThisStep = [];
+    while (ptr < elems.length && elems[ptr].val <= q.v) {
+      addedAt[elems[ptr].pos] = 1;
+      addedThisStep.push({pos: elems[ptr].pos, val: elems[ptr].val});
+      ptr++;
+    }
+    // 计算区间内已加入的个数
+    let le = 0;
+    for (let i = q.l; i <= q.r; i++) le += addedAt[i];
+    const ans = (q.r - q.l + 1) - le;
+
+    steps.push({
+      phase:'query',
+      qId: q.id,
+      l: q.l, r: q.r, v: q.v,
+      added: addedThisStep.slice(),
+      le: le,
+      len: q.r - q.l + 1,
+      ans: ans,
+      ptr: ptr,
+      addedAt: addedAt.slice()
+    });
+    ansAt[q.id] = ans;
+  }
+  steps.push({phase:'done'});
+
+  /* ===== 渲染 ===== */
+  const qEl = document.getElementById('offQ');
+  const cellsEl = document.getElementById('offCells');
+  const fenEl = document.getElementById('offFen');
+  const statusEl = document.getElementById('offStatus');
+  const btnStep = document.getElementById('offStep');
+  const btnReset = document.getElementById('offReset');
+  const btnAuto = document.getElementById('offAuto');
+
+  let cur = 0;
+  let timer = null;
+
+  function lowbit(x){ return x & (-x); }
+
+  // 计算树状数组当前每个节点的和
+  function fenSnapshot(added){
+    const c = new Array(n + 1).fill(0);
+    for (let i = 1; i <= n; i++) {
+      let s = 0, j = i;
+      while (j > 0) { s += added[j]; j -= lowbit(j); }
+      c[i] = s;
+    }
+    return c;
+  }
+
+  function renderQueries(activeId, doneIds){
+    let h = '';
+    for (let i = 0; i < QUERIES.length; i++) {
+      const q = QUERIES[i];
+      let cls = 'qchip';
+      if (doneIds.has(i)) cls += ' done';
+      if (i === activeId) cls += ' active';
+      h += '<span class="' + cls + '">#' + (i+1) + ' (' + q.l + ',' + q.r + ',' + q.v + ')</span>';
+    }
+    qEl.innerHTML = h;
+  }
+
+  function renderCells(added, qL, qR){
+    let h = '<div class="seg-bar"><span class="seg-label">数组 a</span><div class="arr-row">';
+    for (let i = 1; i <= n; i++) {
+      let cls = 'arr-cell';
+      if (added[i]) cls += ' added';
+      if (qL && i >= qL && i <= qR) cls += ' qrange';
+      h += '<div class="' + cls + '">' + A[i-1] + '</div>';
+    }
+    h += '</div></div>';
+    h += '<div class="seg-bar"><span class="seg-label"></span><div class="arr-row">';
+    for (let i = 1; i <= n; i++) h += '<div class="arr-cell idx">' + i + '</div>';
+    h += '</div></div>';
+    return h;
+  }
+
+  function renderFen(added, qL, qR){
+    const c = fenSnapshot(added);
+    let h = '<div class="seg-bar"><span class="seg-label">树状 c</span><div class="arr-row">';
+    for (let i = 1; i <= n; i++) {
+      let cls = 'arr-cell';
+      if (added[i] && c[i] > 0) cls += ' added';
+      h += '<div class="' + cls + '">' + c[i] + '</div>';
+    }
+    h += '</div></div>';
+    h += '<div class="seg-bar"><span class="seg-label"></span><div class="arr-row">';
+    for (let i = 1; i <= n; i++) h += '<div class="arr-cell idx">' + i + '</div>';
+    h += '</div></div>';
+    // 标出前缀和求和路径
+    if (qL >= 1 && qR >= qL) {
+      let sumPath = [];
+      for (let x = qR; x > 0; x -= lowbit(x)) sumPath.push(x);
+      h += '<div style="font-size:12px;color:var(--text-dim);margin-top:6px;">sum(' + qR + ') 经过节点：' + sumPath.join(' → ') +
+           '；sum(' + (qL-1) + ') 经过节点：';
+      let prePath = [];
+      for (let x = qL - 1; x > 0; x -= lowbit(x)) prePath.push(x);
+      h += (prePath.length ? prePath.join(' → ') : '(空)') + '</div>';
+    }
+    return h;
+  }
+
+  function render(){
+    const s = steps[cur];
+    if (s.phase === 'init') {
+      renderQueries(-1, new Set());
+      cellsEl.innerHTML = renderCells(new Array(n+1).fill(0), null, null);
+      fenEl.innerHTML = renderFen(new Array(n+1).fill(0), 1, 0);
+      statusEl.innerHTML =
+        '<div class="row">先把数组元素按值升序排：' +
+        elems.map(e => 'a[' + e.pos + ']=' + e.val).join('、') + '。</div>' +
+        '<div class="row">把询问按 v 升序排：' +
+        qSorted.map(q => '(' + q.l + ',' + q.r + ',' + q.v + ')').join(' → ') + '。</div>' +
+        '<div class="row">树状数组当前为空，所有位置都还没加入。</div>';
+    } else if (s.phase === 'query') {
+      const done = new Set();
+      for (let j = 0; j < cur; j++) {
+        if (steps[j].phase === 'query') done.add(steps[j].qId);
+      }
+      renderQueries(s.qId, done);
+      const added = s.addedAt;
+      cellsEl.innerHTML = renderCells(added, s.l, s.r);
+      fenEl.innerHTML = renderFen(added, s.l, s.r);
+
+      const addedDesc = s.added.length === 0
+        ? '（本轮没有新加入的元素）'
+        : '把元素 ' + s.added.map(a => 'a[' + a.pos + ']=' + a.val).join('、') + ' 加入树状数组（值都 ≤ ' + s.v + '）。';
+      statusEl.innerHTML =
+        '<div class="row">处理询问 <strong>#' + (s.qId+1) + '</strong>：区间 [' + s.l + ', ' + s.r + ']，阈值 v = ' + s.v + '</div>' +
+        '<div class="row">' + addedDesc + '</div>' +
+        '<div class="row">已加入的位置中，落入 [' + s.l + ', ' + s.r + '] 的有 <strong>' + s.le + '</strong> 个（≤ v 的个数）。</div>' +
+        '<div class="row">区间长度 = ' + s.len + '，所以 &gt; v 的个数 = ' + s.len + ' − ' + s.le + ' = <strong>' + s.ans + '</strong></div>' +
+        '<div class="total">答案 ans[' + s.qId + '] = ' + s.ans + '</div>';
+    } else if (s.phase === 'done') {
+      renderQueries(-1, new Set(QUERIES.map((_, i) => i)));
+      statusEl.innerHTML =
+        '<div class="row">全部处理完毕。</div>' +
+        '<div class="total">答案依次为：' + QUERIES.map((_, i) => 'ans[' + i + ']=' + ansAt[i]).join('，') + '。</div>';
+    }
+    btnStep.disabled = (cur >= steps.length - 1);
+  }
+
+  function step(){
+    if (cur >= steps.length - 1) { render(); return; }
+    cur++;
+    render();
+  }
+  function stopAuto(){
+    if (timer) { clearInterval(timer); timer = null; }
+    btnAuto.textContent = '自动播放';
+  }
+  function toggleAuto(){
+    if (timer) { stopAuto(); return; }
+    btnAuto.textContent = '暂停';
+    timer = setInterval(function(){
+      if (cur >= steps.length - 1) { stopAuto(); return; }
+      cur++;
+      render();
+    }, 900);
+  }
+  function reset(){
+    stopAuto();
+    cur = 0;
+    render();
+  }
+
+  btnStep.addEventListener('click', step);
+  btnReset.addEventListener('click', reset);
+  btnAuto.addEventListener('click', toggleAuto);
+  render();
+
+})();
+</script>
+</body>
+</html>

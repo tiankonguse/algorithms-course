@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>传递闭包 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  :root{
+    --ok:#16a34a;
+    --ok-bg:#dcfce7;
+  }
+  .tc-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .tc-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .tc-btn:disabled{opacity:.4;cursor:default;}
+  .tc-btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;}
+  .tc-grid{
+    display:grid;grid-template-columns:repeat(6,42px);
+    gap:4px;margin-top:12px;font-variant-numeric:tabular-nums;
+  }
+  .tc-cell{
+    width:42px;height:38px;display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--border);border-radius:6px;background:var(--bg);
+    font-size:15px;color:var(--text-dim);
+    transition:background .12s,border-color .12s,color .12s;
+  }
+  .tc-cell.head{border:none;background:transparent;font-size:12px;height:26px;color:var(--text-dim);}
+  .tc-cell.on{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+  .tc-cell.new{background:var(--ok-bg);border-color:var(--ok);color:var(--ok);font-weight:600;}
+  .tc-cell.bridge{border-color:var(--partial);background:var(--partial-bg);color:var(--partial);font-weight:600;}
+  .tc-chip{
+    display:inline-block;border:1px solid var(--border);border-radius:6px;
+    padding:4px 10px;font-size:13px;margin:6px 6px 0 0;color:var(--text-dim);
+  }
+  .tc-chip b{color:var(--text);font-weight:600;}
+  @media(max-width:760px){
+    .tc-grid{grid-template-columns:repeat(6,34px);gap:3px;}
+    .tc-cell{width:34px;height:32px;font-size:13px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>传递闭包</h1>
+    <p class="intro">有向图里 i 能不能走到 j，走几条边都行。用 Floyd 的方式枚举每个点当跳板，再把每一行压成一个 bitset，一次或运算就合并一整行，复杂度从 O(n³) 降到 O(n³ / 64)。</p>
+
+    <h2>零、背景</h2>
+    <p>有些关系是有方向、又能传递的。a 比 b 强，b 比 c 强，那 a 就比 c 强；i 有一条边到 k，k 有一条边到 j，那 i 就能走到 j。</p>
+    <p>把这种关系建成有向图之后，要回答的问题就是：任意两点 i、j 之间，有没有一条长度至少为 1 的有向路径。所有答案放在一起是一张 n × n 的 0/1 矩阵，叫传递闭包，也叫可达矩阵。</p>
+    <p>它的用处比听起来大。「能不能比出高下」「还缺几条关系」「名次能不能定下来」，最后都落到这张矩阵上。</p>
+
+    <h2>一、问题</h2>
+    <p>给定一张有向图的邻接矩阵 a：<code class="inline">a[i][j] = 1</code> 表示有一条 i 到 j 的边，0 表示没有。求传递闭包矩阵 b：<code class="inline">b[i][j] = 1</code> 当且仅当 i 经过至少一条边能到 j。</p>
+    <p>例子用这张图，5 个点 5 条边：</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 600 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="示例有向图" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="c1a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+        <g stroke="#9aa0a6" stroke-width="1.6" fill="none" marker-end="url(#c1a)">
+          <line x1="99" y1="98" x2="187" y2="60"/>
+          <line x1="210" y1="65" x2="210" y2="155"/>
+          <line x1="192" y1="166" x2="101" y2="120"/>
+          <line x1="230" y1="175" x2="330" y2="175"/>
+          <line x1="370" y1="175" x2="470" y2="175"/>
+        </g>
+        <g>
+          <circle cx="80" cy="110" r="20" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="80" y="116" text-anchor="middle" font-size="16" fill="#1f2328">1</text>
+          <circle cx="210" cy="45" r="20" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="210" y="51" text-anchor="middle" font-size="16" fill="#1f2328">2</text>
+          <circle cx="210" cy="175" r="20" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="210" y="181" text-anchor="middle" font-size="16" fill="#1f2328">3</text>
+          <circle cx="350" cy="175" r="20" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="350" y="181" text-anchor="middle" font-size="16" fill="#1f2328">4</text>
+          <circle cx="490" cy="175" r="20" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="490" y="181" text-anchor="middle" font-size="16" fill="#1f2328">5</text>
+        </g>
+        <text x="300" y="208" text-anchor="middle" font-size="13" fill="#6b7280">1 → 2 → 3 → 1 构成一个环，3 再接出 4 → 5</text>
+      </svg>
+      <figcaption>1、2、3 在同一个环里，彼此都能走到；4 只能到 5，5 哪也去不了</figcaption>
+    </figure>
+
+    <p>对应的两张矩阵是这样的：</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 600 224" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="邻接矩阵与传递闭包矩阵" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="145" y="26" text-anchor="middle" font-size="13" fill="#6b7280">邻接矩阵 a</text>
+        <text x="465" y="26" text-anchor="middle" font-size="13" fill="#6b7280">闭包矩阵 b</text>
+        <g font-size="11" fill="#9aa0a6" text-anchor="middle">
+          <text x="83" y="56">1</text><text x="109" y="56">2</text><text x="135" y="56">3</text><text x="161" y="56">4</text><text x="187" y="56">5</text>
+          <text x="403" y="56">1</text><text x="429" y="56">2</text><text x="455" y="56">3</text><text x="481" y="56">4</text><text x="507" y="56">5</text>
+        </g>
+        <g font-size="11" fill="#9aa0a6" text-anchor="end">
+          <text x="64" y="79">1</text><text x="64" y="105">2</text><text x="64" y="131">3</text><text x="64" y="157">4</text><text x="64" y="183">5</text>
+          <text x="384" y="79">1</text><text x="384" y="105">2</text><text x="384" y="131">3</text><text x="384" y="157">4</text><text x="384" y="183">5</text>
+        </g>
+        <g font-size="14" text-anchor="middle">
+          <!-- 左：邻接矩阵 -->
+          <rect x="70" y="66" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="83" y="84" fill="#9aa0a6">0</text>
+          <rect x="96" y="66" width="26" height="26" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="109" y="84" fill="#2563eb">1</text>
+          <rect x="122" y="66" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="135" y="84" fill="#9aa0a6">0</text>
+          <rect x="148" y="66" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="161" y="84" fill="#9aa0a6">0</text>
+          <rect x="174" y="66" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="187" y="84" fill="#9aa0a6">0</text>
+
+          <rect x="70" y="92" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="83" y="110" fill="#9aa0a6">0</text>
+          <rect x="96" y="92" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="109" y="110" fill="#9aa0a6">0</text>
+          <rect x="122" y="92" width="26" height="26" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="135" y="110" fill="#2563eb">1</text>
+          <rect x="148" y="92" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="161" y="110" fill="#9aa0a6">0</text>
+          <rect x="174" y="92" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="187" y="110" fill="#9aa0a6">0</text>
+
+          <rect x="70" y="118" width="26" height="26" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="83" y="136" fill="#2563eb">1</text>
+          <rect x="96" y="118" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="109" y="136" fill="#9aa0a6">0</text>
+          <rect x="122" y="118" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="135" y="136" fill="#9aa0a6">0</text>
+          <rect x="148" y="118" width="26" height="26" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="161" y="136" fill="#2563eb">1</text>
+          <rect x="174" y="118" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="187" y="136" fill="#9aa0a6">0</text>
+
+          <rect x="70" y="144" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="83" y="162" fill="#9aa0a6">0</text>
+          <rect x="96" y="144" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="109" y="162" fill="#9aa0a6">0</text>
+          <rect x="122" y="144" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="135" y="162" fill="#9aa0a6">0</text>
+          <rect x="148" y="144" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="161" y="162" fill="#9aa0a6">0</text>
+          <rect x="174" y="144" width="26" height="26" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="187" y="162" fill="#2563eb">1</text>
+
+          <rect x="70" y="170" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="83" y="188" fill="#9aa0a6">0</text>
+          <rect x="96" y="170" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="109" y="188" fill="#9aa0a6">0</text>
+          <rect x="122" y="170" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="135" y="188" fill="#9aa0a6">0</text>
+          <rect x="148" y="170" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="161" y="188" fill="#9aa0a6">0</text>
+          <rect x="174" y="170" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="187" y="188" fill="#9aa0a6">0</text>
+
+          <!-- 右：闭包矩阵 -->
+          <rect x="390" y="66" width="26" height="26" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="403" y="84" fill="#2563eb">1</text>
+          <rect x="416" y="66" width="26" height="26" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="429" y="84" fill="#2563eb">1</text>
+          <rect x="442" y="66" width="26" height="26" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="455" y="84" fill="#ea580c">1</text>
+          <rect x="468" y="66" width="26" height="26" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="481" y="84" fill="#ea580c">1</text>
+          <rect x="494" y="66" width="26" height="26" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="507" y="84" fill="#ea580c">1</text>
+
+          <rect x="390" y="92" width="26" height="26" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="403" y="110" fill="#ea580c">1</text>
+          <rect x="416" y="92" width="26" height="26" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="429" y="110" fill="#ea580c">1</text>
+          <rect x="442" y="92" width="26" height="26" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="455" y="110" fill="#2563eb">1</text>
+          <rect x="468" y="92" width="26" height="26" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="481" y="110" fill="#ea580c">1</text>
+          <rect x="494" y="92" width="26" height="26" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="507" y="110" fill="#ea580c">1</text>
+
+          <rect x="390" y="118" width="26" height="26" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="403" y="136" fill="#2563eb">1</text>
+          <rect x="416" y="118" width="26" height="26" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="429" y="136" fill="#ea580c">1</text>
+          <rect x="442" y="118" width="26" height="26" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="455" y="136" fill="#ea580c">1</text>
+          <rect x="468" y="118" width="26" height="26" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="481" y="136" fill="#2563eb">1</text>
+          <rect x="494" y="118" width="26" height="26" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="507" y="136" fill="#ea580c">1</text>
+
+          <rect x="390" y="144" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="403" y="162" fill="#9aa0a6">0</text>
+          <rect x="416" y="144" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="429" y="162" fill="#9aa0a6">0</text>
+          <rect x="442" y="144" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="455" y="162" fill="#9aa0a6">0</text>
+          <rect x="468" y="144" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="481" y="162" fill="#9aa0a6">0</text>
+          <rect x="494" y="144" width="26" height="26" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="507" y="162" fill="#2563eb">1</text>
+
+          <rect x="390" y="170" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="403" y="188" fill="#9aa0a6">0</text>
+          <rect x="416" y="170" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="429" y="188" fill="#9aa0a6">0</text>
+          <rect x="442" y="170" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="455" y="188" fill="#9aa0a6">0</text>
+          <rect x="468" y="170" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="481" y="188" fill="#9aa0a6">0</text>
+          <rect x="494" y="170" width="26" height="26" rx="4" fill="#fff" stroke="#e6e8eb"/><text x="507" y="188" fill="#9aa0a6">0</text>
+        </g>
+        <path d="M222 130 L366 130" stroke="#ea580c" stroke-width="1.6" fill="none"/>
+        <path d="M366 130 L358 125 L358 135 z" fill="#ea580c"/>
+        <text x="294" y="120" text-anchor="middle" font-size="12" fill="#ea580c">枚举跳板 + 位图或运算</text>
+        <text x="300" y="212" text-anchor="middle" font-size="13" fill="#6b7280">橙色是多出来的 1：它们不是原图的边，是靠走好几步才连上的</text>
+      </svg>
+      <figcaption>闭包比邻接矩阵多出 11 个 1，全部来自「绕一圈」或「走两步」</figcaption>
+    </figure>
+
+    <h2>二、朴素做法</h2>
+    <p>最直接的办法是从每个点做一次 DFS 或者 BFS，把能到的点全标上。n 个点各做一遍，复杂度是 O(n·(n + m))。</p>
+    <p>稠密图里 m ≈ n²，这就是 O(n³)。n = 2000 时是 8 × 10⁹，跑不动。稀疏图能快些，但 m 一大照样退回 O(n³)。</p>
+    <p>换个思路：不去「搜」，而是像 Floyd 那样枚举跳板。</p>
+
+    <h2>三、枚举跳板</h2>
+    <p>Floyd 求最短路时，外层枚举的 bridge 是「只允许路径经过编号 ≤ bridge 的点」的意思。求可达性时可以照搬：如果 i 已经能到 bridge，而 bridge 能到 j，那么 i 就能到 j。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 600 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="跳板 bridge 的作用" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="c3a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+          </marker>
+          <marker id="c3o" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <path d="M124 84 L276 84" stroke="#2563eb" stroke-width="2" fill="none" marker-end="url(#c3a)"/>
+        <path d="M324 84 L476 84" stroke="#2563eb" stroke-width="2" fill="none" marker-end="url(#c3a)"/>
+        <path d="M124 68 Q300 20 476 68" stroke="#ea580c" stroke-width="2" stroke-dasharray="5 4" fill="none" marker-end="url(#c3o)"/>
+        <circle cx="100" cy="84" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+        <text x="100" y="90" text-anchor="middle" font-size="16" fill="#1f2328">i</text>
+        <circle cx="300" cy="84" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+        <text x="300" y="90" text-anchor="middle" font-size="16" fill="#2563eb" font-weight="600">k</text>
+        <circle cx="500" cy="84" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+        <text x="500" y="90" text-anchor="middle" font-size="16" fill="#1f2328">j</text>
+        <text x="300" y="126" text-anchor="middle" font-size="14" fill="#6b7280">dp[i][k] = 1 且 dp[k][j] = 1　⟹　dp[i][j] = 1</text>
+        <text x="300" y="152" text-anchor="middle" font-size="13" fill="#ea580c">橙色这条新关系，就是把 k 当跳板接出来的</text>
+        <text x="300" y="176" text-anchor="middle" font-size="13" fill="#6b7280">k 从 1 到 n 各当一次跳板，所有间接可达的点对都会被接上</text>
+      </svg>
+      <figcaption>外层循环枚举跳板 k，内层把「能到 k 的行」整体或上「k 这一行」</figcaption>
+    </figure>
+
+    <p>写成三重循环是这样：</p>
+    <pre class="code"><span class="kw">for</span> (<span class="kw">int</span> bridge = 1; bridge &lt;= n; bridge++)
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++)
+        <span class="kw">if</span> (dp[i][bridge])
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= n; j++)
+                dp[i][j] |= dp[bridge][j];</pre>
+    <p>复杂度 O(n³)，和朴素做法一个量级。真正省时间的是下面这一步。</p>
+
+    <h2>四、一行压成一个 bitset</h2>
+    <p>矩阵里存的只是 0 和 1，一个 bit 就够，没必要用一个 int 甚至一个 bool。把第 i 行的 n 个关系压成一个 bitset，最内层那个「逐列或」的循环就消失了，两个 bitset 做一次 <code class="inline">|=</code>，机器上一口气处理 64 个 bit。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 600 196" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="bitset 一次或运算" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="11" fill="#9aa0a6" text-anchor="middle">
+          <text x="156" y="34">1</text><text x="196" y="34">2</text><text x="236" y="34">3</text><text x="276" y="34">4</text>
+          <text x="316" y="34">5</text><text x="356" y="34">6</text><text x="396" y="34">7</text><text x="436" y="34">8</text>
+        </g>
+        <text x="128" y="66" font-size="13" fill="#6b7280" text-anchor="end">dp[i]</text>
+        <g font-size="14" text-anchor="middle">
+          <rect x="136" y="44" width="40" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="156" y="64" fill="#2563eb">1</text>
+          <rect x="176" y="44" width="40" height="30" rx="5" fill="#fff" stroke="#e6e8eb"/><text x="196" y="64" fill="#9aa0a6">0</text>
+          <rect x="216" y="44" width="40" height="30" rx="5" fill="#fff" stroke="#e6e8eb"/><text x="236" y="64" fill="#9aa0a6">0</text>
+          <rect x="256" y="44" width="40" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="276" y="64" fill="#2563eb">1</text>
+          <rect x="296" y="44" width="40" height="30" rx="5" fill="#fff" stroke="#e6e8eb"/><text x="316" y="64" fill="#9aa0a6">0</text>
+          <rect x="336" y="44" width="40" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="356" y="64" fill="#2563eb">1</text>
+          <rect x="376" y="44" width="40" height="30" rx="5" fill="#fff" stroke="#e6e8eb"/><text x="396" y="64" fill="#9aa0a6">0</text>
+          <rect x="416" y="44" width="40" height="30" rx="5" fill="#fff" stroke="#e6e8eb"/><text x="436" y="64" fill="#9aa0a6">0</text>
+        </g>
+        <text x="128" y="106" font-size="13" fill="#6b7280" text-anchor="end">dp[bridge]</text>
+        <g font-size="14" text-anchor="middle">
+          <rect x="136" y="84" width="40" height="30" rx="5" fill="#fff" stroke="#e6e8eb"/><text x="156" y="104" fill="#9aa0a6">0</text>
+          <rect x="176" y="84" width="40" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/><text x="196" y="104" fill="#ea580c">1</text>
+          <rect x="216" y="84" width="40" height="30" rx="5" fill="#fff" stroke="#e6e8eb"/><text x="236" y="104" fill="#9aa0a6">0</text>
+          <rect x="256" y="84" width="40" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/><text x="276" y="104" fill="#ea580c">1</text>
+          <rect x="296" y="84" width="40" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/><text x="316" y="104" fill="#ea580c">1</text>
+          <rect x="336" y="84" width="40" height="30" rx="5" fill="#fff" stroke="#e6e8eb"/><text x="356" y="104" fill="#9aa0a6">0</text>
+          <rect x="376" y="84" width="40" height="30" rx="5" fill="#fff" stroke="#e6e8eb"/><text x="396" y="104" fill="#9aa0a6">0</text>
+          <rect x="416" y="84" width="40" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/><text x="436" y="104" fill="#ea580c">1</text>
+        </g>
+        <line x1="60" y1="126" x2="476" y2="126" stroke="#e6e8eb" stroke-width="1.4"/>
+        <text x="128" y="158" font-size="13" fill="#6b7280" text-anchor="end">dp[i] |= dp[bridge]</text>
+        <g font-size="14" text-anchor="middle">
+          <rect x="136" y="136" width="40" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="156" y="156" fill="#2563eb">1</text>
+          <rect x="176" y="136" width="40" height="30" rx="5" fill="#dcfce7" stroke="#16a34a"/><text x="196" y="156" fill="#16a34a" font-weight="600">1</text>
+          <rect x="216" y="136" width="40" height="30" rx="5" fill="#fff" stroke="#e6e8eb"/><text x="236" y="156" fill="#9aa0a6">0</text>
+          <rect x="256" y="136" width="40" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="276" y="156" fill="#2563eb">1</text>
+          <rect x="296" y="136" width="40" height="30" rx="5" fill="#dcfce7" stroke="#16a34a"/><text x="316" y="156" fill="#16a34a" font-weight="600">1</text>
+          <rect x="336" y="136" width="40" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="356" y="156" fill="#2563eb">1</text>
+          <rect x="376" y="136" width="40" height="30" rx="5" fill="#fff" stroke="#e6e8eb"/><text x="396" y="156" fill="#9aa0a6">0</text>
+          <rect x="416" y="136" width="40" height="30" rx="5" fill="#dcfce7" stroke="#16a34a"/><text x="436" y="156" fill="#16a34a" font-weight="600">1</text>
+        </g>
+        <text x="300" y="186" text-anchor="middle" font-size="13" fill="#6b7280">8 个格子一次算完；机器上一个 64 位字也是一次算完</text>
+      </svg>
+      <figcaption>一个 bit 存一个关系，最内层循环被一次位运算替掉</figcaption>
+    </figure>
+
+    <p>于是三重循环变成两重，最里面那句只剩一个 <code class="inline">|=</code>：</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">floyd</span>() {
+    <span class="kw">for</span> (<span class="kw">int</span> bridge = 1; bridge &lt;= n; bridge++)
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++)
+            <span class="kw">if</span> (dp[i][bridge])
+                dp[i] |= dp[bridge];
+}</pre>
+    <p>省下来的倍数就是字长。n = 2000 时，原本 8 × 10⁹ 次「列」操作，现在只有 1.25 × 10⁸ 次位运算。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 600 176" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="位图加速的倍数" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="40" y="30" font-size="13" fill="#6b7280">n = 2000，两种写法要做的「单个格子」操作次数</text>
+        <text x="40" y="66" font-size="13" fill="#6b7280">三重循环</text>
+        <rect x="150" y="52" width="410" height="22" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+        <text x="560" y="68" font-size="13" fill="#ea580c" text-anchor="end">8 × 10⁹</text>
+        <text x="160" y="68" font-size="12" fill="#ea580c">n³</text>
+        <text x="40" y="112" font-size="13" fill="#6b7280">bitset 版</text>
+        <rect x="150" y="98" width="7" height="22" rx="2" fill="#dbeafe" stroke="#2563eb"/>
+        <text x="170" y="114" font-size="13" fill="#2563eb">1.25 × 10⁸　= n³ / 64</text>
+        <text x="40" y="152" font-size="13" fill="#6b7280">同一个数量级的差距，把 n 从 500 抬到 2000 也能做</text>
+      </svg>
+      <figcaption>省下的 64 倍来自机器字长，不是算法上的改进</figcaption>
+    </figure>
+
+    <h2>五、演示</h2>
+    <p>点「下一步」看 bridge 从 1 走到 5，绿色是本轮新填进去的 1。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　枚举跳板求传递闭包</div>
+      <div id="tcGrid" class="tc-grid"></div>
+      <div id="tcRows"></div>
+      <div class="breakdown" id="tcStatus"></div>
+      <div class="tc-btns">
+        <button class="tc-btn" id="tcStep">下一步</button>
+        <button class="tc-btn" id="tcAuto">自动播放</button>
+        <button class="tc-btn" id="tcReset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot full"></span>已经是 1</span>
+        <span><span class="dot partial"></span>当前跳板所在的列</span>
+        <span><span class="dot" style="background:var(--ok-bg);border:1px solid var(--ok)"></span>本轮新增</span>
+      </div>
+    </div>
+
+    <h2>六、代码</h2>
+    <p>下面是模板题的完整实现，一共十几行。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 105;
+
+<span class="kw">int</span> n;
+bitset&lt;MAXN&gt; dp[MAXN];               <span class="cm">// dp[i][j] = 1：i 能到 j</span>
+
+<span class="kw">void</span> <span class="fn">floyd</span>() {
+    <span class="kw">for</span> (<span class="kw">int</span> bridge = 1; bridge &lt;= n; bridge++)
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++)
+            <span class="kw">if</span> (dp[i][bridge])          <span class="cm">// i 能到 bridge</span>
+                dp[i] |= dp[bridge];   <span class="cm">// 就把 bridge 能到的全接过来</span>
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    ios::sync_with_stdio(<span class="kw">false</span>);
+    cin.tie(<span class="kw">nullptr</span>);
+    cin &gt;&gt; n;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++)
+        <span class="kw">for</span> (<span class="kw">int</span> j = 1, s; j &lt;= n; j++) {
+            cin &gt;&gt; s;
+            dp[i][j] = s;
+        }
+    floyd();
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= n; j++)
+            cout &lt;&lt; (dp[i][j] ? <span class="cm">"1 "</span> : <span class="cm">"0 "</span>);
+        cout &lt;&lt; <span class="cm">'\n'</span>;
+    }
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <p>这里有个容易漏掉的点：<code class="inline">dp[i][bridge]</code> 这个判断不能省。省掉的话，i 到不了 bridge 也会被或上bridge 那一行，凭空多出很多可达关系。</p>
+
+    <h2>七、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>每个点 DFS / BFS（朴素）</td><td><code class="inline">O(n·(n + m))</code>，稠密图 <code class="inline">O(n³)</code></td></tr>
+        <tr><td>Floyd 三重循环</td><td><code class="inline">O(n³)</code></td></tr>
+        <tr><td>bitset 版 Floyd</td><td><code class="inline">O(n³ / 64)</code>（n² 次或运算，每次 n / 64 个字）</td></tr>
+        <tr><td>读入邻接矩阵</td><td><code class="inline">O(n²)</code></td></tr>
+        <tr><td>总时间</td><td><code class="inline">O(n³ / 64)</code></td></tr>
+        <tr><td>额外空间</td><td><code class="inline">O(n² / 8)</code> 字节</td></tr>
+      </tbody>
+    </table>
+    <p>空间上，n 行 bitset 一共 n² 个 bit，也就是 n² / 8 个字节。n = 2000 时是 5 × 10⁵ 字节，不到半兆，很宽松。</p>
+    <p>时间复杂度里那个 64 是机器字长。<code class="inline">bitset&lt;MAXN&gt;</code> 的 <code class="inline">|=</code> 会把整行拆成 ⌈n / 64⌉ 个 64 位字，一个字一次算完，所以是 n³ / 64 而不是 n³。</p>
+    <p>这也说明它的边界：n 到几千没问题，再大下去 n² / 8 的空间先撑不住。那种规模得换成按连通分量缩点，或者别的可达性结构。</p>
+
+    <h2>八、换个问法</h2>
+    <p>闭包求出来之后，大部分题目要的不是矩阵本身，而是从矩阵里数出点什么。下面几个都是同一个骨架，只改最后一步。</p>
+
+    <h3>连通数</h3>
+    <p>问有多少个有序点对 (i, j) 满足 i 能到 j，并且每个点都能到自己。做法是把对角线先置成 1，求完闭包后数一数每行有几个 1。</p>
+    <pre class="code"><span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) dp[i][i] = <span class="kw">true</span>;   <span class="cm">// 自己到自己也算</span>
+floyd();
+<span class="kw">int</span> ans = 0;
+<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) ans += dp[i].count();</pre>
+
+    <h3>确定能力</h3>
+    <p>n 头奶牛能力各不相同，给出 m 条「a 强于 b」的关系，关系可传递。问有几头牛的名次能确定下来。一头牛的名次能确定，等价于它和其余 n − 1 头牛的高下都已明确。</p>
+    <pre class="code"><span class="kw">for</span> (<span class="kw">int</span> i = 0, a, b; i &lt; m; i++) { cin &gt;&gt; a &gt;&gt; b; dp[a][b] = <span class="kw">true</span>; }
+floyd();
+<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++)
+    <span class="kw">for</span> (<span class="kw">int</span> j = i + 1; j &lt;= n; j++)
+        <span class="kw">if</span> (dp[i][j] || dp[j][i]) { cnt[i]++; cnt[j]++; }  <span class="cm">// 这一对能比出来</span>
+<span class="kw">int</span> ans = 0;
+<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++)
+    <span class="kw">if</span> (cnt[i] == n - 1) ans++;                        <span class="cm">// 和所有牛都比过</span></pre>
+
+    <h3>需要关系</h3>
+    <p>还是那些强弱关系，问至少还要补充几条关系，才能把完整排名定下来。 unknow 的那一对就需要问一次，数一数两个方向都不可达的点对有多少。</p>
+    <pre class="code">floyd();
+<span class="kw">int</span> need = 0;
+<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++)
+    <span class="kw">for</span> (<span class="kw">int</span> j = i + 1; j &lt;= n; j++)
+        <span class="kw">if</span> (!dp[i][j] &amp;&amp; !dp[j][i]) need++;            <span class="cm">// 这一对还没法比</span></pre>
+
+    <h3>有向图与查询</h3>
+    <p>定义一条路径的代价是路径上所有点编号的最大值，q 次询问 s 到 t 的最小代价。做法是边跑 Floyd 边回答：当跳板枚举到 bridge 时，只允许经过编号 ≤ bridge 的点，s 到 t 第一次连通的那个 bridge，加上 s、t 自己的编号，就是答案。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">floyd</span>() {
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++) ans[i] = -1;
+    <span class="kw">for</span> (<span class="kw">int</span> bridge = 1; bridge &lt;= n; bridge++) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++)
+            <span class="kw">if</span> (dp[i][bridge]) dp[i] |= dp[bridge];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++)                 <span class="cm">// 刚好在这一轮连通</span>
+            <span class="kw">if</span> (ans[i] == -1 &amp;&amp; dp[s[i]][t[i]])
+                ans[i] = max(bridge, max(s[i], t[i]));
+    }
+}</pre>
+
+    <h3>排序</h3>
+    <p>逐条加入「A &lt; B」这样的关系，每加一条就判断一次：有没有矛盾、排名是不是已经唯一。判断还是看闭包，对角线上出现 1 说明有环，也就是矛盾；存在一对两个方向都不可达，说明还没定下来。</p>
+    <pre class="code"><span class="cm">// 0：还没确定　1：已确定　2：有矛盾</span>
+<span class="kw">int</span> <span class="fn">check</span>() {
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++)
+        <span class="kw">if</span> (dp[i][i]) <span class="kw">return</span> 2;                 <span class="cm">// 自己能到自己，成环了</span>
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++)
+        <span class="kw">for</span> (<span class="kw">int</span> j = i + 1; j &lt;= n; j++)
+            <span class="kw">if</span> (!dp[i][j] &amp;&amp; !dp[j][i]) <span class="kw">return</span> 0;  <span class="cm">// 有一对还没比出来</span>
+    <span class="kw">return</span> 1;
+}</pre>
+    <p>确定之后输出升序序列：对每个元素数一数有多少个元素比它小，这个个数就是它排第几，直接放到对应位置。</p>
+
+    <h2>九、最后</h2>
+    <p>传递闭包本身很简单，就是 Floyd 去掉「取最小」那一步，只留下「有没有」。真正让它在 n = 2000 这种规模上能用起来的，是 bitset 把最内层循环换成了一次位运算。</p>
+    <p>用的时候记住两件事：一是 <code class="inline">if (dp[i][bridge])</code> 那个判断别漏；二是题目说「自己能到自己」时要先把对角线置 1，说「走至少一条边」时则不要置，两者差一个环的判断。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var n = 5;
+  var E = [[1,2],[2,3],[3,1],[3,4],[4,5]];
+
+  var dp = [];
+  for (var i = 0; i <= n; i++) {
+    dp.push(new Array(n + 1).fill(0));
+  }
+  for (var k = 0; k < E.length; k++) dp[E[k][0]][E[k][1]] = 1;
+
+  function clone(m){
+    var r = [];
+    for (var i = 0; i <= n; i++) r.push(m[i].slice());
+    return r;
+  }
+
+  function rowText(m, i){
+    var s = [];
+    for (var j = 1; j <= n; j++) if (m[i][j]) s.push(j);
+    return s.length ? s.join('、') : '—';
+  }
+
+  var frames = [];
+  frames.push({
+    bridge: 0, dp: clone(dp), added: [], rows: [],
+    text: '初始状态：dp 就是邻接矩阵，只有直接相连的边是 1。'
+  });
+  for (var b = 1; b <= n; b++) {
+    var added = [], rows = [];
+    for (var i = 1; i <= n; i++) {
+      if (!dp[i][b]) continue;
+      rows.push(i);
+      for (var j = 1; j <= n; j++) {
+        if (dp[b][j] && !dp[i][j]) {
+          dp[i][j] = 1;
+          added.push([i, j]);
+        }
+      }
+    }
+    var t;
+    if (rows.length === 0) {
+      t = 'bridge = ' + b + '：第 ' + b + ' 列全是 0，没有行需要或运算，这一轮什么都不变。';
+    } else {
+      t = 'bridge = ' + b + '：第 ' + b + ' 列为 1 的行是 ' + rows.join('、') +
+          '；把这些行整体或上第 ' + b + ' 行（' + rowText(dp, b) + '）' +
+          (added.length ? '，新增 ' + added.length + ' 个 1。' : '，本轮没有新的 1。');
+    }
+    frames.push({ bridge: b, dp: clone(dp), added: added, rows: rows, text: t });
+  }
+
+  var gridEl  = document.getElementById('tcGrid');
+  var rowsEl  = document.getElementById('tcRows');
+  var statEl  = document.getElementById('tcStatus');
+  var btnStep = document.getElementById('tcStep');
+  var btnAuto = document.getElementById('tcAuto');
+  var btnReset= document.getElementById('tcReset');
+
+  var cur = 0;
+  var timer = null;
+
+  function render(){
+    var f = frames[cur];
+    var h = '<div class="tc-cell head"></div>';
+    for (var j = 1; j <= n; j++) {
+      h += '<div class="tc-cell head">' + j + '</div>';
+    }
+    for (var i = 1; i <= n; i++) {
+      h += '<div class="tc-cell head">' + i + '</div>';
+      for (var j = 1; j <= n; j++) {
+        var cls = 'tc-cell';
+        var isNew = false;
+        for (var k = 0; k < f.added.length; k++) {
+          if (f.added[k][0] === i && f.added[k][1] === j) isNew = true;
+        }
+        if (f.dp[i][j]) cls += isNew ? ' new' : ' on';
+        if (j === f.bridge) cls += ' bridge';
+        h += '<div class="' + cls + '">' + f.dp[i][j] + '</div>';
+      }
+    }
+    gridEl.innerHTML = h;
+
+    var r = '';
+    for (var i = 1; i <= n; i++) {
+      r += '<span class="tc-chip">' + i + ' 能到 <b>' + rowText(f.dp, i) + '</b></span>';
+    }
+    rowsEl.innerHTML = r;
+
+    statEl.innerHTML = '<div class="row">第 ' + cur + ' / ' + (frames.length - 1) + ' 步' +
+                       (f.bridge ? '　当前跳板 bridge = ' + f.bridge : '　还没开始') + '</div>' +
+                       '<div class="row" style="margin-top:4px;">' + f.text + '</div>';
+    btnStep.disabled = (cur >= frames.length - 1);
+  }
+
+  function step(){
+    if (cur >= frames.length - 1) { render(); return; }
+    cur++;
+    render();
+  }
+  function stopAuto(){
+    if (timer) { clearInterval(timer); timer = null; }
+    btnAuto.textContent = '自动播放';
+  }
+  function toggleAuto(){
+    if (timer) { stopAuto(); return; }
+    btnAuto.textContent = '暂停';
+    timer = setInterval(function(){
+      if (cur >= frames.length - 1) { stopAuto(); return; }
+      cur++;
+      render();
+    }, 1200);
+  }
+  function reset(){
+    stopAuto();
+    cur = 0;
+    render();
+  }
+
+  btnStep.addEventListener('click', step);
+  btnAuto.addEventListener('click', toggleAuto);
+  btnReset.addEventListener('click', reset);
+  render();
+})();
+</script>
+</body>
+</html>

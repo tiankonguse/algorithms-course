@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>单双链表及其反转 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.ll-sel,.ll-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.ll-sel:focus{outline:none;border-color:var(--accent);}
+.ll-btn{cursor:pointer;}
+.ll-btn:hover{border-color:var(--accent);color:var(--accent);}
+.ll-btn:disabled{opacity:.4;cursor:default;}
+.ll-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.ll-ctl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>单双链表及其反转</h1>
+      <p class="intro">上一讲把数据结构拆成了连续结构和跳转结构两种零件。链表是最纯粹的跳转结构，除了值和一根跳转指针什么都没有。反转它只有十几行代码，却能把「指针到底是个什么变量」这件事问得清清楚楚。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>单链表在笔试和面试里出现的频率高得不成比例。原因不是它难，而是它刚好卡在一个位置上：写对需要理解内存，写错又非常容易，几行代码里任何一个顺序写反都会挂。</p>
+      <p>这一讲顺着三个问题往下走：变量里装的是什么，单链表怎么反转，双链表多出来的那根指针怎么处理。反转之外的内容，后面讲栈和队列时还会再碰见。</p>
+
+      <h2 id="prob">一、问题</h2>
+      <p>给一个单链表的头节点 <code class="inline">head</code>，把整条链反过来，返回新链表的头。原链表的最后一个节点变成新链表的第一个。</p>
+      <p>双链表的版本多一根往前指的指针，反转时两根都得改。<a href="https://leetcode.cn/problems/reverse-linked-list/" target="_blank">反转链表</a>是单链表版的模版题。</p>
+      <p>限制很明确：不许新开一条链把值抄一遍，只能在原来的节点上改指针。所以额外空间得是 O(1)。</p>
+
+      <h2 id="pass">二、变量里装的是什么</h2>
+      <p>先说一件和语言有关的事。函数拿到的参数永远是副本，区别只在于副本里装的是值还是地址。</p>
+      <p>装值的时候，在函数里给副本赋值，外面那个变量一点没动。实测：<code class="inline">void f(int a){ a = 0; }</code> 调用完外面还是 10。</p>
+      <p>装地址的时候要分两件事看。给副本本身赋值，照样改不动外面；但通过副本去写它指向的那块内存，外面看得见，因为副本和外面那个变量指向的是同一块内存。</p>
+
+      <figure class="fig" id="figPass"></figure>
+
+      <p>这四条里最容易搞混的是第二条：<code class="inline">p = nullptr</code> 是把副本改了，<code class="inline">p-&gt;val = 6</code> 是顺着副本里那个地址去改内存。前者无效，后者有效。</p>
+      <p>真想让函数改到调用方的指针本身，得把那个变量本身传进去，也就是引用或者二级指针。实测两种写法调用完外面的指针都变成了 0x0。</p>
+
+          <pre class="code"><span class="kw">void</span> <span class="fn">f</span>(<span class="kw">int</span> a) { a = 0; }
+
+    <span class="kw">void</span> <span class="fn">g1</span>(ListNode* p) { p = <span class="kw">nullptr</span>; }
+    <span class="kw">void</span> <span class="fn">g2</span>(ListNode* p) { p-&gt;val = 6; }
+
+    <span class="kw">void</span> <span class="fn">g3</span>(<span class="kw">int</span>* c) { c = <span class="kw">nullptr</span>; }
+    <span class="kw">void</span> <span class="fn">g4</span>(<span class="kw">int</span>* c) { c[0] = 100; }
+
+    <span class="kw">void</span> <span class="fn">g5</span>(ListNode*&amp; p) { p = <span class="kw">nullptr</span>; }
+    <span class="kw">void</span> <span class="fn">g6</span>(ListNode** p) { *p = <span class="kw">nullptr</span>; }</pre>
+
+      <p>数组是同一回事：<code class="inline">c = nullptr</code> 改不动，<code class="inline">c[0] = 100</code> 改得动，实测调用完 <code class="inline">c[0]</code> 就是 100。</p>
+
+      <h2 id="node">三、单链表与双链表的定义</h2>
+      <p>单链表的节点只有两样东西：一个值，一个指向下一个节点的地址。双链表多一个指回上一个节点的地址。</p>
+
+          <pre class="code"><span class="kw">struct</span> ListNode {
+        <span class="kw">int</span> val;
+        ListNode* next;
+        ListNode(<span class="kw">int</span> v) : val(v), next(<span class="kw">nullptr</span>) {}
+    };
+
+    <span class="kw">struct</span> DoubleListNode {
+        <span class="kw">int</span> val;
+        DoubleListNode* last;
+        DoubleListNode* next;
+        DoubleListNode(<span class="kw">int</span> v) : val(v), last(<span class="kw">nullptr</span>), next(<span class="kw">nullptr</span>) {}
+    };</pre>
+
+      <p>节点是 <code class="inline">new</code> 出来的，散落在堆上，谁和谁都不挨着。实测相邻两个节点的地址差是 32、-16、32、48、80 字节，有正有负。</p>
+
+      <figure class="fig" id="figNode"></figure>
+
+      <p><code class="inline">sizeof(ListNode)</code> 实测 16 字节，其中 4 字节是值、8 字节是指针，剩下 4 字节是对齐补出来的；双链表节点 24 字节。</p>
+      <p>所以「链表」这个词指的不是内存里的形状，而是用指针串出来的逻辑顺序。内存里它们各在各的地方。</p>
+
+      <h2 id="reverse">四、单链表怎么反转</h2>
+      <p>三个指针就够了：<code class="inline">pre</code> 是已经反转好的那一段的头，<code class="inline">head</code> 是还没处理的那一段的头，<code class="inline">next</code> 用来临时存一下后面是谁。</p>
+      <p>每轮循环做四件事，一个节点就翻过来了。</p>
+
+          <pre class="code">ListNode* reverseList(ListNode* head) {
+        ListNode* pre = <span class="kw">nullptr</span>;
+        ListNode* next = <span class="kw">nullptr</span>;
+        <span class="kw">while</span> (head != <span class="kw">nullptr</span>) {
+            next = head-&gt;next;   <span class="cm">// 1) 先把后面存下来</span>
+            head-&gt;next = pre;    <span class="cm">// 2) 箭头掉头</span>
+            pre = head;          <span class="cm">// 3) pre 挪到这一节点</span>
+            head = next;         <span class="cm">// 4) 处理下一个</span>
+        }
+        <span class="kw">return</span> pre;
+    }</pre>
+
+      <figure class="fig" id="figStep"></figure>
+
+      <p>实测 n = 6 时四条赋值各执行 6 次，一共 24 次，正好 4n。每个节点的代价是常数，跟它在链上多远无关。</p>
+      <p>第一步为什么不能省，看这张图。</p>
+
+      <figure class="fig" id="figBreak"></figure>
+
+      <p>箭头一改，<code class="inline">head-&gt;next</code> 里存的就是 <code class="inline">pre</code> 了，原来的后继没有任何人记得。所以必须先把后继抄到 <code class="inline">next</code> 里，再动手改箭头。</p>
+
+      <div class="viz" id="vizRev">
+        <div class="viz-title">演示　单链表反转，逐个子步骤走一遍</div>
+        <div id="rvSvg"></div>
+        <div class="breakdown" id="rvStat"></div>
+        <div class="viz-controls">
+          <div class="ll-ctl"><label>长度</label>
+            <select class="ll-sel" id="rvN">
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+            </select>
+          </div>
+          <button class="ll-btn" id="rvNext" type="button">下一步</button>
+          <button class="ll-btn" id="rvAll" type="button">一次跑完</button>
+          <button class="ll-btn" id="rvPrev" type="button">上一步</button>
+          <button class="ll-btn" id="rvReset" type="button">重置</button>
+        </div>
+        <div class="legend">
+          <span><span class="dot"></span>已经反转好的一段</span>
+          <span><span class="dot partial"></span>这一步正在动的节点 / 箭头</span>
+          <span><span class="dot skip"></span>还没处理的一段</span>
+        </div>
+      </div>
+
+      <p>跑一遍就能看出一条不变式：每轮循环结束时，<code class="inline">pre</code> 是已反转段的头，<code class="inline">head</code> 是未反转段的头，两段拼起来仍然是原来那条链。</p>
+      <p>循环退出时 <code class="inline">head</code> 是空，说明未反转段没了，<code class="inline">pre</code> 就是整条链的新头。空链表和单个节点都落在这条不变式里，不用单独判。</p>
+
+      <h2 id="double">五、双链表怎么反转</h2>
+      <p>双链表多了 <code class="inline">last</code>，反转时它和 <code class="inline">next</code> 要一起掉头，否则新链表顺着 <code class="inline">last</code> 走会走歪。</p>
+
+          <pre class="code">DoubleListNode* reverseDoubleList(DoubleListNode* head) {
+        DoubleListNode* pre = <span class="kw">nullptr</span>;
+        DoubleListNode* next = <span class="kw">nullptr</span>;
+        <span class="kw">while</span> (head != <span class="kw">nullptr</span>) {
+            next = head-&gt;next;
+            head-&gt;next = pre;
+            head-&gt;last = next;
+            pre = head;
+            head = next;
+        }
+        <span class="kw">return</span> pre;
+    }</pre>
+
+      <p>比单链表多一行 <code class="inline">head-&gt;last = next</code>，实测每节点 5 次赋值，n = 6 时 30 次。</p>
+
+      <figure class="fig" id="figDouble"></figure>
+
+      <p>还有另一种写法：每个节点只把 <code class="inline">last</code> 和 <code class="inline">next</code> 交换一下，然后沿着交换后的 <code class="inline">last</code>往后走。实测两种写法赋值次数一样，结果也一样，反向遍历都能走回原序 1 2 3 4 5。</p>
+      <p>不管哪种写法，反转完都有两条边要检查：新头的 <code class="inline">last</code> 是空，新尾的 <code class="inline">next</code> 是空。这两条对拍时逐组验过，漏一条链表就是断的。</p>
+
+      <div class="viz" id="vizDbl">
+        <div class="viz-title">演示　双链表反转，两根指针一起掉头</div>
+        <div id="dbSvg"></div>
+        <div class="breakdown" id="dbStat"></div>
+        <div class="viz-controls">
+          <div class="ll-ctl"><label>长度</label>
+            <select class="ll-sel" id="dbN">
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
+          <button class="ll-btn" id="dbNext" type="button">下一步</button>
+          <button class="ll-btn" id="dbAll" type="button">一次跑完</button>
+          <button class="ll-btn" id="dbPrev" type="button">上一步</button>
+          <button class="ll-btn" id="dbReset" type="button">重置</button>
+        </div>
+        <div class="legend">
+          <span><span class="dot"></span>已经反转好的一段</span>
+          <span><span class="dot partial"></span>这一步正在动的节点</span>
+          <span><span class="dot skip"></span>还没处理的一段</span>
+        </div>
+      </div>
+
+      <h2 id="arr">六、竞赛里通常怎么写</h2>
+      <p>比赛里几乎不写 <code class="inline">new Node</code>。一是慢，二是散在堆上的节点没法预估占多少。常见做法是拿数组拼出链表：<code class="inline">val[]</code> 存值，<code class="inline">nxt[]</code> 存下一个的下标，<code class="inline">head</code> 存第一个的下标。</p>
+      <p>跳转本来只需要一个「指向谁的编号」，而编号天然可以做下标。于是连续结构直接把跳转结构装了进去。</p>
+
+          <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXN = 1000005;
+    <span class="kw">int</span> val[MAXN], nxt[MAXN], head = -1, tot = 0;
+
+    <span class="kw">void</span> <span class="fn">pushFront</span>(<span class="kw">int</span> v) {
+        val[++tot] = v;
+        nxt[tot] = head;
+        head = tot;
+    }
+
+    <span class="kw">int</span> <span class="fn">reverseArrList</span>(<span class="kw">int</span> head) {
+        <span class="kw">int</span> pre = -1, cur = head, next;
+        <span class="kw">while</span> (cur != -1) {
+            next = nxt[cur];
+            nxt[cur] = pre;
+            pre = cur;
+            cur = next;
+        }
+        <span class="kw">return</span> pre;
+    }</pre>
+
+      <p>反转的写法和指针版一模一样，只是把空指针换成了 −1。</p>
+      <p>实测反转二百万个节点：<code class="inline">new</code> 出来的链表 1.80 毫秒，静态数组版 0.75 毫秒，直接对数组做 <code class="inline">std::reverse</code> 0.50 毫秒。三条都是 O(n)，常数差在寻址上。</p>
+      <p>顺带一提，静态数组版每个节点只占 8 字节（值 + 下标），<code class="inline">new</code> 版是 16 字节，二百万个节点分别是 15 MB 和 30 MB。</p>
+
+      <h2 id="pit">七、几个会踩的地方</h2>
+      <p>递归版写出来更短，但栈是 O(n) 的。实测在 macOS 默认栈（8176 KB）下，n = 150000 能跑完，n = 200000 直接段错误。链表长到十万这个量级就别用递归了。</p>
+      <p>反转后原来的头节点变成尾节点，它的 <code class="inline">next</code> 必须是空。漏掉这一步链表会成环，任何一次遍历都停不下来。</p>
+      <p>函数的返回值是新头 <code class="inline">pre</code>，不是原来的 <code class="inline">head</code>。反转结束后 <code class="inline">head</code> 已经走到空了，拿它当答案会得到一个空链表。</p>
+      <p>判断循环条件一律用 <code class="inline">while (head != nullptr)</code>，别先去判 <code class="inline">n == 0</code> 或 <code class="inline">n == 1</code>。这两种情况循环体分别执行 0 次和 1 次，结果本来就是对的。</p>
+
+      <h2 id="complexity">复杂度分析</h2>
+      <p>n 是节点个数。反转过程中的每一步都是常数次赋值，没有嵌套，也没有回头重扫。</p>
+
+      <table class="complexity">
+        <tr><th>操作</th><th>单链表</th><th>双链表</th><th>说明</th></tr>
+        <tr><td>反转整条链（迭代）</td><td>O(n) / O(1)</td><td>O(n) / O(1)</td><td>每节点常数次赋值，实测 4n 与 5n；只用三个指针，额外空间与 n 无关</td></tr>
+        <tr><td>反转整条链（递归）</td><td>O(n) / O(n)</td><td>O(n) / O(n)</td><td>栈深度等于链长，实测 n = 15 万能过，20 万爆栈</td></tr>
+        <tr><td>遍历一遍</td><td>O(n) / O(1)</td><td>O(n) / O(1)</td><td>顺着 next 走，每个节点访问一次</td></tr>
+        <tr><td>取第 k 个节点</td><td>O(k)，最差 O(n)</td><td>O(k)，最差 O(n)</td><td>只有头指针时都得从头跳，平均 n/2 步</td></tr>
+        <tr><td>在已知节点前插入</td><td>O(n)</td><td>O(1)</td><td>单链表得先找到前驱，双链表的 last 直接指着他</td></tr>
+        <tr><td>删除已知节点</td><td>O(n)</td><td>O(1)</td><td>同上，双链表把两边的指针一接就行</td></tr>
+        <tr><td>每个节点的空间</td><td>16 字节（new）</td><td>24 字节（new）</td><td>静态数组版分别是 8 和 12 字节，但要一开始预估上限</td></tr>
+      </table>
+
+      <p>表里前两项的 O(1) 指的是额外空间：链表本身占的 O(n) 是输入，不算进来。反转没有开新节点，只搬了三个指针变量。</p>
+
+      <h2 id="end">八、最后</h2>
+      <p>把四步顺序背下来不难，难的是随时能说出每一步之后内存里是什么样。后面讲栈、队列、邻接表、并查集时都是同一套看法：先认清变量里装的是值还是地址，再谈改哪个有效。</p>
+      <p style="text-align:center">《完》</p>
+
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var BLUE = '#2563eb', BLUEBG = '#dbeafe', OR = '#ea580c', ORBG = '#ffedd5',
+      DIM = '#6b7280', BORDER = '#e6e8eb', GREY = '#f6f7f9', GREYBD = '#c9ced4',
+      DARK = '#1f2328';
+
+  function svg(w, h, inner){
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg">' + inner + '</svg>';
+  }
+  function text(x, y, s, o){
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.fs || 12) + '" fill="' + (o.fill || DARK) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' +
+      (o.fw ? ' font-weight="' + o.fw + '"' : '') +
+      (o.ff ? ' font-family="' + o.ff + '"' : '') + '>' + s + '</text>';
+  }
+  function mono(x, y, s, o){
+    o = o || {}; o.ff = 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+    return text(x, y, s, o);
+  }
+  function rect(x, y, w, h, fill, stroke, dash){
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" fill="' + fill +
+      '" stroke="' + stroke + '" stroke-width="1.2"' + (dash ? ' stroke-dasharray="4 3"' : '') + '/>';
+  }
+  function put(id, s, cap){
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = svg(660, s.h, s.g) + '<figcaption>' + cap + '</figcaption>';
+  }
+  function defs(){
+    return '<defs>' +
+      '<marker id="ab" markerWidth="8" markerHeight="8" refX="6.5" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z" fill="' + BLUE + '"/></marker>' +
+      '<marker id="ao" markerWidth="8" markerHeight="8" refX="6.5" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z" fill="' + OR + '"/></marker>' +
+      '<marker id="ag" markerWidth="8" markerHeight="8" refX="6.5" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z" fill="' + GREYBD + '"/></marker>' +
+      '<marker id="alb" markerWidth="8" markerHeight="8" refX="1.5" refY="3" orient="auto"><path d="M6.5,0 L0,3 L6.5,6 Z" fill="' + BLUE + '"/></marker>' +
+      '<marker id="alg" markerWidth="8" markerHeight="8" refX="1.5" refY="3" orient="auto"><path d="M6.5,0 L0,3 L6.5,6 Z" fill="' + GREYBD + '"/></marker>' +
+      '<marker id="alo" markerWidth="8" markerHeight="8" refX="1.5" refY="3" orient="auto"><path d="M6.5,0 L0,3 L6.5,6 Z" fill="' + OR + '"/></marker>' +
+      '</defs>';
+  }
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // ---------- 图1：传进去的是副本 ----------
+  (function(){
+    var g = defs();
+    g += text(330, 17, '函数拿到的永远是副本：改副本没用，改副本指向的那块内存有用', { fs: 13, fw: '600' });
+    g += mono(16, 37, '函数里做什么', { fs: 11, fill: DIM, anchor: 'start' });
+    g += text(348, 37, '调用方变量之后', { fs: 11, fill: DIM });
+    var rows = [
+      { sig: 'void f(int a) { a = 0; }',            cell: 'a = 10',   ok: false, res: '还是 10，副本改了白改' },
+      { sig: 'void g1(ListNode* p) { p = nullptr; }', cell: 'b → #1',  ok: false, res: '还指着那个节点' },
+      { sig: 'void g2(ListNode* p) { p->val = 6; }',  cell: 'b.val = 6', ok: true,  res: '同一块内存被改了' },
+      { sig: 'void g5(ListNode*& p) { p = nullptr; }', cell: 'd = null', ok: true,  res: '变量本身被改了' }
+    ];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i], y = 50 + i * 48;
+      g += rect(10, y, 296, 34, '#ffffff', BORDER);
+      g += mono(18, y + 22, esc(r.sig), { fs: 11.5, anchor: 'start' });
+      g += rect(316, y, 84, 34, r.ok ? BLUEBG : GREY, r.ok ? BLUE : GREYBD);
+      g += mono(358, y + 22, esc(r.cell), { fs: 12, fill: r.ok ? BLUE : DIM });
+      g += text(414, y + 22, (r.ok ? '改到了　' : '没改到　') + r.res, { fs: 11.5, fill: r.ok ? BLUE : DIM, anchor: 'start' });
+    }
+    g += text(330, 248, '前两行改的是副本本身，后两行改的是副本指向的那块内存（或变量本身）', { fs: 11, fill: DIM });
+    put('figPass', { g: g, h: 262 }, '四个函数的实测结果：指针按值传进来，改副本没用，顺着副本改内存有用');
+  })();
+
+  // ---------- 图2：单链表的内存形状 ----------
+  (function(){
+    var g = defs();
+    g += text(330, 17, '单链表：值 + 一根跳转，节点在堆上各在各的地方', { fs: 13, fw: '600' });
+    var vals = [4, 9, 2, 7], xs = [120, 242, 370, 492], y = 70, cw = 44, hh = 40;
+    // head 变量
+    g += rect(16, y + 4, 74, 32, ORBG, OR);
+    g += mono(53, y + 25, 'head', { fs: 12, fill: OR });
+    g += '<line x1="90" y1="' + (y + 20) + '" x2="116" y2="' + (y + 20) + '" stroke="' + OR +
+         '" stroke-width="1.4" marker-end="url(#ao)"/>';
+    for (var i = 0; i < vals.length; i++) {
+      var x = xs[i];
+      g += rect(x, y, cw, hh, BLUEBG, BLUE);
+      g += mono(x + cw / 2, y + 26, String(vals[i]), { fs: 15 });
+      g += rect(x + cw, y, cw, hh, '#ffffff', BORDER);
+      g += mono(x + cw + cw / 2, y + 26, '→', { fs: 14, fill: DIM });
+      g += mono(x + 22, y + 56, '#' + (i + 1), { fs: 10.5, fill: DIM });
+      if (i + 1 < vals.length) {
+        var nx = xs[i + 1];
+        g += '<line x1="' + (x + 2 * cw) + '" y1="' + (y + 20) + '" x2="' + (nx - 4) + '" y2="' + (y + 20) +
+             '" stroke="' + BLUE + '" stroke-width="1.4" marker-end="url(#ab)"/>';
+      } else {
+        g += text(x + 2 * cw + 26, y + 24, 'null', { fs: 11, fill: DIM, anchor: 'start' });
+      }
+    }
+    g += mono(330, 142, '0x7f..a0   0x7f..c0   0x7f..a8   0x7f..e0', { fs: 11, fill: DIM });
+    g += text(330, 166, '实测相邻节点的地址差是 32、-16、32、48 字节：逻辑上挨着，内存里不挨着', { fs: 11.5, fill: DIM });
+    g += text(330, 188, 'sizeof(ListNode) = 16 字节（4 值 + 8 指针 + 4 对齐），双链表节点 24 字节', { fs: 11.5, fill: DIM });
+    put('figNode', { g: g, h: 202 }, '单链表的节点：一块值加一根跳转，head 里存的是第一个节点的地址');
+  })();
+
+  // ---------- 图3：一个节点的四个动作 ----------
+  (function(){
+    var g = defs();
+    g += text(330, 17, '一个节点的四个动作，顺序不能换', { fs: 13, fw: '600' });
+    // 每列三个节点：pre(A) head(B) 后继(C)
+    var cols = [
+      { code: 'next = head->next', tip: '先记住后面是谁', tag: ['pre', 'head', '后继'], arrow: 'fwd' },
+      { code: 'head->next = pre', tip: '箭头掉头，接上已反转段', tag: ['pre', 'head', 'next'], arrow: 'back' },
+      { code: 'pre = head', tip: '已反转段长一个', tag: ['', 'pre/head', 'next'], arrow: 'back' },
+      { code: 'head = next', tip: '未反转段的头后挪', tag: ['pre', '', 'head'], arrow: 'back' }
+    ];
+    for (var ci = 0; ci < 4; ci++) {
+      var cx = 8 + ci * 162, nw = 34, ngap = 10, y = 46;
+      var x0 = cx + (162 - (3 * nw + 2 * ngap)) / 2;
+      var nodeX = [x0, x0 + nw + ngap, x0 + 2 * (nw + ngap)];
+      // 标签
+      for (var k = 0; k < 3; k++) {
+        var t = cols[ci].tag[k];
+        if (!t) continue;
+        var col = (t === 'head') ? OR : ((t === 'pre' || t === 'pre/head') ? BLUE : DIM);
+        g += text(nodeX[k] + nw / 2, y - 6, t, { fs: 11, fill: col, fw: '600' });
+      }
+      for (var k2 = 0; k2 < 3; k2++) {
+        var fill = '#ffffff', st = BORDER;
+        if (k2 === 1) { fill = ORBG; st = OR; }
+        else if (k2 === 0) { fill = BLUEBG; st = BLUE; }
+        g += rect(nodeX[k2], y, nw, 30, fill, st);
+        g += mono(nodeX[k2] + nw / 2, y + 20, ['A', 'B', 'C'][k2], { fs: 13, fill: DARK });
+      }
+      if (cols[ci].arrow === 'fwd') {
+        g += '<line x1="' + (nodeX[1] + nw) + '" y1="' + (y + 15) + '" x2="' + (nodeX[2] - 3) + '" y2="' + (y + 15) +
+             '" stroke="' + GREYBD + '" stroke-width="1.3" marker-end="url(#ag)"/>';
+      } else {
+        // B -> A 的回头箭头，走下方
+        var yb = y + 30;
+        g += '<path d="M' + (nodeX[1] + nw / 2) + ',' + yb + ' L' + (nodeX[1] + nw / 2) + ',' + (yb + 12) +
+             ' L' + (nodeX[0] + nw / 2) + ',' + (yb + 12) + ' L' + (nodeX[0] + nw / 2) + ',' + (yb + 2) +
+             '" fill="none" stroke="' + OR + '" stroke-width="1.3" marker-end="url(#ao)"/>';
+      }
+      g += mono(cx + 81, y + 74, (ci + 1) + ') ' + esc(cols[ci].code), { fs: 11.5, fill: DARK });
+      g += text(cx + 81, y + 94, cols[ci].tip, { fs: 11, fill: DIM });
+    }
+    g += text(330, 172, 'A 是已经翻好的那一段，B 是当前节点，C 是它的后继', { fs: 11, fill: DIM });
+    put('figStep', { g: g, h: 184 }, '反转一个节点的四个动作：存档、掉头、pre 前移、head 后移');
+  })();
+
+  // ---------- 图4：先改箭头会怎样 ----------
+  (function(){
+    var g = defs();
+    g += text(330, 17, '不先存后继就掉头，后面那半条链就找不回来了', { fs: 13, fw: '600' });
+    // 左：正确顺序
+    g += text(165, 42, '正确：先 next = head->next', { fs: 11.5, fill: BLUE, fw: '600' });
+    var lx = [40, 122, 204, 286], y = 62, nw = 40;
+    for (var i = 0; i < 4; i++) {
+      g += rect(lx[i], y, nw, 30, i === 1 ? ORBG : '#ffffff', i === 1 ? OR : BORDER);
+      g += mono(lx[i] + nw / 2, y + 20, String(i + 1), { fs: 13 });
+      if (i < 3) {
+        g += '<line x1="' + (lx[i] + nw) + '" y1="' + (y + 15) + '" x2="' + (lx[i + 1] - 3) + '" y2="' + (y + 15) +
+             '" stroke="' + (i === 1 ? OR : GREYBD) + '" stroke-width="1.3" marker-end="url(#a' + (i === 1 ? 'o' : 'g') + ')"/>';
+      }
+    }
+    g += rect(146, 116, 92, 28, BLUEBG, BLUE);
+    g += mono(192, 134, 'next = 3 号', { fs: 11.5, fill: BLUE });
+    g += '<line x1="162" y1="' + (y + 30) + '" x2="192" y2="118" stroke="' + BLUE + '" stroke-width="1.2" marker-end="url(#ab)"/>';
+    g += text(165, 162, '后继抄在 next 里，改箭头也不怕', { fs: 11, fill: DIM });
+
+    // 右：错误顺序
+    g += text(495, 42, '错误：直接 head->next = pre', { fs: 11.5, fill: OR, fw: '600' });
+    var rx = [370, 452, 534, 616];
+    for (var j = 0; j < 4; j++) {
+      g += rect(rx[j], y, nw, 30, j === 1 ? ORBG : (j >= 2 ? GREY : '#ffffff'), j === 1 ? OR : (j >= 2 ? GREYBD : BORDER), j >= 2);
+      g += mono(rx[j] + nw / 2, y + 20, String(j + 1), { fs: 13, fill: j >= 2 ? GREYBD : DARK });
+    }
+    g += '<line x1="' + (rx[0] + nw) + '" y1="' + (y + 15) + '" x2="' + (rx[1] - 3) + '" y2="' + (y + 15) +
+         '" stroke="' + GREYBD + '" stroke-width="1.3" marker-end="url(#ag)"/>';
+    var yb = y + 30;
+    g += '<path d="M' + (rx[1] + nw / 2) + ',' + yb + ' L' + (rx[1] + nw / 2) + ',' + (yb + 14) +
+         ' L' + (rx[0] + nw / 2) + ',' + (yb + 14) + ' L' + (rx[0] + nw / 2) + ',' + (yb + 2) +
+         '" fill="none" stroke="' + OR + '" stroke-width="1.3" marker-end="url(#ao)"/>';
+    g += text(495, 116, '3、4 号还在堆上，但没人记得地址了', { fs: 11, fill: OR });
+    g += text(495, 162, '顺着 2 号往前走只能回到 1 号，后半条链永远到不了', { fs: 11, fill: DIM });
+    put('figBreak', { g: g, h: 176 }, '存档那一步的必要性：箭头一改，原来的后继就没有引用了');
+  })();
+
+  // ---------- 图5：双链表反转前后 ----------
+  (function(){
+    var g = defs();
+    g += text(330, 17, '双链表反转：next 掉头，last 也跟着掉头', { fs: 13, fw: '600' });
+    function drawRow(y, vals, dir, label, col){
+      var xs = [180, 280, 380], nw = 52;
+      g += text(90, y + 20, label, { fs: 11.5, fill: col, fw: '600', anchor: 'start' });
+      for (var i = 0; i < 3; i++) {
+        g += rect(xs[i], y, nw, 34, i === 1 ? ORBG : BLUEBG, i === 1 ? OR : BLUE);
+        g += mono(xs[i] + nw / 2, y + 23, String(vals[i]), { fs: 14 });
+      }
+      for (var k = 0; k < 2; k++) {
+        var a = xs[k], b = xs[k + 1];
+        var ya = y + 11, yb2 = y + 25;
+        g += '<line x1="' + (a + nw) + '" y1="' + ya + '" x2="' + (b - 3) + '" y2="' + ya +
+             '" stroke="' + col + '" stroke-width="1.3" marker-end="url(#a' + (col === BLUE ? 'b' : 'o') + ')"/>';
+        g += '<line x1="' + (b - 3) + '" y1="' + yb2 + '" x2="' + (a + nw) + '" y2="' + yb2 +
+             '" stroke="' + col + '" stroke-width="1.3" marker-end="url(#al' + (col === BLUE ? 'b' : 'o') + ')"/>';
+      }
+      g += text(xs[0] - 8, y + 11, 'null', { fs: 10, fill: DIM, anchor: 'end' });
+      g += text(xs[2] + nw + 8, y + 25, 'null', { fs: 10, fill: DIM, anchor: 'start' });
+      g += text(xs[2] + nw + 46, y + 11, 'next →', { fs: 10.5, fill: DIM, anchor: 'start' });
+      g += text(xs[2] + nw + 46, y + 25, '← last', { fs: 10.5, fill: DIM, anchor: 'start' });
+    }
+    drawRow(44, [1, 2, 3], 1, '反转前', BLUE);
+    drawRow(116, [3, 2, 1], 1, '反转后', OR);
+    g += text(330, 176, '反转后：新头的 last 是 null，新尾的 next 是 null，两根指针互为反向', { fs: 11, fill: DIM });
+    put('figDouble', { g: g, h: 190 }, '双链表反转前后：同一个节点上 next 与 last 一起换方向');
+  })();
+
+  // ---------- 演示1：单链表反转 ----------
+  (function(){
+    var elSvg = document.getElementById('rvSvg'), elStat = document.getElementById('rvStat');
+    var selN = document.getElementById('rvN'), bNext = document.getElementById('rvNext'),
+        bAll = document.getElementById('rvAll'), bPrev = document.getElementById('rvPrev'),
+        bReset = document.getElementById('rvReset');
+    if (!elSvg) return;
+    var n = 5, steps = [], pos = 0;
+
+    function build(){
+      n = parseInt(selN.value, 10);
+      steps = [];
+      var nxt = [], val = [];
+      for (var i = 1; i <= n; i++) { val[i] = i; nxt[i] = (i === n ? -1 : i + 1); }
+      var pre = -1, head = 1, next = -1, done = [];
+      for (var i2 = 1; i2 <= n; i2++) done.push(false);
+      steps.push({ nxt: nxt.slice(), val: val.slice(), pre: -1, head: 1, next: -1, done: done.slice(),
+                   hl: -1, act: '初始：pre = null，head 指向 1 号，next = null', code: '' });
+      while (head !== -1) {
+        next = nxt[head];
+        steps.push({ nxt: nxt.slice(), val: val.slice(), pre: pre, head: head, next: next, done: done.slice(),
+                     hl: head, arrow: -1, act: '把 ' + head + ' 号的后继抄进 next', code: 'next = head->next' });
+        nxt[head] = pre;
+        steps.push({ nxt: nxt.slice(), val: val.slice(), pre: pre, head: head, next: next, done: done.slice(),
+                     hl: head, arrow: head, act: head + ' 号的 next 改成指向 pre', code: 'head->next = pre' });
+        pre = head;
+        done[head] = true;
+        steps.push({ nxt: nxt.slice(), val: val.slice(), pre: pre, head: head, next: next, done: done.slice(),
+                     hl: head, arrow: head, act: 'pre 挪到 ' + head + ' 号，已反转段长一个', code: 'pre = head' });
+        head = next;
+        steps.push({ nxt: nxt.slice(), val: val.slice(), pre: pre, head: head, next: next, done: done.slice(),
+                     hl: -1, act: 'head 挪到 ' + (head === -1 ? 'null' : head + ' 号'), code: 'head = next' });
+      }
+      steps.push({ nxt: nxt.slice(), val: val.slice(), pre: pre, head: -1, next: -1, done: done.slice(),
+                   hl: -1, act: 'head 为空，返回 pre = ' + pre + ' 号', code: 'return pre' });
+      pos = 0;
+      draw();
+    }
+
+    function draw(){
+      var st = steps[pos], g = defs();
+      var cw = 52, gap = n >= 6 ? 26 : 34;
+      var total = n * cw + (n - 1) * gap;
+      var x0 = Math.max(14, (660 - total - 56) / 2);
+      var y = 62, hh = 36;
+      g += text(330, 18, '单链表反转　第 ' + pos + ' / ' + (steps.length - 1) + ' 步', { fs: 13, fw: '600' });
+      // 指针标签
+      function tagAt(idx, name, col){
+        if (idx === -1) return;
+        var x = x0 + (idx - 1) * (cw + gap);
+        g += rect(x - 2, y - 30, cw + 4, 20, '#ffffff', col);
+        g += mono(x + cw / 2, y - 15, name, { fs: 11, fill: col });
+      }
+      tagAt(st.pre === st.head && st.pre !== -1 ? -1 : st.pre, 'pre', BLUE);
+      if (st.pre === st.head && st.pre !== -1) tagAt(st.pre, 'pre/head', BLUE);
+      tagAt(st.head, 'head', OR);
+      tagAt(st.next, 'next', DIM);
+      // 节点
+      for (var i = 1; i <= n; i++) {
+        var x = x0 + (i - 1) * (cw + gap);
+        var fill = '#ffffff', stroke = BORDER, tcol = DARK;
+        if (st.done[i]) { fill = BLUEBG; stroke = BLUE; }
+        if (st.hl === i) { fill = ORBG; stroke = OR; }
+        g += rect(x, y, cw, hh, fill, stroke);
+        g += mono(x + cw / 2, y + 24, String(st.val[i]), { fs: 14, fill: tcol });
+        g += text(x + cw / 2 - 14, y + 50, '#' + i, { fs: 10, fill: DIM, anchor: 'end' });
+      }
+      // 箭头
+      for (var j = 1; j <= n; j++) {
+        var t = st.nxt[j];
+        var xa = x0 + (j - 1) * (cw + gap);
+        if (t === -1) {
+          if (j === n) g += text(xa + cw + 8, y + 24, '→ null', { fs: 11, fill: DIM, anchor: 'start' });
+          continue;
+        }
+        var xb = x0 + (t - 1) * (cw + gap);
+        var col = GREYBD, mk = 'ag';
+        if (st.done[j]) { col = BLUE; mk = 'ab'; }
+        if (st.arrow === j) { col = OR; mk = 'ao'; }
+        if (t > j) {
+          g += '<line x1="' + (xa + cw) + '" y1="' + (y + 18) + '" x2="' + (xb - 3) + '" y2="' + (y + 18) +
+               '" stroke="' + col + '" stroke-width="1.4" marker-end="url(#a' + mk.charAt(1) + ')"/>';
+        } else {
+          var yb = y + hh;
+          g += '<path d="M' + (xa + cw / 2) + ',' + yb + ' L' + (xa + cw / 2) + ',' + (yb + 26) +
+               ' L' + (xb + cw / 2) + ',' + (yb + 26) + ' L' + (xb + cw / 2) + ',' + (yb + 3) +
+               '" fill="none" stroke="' + col + '" stroke-width="1.4" marker-end="url(#a' + mk.charAt(1) + ')"/>';
+        }
+      }
+      var H = y + hh + 46;
+      elSvg.innerHTML = svg(660, H, g);
+      var cntDone = 0;
+      for (var q = 1; q <= n; q++) if (st.done[q]) cntDone++;
+      elStat.innerHTML = '<span class="num">' + st.act + '</span>' +
+        (st.code ? '　<code class="inline">' + esc(st.code) + '</code>' : '') +
+        '<br>pre = <span class="num">' + (st.pre === -1 ? 'null' : st.pre + ' 号') + '</span>　' +
+        'head = <span class="num">' + (st.head === -1 ? 'null' : st.head + ' 号') + '</span>　' +
+        'next = <span class="num">' + (st.next === -1 ? 'null' : st.next + ' 号') + '</span>　' +
+        '已反转 <span class="num">' + cntDone + '/' + n + '</span>　第 ' + pos + ' / ' + (steps.length - 1) + ' 步';
+      bNext.disabled = (pos >= steps.length - 1);
+      bAll.disabled = (pos >= steps.length - 1);
+      bPrev.disabled = (pos <= 0);
+    }
+    bNext.addEventListener('click', function(){ if (pos < steps.length - 1) { pos++; draw(); } });
+    bAll.addEventListener('click', function(){ pos = steps.length - 1; draw(); });
+    bPrev.addEventListener('click', function(){ if (pos > 0) { pos--; draw(); } });
+    bReset.addEventListener('click', build);
+    selN.addEventListener('change', build);
+    build();
+  })();
+
+  // ---------- 演示2：双链表反转 ----------
+  (function(){
+    var elSvg = document.getElementById('dbSvg'), elStat = document.getElementById('dbStat');
+    var selN = document.getElementById('dbN'), bNext = document.getElementById('dbNext'),
+        bAll = document.getElementById('dbAll'), bPrev = document.getElementById('dbPrev'),
+        bReset = document.getElementById('dbReset');
+    if (!elSvg) return;
+    var n = 4, steps = [], pos = 0;
+
+    function build(){
+      n = parseInt(selN.value, 10);
+      steps = [];
+      var nxt = [], lst = [], val = [], done = [];
+      for (var i = 1; i <= n; i++) {
+        val[i] = i;
+        nxt[i] = (i === n ? -1 : i + 1);
+        lst[i] = (i === 1 ? -1 : i - 1);
+        done[i] = false;
+      }
+      steps.push({ nxt: nxt.slice(), lst: lst.slice(), val: val.slice(), done: done.slice(), head: 1, hl: -1,
+                   act: '初始：1 号的 last 是 null，' + n + ' 号的 next 是 null', code: '' });
+      var pre = -1, head = 1, next = -1;
+      while (head !== -1) {
+        next = nxt[head];
+        nxt[head] = pre;
+        lst[head] = next;
+        done[head] = true;
+        var hv = head;
+        steps.push({ nxt: nxt.slice(), lst: lst.slice(), val: val.slice(), done: done.slice(), head: head,
+                     hl: hv, act: '处理 ' + hv + ' 号：next 指向 ' + (pre === -1 ? 'null' : pre + ' 号') +
+                     '，last 指向 ' + (next === -1 ? 'null' : next + ' 号'), code: 'head->next = pre; head->last = next;',
+                     pre: pre });
+        pre = head;
+        head = next;
+      }
+      steps.push({ nxt: nxt.slice(), lst: lst.slice(), val: val.slice(), done: done.slice(), head: -1, hl: -1,
+                   act: '返回新头 ' + pre + ' 号，顺着 next 走是 ' + n + ' → … → 1', code: 'return pre', pre: pre });
+      pos = 0;
+      draw();
+    }
+
+    function draw(){
+      var st = steps[pos], g = defs();
+      var cw = 54, gap = n >= 5 ? 24 : 34;
+      var total = n * cw + (n - 1) * gap;
+      var x0 = Math.max(40, (660 - total) / 2);
+      var y = 76, hh = 34;
+      g += text(330, 18, '双链表反转　第 ' + pos + ' / ' + (steps.length - 1) + ' 步', { fs: 13, fw: '600' });
+      g += text(x0 - 10, y - 18, 'last', { fs: 10.5, fill: DIM, anchor: 'end' });
+      g += text(x0 - 10, y + hh + 22, 'next', { fs: 10.5, fill: DIM, anchor: 'end' });
+      for (var i = 1; i <= n; i++) {
+        var x = x0 + (i - 1) * (cw + gap);
+        var fill = '#ffffff', stroke = BORDER;
+        if (st.done[i]) { fill = BLUEBG; stroke = BLUE; }
+        if (st.hl === i) { fill = ORBG; stroke = OR; }
+        g += rect(x, y, cw, hh, fill, stroke);
+        g += mono(x + cw / 2, y + 23, String(st.val[i]), { fs: 14 });
+        g += text(x + cw / 2 - 14, y + 52, st.nxt[i] === -1 ? 'null' : '#' + i,
+                  { fs: 10, fill: st.nxt[i] === -1 ? OR : DIM, anchor: 'end' });
+      }
+      // last 箭头走上方，next 箭头走下方
+      for (var j = 1; j <= n; j++) {
+        var xj = x0 + (j - 1) * (cw + gap);
+        var t = st.lst[j], u = st.nxt[j];
+        var mkL = (st.hl === j ? 'alo' : (st.done[j] ? 'alb' : 'alg'));
+        var mkN = (st.hl === j ? 'ao' : (st.done[j] ? 'ab' : 'ag'));
+        var colL = (st.hl === j ? OR : (st.done[j] ? BLUE : GREYBD));
+        var colN = (st.hl === j ? OR : (st.done[j] ? BLUE : GREYBD));
+        if (t !== -1) {
+          var xt = x0 + (t - 1) * (cw + gap);
+          var yUp = y - 30 - ((j - 1) % 2) * 8;
+          g += '<path d="M' + (xj + cw / 2) + ',' + (y - 2) + ' L' + (xj + cw / 2) + ',' + yUp +
+               ' L' + (xt + cw / 2) + ',' + yUp + ' L' + (xt + cw / 2) + ',' + (y - 4) +
+               '" fill="none" stroke="' + colL + '" stroke-width="1.4" marker-end="url(#' + mkL + ')"/>';
+        } else {
+          g += text(xj + cw / 2, y - 10, 'null', { fs: 10, fill: DIM });
+        }
+        if (u !== -1) {
+          var xu = x0 + (u - 1) * (cw + gap);
+          var yDn = y + hh + 26 + ((j - 1) % 2) * 8;
+          g += '<path d="M' + (xj + cw / 2) + ',' + (y + hh + 2) + ' L' + (xj + cw / 2) + ',' + yDn +
+               ' L' + (xu + cw / 2) + ',' + yDn + ' L' + (xu + cw / 2) + ',' + (y + hh + 4) +
+               '" fill="none" stroke="' + colN + '" stroke-width="1.4" marker-end="url(#' + mkN + ')"/>';
+        }
+      }
+      var H = y + hh + 66;
+      elSvg.innerHTML = svg(660, H, g);
+      var order = [], p = (st.pre === undefined || st.pre === -1) ? st.head : st.pre;
+      var seen = 0;
+      while (p !== -1 && p !== undefined && seen < n + 2) { order.push(p); p = st.nxt[p]; seen++; }
+      elStat.innerHTML = '<span class="num">' + st.act + '</span>' +
+        (st.code ? '　<code class="inline">' + esc(st.code) + '</code>' : '') +
+        '<br>沿 next 从 pre 走：<span class="num">' + (order.length ? order.join(' → ') : '空') + '</span>　' +
+        '第 ' + pos + ' / ' + (steps.length - 1) + ' 步';
+      bNext.disabled = (pos >= steps.length - 1);
+      bAll.disabled = (pos >= steps.length - 1);
+      bPrev.disabled = (pos <= 0);
+    }
+    bNext.addEventListener('click', function(){ if (pos < steps.length - 1) { pos++; draw(); } });
+    bAll.addEventListener('click', function(){ pos = steps.length - 1; draw(); });
+    bPrev.addEventListener('click', function(){ if (pos > 0) { pos--; draw(); } });
+    bReset.addEventListener('click', build);
+    selN.addEventListener('change', build);
+    build();
+  })();
+})();
+</script>
+</body>
+</html>

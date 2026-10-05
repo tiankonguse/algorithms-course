@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>离散化 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.dis-cells{display:flex;gap:5px;flex-wrap:wrap;}
+.dis-cell{
+  min-width:44px;height:34px;padding:0 8px;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+  font-size:14px;font-variant-numeric:tabular-nums;
+  transition:opacity .12s,border-color .12s,background .12s;
+}
+.dis-cell.s{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.dis-cell.e{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+.dis-cell.dup{opacity:.35;text-decoration:line-through;}
+.dis-cell.dim{opacity:.35;}
+.dis-cell.cur{border-color:var(--text);box-shadow:0 0 0 2px rgba(37,99,235,.18);}
+.dis-cell.best{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:700;}
+.dis-row{display:flex;align-items:center;gap:8px;margin:5px 0;}
+.dis-tag{width:78px;flex:0 0 78px;font-size:13px;color:var(--text-dim);text-align:right;}
+
+.meet-list{display:flex;flex-direction:column;gap:6px;}
+.meet-row{display:flex;align-items:center;gap:8px;font-size:14px;font-variant-numeric:tabular-nums;}
+.meet-row.off{opacity:.3;}
+.meet-idx{width:56px;flex:0 0 56px;font-size:13px;color:var(--text-dim);}
+.chip{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:38px;height:26px;padding:0 8px;
+  border:1px solid var(--border);border-radius:6px;background:var(--bg);
+  font-size:13px;font-variant-numeric:tabular-nums;
+}
+.chip.s{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.chip.e{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+
+.map-row{display:flex;align-items:center;gap:10px;font-size:14px;font-variant-numeric:tabular-nums;padding:3px 8px;border-radius:6px;}
+.map-row.on{background:var(--accent-soft);}
+.map-val{width:96px;font-weight:600;}
+.map-arrow{color:var(--text-dim);}
+.map-idx{
+  width:44px;height:28px;display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--border);border-radius:6px;background:var(--bg-soft);
+}
+.map-row.on .map-idx{border-color:var(--full);background:var(--full-bg);color:var(--full);font-weight:600;}
+
+
+.dis-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+  transition:border-color .12s,color .12s;
+}
+.dis-btn:hover{border-color:var(--accent);color:var(--accent);}
+
+.legend .dot.dup{background:#eceef1;border:1px dashed #9aa0a6;}
+@media(max-width:760px){
+  .dis-cell{min-width:38px;height:30px;font-size:13px;}
+  .dis-tag{width:64px;flex:0 0 64px;}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>离散化</h1>
+    <p class="intro">值的范围很大，但真正用到的值没几个。收集起来排序去重，只保留大小关系，大值域就压成了小下标。</p>
+
+    <h2>零、背景</h2>
+    <p>比赛里经常遇到这类题：给出 n 个区间，问某个位置最多被多少个区间覆盖。</p>
+    <p>位置的取值范围可能到 10⁹，而 n 只有 10⁵。按位置开数组需要 10⁹+1 个格子，内存直接爆炸。</p>
+    <p>处理这类问题的常规操作是离散化，也叫坐标压缩。下面用一个具体的问题把它讲清楚。</p>
+
+    <h2>一、问题</h2>
+    <p>有 n 个会议，第 i 个会议占用 <code class="inline">[s_i, e_i)</code> 这段时间，即 e_i 时刻会议室已经空出来了。问最少需要几间会议室。</p>
+    <p>例如 5 个会议：</p>
+    <ul>
+      <li><code class="inline">[5, 12)</code>、<code class="inline">[3, 7)</code>、<code class="inline">[7, 15)</code>、<code class="inline">[12, 20)</code>、<code class="inline">[3, 10)</code></li>
+    </ul>
+    <p>这里用小整数举例，方便画图。真实题目里换成 10⁹ 量级的时间戳，做法完全一样。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>最顺手的做法是差分。准备一个数组 diff，下标就是时刻，会议起点加 1，终点减 1。</p>
+    <pre class="code"><span class="kw">int</span> diff[MAXV + 1];               <span class="cm">// 下标就是时刻</span>
+<span class="kw">for</span> (<span class="kw">auto</span>&amp; m : meetings) {
+    diff[m[0]]++;                  <span class="cm">// 会议开始</span>
+    diff[m[1]]--;                  <span class="cm">// 会议结束</span>
+}</pre>
+    <p>之后从头到尾扫一遍，前缀和的最大值就是答案，复杂度是 <code class="inline">O(V + n)</code>，V 是值域大小。</p>
+    <p>问题在于 V 可能是 10⁹，这个数组开不出来。</p>
+
+    <h2>三、离散化</h2>
+    <p>可以发现，diff 只会在会议端点处发生变化。</p>
+    <p>看两个相邻的端点，比如 7 和 10。这中间既没有会议开始，也没有会议结束，所以正在进行的会议数一直是 3。时刻 8 和 9 都不是端点，它们的值和 7 完全一样，属于陪跑。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>两个端点之间（这里是 7 和 10）数量一直是 3，中间的 8、9 都是陪跑</figcaption>
+    </figure>
+
+    <p>5 个会议只有 10 个端点，去掉重复的只剩 7 个不同的值。既然如此，就没必要给 10⁹ 个时刻各开一个格子，给这 7 个值各开一个格子就够了。</p>
+    <p>离散化做的就是这件事：把原始值换成「第几小」，只保留大小关系和相等关系。整个预处理固定三步，收集、排序去重、映射，代码也是这三步的直接翻译。</p>
+    <pre class="code"><span class="kw">vector</span>&lt;<span class="kw">ll</span>&gt; vals;                      <span class="cm">// 排序去重后的所有端点</span>
+<span class="kw">unordered_map</span>&lt;<span class="kw">ll</span>, <span class="kw">int</span>&gt; valToIdx;        <span class="cm">// 原始值 → 压缩下标</span>
+
+<span class="kw">void</span> <span class="fn">InitDiscretization</span>(<span class="kw">const</span> <span class="kw">vector</span>&lt;<span class="kw">vector</span>&lt;<span class="kw">int</span>&gt;&gt;&amp; meetings) {
+    vals.<span class="fn">reserve</span>(meetings.<span class="fn">size</span>() * 2);   <span class="cm">// 每个会议 2 个端点，一次性预留</span>
+    <span class="kw">for</span> (<span class="kw">auto</span>&amp; m : meetings) {
+        vals.<span class="fn">push_back</span>(m[0]);          <span class="cm">// 起点</span>
+        vals.<span class="fn">push_back</span>(m[1]);          <span class="cm">// 终点</span>
+    }
+    <span class="fn">sort</span>(vals.<span class="fn">begin</span>(), vals.<span class="fn">end</span>());                <span class="cm">// 排序</span>
+    vals.<span class="fn">erase</span>(<span class="fn">unique</span>(vals.<span class="fn">begin</span>(), vals.<span class="fn">end</span>()), vals.<span class="fn">end</span>()); <span class="cm">// 去重</span>
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; vals.<span class="fn">size</span>(); i++) {
+        valToIdx[vals[i]] = i;                <span class="cm">// 映射：值 → 下标</span>
+    }
+}</pre>
+    <p>这里有两个细节。reserve 是把空间一次要够，避免 push_back 时反复搬家。unique 不会真的删除元素，它把重复项挤到末尾并返回新结尾，所以要配合 erase 才能真正缩短数组。</p>
+
+    <h2>四、第一步：收集</h2>
+    <p>不管值长什么样，先把所有会用到的值都塞进数组 vals。拖动滑块，看它是怎么长大的。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ①　收集：每个会议贡献 2 个端点</div>
+      <div id="d1"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>展开前</label>
+          <input type="range" id="d1k" min="1" max="5" value="5">
+          <span class="val" id="d1kv">5</span>
+          <label>个会议</label>
+        </div>
+      </div>
+      <div class="breakdown" id="d1b"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>会议起点 s</span>
+        <span><span class="dot partial"></span>会议终点 e</span>
+      </div>
+    </div>
+
+    <p>会议有 n 个，端点就有 2n 个。这一步只是抄一遍，复杂度 O(n)。</p>
+
+    <h2>五、第二步：排序去重</h2>
+    <p>排序之后，相同的值必然挨在一起，扫一遍就能把重复的挑出来。点一下按钮，看哪些格子被丢掉。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ②　sort + unique：重复项只留一个</div>
+      <div id="d2"></div>
+      <div class="viz-controls">
+        <button class="dis-btn" id="d2btn">执行 unique()</button>
+      </div>
+      <div class="breakdown" id="d2b"></div>
+      <div class="legend">
+        <span><span class="dot dup"></span>重复项（被挤到末尾后删掉）</span>
+      </div>
+    </div>
+
+    <p>去重之后 <code class="inline">vals = [3, 5, 7, 10, 12, 15, 20]</code>，长度 <code class="inline">k = 7</code>。原来 0 到 10⁹ 的值域，现在只要 7 个格子。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="离散化前后的对比" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="70" y="32" font-size="12" fill="#6b7280">离散化前：按时刻开数组，要 maxV+1 个格子</text>
+        <g font-size="10" fill="#2563eb" text-anchor="middle">
+          <text x="100" y="54">3</text>
+          <text x="122" y="54">5</text>
+          <text x="144" y="54">7</text>
+          <text x="166" y="54">10</text>
+          <text x="188" y="54">12</text>
+          <text x="210" y="54">15</text>
+          <text x="232" y="54">20</text>
+        </g>
+        <g stroke="#2563eb" stroke-width="1.6">
+          <line x1="100" y1="60" x2="100" y2="72"/>
+          <line x1="122" y1="60" x2="122" y2="72"/>
+          <line x1="144" y1="60" x2="144" y2="72"/>
+          <line x1="166" y1="60" x2="166" y2="72"/>
+          <line x1="188" y1="60" x2="188" y2="72"/>
+          <line x1="210" y1="60" x2="210" y2="72"/>
+          <line x1="232" y1="60" x2="232" y2="72"/>
+        </g>
+        <line x1="70" y1="72" x2="640" y2="72" stroke="#d0d7de" stroke-width="1.5"/>
+        <g font-size="11" fill="#9aa0a6">
+          <text x="70" y="90">0</text>
+          <text x="640" y="90" text-anchor="end">10⁹</text>
+        </g>
+        <rect x="252" y="84" width="366" height="30" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-dasharray="5 4"/>
+        <text x="435" y="104" text-anchor="middle" font-size="12" fill="#9aa0a6">这里上亿个格子，一个都用不到</text>
+
+        <path d="M340,124 L340,146" stroke="#c8ccd1" stroke-width="1.5" marker-end="url(#arDis)"/>
+        <text x="352" y="140" font-size="12" fill="#6b7280">只保留大小关系和相等关系</text>
+
+        <text x="70" y="168" font-size="12" fill="#6b7280">离散化后：只给这 7 个值各开一格，下标就是排名</text>
+        <g>
+          <rect x="146" y="178" width="52" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="172" y="203" text-anchor="middle" font-size="15" fill="#1f2328">3</text>
+          <rect x="202" y="178" width="52" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="228" y="203" text-anchor="middle" font-size="15" fill="#1f2328">5</text>
+          <rect x="258" y="178" width="52" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="284" y="203" text-anchor="middle" font-size="15" fill="#1f2328">7</text>
+          <rect x="314" y="178" width="52" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="340" y="203" text-anchor="middle" font-size="15" fill="#1f2328">10</text>
+          <rect x="370" y="178" width="52" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="396" y="203" text-anchor="middle" font-size="15" fill="#1f2328">12</text>
+          <rect x="426" y="178" width="52" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="452" y="203" text-anchor="middle" font-size="15" fill="#1f2328">15</text>
+          <rect x="482" y="178" width="52" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="508" y="203" text-anchor="middle" font-size="15" fill="#1f2328">20</text>
+        </g>
+        <g font-size="11" fill="#6b7280" text-anchor="middle">
+          <text x="172" y="236">0</text>
+          <text x="228" y="236">1</text>
+          <text x="284" y="236">2</text>
+          <text x="340" y="236">3</text>
+          <text x="396" y="236">4</text>
+          <text x="452" y="236">5</text>
+          <text x="508" y="236">6</text>
+        </g>
+        <defs><marker id="arDis" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#c8ccd1"/></marker></defs>
+      </svg>
+      <figcaption>值域从 10⁹+1 压到 k = 7；代价是两个值之间差了多少被丢掉了</figcaption>
+    </figure>
+
+    <h2>六、第三步：映射</h2>
+    <p>vals 已经有序且互不相同，排在第 i 位就是一个天然编号。于是规定：值为 vals[i] 的端点，压缩后的下标就是 i。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ③　映射表：valToIdx[原值] = 下标</div>
+      <div id="d3"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>查 vals[</label>
+          <input type="range" id="d3i" min="0" max="6" value="3">
+          <span class="val" id="d3iv">3</span>
+          <label>]</label>
+        </div>
+      </div>
+      <div class="breakdown" id="d3b"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>当前查的这一对映射</span>
+      </div>
+    </div>
+
+    <p>有了映射，原来按值开数组，改成按下标开数组即可：<code class="inline">diff[GetIdx(s)]++</code>、<code class="inline">diff[GetIdx(e)]--</code>。</p>
+    <p>查下标有两种写法。一种是哈希表，预处理时把映射存进 unordered_map，之后查询是 O(1)。</p>
+    <pre class="code"><span class="cm">// 写法一：哈希表，查询 O(1)，代价是多开一张表</span>
+<span class="kw">int</span> <span class="fn">GetIdx</span>(<span class="kw">ll</span> v) { <span class="kw">return</span> valToIdx[v]; }</pre>
+    <p>另一种不存哈希表，直接在 vals 上二分，查询是 O(log k)。</p>
+    <pre class="code"><span class="cm">// 写法二：二分，不用哈希表，查询 O(log k)</span>
+<span class="kw">int</span> <span class="fn">GetIdxByBinarySearch</span>(<span class="kw">ll</span> v) {
+    <span class="kw">return</span> <span class="fn">lower_bound</span>(vals.<span class="fn">begin</span>(), vals.<span class="fn">end</span>(), v) - vals.<span class="fn">begin</span>();
+}</pre>
+    <p>查询次数非常多时，哈希表更划算；次数不多时用二分就够了，还能省一份空间。二分版有个前提，v 一定在 vals 里，否则要先判断。</p>
+
+    <h2>七、回到会议室</h2>
+    <p>把每个会议的 +1 与 −1 打到压缩后的坐标上，再扫一遍求前缀和的最大值。拖动滑块跟着扫。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ④　在压缩后的坐标上做差分扫描</div>
+      <div id="d4"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>扫描到下标</label>
+          <input type="range" id="d4i" min="0" max="6" value="0">
+          <span class="val" id="d4iv">0</span>
+        </div>
+      </div>
+      <div class="breakdown" id="d4b"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>同时进行数量最大的时刻</span>
+        <span><span class="dot partial"></span>当前扫描位置</span>
+      </div>
+    </div>
+
+    <p>答案是 3。<code class="inline">[5, 7)</code> 和 <code class="inline">[7, 10)</code> 这两段时间里都同时有 3 个会议在进行，所以至少要 3 间会议室。</p>
+
+    <h2>八、代码</h2>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+<span class="kw">using</span> ll = <span class="kw">long</span> <span class="kw">long</span>;
+
+<span class="kw">vector</span>&lt;ll&gt; vals;                       <span class="cm">// 排序去重后的所有端点</span>
+<span class="kw">unordered_map</span>&lt;ll, <span class="kw">int</span>&gt; valToIdx;        <span class="cm">// 原始值 → 压缩下标</span>
+
+<span class="kw">void</span> <span class="fn">InitDiscretization</span>(<span class="kw">const</span> <span class="kw">vector</span>&lt;<span class="kw">vector</span>&lt;<span class="kw">int</span>&gt;&gt;&amp; meetings) {
+    vals.<span class="fn">reserve</span>(meetings.<span class="fn">size</span>() * 2);
+    <span class="kw">for</span> (<span class="kw">auto</span>&amp; m : meetings) {
+        vals.<span class="fn">push_back</span>(m[0]);
+        vals.<span class="fn">push_back</span>(m[1]);
+    }
+    <span class="fn">sort</span>(vals.<span class="fn">begin</span>(), vals.<span class="fn">end</span>());
+    vals.<span class="fn">erase</span>(<span class="fn">unique</span>(vals.<span class="fn">begin</span>(), vals.<span class="fn">end</span>()), vals.<span class="fn">end</span>());
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; vals.<span class="fn">size</span>(); i++) {
+        valToIdx[vals[i]] = i;
+    }
+}
+
+<span class="kw">int</span> <span class="fn">GetIdx</span>(ll v) { <span class="kw">return</span> valToIdx[v]; }   <span class="cm">// O(1) 查下标</span>
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    <span class="kw">vector</span>&lt;<span class="kw">vector</span>&lt;<span class="kw">int</span>&gt;&gt; meetings = {{5,12},{3,7},{7,15},{12,20},{3,10}};
+    <span class="fn">InitDiscretization</span>(meetings);
+
+    <span class="kw">int</span> k = vals.<span class="fn">size</span>();                  <span class="cm">// 压缩后只有 7 个坐标</span>
+    <span class="kw">vector</span>&lt;<span class="kw">int</span>&gt; diff(k + 1, 0);
+    <span class="kw">for</span> (<span class="kw">auto</span>&amp; m : meetings) {
+        diff[<span class="fn">GetIdx</span>(m[0])]++;         <span class="cm">// 会议开始：+1</span>
+        diff[<span class="fn">GetIdx</span>(m[1])]--;         <span class="cm">// 会议结束：−1</span>
+    }
+
+    <span class="kw">int</span> cur = 0, ans = 0;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; k; i++) {
+        cur += diff[i];
+        ans = <span class="fn">max</span>(ans, cur);
+    }
+    cout &lt;&lt; k &lt;&lt; endl;      <span class="cm">// 7</span>
+    cout &lt;&lt; ans &lt;&lt; endl;    <span class="cm">// 3</span>
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <h2>九、复杂度分析</h2>
+    <p>设 n 为会议个数，端点共 2n 个，去重后 k 个不同的值，k ≤ 2n。</p>
+    <p>收集是扫一遍，O(n)。排序是 2n 个元素排序，O(n log n)，写成 O(k log k) 也一样。unique 和 erase 各扫一遍，O(k)。建映射是往哈希表塞 k 项，O(k)。</p>
+    <p>瓶颈在排序，所以预处理的总复杂度是 O(n log n)。之后的差分是 O(n)，扫描是 O(k)。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>收集端点 <code class="inline">push_back</code></td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>排序 <code class="inline">sort</code></td><td><code class="inline">O(k log k)</code>，即 <code class="inline">O(n log n)</code></td></tr>
+        <tr><td>去重 <code class="inline">unique + erase</code></td><td><code class="inline">O(k)</code></td></tr>
+        <tr><td>建映射 <code class="inline">valToIdx</code></td><td><code class="inline">O(k)</code>（期望）</td></tr>
+        <tr><td>查下标（哈希表）</td><td><code class="inline">O(1)</code>（期望）</td></tr>
+        <tr><td>查下标（<code class="inline">lower_bound</code> 二分）</td><td><code class="inline">O(log k)</code></td></tr>
+        <tr><td>预处理总计</td><td><code class="inline">O(n log n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间上，vals 存 k 个值，哈希表存 k 项，都是 O(k)，也就是 O(n)。不建哈希表只用二分的话，额外空间就只有 vals 这一份。对比一下，不离散化需要 O(V)，V 是值域大小，这正是离散化要消灭的开销。</p>
+
+    <h2>十、最后</h2>
+    <p>离散化本身不解决任何问题，它是个前置工具。把值域压到 O(n)，后面的差分、树状数组、线段树、扫描线才开得下，也才跑得动。</p>
+    <p>用的时候有一个地方容易错：所有会被用到的值都要收集进来。比如会议室这道题，只收集起点忘了终点，映射出来的下标就是错的。</p>
+    <p>另外，离散化只保留大小关系和相等关系，两个值之间差了多少会被丢掉。如果题目要求算距离、算区间长度，就不能直接这么压。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  const MEET = [[5,12],[3,7],[7,15],[12,20],[3,10]];
+  const raw = [];                              // 收集顺序
+  MEET.forEach(m => { raw.push(m[0]); raw.push(m[1]); });
+  const sorted = raw.slice().sort((a,b) => a - b);
+  const uniq = [];
+  sorted.forEach(v => { if (!uniq.length || uniq[uniq.length-1] !== v) uniq.push(v); });
+  const k = uniq.length;
+  const idxOf = v => uniq.indexOf(v);
+
+  // ---------- 演示①：收集端点 ----------
+  const d1 = document.getElementById('d1');
+  const d1k = document.getElementById('d1k');
+  const d1kv = document.getElementById('d1kv');
+  const d1b = document.getElementById('d1b');
+  function render1(){
+    const take = parseInt(d1k.value, 10);
+    d1kv.textContent = take;
+    let h = '<div class="meet-list">';
+    MEET.forEach((m, i) => {
+      const off = i < take ? '' : ' off';
+      h += '<div class="meet-row' + off + '">' +
+             '<span class="meet-idx">会议 ' + (i+1) + '</span>' +
+             '<span class="chip s">' + m[0] + '</span>' +
+             '<span class="chip e">' + m[1] + '</span>' +
+           '</div>';
+    });
+    h += '</div>';
+    h += '<div class="dis-row" style="margin-top:14px"><span class="dis-tag">vals</span><div class="dis-cells">';
+    for (let i = 0; i < take * 2; i++) {
+      const type = (i % 2 === 0) ? ' s' : ' e';
+      h += '<div class="dis-cell' + type + '">' + raw[i] + '</div>';
+    }
+    h += '</div></div>';
+    d1.innerHTML = h;
+
+    const list = raw.slice(0, take * 2);
+    d1b.innerHTML =
+      '<div class="row">已展开 ' + take + ' 个会议 → 收集到 <strong>' + list.length + '</strong> 个端点</div>' +
+      '<div class="row">' + list.join(', ') + '</div>' +
+      '<div class="row" style="color:var(--text-dim)">reserve 先把空间一次要够，后面 push_back 就不用反复搬家</div>';
+  }
+  d1k.addEventListener('input', render1);
+  render1();
+
+  // ---------- 演示②：排序 + 去重 ----------
+  const d2 = document.getElementById('d2');
+  const d2btn = document.getElementById('d2btn');
+  const d2b = document.getElementById('d2b');
+  let removed = false;
+  function render2(){
+    let h = '<div class="dis-row"><span class="dis-tag">sort 后</span><div class="dis-cells">';
+    sorted.forEach((v, i) => {
+      const dup = (i > 0 && sorted[i-1] === v) ? ' dup' : '';
+      h += '<div class="dis-cell' + (removed ? dup : '') + '">' + v + '</div>';
+    });
+    h += '</div></div>';
+    if (removed) {
+      h += '<div class="dis-row"><span class="dis-tag">unique 后</span><div class="dis-cells">';
+      uniq.forEach(v => { h += '<div class="dis-cell">' + v + '</div>'; });
+      h += '</div></div>';
+    }
+    d2.innerHTML = h;
+
+    if (removed) {
+      d2b.innerHTML =
+        '<div class="row">sort 之后：' + sorted.join(', ') + '（<strong>' + sorted.length + '</strong> 个）</div>' +
+        '<div class="row">unique 之后：<strong>' + uniq.join(', ') + '</strong>（<strong>' + k + '</strong> 个）</div>' +
+        '<div class="row" style="color:var(--text-dim)">删掉 ' + (sorted.length - k) + ' 个重复项，剩下 ' + k + ' 个格子</div>';
+      d2btn.textContent = '撤销 unique()';
+    } else {
+      d2b.innerHTML =
+        '<div class="row">sort 之后：' + sorted.join(', ') + '（<strong>' + sorted.length + '</strong> 个）</div>' +
+        '<div class="row" style="color:var(--text-dim)">相同的值已经挨在一起，点按钮执行 unique() 把重复项丢掉</div>';
+      d2btn.textContent = '执行 unique()';
+    }
+  }
+  d2btn.addEventListener('click', () => { removed = !removed; render2(); });
+  render2();
+
+  // ---------- 演示③：映射表 ----------
+  const d3 = document.getElementById('d3');
+  const d3i = document.getElementById('d3i');
+  const d3iv = document.getElementById('d3iv');
+  const d3b = document.getElementById('d3b');
+  function render3(){
+    const cur = parseInt(d3i.value, 10);
+    d3iv.textContent = cur;
+    let h = '';
+    uniq.forEach((v, i) => {
+      h += '<div class="map-row' + (i === cur ? ' on' : '') + '">' +
+             '<span class="map-val">vals[' + i + '] = ' + v + '</span>' +
+             '<span class="map-arrow">→ valToIdx[' + v + '] =</span>' +
+             '<span class="map-idx">' + i + '</span>' +
+           '</div>';
+    });
+    d3.innerHTML = h;
+    d3b.innerHTML =
+      '<div class="row">GetIdx(' + uniq[cur] + ') = <strong>' + cur + '</strong>，也就是 diff[' + cur + '] 这一格</div>' +
+      '<div class="row" style="color:var(--text-dim)">不离散化要开 maxV+1 个格子，现在只要 k = ' + k + ' 个</div>';
+  }
+  d3i.addEventListener('input', render3);
+  render3();
+
+  // ---------- 演示④：差分扫描 ----------
+  const d4 = document.getElementById('d4');
+  const d4i = document.getElementById('d4i');
+  const d4iv = document.getElementById('d4iv');
+  const d4b = document.getElementById('d4b');
+  const diff = new Array(k + 1).fill(0);
+  MEET.forEach(m => { diff[idxOf(m[0])]++; diff[idxOf(m[1])]--; });
+  const curArr = [];
+  let acc = 0;
+  for (let i = 0; i < k; i++) { acc += diff[i]; curArr.push(acc); }
+  const best = Math.max.apply(null, curArr);
+
+  function cell(cls, txt){ return '<div class="dis-cell ' + cls + '">' + txt + '</div>'; }
+  function render4(){
+    const pos = parseInt(d4i.value, 10);
+    d4iv.textContent = pos;
+    let h = '<div class="dis-row"><span class="dis-tag">坐标 vals</span><div class="dis-cells">';
+    for (let i = 0; i < k; i++) h += cell('dim' , uniq[i]);
+    h += '</div></div>';
+    h += '<div class="dis-row"><span class="dis-tag">下标</span><div class="dis-cells">';
+    for (let i = 0; i < k; i++) h += cell('dim', i);
+    h += '</div></div>';
+    h += '<div class="dis-row"><span class="dis-tag">diff</span><div class="dis-cells">';
+    for (let i = 0; i < k; i++) {
+      const d = diff[i];
+      const cls = (i > pos ? 'dim' : (d > 0 ? 's' : (d < 0 ? 'e' : ''))) + (i === pos ? ' cur' : '');
+      h += cell(cls, d > 0 ? '+' + d : String(d));
+    }
+    h += '</div></div>';
+    h += '<div class="dis-row"><span class="dis-tag">同时进行</span><div class="dis-cells">';
+    for (let i = 0; i < k; i++) {
+      let cls = i > pos ? 'dim' : '';
+      if (i <= pos && curArr[i] === best) cls = 'best';
+      if (i === pos) cls += ' cur';
+      h += cell(cls, curArr[i]);
+    }
+    h += '</div></div>';
+    d4.innerHTML = h;
+
+    let mx = 0;
+    for (let i = 0; i <= pos; i++) mx = Math.max(mx, curArr[i]);
+    d4b.innerHTML =
+      '<div class="row">扫描到下标 ' + pos + '（坐标 ' + uniq[pos] + '）：diff = ' +
+        (diff[pos] > 0 ? '+' + diff[pos] : diff[pos]) + '，cur = <strong>' + curArr[pos] + '</strong></div>' +
+      '<div class="row">目前最大值 ans = <strong>' + mx + '</strong></div>' +
+      '<div class="row" style="color:var(--text-dim)">cur 表示 [ ' + uniq[pos] + ', ' +
+        (pos + 1 < k ? uniq[pos + 1] : '∞') + ' ) 这段时间内同时进行的会议数</div>';
+  }
+  d4i.addEventListener('input', render4);
+  render4();
+
+  // ---------- 图示：端点之间数量不变 ----------
+  const figEl = document.getElementById('fig1');
+  if (figEl) {
+    const FX = t => 70 + t * 26;
+    const AXIS_Y = 182;
+    let s = '<svg viewBox="0 0 680 300" role="img" aria-label="会议区间与端点示意图">';
+    s += '<rect x="' + FX(7) + '" y="28" width="' + (FX(10) - FX(7)) + '" height="238" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-dasharray="4 3"/>';
+    s += '<text x="' + (FX(7) + FX(10)) / 2 + '" y="20" text-anchor="middle" font-size="12" fill="#2563eb">7 和 10 之间一直是 3</text>';
+    MEET.forEach((m, i) => {
+      const y = 44 + i * 26;
+      s += '<text x="62" y="' + (y + 11) + '" text-anchor="end" font-size="11" fill="#6b7280">会议 ' + (i + 1) + '</text>';
+      s += '<rect x="' + FX(m[0]) + '" y="' + y + '" width="' + (FX(m[1]) - FX(m[0])) + '" height="14" rx="4" fill="#dbeafe" stroke="#2563eb"/>';
+    });
+    s += '<line x1="' + (FX(0) - 6) + '" y1="' + AXIS_Y + '" x2="' + (FX(21) - 6) + '" y2="' + AXIS_Y + '" stroke="#d0d7de" stroke-width="1.5"/>';
+    for (let t = 0; t <= 20; t++) {
+      const isEnd = uniq.indexOf(t) >= 0;
+      const col = isEnd ? '#2563eb' : '#c8ccd1';
+      s += '<line x1="' + FX(t) + '" y1="' + AXIS_Y + '" x2="' + FX(t) + '" y2="' + (AXIS_Y + 6) + '" stroke="' + col + '" stroke-width="' + (isEnd ? 1.6 : 1) + '"/>';
+      s += '<text x="' + FX(t) + '" y="' + (AXIS_Y + 22) + '" text-anchor="middle" font-size="10" fill="' + (isEnd ? '#2563eb' : '#9aa0a6') + '"' + (isEnd ? ' font-weight="600"' : '') + '>' + t + '</text>';
+    }
+    for (let i = 0; i < k - 1; i++) {
+      const a = uniq[i], b = uniq[i + 1];
+      const hl = (a === 7);
+      s += '<rect x="' + (FX(a) + 2) + '" y="216" width="' + (FX(b) - FX(a) - 4) + '" height="26" rx="5" fill="' + (hl ? '#dbeafe' : '#f6f7f9') + '" stroke="' + (hl ? '#2563eb' : '#e6e8eb') + '"/>';
+      s += '<text x="' + (FX(a) + FX(b)) / 2 + '" y="234" text-anchor="middle" font-size="13" font-weight="600" fill="' + (hl ? '#2563eb' : '#1f2328') + '">' + curArr[i] + '</text>';
+    }
+    s += '<text x="' + (FX(8) + FX(9)) / 2 + '" y="284" text-anchor="middle" font-size="12" fill="#6b7280">8、9 不是端点，跟着左边的 7 走</text>';
+    s += '</svg>';
+    figEl.innerHTML = s;
+  }
+})();
+</script>
+</body>
+</html>

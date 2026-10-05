@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>块状链表：文本编辑器 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .edrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;}
+  .edblock{
+    display:flex;gap:2px;padding:5px;border:1.5px solid var(--accent);border-radius:8px;
+    background:#fff;
+  }
+  .edblock.reborn{border-color:#dc2626;border-style:dashed;}
+  .edcell{
+    width:30px;height:34px;display:flex;align-items:center;justify-content:center;
+    background:var(--bg-soft);border:1px solid var(--border);border-radius:5px;
+    font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  .edcell.hot{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+  .edcell.fresh{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+  .edcaret{
+    width:3px;height:34px;background:#dc2626;border-radius:2px;
+  }
+  .edsz{font-size:11px;color:var(--text-dim);text-align:center;margin-top:3px;font-variant-numeric:tabular-nums;}
+  .edarrow{color:#9aa0a6;font-size:16px;padding:0 2px;}
+  .edwrap{display:flex;flex-direction:column;align-items:flex-start;}
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
+  .viz button{
+    font:inherit;font-size:14px;padding:6px 14px;border-radius:8px;cursor:pointer;
+    border:1px solid var(--border);background:var(--bg);color:var(--text);
+  }
+  .viz button:hover{border-color:var(--accent);color:var(--accent);}
+  .stepnote{margin-top:12px;font-size:14px;color:var(--text-dim);min-height:24px;}
+  .stepnote b{color:var(--accent);}
+  .meta{font-size:12px;color:var(--text-dim);margin-top:8px;font-variant-numeric:tabular-nums;}
+  @media(max-width:760px){
+    .edcell{width:24px;height:28px;font-size:12px;}
+    .edcaret{height:28px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>块状链表：文本编辑器</h1>
+    <p class="intro">块状数组解决的是区间统计，元素的位置从头到尾不动。要是题目要在中间插入一段、删掉一段，后面的元素就得整体搬家，数组就不合适了。块状链表把块和块用链表串起来：每块内部还是数组，插入删除只调整块之间的连接，后面内容的地址一个都不用挪。</p>
+
+    <h2>零、背景</h2>
+    <p>概念上，块状链表的每一块都是数组，块之间根据需求用单链表或双链表连接。实现上不动态 new 出链表节点，而是用 pool 数组做块编号的分配和回收，纯静态数组：编号从栈顶弹出就是分配，压回栈顶就是回收。</p>
+    <p>规模上保证「块内容量」和「块的数量」同等：块内容量取 2√n，任何块的内容大小不能超过这个容量。容量取 2√n 而不是 √n，是给分裂和合并留余量，不然后面 maintain 的时候没东西可合。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="块状链表的结构" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="blArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+          </marker>
+        </defs>
+        <text x="20" y="18" font-size="11" fill="#6b7280">0 号块当头，也当普通块用；nxt[i] 指向下一块的编号，链尾指向 −1</text>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <rect x="40" y="34" width="140" height="46" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
+          <text x="110" y="62">块 0：space[0]</text>
+          <rect x="230" y="34" width="140" height="46" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
+          <text x="300" y="62">块 7：space[7]</text>
+          <rect x="420" y="34" width="140" height="46" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
+          <text x="490" y="62">块 3：space[3]</text>
+        </g>
+        <line x1="182" y1="57" x2="228" y2="57" stroke="#2563eb" stroke-width="1.5" marker-end="url(#blArrow)"/>
+        <line x1="372" y1="57" x2="418" y2="57" stroke="#2563eb" stroke-width="1.5" marker-end="url(#blArrow)"/>
+        <g font-size="11" fill="#6b7280" text-anchor="middle">
+          <text x="205" y="46">nxt[0]=7</text>
+          <text x="395" y="46">nxt[7]=3</text>
+        </g>
+        <text x="20" y="112" font-size="11" fill="#374151">三个数组就是全部状态：space[i] 是块 i 的内容数组，siz[i] 是已写入的长度，nxt[i] 是下一块编号</text>
+        <text x="20" y="136" font-size="11" fill="#374151">块内容量 2√n、块数同规模：定位走链 O(√n) 步，块内拷贝 O(√n)，两者相抵</text>
+        <text x="20" y="160" font-size="11" fill="#6b7280">pool 是一个栈：assign() 弹出一个空闲编号，recycle(id) 把编号压回去，块本身从不销毁</text>
+        <text x="20" y="180" font-size="11" fill="#6b7280">插入删除只改 nxt 指向，任何块里的内容都不用搬家</text>
+      </svg>
+      <figcaption>块是数组、链是编号：链表的手续，数组的速度</figcaption>
+    </figure>
+
+    <h2>一、题目：文本编辑器</h2>
+    <p>一开始文本为空，光标在文本开头。实现六种操作：<code class="inline">Move k</code> 把光标移到第 k 个字符之后；<code class="inline">Insert n s</code> 在光标处插入长度为 n 的字符串 s，光标不动；<code class="inline">Delete n</code> 删除光标后的 n 个字符；<code class="inline">Get n</code> 输出光标后的 n 个字符；<code class="inline">Prev</code>、<code class="inline">Next</code> 光标前后移动。插入总量不超过 2MB。测试链接：<a href="https://www.luogu.com.cn/problem/P4008" target="_blank" rel="noopener">洛谷 P4008</a>。</p>
+    <p>这题在 FHQ Treap 那讲里出现过，是同一道题。平衡树做它要把子树拆开再拼上，块状链表做它是把块切开再接上，思路同源，但块状链表好想得多。</p>
+    <p>读入上有个细节：代码读字符串时数的是「n 个 ASCII 在 32 到 126 之间的字符」，所以输入里 s 要另起一行，跟在 n 后面那个分隔空格会被当成第一个字符吃掉。</p>
+
+    <h2>二、定位与分裂</h2>
+    <p><code class="inline">find(pos)</code> 从头块出发，沿 <code class="inline">nxt</code> 走，每过一块就把 pos 减掉那块的 <code class="inline">siz</code>，减不动了就停。结果是全局变量 <code class="inline">bi</code>（落在哪块）和 <code class="inline">pi</code>（块内偏移）。链长 O(√n)，定位一次 O(√n)。</p>
+    <p><code class="inline">split(curb, pos)</code> 把块 curb 从偏移 pos 处切成两块：分配一个新块接在 curb 后面，把右半段 memcpy 过去，curb 的 siz 收缩成 pos。偏移正好等于块长时就不用切。</p>
+    <p>插入的完整流程是三步：find 定位、split 把插入点切到块边界、新内容按块内容量切成若干整块加一个余块依次挂进链。挂完调 <code class="inline">maintain</code>：从链头扫到尾，相邻两块的大小之和不超过容量就合并。合并也是 memcpy 加改指向，回收掉多出来的那个编号。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="插入的三步" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="blArrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+        <text x="20" y="16" font-size="11" fill="#6b7280">在「cdefg」的 c 后面插入 xyz（块内容量按 4 算）</text>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <rect x="40" y="28" width="70" height="30" rx="6" fill="#f6f7f9" stroke="#e6e8eb"/><text x="75" y="47">ab</text>
+          <rect x="150" y="28" width="120" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="210" y="47">c d e f g</text>
+        </g>
+        <line x1="112" y1="43" x2="148" y2="43" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow2)"/>
+        <line x1="192" y1="62" x2="192" y2="80" stroke="#ea580c" stroke-width="1.4"/>
+        <text x="210" y="76" font-size="11" fill="#ea580c">插入点</text>
+        <text x="310" y="47" font-size="11" fill="#374151">① find：定位到这一块的偏移 1</text>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <rect x="40" y="96" width="70" height="30" rx="6" fill="#f6f7f9" stroke="#e6e8eb"/><text x="75" y="115">ab</text>
+          <rect x="150" y="96" width="36" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="168" y="115">c</text>
+          <rect x="196" y="96" width="86" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="239" y="115">d e f g</text>
+        </g>
+        <line x1="112" y1="111" x2="148" y2="111" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow2)"/>
+        <line x1="188" y1="111" x2="194" y2="111" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow2)"/>
+        <text x="310" y="111" font-size="11" fill="#374151">② split：从偏移 1 切开，</text>
+        <text x="310" y="131" font-size="11" fill="#374151">右半搬到新块，原块缩成 c</text>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <rect x="40" y="164" width="70" height="30" rx="6" fill="#f6f7f9" stroke="#e6e8eb"/><text x="75" y="183">ab</text>
+          <rect x="150" y="164" width="36" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="168" y="183">c</text>
+          <rect x="196" y="164" width="52" height="30" rx="6" fill="#dcfce7" stroke="#16a34a"/><text x="222" y="183">x y z</text>
+          <rect x="258" y="164" width="86" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="301" y="183">d e f g</text>
+        </g>
+        <line x1="112" y1="179" x2="148" y2="179" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow2)"/>
+        <line x1="188" y1="179" x2="194" y2="179" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow2)"/>
+        <line x1="250" y1="179" x2="256" y2="179" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow2)"/>
+        <text x="370" y="183" font-size="11" fill="#15803d">③ 新内容装进新块挂进链</text>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <rect x="40" y="204" width="70" height="30" rx="6" fill="#f6f7f9" stroke="#e6e8eb"/><text x="75" y="223">ab</text>
+          <rect x="150" y="204" width="86" height="30" rx="6" fill="#dcfce7" stroke="#16a34a"/><text x="193" y="223">c x y z</text>
+          <rect x="246" y="204" width="86" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="289" y="223">d e f g</text>
+        </g>
+        <line x1="112" y1="219" x2="148" y2="219" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow2)"/>
+        <line x1="238" y1="219" x2="244" y2="219" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow2)"/>
+        <text x="370" y="219" font-size="11" fill="#15803d">④ maintain：c + xyz = 4 ≤ 容量，合并</text>
+      </svg>
+      <figcaption>插入三步：切开到边界、挂上新块、把过小的邻居合并回去</figcaption>
+    </figure>
+
+    <p>删除是对称的三步：find 定位后先 split，把删除起点切到块边界；然后沿链走，整块被删完的整个回收；最后一块没删完，在剩余长度处再 split 一次，把多余的尾巴留下。删完同样调 maintain 合并。</p>
+    <p>读取 <code class="inline">Get</code> 不做任何修改：find 定位后从光标所在块开始，逐块 memcpy 到输出缓冲，凑满 n 个字符为止。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="删除的三步" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="blArrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+        <text x="20" y="16" font-size="11" fill="#6b7280">删掉从 P 块中段到 S 块前段的一段内容</text>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <rect x="40" y="30" width="70" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="75" y="49">P 块</text>
+          <rect x="130" y="30" width="70" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="165" y="49">Q 块</text>
+          <rect x="220" y="30" width="70" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="255" y="49">R 块</text>
+          <rect x="310" y="30" width="70" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="345" y="49">S 块</text>
+        </g>
+        <line x1="110" y1="45" x2="128" y2="45" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow3)"/>
+        <line x1="200" y1="45" x2="218" y2="45" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow3)"/>
+        <line x1="290" y1="45" x2="308" y2="45" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow3)"/>
+        <line x1="76" y1="64" x2="76" y2="82" stroke="#ea580c" stroke-width="1.4"/>
+        <text x="92" y="78" font-size="11" fill="#ea580c">删除起点</text>
+        <line x1="330" y1="64" x2="330" y2="82" stroke="#ea580c" stroke-width="1.4"/>
+        <text x="346" y="78" font-size="11" fill="#ea580c">删除终点</text>
+        <text x="420" y="49" font-size="11" fill="#374151">① 两端先 split：</text>
+        <text x="420" y="69" font-size="11" fill="#374151">起点、终点都切到块边界</text>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <rect x="40" y="104" width="40" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="60" y="123">P₁</text>
+          <rect x="90" y="104" width="40" height="30" rx="6" fill="#ffedd5" stroke="#ea580c"/><text x="110" y="123">P₂</text>
+          <rect x="140" y="104" width="56" height="30" rx="6" fill="#ffedd5" stroke="#ea580c"/><text x="168" y="123">Q 块</text>
+          <rect x="206" y="104" width="56" height="30" rx="6" fill="#ffedd5" stroke="#ea580c"/><text x="234" y="123">R 块</text>
+          <rect x="272" y="104" width="40" height="30" rx="6" fill="#ffedd5" stroke="#ea580c"/><text x="292" y="123">S₁</text>
+          <rect x="322" y="104" width="40" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="342" y="123">S₂</text>
+        </g>
+        <line x1="82" y1="119" x2="88" y2="119" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow3)"/>
+        <line x1="132" y1="119" x2="138" y2="119" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow3)"/>
+        <line x1="198" y1="119" x2="204" y2="119" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow3)"/>
+        <line x1="264" y1="119" x2="270" y2="119" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow3)"/>
+        <line x1="314" y1="119" x2="320" y2="119" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#blArrow3)"/>
+        <text x="420" y="119" font-size="11" fill="#ea580c">② 橙色的整块整个回收，</text>
+        <text x="420" y="139" font-size="11" fill="#ea580c">编号压回 pool 栈</text>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <rect x="40" y="162" width="40" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="60" y="181">P₁</text>
+          <rect x="120" y="162" width="40" height="30" rx="6" fill="#dbeafe" stroke="#2563eb"/><text x="140" y="181">S₂</text>
+        </g>
+        <path d="M 84 177 q 16 0 32 0" stroke="#9aa0a6" stroke-width="1.3" fill="none" marker-end="url(#blArrow3)"/>
+        <text x="180" y="181" font-size="11" fill="#15803d">③ maintain：P₁ + S₂ 不超过容量就合并</text>
+      </svg>
+      <figcaption>删除把区间两端切到块边界，中间整块回收，剩下的邻居按容量合并</figcaption>
+    </figure>
+
+    <h2>三、实现细节</h2>
+    <p>读入有一个专门处理的坑：<code class="inline">Insert</code> 的字符串在 n 的下一行，中间可能夹着回车符，字符串本身也可能跨行、包含空格。所以不能用 <code class="inline">cin &gt;&gt;</code> 读字符串，得 <code class="inline">cin.get()</code> 一个一个字符收，ASCII 码在 [32,126] 之外的直接丢弃，收满 n 个为止。</p>
+    <p>常数上限这样定：全文最大长度 MAXN 取 3×10⁶ 出头，块内容量 BLEN = 3001（约等于 2√MAXN），块数上限 BNUM 是 MAXN / BLEN 的两倍。每个块最满 3001 个字符，最坏情况下块数是容量的一半，两倍的余量够分裂挥霍。</p>
+    <p>还有一个容易忽略的边界：<code class="inline">find</code> 的循环条件是 <code class="inline">pos &gt; siz[curb]</code>，等于时停在本块末尾，此时 split 会因为偏移等于块长而直接返回。空文本、光标在末尾这些情况都被这个条件自然覆盖掉。</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 3000001;
+    <span class="kw">const</span> <span class="kw">int</span> BLEN = 3001;
+    <span class="kw">const</span> <span class="kw">int</span> BNUM = (MAXN / BLEN) &lt;&lt; 1;
+
+    <span class="kw">char</span> space[BNUM][BLEN];
+    <span class="kw">int</span> pool[BNUM];
+    <span class="kw">int</span> top = 0;
+
+    <span class="kw">int</span> nxt[BNUM];
+    <span class="kw">int</span> siz[BNUM];
+
+    <span class="kw">char</span> str[MAXN];
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, id = BNUM - 1; i &lt; BNUM; i++, id--) {
+            pool[i] = id;
+        }
+        top = BNUM - 1;
+        siz[0] = 0;
+        nxt[0] = -1;
+    }
+
+    <span class="kw">int</span> <span class="fn">assign</span>() {
+        <span class="kw">return</span> pool[top--];
+    }
+
+    <span class="kw">void</span> <span class="fn">recycle</span>(<span class="kw">int</span> id) {
+        pool[++top] = id;
+    }
+
+    <span class="kw">int</span> bi, pi;
+
+    <span class="kw">void</span> <span class="fn">find</span>(<span class="kw">int</span> pos) {
+        <span class="kw">int</span> curb = 0;
+        <span class="kw">while</span> (curb != -1 &amp;&amp; pos &gt; siz[curb]) {
+            pos -= siz[curb];
+            curb = nxt[curb];
+        }
+        bi = curb;
+        pi = pos;
+    }
+
+    <span class="kw">void</span> <span class="fn">linkAndWrite</span>(<span class="kw">int</span> curb, <span class="kw">int</span> nextb, <span class="kw">char</span>* src, <span class="kw">int</span> pos, <span class="kw">int</span> len) {
+        nxt[nextb] = nxt[curb];
+        nxt[curb] = nextb;
+        memcpy(space[nextb], src + pos, len);
+        siz[nextb] = len;
+    }
+
+    <span class="kw">void</span> <span class="fn">merge</span>(<span class="kw">int</span> curb, <span class="kw">int</span> nextb) {
+        memcpy(space[curb] + siz[curb], space[nextb], siz[nextb]);
+        siz[curb] += siz[nextb];
+        nxt[curb] = nxt[nextb];
+        recycle(nextb);
+    }
+
+    <span class="kw">void</span> <span class="fn">split</span>(<span class="kw">int</span> curb, <span class="kw">int</span> pos) {
+        <span class="kw">if</span> (curb == -1 || pos == siz[curb]) <span class="kw">return</span>;
+        <span class="kw">int</span> nextb = assign();
+        linkAndWrite(curb, nextb, space[curb], pos, siz[curb] - pos);
+        siz[curb] = pos;
+    }
+
+    <span class="kw">void</span> <span class="fn">maintain</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> curb = 0, nextb; curb != -1; curb = nxt[curb]) {
+            nextb = nxt[curb];
+            <span class="kw">while</span> (nextb != -1 &amp;&amp; siz[curb] + siz[nextb] &lt;= BLEN) {
+                merge(curb, nextb);
+                nextb = nxt[curb];
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">insert</span>(<span class="kw">int</span> pos, <span class="kw">int</span> len) {
+        find(pos);
+        split(bi, pi);
+        <span class="kw">int</span> curb = bi, newb, done = 0;
+        <span class="kw">while</span> (done + BLEN &lt;= len) {
+            newb = assign();
+            linkAndWrite(curb, newb, str, done, BLEN);
+            done += BLEN;
+            curb = newb;
+        }
+        <span class="kw">if</span> (len &gt; done) {
+            newb = assign();
+            linkAndWrite(curb, newb, str, done, len - done);
+        }
+        maintain();
+    }
+
+    <span class="kw">void</span> <span class="fn">erase</span>(<span class="kw">int</span> pos, <span class="kw">int</span> len) {
+        find(pos);
+        split(bi, pi);
+        <span class="kw">int</span> curb = bi;
+        <span class="kw">int</span> nextb = nxt[curb];
+        <span class="kw">while</span> (nextb != -1 &amp;&amp; len &gt; siz[nextb]) {
+            len -= siz[nextb];
+            recycle(nextb);
+            nextb = nxt[nextb];
+        }
+        <span class="kw">if</span> (nextb != -1) {
+            split(nextb, len);
+            recycle(nextb);
+            nxt[curb] = nxt[nextb];
+        } <span class="kw">else</span> {
+            nxt[curb] = -1;
+        }
+        maintain();
+    }
+
+    <span class="kw">void</span> <span class="fn">get</span>(<span class="kw">int</span> pos, <span class="kw">int</span> len) {
+        find(pos);
+        <span class="kw">int</span> curb = bi;
+        pos = pi;
+        <span class="kw">int</span> done = (len &lt; siz[curb] - pos) ? len : (siz[curb] - pos);
+        memcpy(str, space[curb] + pos, done);
+        curb = nxt[curb];
+        <span class="kw">while</span> (curb != -1 &amp;&amp; done + siz[curb] &lt;= len) {
+            memcpy(str + done, space[curb], siz[curb]);
+            done += siz[curb];
+            curb = nxt[curb];
+        }
+        <span class="kw">if</span> (curb != -1 &amp;&amp; done &lt; len) {
+            memcpy(str + done, space[curb], len - done);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        <span class="kw">int</span> n;
+        cin &gt;&gt; n;
+        <span class="kw">int</span> pos = 0, len;
+        <span class="kw">char</span> op[10];
+        prepare();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; op;
+            <span class="kw">if</span> (op[0] == 'P') {
+                pos--;
+            } <span class="kw">else</span> <span class="kw">if</span> (op[0] == 'N') {
+                pos++;
+            } <span class="kw">else</span> <span class="kw">if</span> (op[0] == 'M') {
+                cin &gt;&gt; pos;
+            } <span class="kw">else</span> <span class="kw">if</span> (op[0] == 'I') {
+                cin &gt;&gt; len;
+                <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; len; ) {
+                    <span class="kw">char</span> ch = cin.get();
+                    <span class="kw">if</span> (32 &lt;= ch &amp;&amp; ch &lt;= 126) {
+                        str[j++] = ch;
+                    }
+                }
+                insert(pos, len);
+            } <span class="kw">else</span> <span class="kw">if</span> (op[0] == 'D') {
+                cin &gt;&gt; len;
+                erase(pos, len);
+            } <span class="kw">else</span> {
+                cin &gt;&gt; len;
+                get(pos, len);
+                cout.write(str, len);
+                cout.put('\n');
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>四、一次编辑的完整过程</h2>
+    <p>下面把 Move、Insert、Delete、Get 各走一遍。文本初始为 ABCDEFGHIJ，块内容量按 4 演示：先 Move 5 把光标放到 E 后面，插入 XYZ，再从光标处删除 6 个字符，最后取 2 个字符输出。</p>
+
+    <div class="viz" id="viz">
+      <div class="edrow" id="vRow"></div>
+      <p class="meta" id="vMeta">光标：位置 0（文本开头）</p>
+      <div class="btnrow">
+        <button id="vNext">下一步</button>
+        <button id="vReset">重置</button>
+      </div>
+      <p class="stepnote" id="vNote">初始状态：文本 ABCDEFGHIJ 分成 3 块。点「下一步」执行 Move 5。</p>
+    </div>
+
+    <h2>五、复杂度分析</h2>
+    <p>设全文长度 n，块内容量 B = 2√n。链长不超过 n / (B/2) 加上分裂的余量，仍是 O(√n) 规模。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>find 定位（沿链累减 siz）</td><td><code class="inline">O(√n)</code></td><td rowspan="4"><code class="inline">O(n)</code>：space 是 BNUM × BLEN 的字符矩阵，总量与两倍余量的 n 同阶；nxt、siz、pool 都是块数规模</td></tr>
+        <tr><td>split / merge（块内 memcpy 与改指向）</td><td><code class="inline">O(√n)</code></td></tr>
+        <tr><td>Insert（定位 + 切块挂链 + maintain）</td><td><code class="inline">O(√n + len)</code></td></tr>
+        <tr><td>Delete（定位 + 两端切 + 整块回收 + maintain）</td><td><code class="inline">O(√n)</code></td></tr>
+        <tr><td>Get（定位 + 跨块拷贝）</td><td><code class="inline">O(√n + n)</code>，n 为读取长度</td><td></td></tr>
+      </tbody>
+    </table>
+    <p>maintain 看似每次都扫全链 O(√n)，但插入删除本身就是 O(√n)，不改变量级。m 条操作总量 O(m·√n)，本题 2MB 的文本对应 √n 约 1400，跑起来很宽裕。</p>
+
+    <h2>六、最后</h2>
+    <p>块状链表的账算清楚了：定位 O(√n)、切块 O(√n)，换来的是插入删除不搬家。它绝对好想，链表怎么操作它就怎么操作；但未必好写，split、回收、maintain 里全是边界。区间增删、区间移动的题目，最优解大概率是平衡树，只是学习门槛往往更高。</p>
+    <p>到这里分块专题的第一讲结束。下一讲开始看分块的好题：块里存的东西从有序副本换成值域计数，再把分块搬到时间轴和树上，其中第一道就是区间第 k 小。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var CAP=4;
+  var row=document.getElementById('vRow');
+  var meta=document.getElementById('vMeta');
+  var note=document.getElementById('vNote');
+  var next=document.getElementById('vNext');
+  var reset=document.getElementById('vReset');
+  var step=0;
+  var INIT='初始状态：文本 ABCDEFGHIJ 分成 3 块。点「下一步」执行 Move 5。';
+
+  function render(blocks,pos,o){
+    var s='';
+    var acc=0;
+    for(var b=0;b<blocks.length;b++){
+      var blk=blocks[b];
+      var fresh=o&&o.fresh&&o.fresh.indexOf(b)>=0;
+      var hot=o&&o.hot&&o.hot.indexOf(b)>=0;
+      s+='<div class="edwrap"><div class="edblock'+(fresh?' fresh':'')+(hot?' hot':'')+'">';
+      for(var i=0;i<blk.length;i++){
+        if(pos===acc+i){
+          s+='<div class="edcaret"></div>';
+        }
+        var cls='';
+        if(o&&o.hotCells){var key=b+':'+i;if(o.hotCells.indexOf(key)>=0)cls='hot';}
+        s+='<div class="edcell '+cls+'">'+blk[i]+'</div>';
+      }
+      if(pos===acc+blk.length){
+        s+='<div class="edcaret"></div>';
+      }
+      s+='</div><div class="edsz">siz='+blk.length+'</div></div>';
+      if(b<blocks.length-1)s+='<div class="edarrow">→</div>';
+      acc+=blk.length;
+    }
+    row.innerHTML=s;
+    meta.textContent='光标：位置 '+pos+'　·　全文：'+acc+' 个字符　·　块内容量（演示）：'+CAP;
+    if(o&&o.note)note.innerHTML=o.note;
+  }
+
+  var steps=[
+    function(){render([['A','B','C','D'],['E','F','G','H'],['I','J']],5,{note:'<b>Move 5</b>：光标移到第 5 个字符（E）之后。find(5) 从头块累减 siz：5 大于第一块的 4，减掉后剩 1，落在第二块偏移 1。'});},
+    function(){render([['A','B','C','D'],['E'],['F','G','H'],['I','J']],5,{hot:[1,2],note:'<b>Insert XYZ 准备</b>：split 把第二块从偏移 1 切开，右半 FGH 搬进新块，插入点落在块边界上。'});},
+    function(){render([['A','B','C','D'],['E'],['X','Y','Z'],['F','G','H'],['I','J']],5,{fresh:[2],note:'<b>Insert XYZ</b>：新内容只有 3 个字符，装进一个新块挂在 E 后面。编号是从 pool 栈里弹出来的。'});},
+    function(){render([['A','B','C','D'],['E','X','Y','Z'],['F','G','H'],['I','J']],5,{fresh:[1],note:'<b>maintain</b>：E 和 XYZ 的大小和 1 + 3 = 4，不超过容量 4，合并成一块。ABCD + EXYZ = 8 超了，不动。'});},
+    function(){render([['A','B','C','D'],['E'],['X','Y','Z'],['F','G','H'],['I','J']],5,{hot:[2,3],note:'<b>Delete 6 准备</b>：还是先 split，把删除起点切到块边界，E 独立成块，要删的 XYZFGH 正好是两个整块。'});},
+    function(){render([['A','B','C','D'],['E'],['I','J']],5,{note:'<b>Delete 6</b>：XYZ 和 FGH 两个整块整个回收，编号压回 pool。剩余长度刚好删完，右端不用再切。'});},
+    function(){render([['A','B','C','D'],['E','I','J']],5,{fresh:[1],note:'<b>maintain</b>：E + IJ = 3 ≤ 4，合并。现在全文是 ABCDEIJ，光标仍在 E 后面，位置没动过。'});},
+    function(){render([['A','B','C','D'],['E','I','J']],5,{hotCells:['1:1','1:2'],note:'<b>Get 2</b>：从光标处跨块拷 2 个字符，输出 IJ。全过程的 Move、Insert、Delete、Get 都只是定位 O(√n) 加块内拷贝 O(√n)。'});},
+  ];
+
+  next.onclick=function(){
+    if(step<steps.length){steps[step]();step++;}
+    else{note.innerHTML='演示已结束，点「重置」可以重来。';}
+  };
+  reset.onclick=function(){
+    step=0;
+    render([['A','B','C','D'],['E','F','G','H'],['I','J']],0,{note:INIT});
+  };
+  render([['A','B','C','D'],['E','F','G','H'],['I','J']],0,{note:INIT});
+})();
+</script>
+</body>
+</html>

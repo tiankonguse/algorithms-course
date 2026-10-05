@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>割点 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .g-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .g-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .g-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  @media(max-width:760px){
+    .g-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>割点</h1>
+    <p class="intro">无向图里有些点是「要害」：把它连同相连的边一起拿掉，图就散架了。这样的点叫割点。这一节用 dfn 和 low 两个数组，一次 dfs 把所有割点找出来，然后连做三道题。</p>
+
+    <h2>零、背景</h2>
+    <p>这一节站在两讲的基础上：强连通分量给出了 dfn、low 的骨架，割边和边双连通分量把这副骨架搬到了无向图上。现在还是同一副骨架，只是「口袋」从边换成了点。</p>
+    <p>先把两个数组说清楚。dfn[u] 是第一次走到 u 时发的时间戳，先来先得、绝不重复。low[u] 是 u 和它的子树沿着树边往下、再顺着回边往回摸，能摸到的最小时间戳。</p>
+    <p>无向图的 dfs 里，边分三类。树边是往下走的新边；回边指向已经访问过、时间戳更小的点；剩下的都算弃边，比如反着扫回来的树边重复、指向时间戳更大的点，它们对 low 没有影响。</p>
+    <p>这里有个细节：这套代码不记父亲。反着走的树边（u 回看父亲 v）也会被当成回边处理，把 low[u] 和 dfn[v] 取一次 min。看起来像作弊，其实无害，判定的门槛恰好是 dfn[u]，等号照样成立，下一节会专门说这件事。</p>
+
+    <h2>一、割点的定义</h2>
+    <p>删掉某个点以及与它相连的所有边，如果无向图的连通区数量增加了，这个点就叫割点。图本身不保证连通，删点之前就有若干个连通块，比较的是删前删后的块数。</p>
+    <p>和割边对照着看：割边拿掉一条边，割点拿掉一个点和它身上的所有边。一个点可以既是割点又是割边的端点，两个概念互相不蕴含。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="割点定义：删除一个点前后连通块数量对比" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="70" y1="110" x2="170" y2="70"/>
+          <line x1="170" y1="70" x2="160" y2="180"/>
+          <line x1="160" y1="180" x2="260" y2="130"/>
+          <line x1="260" y1="130" x2="170" y2="70"/>
+          <line x1="260" y1="130" x2="360" y2="130"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="70" cy="110" r="16"/>
+          <circle cx="170" cy="70" r="16"/>
+          <circle cx="160" cy="180" r="16"/>
+          <circle cx="260" cy="130" r="16"/>
+          <circle cx="360" cy="130" r="16"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="70" y="114">1</text>
+          <text x="170" y="74">2</text>
+          <text x="160" y="184">3</text>
+          <text x="260" y="134">4</text>
+          <text x="360" y="134">5</text>
+        </g>
+        <text x="215" y="222" font-size="11" fill="#6b7280" text-anchor="middle">删除前：1 个连通块</text>
+
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="410" y1="110" x2="510" y2="70"/>
+          <line x1="510" y1="70" x2="500" y2="180"/>
+        </g>
+        <circle cx="600" cy="130" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+        <circle cx="596" cy="130" r="21" fill="none" stroke="#9aa0a6" stroke-width="1.2" stroke-dasharray="4 3"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="410" cy="110" r="16"/>
+          <circle cx="510" cy="70" r="16"/>
+          <circle cx="500" cy="180" r="16"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="410" y="114">1</text>
+          <text x="510" y="74">2</text>
+          <text x="500" y="184">3</text>
+        </g>
+        <text x="600" y="134" font-size="12" fill="#9aa0a6" text-anchor="middle">4</text>
+        <text x="600" y="170" font-size="11" fill="#9aa0a6" text-anchor="middle">已删除</text>
+        <text x="482" y="222" font-size="11" fill="#ea580c" text-anchor="middle">删除 4 之后：{1,2,3} 和 {5} 两块</text>
+        <text x="505" y="40" font-size="11" fill="#374151" text-anchor="middle">连通块从 1 个变 2 个，4 是割点</text>
+      </svg>
+      <figcaption>割点的判定标准只有一条：删掉它之后连通区数量变多</figcaption>
+    </figure>
+
+    <h2>二、朴素做法</h2>
+    <p>最直接的办法是照定义来：枚举每个点，删掉，跑一遍 dfs 数连通块，和原来的数量比。一次 O(n + m)，n 个点就是 O(n·(n + m))。</p>
+    <p>n 到 2 × 10⁴、m 到 10⁵ 时，这个数是 4 × 10⁹ 量级，必然超时。</p>
+    <p>可以发现，删一个点会不会散架，只取决于它周围「口袋」的结构。而这个结构，dfs 的时候顺手就能看见，这就是 Tarjan 的切入点。</p>
+
+    <h2>三、Tarjan 求割点</h2>
+    <p>dfs 沿树边往下走，每条树边 (u, v)（u 在上、v 在下）返回的时候，检查 low[v] 和 dfn[u]。</p>
+    <p>如果 low[v] ≥ dfn[u]，说明 v 的子树里所有回边最高只够到 u 自己，一条都翻不出去。删掉 u，这棵子树就和上方断开。这个动作叫扎口袋，u 是袋口。</p>
+    <p>于是有两条判定。u 不是根：只要扎起一次口袋，u 就是割点。u 是根：根的上方没有点，口袋扎得再多也不会散架，只有树儿子数 ≥ 2，删掉根才能把两棵子树分开，根的判定只看树儿子数，不看 low。</p>
+    <p>遇到回边时 low[u] = min(low[u], dfn[v])，必须用 dfn[v]，不能用 low[v]。回边贡献的是这条边一头连着的那个祖先，dfn[v] 正是它的时间戳；low[v] 是 v 那边整棵子树的摸高，把别人的子树情况借过来，口袋就会扎错位置。</p>
+    <p>还有一个等价的写法。因为反着走的树边把 low[v] 压到了 dfn[u]，low[v] 永远不会超过 dfn[u]，所以判定写 low[v] ≥ dfn[u] 和写 low[v] == dfn[u] 结果相同。两种写法站内都会出现。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="扎口袋判定与根节点特判" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <ellipse cx="105" cy="165" rx="82" ry="62" fill="none" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="7 4"/>
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="105" y1="46" x2="105" y2="112"/>
+          <line x1="105" y1="112" x2="60" y2="178"/>
+          <line x1="105" y1="112" x2="152" y2="176"/>
+          <line x1="60" y1="178" x2="152" y2="176"/>
+        </g>
+        <line x1="60" y1="178" x2="105" y2="112" stroke="#ea580c" stroke-width="2.2" stroke-dasharray="7 4"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="105" cy="46" r="15"/>
+          <circle cx="105" cy="112" r="15"/>
+          <circle cx="60" cy="178" r="15"/>
+          <circle cx="152" cy="176" r="15"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="105" y="50">r</text>
+          <text x="105" y="116">u</text>
+          <text x="60" y="182">v</text>
+          <text x="152" y="180">w</text>
+        </g>
+        <text x="130" y="232" font-size="10" fill="#ea580c" text-anchor="middle">回边只够到 u：low[v] ≥ dfn[u]</text>
+        <text x="130" y="250" font-size="10" fill="#6b7280" text-anchor="middle">删掉 u，子树整体掉队，u 扎口袋</text>
+
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="330" y1="46" x2="330" y2="112"/>
+          <line x1="330" y1="112" x2="285" y2="178"/>
+          <line x1="330" y1="112" x2="382" y2="176"/>
+          <line x1="285" y1="178" x2="382" y2="176"/>
+        </g>
+        <line x1="285" y1="178" x2="330" y2="46" stroke="#ea580c" stroke-width="2.2" stroke-dasharray="7 4"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="330" cy="46" r="15"/>
+          <circle cx="330" cy="112" r="15"/>
+          <circle cx="285" cy="178" r="15"/>
+          <circle cx="382" cy="176" r="15"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="330" y="50">r</text>
+          <text x="330" y="116">u</text>
+          <text x="285" y="182">v</text>
+          <text x="382" y="180">w</text>
+        </g>
+        <text x="365" y="232" font-size="10" fill="#2563eb" text-anchor="middle">回边翻过 u 直达 r：low[v] &lt; dfn[u]</text>
+        <text x="365" y="250" font-size="10" fill="#6b7280" text-anchor="middle">子树有路绕开 u，u 不是割点</text>
+
+        <text x="540" y="60" font-size="11" fill="#374151" text-anchor="middle">根节点另算：</text>
+        <text x="540" y="86" font-size="11" fill="#374151" text-anchor="middle">根没有上方</text>
+        <text x="540" y="106" font-size="11" fill="#374151" text-anchor="middle">口袋再多也不散架</text>
+        <text x="540" y="132" font-size="11" fill="#ea580c" text-anchor="middle">树儿子 ≥ 2 才是割点</text>
+        <text x="540" y="158" font-size="11" fill="#6b7280" text-anchor="middle">一个树儿子的根：</text>
+        <text x="540" y="178" font-size="11" fill="#6b7280" text-anchor="middle">整块挂在一条树边下</text>
+        <text x="540" y="198" font-size="11" fill="#6b7280" text-anchor="middle">删掉根，剩下还连通</text>
+      </svg>
+      <figcaption>非根看 low[v] ≥ dfn[u]，根只看树儿子数，两套判据互不干涉</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">Tarjan 求割点走一遍</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">8 个点、9 条边，两个三角形靠一条边串起来。点「下一步」，看 dfn、low 怎么走，口袋在哪里一个个扎起来，割点怎么现形。</p>
+      <svg id="cvSvg" viewBox="0 0 620 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Tarjan 求割点过程演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot partial"></span>当前 dfs 所在的点</span>
+        <span><span class="dot full"></span>已访问</span>
+        <span><span class="dot skip"></span>还没走到</span>
+        <span><span class="dot dup"></span>已认出的割点</span>
+      </div>
+      <div class="breakdown" id="cvInfo"></div>
+      <div class="viz-controls">
+        <button class="g-btn" id="cvPrev" type="button">上一步</button>
+        <button class="g-btn" id="cvNext" type="button">下一步</button>
+        <button class="g-btn" id="cvReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <p>求割点的骨架如下，三道题都在它上面改：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 20001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 100001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">bool</span> cutVertex[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u, <span class="kw">bool</span> root) {
+        dfn[u] = low[u] = ++cntd;
+        <span class="kw">int</span> son = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                son++;
+                tarjan(v, <span class="kw">false</span>);
+                low[u] = min(low[u], low[v]);
+                <span class="kw">if</span> (low[v] &gt;= dfn[u]) {
+                    <span class="kw">if</span> (!root || son &gt;= 2) {
+                        cutVertex[u] = <span class="kw">true</span>;
+                    }
+                }
+            } <span class="kw">else</span> {
+                low[u] = min(low[u], dfn[v]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= m; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i, <span class="kw">true</span>);
+            }
+        }
+        <span class="kw">int</span> cutCnt = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (cutVertex[i]) {
+                cutCnt++;
+            }
+        }
+        cout &lt;&lt; cutCnt &lt;&lt; "\n";
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (cutVertex[i]) {
+                cout &lt;&lt; i &lt;&lt; " ";
+            }
+        }
+        cout &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>四、题目1：割点模版</h2>
+    <p>给定一张无向图，n 个点、m 条边，不保证连通。打印图中割点的数量，然后从小到大打印所有割点的编号。1 ≤ n ≤ 2 × 10⁴，1 ≤ m ≤ 10⁵。（洛谷 P3388）</p>
+    <p>就是上面的模版。外层对每个 dfn 为 0 的点跑一次 tarjan，起点当根。</p>
+    <p>有两处细节。无向边要正反各存一条，前向星数组开 2m。cutVertex 是布尔数组，一个点扎多次口袋也只记一次，不用去重。</p>
+
+    <h2>五、题目2：电力</h2>
+    <p>给定一张无向图，n 个点、m 条边，不保证连通，点的编号 0 到 n−1。只能删除一个点的话，连通块最多能有多少。多组数据，读到 0 0 结束。1 ≤ n ≤ 10⁴，1 ≤ m ≤ 2 × 10⁴。（POJ 2117 / LOJ 10103）</p>
+    <p>先数出初始的连通块数 block。删掉一个点 u 之后，u 所在的那块会裂开，其余块不动。</p>
+    <p>裂成几块，Tarjan 已经给出答案。u 是所在块的根：每棵子树各自成块，裂成 son 块。u 不是根：每个口袋里的子树各自成块，再加上 u 上方那块，裂成 cut + 1 块，cut 是 u 扎口袋的次数。</p>
+    <p>所以删 u 之后的总块数 = block − 1 + (u 是根 ? son : cut + 1)，对所有的 u 取最大值就是答案。根的口袋数恰好等于 son − 1，两条式子其实是同一件事的两种数法。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="删除一个点之后连通块裂开的数量" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <ellipse cx="110" cy="120" rx="86" ry="58" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="7 4"/>
+        <ellipse cx="230" cy="150" rx="60" ry="44" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="7 4"/>
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="170" y1="60" x2="110" y2="120"/>
+          <line x1="170" y1="60" x2="230" y2="150"/>
+          <line x1="170" y1="60" x2="180" y2="150"/>
+          <line x1="110" y1="120" x2="60" y2="80"/>
+          <line x1="110" y1="120" x2="70" y2="160"/>
+          <line x1="60" y1="80" x2="70" y2="160"/>
+          <line x1="230" y1="150" x2="200" y2="190"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="170" cy="60" r="16"/>
+          <circle cx="110" cy="120" r="16"/>
+          <circle cx="230" cy="150" r="16"/>
+          <circle cx="180" cy="150" r="16"/>
+          <circle cx="60" cy="80" r="15"/>
+          <circle cx="70" cy="160" r="15"/>
+          <circle cx="200" cy="190" r="15"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="170" y="64">u</text>
+          <text x="110" y="124">a</text>
+          <text x="230" y="154">b</text>
+          <text x="180" y="154">c</text>
+          <text x="60" y="84">a1</text>
+          <text x="70" y="164">a2</text>
+          <text x="200" y="194">b1</text>
+        </g>
+        <text x="150" y="228" font-size="11" fill="#374151" text-anchor="middle">非根 u 扎了 2 次口袋（虚线圈）</text>
+        <text x="150" y="246" font-size="11" fill="#ea580c" text-anchor="middle">删掉 u：口袋 a、口袋 b、上方 c 那块，共 cut + 1 = 3 块</text>
+
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="430" y1="60" x2="370" y2="130"/>
+          <line x1="430" y1="60" x2="490" y2="130"/>
+          <line x1="430" y1="60" x2="430" y2="160"/>
+          <line x1="370" y1="130" x2="490" y2="130"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="430" cy="60" r="16"/>
+          <circle cx="370" cy="130" r="15"/>
+          <circle cx="490" cy="130" r="15"/>
+          <circle cx="430" cy="160" r="15"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="430" y="64">r</text>
+          <text x="370" y="134">d</text>
+          <text x="490" y="134">e</text>
+          <text x="430" y="164">f</text>
+        </g>
+        <text x="430" y="200" font-size="11" fill="#374151" text-anchor="middle">根 r 有 3 个树儿子</text>
+        <text x="430" y="218" font-size="11" fill="#ea580c" text-anchor="middle">删掉 r：三棵子树互不相连，裂成 3 块</text>
+        <text x="430" y="240" font-size="11" fill="#6b7280" text-anchor="middle">答案 = block − 1 + max(所有点裂出的块数)</text>
+      </svg>
+      <figcaption>删一个点裂出的块数，非根是扎口袋数加一，根是树儿子数，两者取最大再加 block − 1</figcaption>
+    </figure>
+
+    <p>编号 0 到 n−1 读进来统一加一。cut 在这里数的是次数，不是标记。完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+    <span class="kw">#include</span> &lt;algorithm&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 10001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 20001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> block, ans;
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        cntg = cntd = block = ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            head[i] = dfn[i] = low[i] = 0;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u, <span class="kw">bool</span> root) {
+        dfn[u] = low[u] = ++cntd;
+        <span class="kw">int</span> son = 0, cut = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                son++;
+                tarjan(v, <span class="kw">false</span>);
+                low[u] = min(low[u], low[v]);
+                <span class="kw">if</span> (low[v] &gt;= dfn[u] &amp;&amp; !root) {
+                    cut++;
+                }
+            } <span class="kw">else</span> {
+                low[u] = min(low[u], dfn[v]);
+            }
+        }
+        <span class="kw">if</span> (root) {
+            ans = max(ans, son);
+        } <span class="kw">else</span> {
+            ans = max(ans, cut + 1);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(0);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">while</span> (n != 0 || m != 0) {
+            prepare();
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= m; i++) {
+                cin &gt;&gt; u &gt;&gt; v;
+                u++;
+                v++;
+                addEdge(u, v);
+                addEdge(v, u);
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+                <span class="kw">if</span> (dfn[i] == 0) {
+                    block++;
+                    tarjan(i, <span class="kw">true</span>);
+                }
+            }
+            cout &lt;&lt; (block + (ans - 1)) &lt;&lt; "\n";
+            cin &gt;&gt; n &gt;&gt; m;
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>六、题目3：嗅探器</h2>
+    <p>给定一张 n 个点、m 条边的无向图，所有节点属于同一个连通区。再给定点 a 和点 b，如果删掉某个别的点能让 a 和 b 不再连通，这个点叫关键点。打印编号最小的关键点，不存在打印 No solution。1 ≤ n ≤ 2 × 10⁵，1 ≤ m ≤ 5 × 10⁵。（洛谷 P5058）</p>
+    <p>从 a 出发跑一遍 dfs，a 就成了整棵 dfs 树的根，b 一定在树里。这样一来，某个点 u 是关键点，当且仅当 u 在 a 到 b 的树路径上，并且 u 扎起的某个口袋把 b 装了进去。</p>
+    <p>翻译成判定：u 有一个树儿子 v，满足 low[v] ≥ dfn[u]（u 扎口袋），并且 b 在 v 的子树里（删掉 u 后 b 被隔开）。加上 u 不是 a 也不是 b 这两个排除条件。</p>
+    <p>「b 在 v 的子树里」用的判据是 dfn[b] ≥ dfn[v]。这里有个细节：检查发生在 v 的子树刚返回的那一刻，此时还没访问到的点 dfn 都是 0；已经访问过、dfn 又不小于 dfn[v] 的点，只能落在 v 的子树里，不会误判到后面才走的分支。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="嗅探器：关键点的判定条件" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <ellipse cx="360" cy="120" rx="120" ry="70" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="7 4"/>
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="60" y1="70" x2="150" y2="70"/>
+          <line x1="150" y1="70" x2="250" y2="70"/>
+          <line x1="250" y1="70" x2="330" y2="110"/>
+          <line x1="330" y1="110" x2="330" y2="50"/>
+          <line x1="330" y1="110" x2="420" y2="60"/>
+          <line x1="330" y1="110" x2="420" y2="170"/>
+          <line x1="420" y1="60" x2="420" y2="170"/>
+        </g>
+        <line x1="420" y1="170" x2="250" y2="70" stroke="#ea580c" stroke-width="2.2" stroke-dasharray="7 4"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="60" cy="70" r="16"/>
+          <circle cx="150" cy="70" r="16"/>
+          <circle cx="250" cy="70" r="16"/>
+          <circle cx="330" cy="110" r="16"/>
+          <circle cx="330" cy="50" r="15"/>
+          <circle cx="420" cy="60" r="15"/>
+          <circle cx="420" cy="170" r="15"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="60" y="74">a</text>
+          <text x="150" y="74">x</text>
+          <text x="250" y="74">u</text>
+          <text x="330" y="114">v</text>
+          <text x="330" y="54">p</text>
+          <text x="420" y="64">q</text>
+          <text x="420" y="174">b</text>
+        </g>
+        <text x="200" y="120" font-size="11" fill="#6b7280">树路径 a → x → u → v</text>
+        <text x="360" y="216" font-size="11" fill="#ea580c" text-anchor="middle">b 落在 v 的子树里：dfn[b] ≥ dfn[v]</text>
+        <text x="360" y="234" font-size="11" fill="#6b7280" text-anchor="middle">而子树的回边最高只够到 u，删掉 u，b 就和 a 断开</text>
+        <text x="360" y="30" font-size="11" fill="#374151" text-anchor="middle">u 是关键点的两个条件缺一不可</text>
+      </svg>
+      <figcaption>口袋把 b 装进去了，袋口 u 才是关键点；b 不在口袋里，删 u 也断不开 a 和 b</figcaption>
+    </figure>
+
+    <p>整图连通，从 a 跑一次 tarjan 就够。完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 500001;
+    <span class="kw">int</span> n, a, b;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">bool</span> isKey[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+                <span class="kw">if</span> (low[v] &gt;= dfn[u] &amp;&amp; u != a &amp;&amp; u != b &amp;&amp; dfn[b] &gt;= dfn[v]) {
+                    isKey[u] = <span class="kw">true</span>;
+                }
+            } <span class="kw">else</span> {
+                low[u] = min(low[u], dfn[v]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">int</span> u, v;
+        cin &gt;&gt; u &gt;&gt; v;
+        <span class="kw">while</span> (u != 0 || v != 0) {
+            addEdge(u, v);
+            addEdge(v, u);
+            cin &gt;&gt; u &gt;&gt; v;
+        }
+        cin &gt;&gt; a &gt;&gt; b;
+        tarjan(a);
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (isKey[i]) {
+                ans = i;
+                <span class="kw">break</span>;
+            }
+        }
+        <span class="kw">if</span> (ans == 0) {
+            cout &lt;&lt; "No solution" &lt;&lt; "\n";
+        } <span class="kw">else</span> {
+            cout &lt;&lt; ans &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>七、复杂度分析</h2>
+    <p>三道题共用一个 dfs 骨架：每个点进出各一次，每条边的两个方向各扫一次，判定都是常数时间。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>步骤</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>求割点（题目1）</td><td><code class="inline">O(n + m)</code></td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>电力（题目2）</td><td><code class="inline">O(n + m)</code> 每组数据</td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>嗅探器（题目3）</td><td><code class="inline">O(n + m)</code>，只跑一次 dfs</td><td><code class="inline">O(n + m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间是链式前向星 2m 条边，加上 dfn、low、cutVertex 几个 n 长的数组。电力是多组数据，每组开头把这几个数组清一遍，清空本身也是 O(n + m)。</p>
+    <p>题目2 的答案整合只在每个点 dfs 返回时做一次 max，题目3 在判定里多加了三个布尔条件，都没有引入新的量级。</p>
+
+    <h2>八、最后</h2>
+    <p>三道题同一副骨架：模版题认标记，电力数口袋裂块，嗅探器给口袋加了一个「b 在不在里面」的条件。改动都发生在 low[v] ≥ dfn[u] 那一行附近。</p>
+    <p>有一件事这一节一直绕着走：割点切出来的块，会在割点上重叠。割边切边双，边双互不相交，直接缩点就行；点双不行，一个割点同时属于两边的块。<a href="vertex-bcc.html">下一节</a>把口袋真正地弹出来，正面处理这个问题。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var NODES = {
+    '1':{x:52,  y:96,  d:[52,60],   l:[52,74]},
+    '2':{x:150, y:96,  d:[150,60],  l:[150,74]},
+    '3':{x:222, y:168, d:[222,202], l:[222,216]},
+    '4':{x:252, y:48,  d:[252,14],  l:[252,28]},
+    '5':{x:346, y:48,  d:[346,14],  l:[346,28]},
+    '6':{x:438, y:118, d:[462,112], l:[462,126], an:'start'},
+    '7':{x:346, y:188, d:[346,216], l:[346,230]},
+    '8':{x:52,  y:190, d:[52,228],  l:[52,242]}
+  };
+  var EDGES = [
+    {a:'1',b:'2'},
+    {a:'1',b:'8'},
+    {a:'2',b:'3'},
+    {a:'3',b:'4'},
+    {a:'4',b:'2'},
+    {a:'4',b:'5'},
+    {a:'5',b:'6'},
+    {a:'6',b:'7'},
+    {a:'7',b:'5'}
+  ];
+  var POCKETS = {
+    A:{x:320,y:64,w:142,h:146},
+    B:{x:316,y:20,w:150,h:202},
+    C:{x:198,y:20,w:268,h:202},
+    D:{x:126,y:20,w:340,h:202},
+    E:{x:24,y:162,w:56,h:56}
+  };
+  function F(n, d, l, extra){
+    var o = {cur:n, dfn:d, low:l, walked:[], cut:[], pocket:null, back:null};
+    for (var k in extra) o[k] = extra[k];
+    return o;
+  }
+  var D1={1:1}, D2={1:1,2:2}, D3={1:1,2:2,3:3}, D4={1:1,2:2,3:3,4:4},
+      D5={1:1,2:2,3:3,4:4,5:5}, D6={1:1,2:2,3:3,4:4,5:5,6:6},
+      D7={1:1,2:2,3:3,4:4,5:5,6:6,7:7}, D8={1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8};
+  var T12=['1-2'], T123=['1-2','2-3'], T1234=['1-2','2-3','3-4'],
+      T12345=['1-2','2-3','3-4','4-5'], T123456=['1-2','2-3','3-4','4-5','5-6'],
+      T1234567=['1-2','2-3','3-4','4-5','5-6','6-7'], TALL=['1-2','2-3','3-4','4-5','5-6','6-7','1-8'];
+  var STEPS = [
+    F(null, {}, {}, {info:'图上有 8 个点、9 条边：三角形 2-3-4、三角形 5-6-7，靠边 4-5 串起来，1 和 8 挂在两端。从 1 号点开始做 dfs，1 是根。'}),
+    F('1', D1, {1:1}, {info:'走到 1，dfn[1] = low[1] = 1。1 是根，根是不是割点要到最后单独看树儿子数。'}),
+    F('2', D2, {1:1,2:1}, {walked:T12, info:'顺着树边 1-2 走到 2，dfn[2] = 2。2 回看 1：已经访问过，按回边处理，low[2] = min(2, dfn[1]) = 1。反着走的树边也当回边，判定的门槛是 dfn[u]，等号照样成立。'}),
+    F('3', D3, {1:1,2:1,3:2}, {walked:T123, info:'走到 3，dfn[3] = 3，回看 2 得 low[3] = 2。'}),
+    F('4', D4, {1:1,2:1,3:2,4:2}, {walked:T1234, back:'4-2', info:'走到 4，dfn[4] = 4。4 的邻居 2 已经访问过，回边 4-2 把 low[4] 拉到 2。回边必须用 dfn 对端的值，不能用 low 对端的值，否则会把别人子树的摸高借过来。'}),
+    F('5', D5, {1:1,2:1,3:2,4:2,5:4}, {walked:T12345, info:'走到 5，dfn[5] = 5。5 回看父亲 4，low[5] = min(5, dfn[4]) = 4。'}),
+    F('6', D6, {1:1,2:1,3:2,4:2,5:4,6:5}, {walked:T123456, info:'走到 6，dfn[6] = 6，回看 5 得 low[6] = 5。'}),
+    F('7', D7, {1:1,2:1,3:2,4:2,5:4,6:5,7:5}, {walked:T1234567, back:'7-5', info:'走到 7，dfn[7] = 7。7 直接连回 5，low[7] = 5。这条回边最高只够到 5，越不过 6。'}),
+    F('6', D7, {1:1,2:1,3:2,4:2,5:4,6:5,7:5}, {walked:T1234567, info:'回到 6，收回 7 的 low：low[6] = min(5, 5) = 5。检查 low[7] = 5 ≥ dfn[6] = 6？不成立，7 的子树有路越过 6，6 不是割点。'}),
+    F('5', D7, {1:1,2:1,3:2,4:2,5:4,6:5,7:5}, {walked:T1234567, cut:['5'], pocket:'A', info:'回到 5，low[5] = min(4, 5) = 4。检查 low[6] = 5 ≥ dfn[5] = 5？成立：6 的子树最高只够到 5，5 扎起口袋，5 是割点。'}),
+    F('4', D7, {1:1,2:1,3:2,4:2,5:4,6:5,7:5}, {walked:T1234567, cut:['5','4'], pocket:'B', info:'回到 4，low[4] = min(2, 4) = 2。检查 low[5] = 4 ≥ dfn[4] = 4？成立，这次圈住的是 5 带着的整个子树，4 也是割点。'}),
+    F('3', D7, {1:1,2:1,3:2,4:2,5:4,6:5,7:5}, {walked:T1234567, info:'回到 3，low[3] = min(2, 2) = 2。检查 low[4] = 2 ≥ dfn[3] = 3？不成立，回边 4-2 越过了 3，3 不是割点。'}),
+    F('2', D7, {1:1,2:1,3:2,4:2,5:4,6:5,7:5}, {walked:T1234567, cut:['5','4','2'], pocket:'C', info:'回到 2，检查 low[3] = 2 ≥ dfn[2] = 2？成立，2 是割点。同一个点扎几次口袋都没关系，标记是布尔的。'}),
+    F('1', D7, {1:1,2:1,3:2,4:2,5:4,6:5,7:5}, {walked:T1234567, cut:['5','4','2'], pocket:'D', info:'回到根 1，low[1] = min(1, 1) = 1。low[2] = 1 ≥ dfn[1] = 1，口袋是扎住了，但 1 是根，此刻树儿子只有 1 个，还不能标记。'}),
+    F('8', D8, {1:1,2:1,3:2,4:2,5:4,6:5,7:5,8:1}, {walked:TALL, info:'1 还有邻居 8 没走。走到 8，dfn[8] = 8，回看 1 得 low[8] = 1。'}),
+    F('1', D8, {1:1,2:1,3:2,4:2,5:4,6:5,7:5,8:1}, {walked:TALL, cut:['5','4','2','1'], pocket:'E', info:'8 回来了，根 1 的第二个树儿子到手：树儿子数 = 2，删掉 1 之后 2 这边和 8 这边会分开，1 是割点。根的判定只看树儿子数。'}),
+    F(null, D8, {1:1,2:1,3:2,4:2,5:4,6:5,7:5,8:1}, {walked:TALL, cut:['5','4','2','1'], pocket:'E', info:'全图走完。割点：1、2、4、5；3、6、7、8 不是。非根点都对应「low[v] ≥ dfn[u]」的口袋事件，根 1 对应的是「树儿子数 ≥ 2」。'})
+  ];
+
+  var svg = document.getElementById('cvSvg');
+  var info = document.getElementById('cvInfo');
+  var prev = document.getElementById('cvPrev');
+  var next = document.getElementById('cvNext');
+  var reset = document.getElementById('cvReset');
+  var at = 0;
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+
+    if (st.pocket) {
+      var r = POCKETS[st.pocket];
+      p.push('<rect x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.h + '" rx="14" fill="none" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="8 5"/>');
+    }
+
+    EDGES.forEach(function(e){
+      var key = e.a + '-' + e.b;
+      var walked = st.walked.indexOf(key) >= 0;
+      var isBack = st.back === key;
+      var a = NODES[e.a], b = NODES[e.b];
+      var stroke = '#e6e8eb', w = 1.4, dash = 'none';
+      if (walked) { stroke = '#2563eb'; w = 2; }
+      if (isBack) { stroke = '#ea580c'; w = 2.4; dash = '7 4'; }
+      p.push('<line x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '" stroke="' + stroke + '" stroke-width="' + w + '"' +
+             (dash === 'none' ? '' : ' stroke-dasharray="' + dash + '"') + '/>');
+    });
+
+    Object.keys(NODES).forEach(function(k){
+      var n = NODES[k];
+      var isCur = st.cur === k;
+      var isCut = st.cut.indexOf(k) >= 0;
+      var d = st.dfn[k], l = st.low[k];
+      var fill = '#ffffff', stroke = '#e6e8eb', tc = '#9aa0a6';
+      if (d) { fill = '#dbeafe'; stroke = '#2563eb'; tc = '#1f2328'; }
+      if (isCut) { fill = '#ffedd5'; stroke = '#ea580c'; tc = '#ea580c'; }
+      p.push('<circle cx="' + n.x + '" cy="' + n.y + '" r="16" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + (isCur ? 2.6 : 1.4) + '"/>');
+      p.push('<text x="' + n.x + '" y="' + (n.y + 4) + '" font-size="12" fill="' + tc + '" text-anchor="middle">' + k + '</text>');
+      var an = n.an || 'middle';
+      if (d) {
+        p.push('<text x="' + n.d[0] + '" y="' + n.d[1] + '" font-size="9" fill="#6b7280" text-anchor="' + an + '">dfn ' + d + '</text>');
+        p.push('<text x="' + n.l[0] + '" y="' + n.l[1] + '" font-size="9" fill="' + (isCut ? '#ea580c' : '#6b7280') + '" text-anchor="' + an + '">low ' + l + '</text>');
+      }
+    });
+
+    p.push('<rect x="16" y="250" width="588" height="76" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>');
+    var curTxt = st.cur ? '当前走到 ' + st.cur : (at === 0 ? '准备出发' : 'dfs 结束');
+    p.push('<text x="32" y="272" font-size="11" fill="#374151">' + curTxt + '，已走 ' + st.walked.length + ' 条树边</text>');
+    p.push('<text x="32" y="292" font-size="11" fill="#6b7280">判定式：非根看 low[v] ≥ dfn[u]，根看树儿子数 ≥ 2</text>');
+    var cutTxt = st.cut.length ? st.cut.join('、') : '还没有';
+    p.push('<text x="32" y="312" font-size="11" fill="' + (st.cut.length ? '#ea580c' : '#9aa0a6') + '">已认出的割点：' + cutTxt + '</text>');
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div>' + st.info + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if (at > 0) { at--; render(); } });
+  next.addEventListener('click', function(){ if (at < STEPS.length - 1) { at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

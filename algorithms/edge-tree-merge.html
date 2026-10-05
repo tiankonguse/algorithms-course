@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>边分树的合并 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .etm-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .etm-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .etm-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #emSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .etm-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>边分树的合并</h1>
+    <p class="intro">上一节建好了信息树，这一节让它发力。两道题都是同一副骨架：在 t1 上建边分树，沿 t2 自底向上合并，在合并的节点上枚举跨重心边的组合。暴力写挂是两棵树，通道是三棵树，后者的第三棵树正好用上前面 dfn 序求 LCA 的那套。</p>
+
+    <h2>零、背景</h2>
+    <p>上一节的可持久化是「链并入树」：前缀版本一个个叠上去，旧的全部保留。这一节的合并方向不同：沿着一棵树的 dfs 自底向上，把儿子代表的点集并进父亲，合并完就丢，不保留版本。</p>
+    <p>合并发生在 t2 的每个点 u 上。参与合并的两份信息来自 u 的不同子树，它们里面的点对的 lca2 恰好是 u，这一点会在式子里变成一个固定的修正量。</p>
+
+    <h2>一、题目4：暴力写挂</h2>
+    <p>两棵树 t1、t2 都有 n 个点，都以 1 为根，边权可能为负。dis1(x) 是 t1 中 x 到根的距离，lca1、lca2 分别是两棵树上的最近公共祖先。点对的指标 = dis1(x) + dis1(y) − dis1(lca1(x,y)) − dis2(lca2(x,y))，x ≤ y，打印最大值。1 ≤ n ≤ 366666。</p>
+    <p>先把式子拆开。t1 上的距离是 dis1(x) + dis1(y) − 2 × dis1(lca1)，代回去，指标乘 2 恰好变成三段：</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 640 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="暴力写挂的式子拆解" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="12" fill="#1f2328">
+          <text x="40" y="35">指标 = dis1(x) + dis1(y) − dis1(lca1) − dis2(lca2)</text>
+          <text x="40" y="60">而 dist1(x,y) = dis1(x) + dis1(y) − 2·dis1(lca1)，代入：</text>
+          <text x="40" y="85">2·指标 = [dis1(x) + dis1(y) + dist1(x,y)] − 2·dis2(lca2)</text>
+        </g>
+        <g font-size="12">
+          <text x="40" y="120" fill="#2563eb">边分树上跨重心边时：</text>
+          <text x="40" y="145" fill="#2563eb">dist1(x,y) = path1(x) + path1(y)，于是</text>
+          <text x="40" y="175" fill="#1f2328">2·指标 = [dis1(x) + path1(x)] + [dis1(y) + path1(y)] − 2·dis2(lca2)</text>
+        </g>
+        <g font-size="11">
+          <rect x="40" y="195" width="215" height="34" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="147" y="216" fill="#1f2328" text-anchor="middle">蓝框 = 信息树两侧存的 lmax / rmax</text>
+          <rect x="280" y="195" width="185" height="34" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+          <text x="372" y="216" fill="#1f2328" text-anchor="middle">橙框 = 合并时的 add 修正</text>
+        </g>
+      </svg>
+      <figcaption>指标乘 2 拆成三段：两个方括号是信息树两侧的最大值，减号在合并时统一处理。</figcaption>
+    </figure>
+
+    <p>于是在 t1 上建边分树（要三度化），每个实点在每一层记 lmax = dis1 + path 的最大值，左侧一份、右侧一份。沿 t2 自底向上合并：合并在 u 进行时，参与合并的点对 lca2 都是 u，add = −2 × dist2(u)，u 到 t2 根的距离。</p>
+    <p>合并到同一个节点时，左配右、右配左两种跨向组合更新答案，然后两侧各自取 max 存下来。x = y 的情况在合并前单独算：指标(x,x) = dis1(x) − dis2(x)。最后答案除以 2。</p>
+    <p>两个细节。t1 的边权可能为负，dis1 要用 dfs 递推，不能按层算。lmax、rmax 的初值是负无穷，建树前先整体赋值。</p>
+    <p>完整代码如下。</p>
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">using</span> <span class="kw">ll</span> = <span class="kw">long</span> <span class="kw">long</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 366667;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = MAXN &lt;&lt; 1;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 10000001;
+    <span class="kw">const</span> <span class="kw">ll</span> INF = 1LL &lt;&lt; 50;
+
+    <span class="kw">int</span> n, cntn;
+
+    <span class="kw">int</span> head0[MAXN];
+    <span class="kw">int</span> next0[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to0[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> weight0[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cnt0;
+
+    <span class="kw">int</span> head1[MAXM];
+    <span class="kw">int</span> next1[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to1[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> weight1[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cnt1;
+
+    <span class="kw">int</span> head2[MAXN];
+    <span class="kw">int</span> next2[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to2[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> weight2[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cnt2;
+
+    <span class="kw">ll</span> dis1[MAXN];
+
+    <span class="kw">bool</span> vis[MAXM];
+    <span class="kw">int</span> siz[MAXM];
+
+    <span class="kw">int</span> up[MAXN];
+    <span class="kw">int</span> root[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">ll</span> lmax[MAXT];
+    <span class="kw">ll</span> rmax[MAXT];
+    <span class="kw">int</span> cntt;
+
+    <span class="kw">ll</span> ans;
+
+    <span class="kw">void</span> <span class="fn">addEdge0</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        next0[++cnt0] = head0[u];
+        to0[cnt0] = v;
+        weight0[cnt0] = w;
+        head0[u] = cnt0;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge1</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        next1[++cnt1] = head1[u];
+        to1[cnt1] = v;
+        weight1[cnt1] = w;
+        head1[u] = cnt1;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge2</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        next2[++cnt2] = head2[u];
+        to2[cnt2] = v;
+        weight2[cnt2] = w;
+        head2[u] = cnt2;
+    }
+
+    <span class="kw">void</span> <span class="fn">getDist</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">ll</span> dist1) {
+        dis1[u] = dist1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head0[u]; e &gt; 0; e = next0[e]) {
+            <span class="kw">int</span> v = to0[e];
+            <span class="kw">if</span> (v != fa) {
+                getDist(v, u, dist1 + weight0[e]);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">rebuild</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        <span class="kw">int</span> last = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head0[u]; e &gt; 0; e = next0[e]) {
+            <span class="kw">int</span> v = to0[e];
+            <span class="kw">int</span> w = weight0[e];
+            <span class="kw">if</span> (v != fa) {
+                <span class="kw">if</span> (last == 0) {
+                    last = u;
+                    addEdge1(u, v, w);
+                    addEdge1(v, u, w);
+                } <span class="kw">else</span> {
+                    <span class="kw">int</span> add = ++cntn;
+                    addEdge1(last, add, 0);
+                    addEdge1(add, last, 0);
+                    addEdge1(add, v, w);
+                    addEdge1(v, add, w);
+                    last = add;
+                }
+                rebuild(v, u);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">getSize</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head1[u]; e &gt; 0; e = next1[e]) {
+            <span class="kw">int</span> v = to1[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[e &gt;&gt; 1]) {
+                getSize(v, u);
+                siz[u] += siz[v];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getCentroidEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        getSize(u, fa);
+        <span class="kw">int</span> total = siz[u];
+        <span class="kw">int</span> half = total &gt;&gt; 1;
+        <span class="kw">bool</span> find = <span class="kw">false</span>;
+        <span class="kw">while</span> (!find) {
+            find = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> e = head1[u]; e &gt; 0; e = next1[e]) {
+                <span class="kw">int</span> v = to1[e];
+                <span class="kw">if</span> (v != fa &amp;&amp; !vis[e &gt;&gt; 1] &amp;&amp; siz[v] &gt; half) {
+                    fa = u;
+                    u = v;
+                    find = <span class="kw">false</span>;
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+        <span class="kw">int</span> best = 0, edge = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head1[u]; e &gt; 0; e = next1[e]) {
+            <span class="kw">if</span> (!vis[e &gt;&gt; 1]) {
+                <span class="kw">int</span> v = to1[e];
+                <span class="kw">int</span> sub = (v == fa ? (total - siz[u]) : siz[v]);
+                <span class="kw">if</span> (sub &gt; best) {
+                    best = sub;
+                    edge = e;
+                }
+            }
+        }
+        <span class="kw">return</span> edge;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">ll</span> path, <span class="kw">int</span> op) {
+        <span class="kw">if</span> (u &lt;= n) {
+            <span class="kw">if</span> (up[u] == 0) {
+                up[u] = ++cntt;
+                root[u] = cntt;
+            }
+            <span class="kw">int</span> cur = up[u];
+            <span class="kw">int</span> nxt = ++cntt;
+            <span class="kw">if</span> (op == 0) {
+                ls[cur] = nxt;
+                lmax[cur] = dis1[u] + path;
+            } <span class="kw">else</span> {
+                rs[cur] = nxt;
+                rmax[cur] = dis1[u] + path;
+            }
+            up[u] = nxt;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head1[u]; e &gt; 0; e = next1[e]) {
+            <span class="kw">int</span> v = to1[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[e &gt;&gt; 1]) {
+                dfs(v, u, path + weight1[e], op);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">solve</span>(<span class="kw">int</span> u) {
+        <span class="kw">int</span> edge = getCentroidEdge(u, 0);
+        <span class="kw">if</span> (edge &gt; 0) {
+            vis[edge &gt;&gt; 1] = <span class="kw">true</span>;
+            <span class="kw">int</span> v1 = to1[edge];
+            <span class="kw">int</span> v2 = to1[edge ^ 1];
+            dfs(v1, 0, 0, 0);
+            dfs(v2, 0, weight1[edge], 1);
+            solve(v1);
+            solve(v2);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">mergeTree</span>(<span class="kw">int</span> x, <span class="kw">int</span> y, <span class="kw">ll</span> add) {
+        <span class="kw">if</span> (x == 0 || y == 0) {
+            <span class="kw">return</span> x + y;
+        }
+        ans = max(ans, max(lmax[x] + rmax[y], lmax[y] + rmax[x]) + add);
+        lmax[x] = max(lmax[x], lmax[y]);
+        rmax[x] = max(rmax[x], rmax[y]);
+        ls[x] = mergeTree(ls[x], ls[y], add);
+        rs[x] = mergeTree(rs[x], rs[y], add);
+        <span class="kw">return</span> x;
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">ll</span> dist2) {
+        ans = max(ans, (dis1[u] - dist2) * 2);
+        <span class="kw">for</span> (<span class="kw">int</span> e = head2[u]; e &gt; 0; e = next2[e]) {
+            <span class="kw">int</span> v = to2[e];
+            <span class="kw">if</span> (v != fa) {
+                compute(v, u, dist2 + weight2[e]);
+                root[u] = mergeTree(root[u], root[v], -dist2 * 2);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v, w; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v &gt;&gt; w;
+            addEdge0(u, v, w);
+            addEdge0(v, u, w);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v, w; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v &gt;&gt; w;
+            addEdge2(u, v, w);
+            addEdge2(v, u, w);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; MAXT; i++) {
+            lmax[i] = rmax[i] = -INF;
+        }
+        cntn = n;
+        cnt1 = 1;
+        ans = -INF;
+        getDist(1, 0, 0);
+        rebuild(1, 0);
+        solve(1);
+        compute(1, 0, 0);
+        cout &lt;&lt; (ans &gt;&gt; 1) &lt;&lt; '\n';
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+
+    <h2>二、题目5：通道</h2>
+    <p>三棵树 t1、t2、t3 都有 n 个点，边权非负。点对 (x, y) 要求两点不同，在树上的距离记 dis1(x,y)、dis2(x,y)、dis3(x,y)，打印三者之和的最大值。2 ≤ n ≤ 10⁵，边权到 10¹²。</p>
+    <p>三棵树各出一件事：t1 建边分树并三度化；t2 决定合并的顺序和修正量；t3 提供两点距离，用 dfn 序加倍增表求 LCA，就是前面「dfn 序求 LCA」那页的做法。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 640 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="三棵树的分工" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="11" text-anchor="middle">
+          <rect x="30" y="40" width="170" height="120" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+          <text x="115" y="68" fill="#1f2328" font-size="12">t1：建边分树</text>
+          <text x="115" y="92" fill="#6b7280">三度化 + 每层重心边</text>
+          <text x="115" y="110" fill="#6b7280">每侧存「最优点对」</text>
+          <text x="115" y="128" fill="#6b7280">值 = path1 + dep2</text>
+          <text x="115" y="146" fill="#6b7280">两个端点的编号也存</text>
+          <rect x="235" y="40" width="170" height="120" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+          <text x="320" y="68" fill="#1f2328" font-size="12">t2：自底向上合并</text>
+          <text x="320" y="92" fill="#6b7280">合并在 u 进行时</text>
+          <text x="320" y="110" fill="#6b7280">跨向组合更新答案</text>
+          <text x="320" y="128" fill="#6b7280">add = −2 × dep2(u)</text>
+          <text x="320" y="146" fill="#6b7280">dep2 = 到根的距离</text>
+          <rect x="440" y="40" width="170" height="120" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1.5"/>
+          <text x="525" y="68" fill="#1f2328" font-size="12">t3：提供 dist3</text>
+          <text x="525" y="92" fill="#6b7280">dfn 序 + 倍增表求 LCA</text>
+          <text x="525" y="110" fill="#6b7280">dist3(a,c) = dep(a)+dep(c)</text>
+          <text x="525" y="128" fill="#6b7280">− 2·dep(lca3)</text>
+          <text x="525" y="146" fill="#6b7280">单次 O(1) 查询</text>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <rect x="120" y="190" width="400" height="34" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="320" y="211">ans = max( dist3(a,c) + 值(a) + 值(c) − 2·dep2(u) )，a、c 跨重心边</text>
+        </g>
+      </svg>
+      <figcaption>t1 出信息、t2 出合并顺序、t3 出两点距离，三个部分各司其职。</figcaption>
+    </figure>
+
+    <p>信息和上一题不同：每侧存的不再是一个数，而是一对点。lx、ly 是左侧最优对的两个端点，lxv 是它的值 = path1 + dep2 的和；右侧对称。为什么存「一对点」？因为 dist3(x,y) 不是一个能拆开的量，必须知道端点是谁才能查。</p>
+    <p>合并两个点集时，新的最优对不用重新枚举所有点对，靠的是树的直径那个结论：合并两个点集，新集合的最优对一定出自原来两个最优对的四个端点的两两组合。六种组合都试一遍，取最优。道理和直径合并一样，把一个端点换成最优对的端点之一，值不会变小。</p>
+
+    <div class="viz">
+      <div class="viz-title">直径结论：四个端点，六种组合</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">一条链上四个点，组合的值 = W(a) + W(b) + 两点距离。集合 A 的最优对是 (a1, b1)，集合 B 的最优对是 (a2, b2)。点「下一步」把六种组合都算一遍，看新最优对落在哪里。</p>
+      <svg id="emSvg" viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="直径结论端点组合演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>集合 A 的端点</span>
+        <span><span class="dot partial"></span>集合 B 的端点</span>
+        <span><span class="dot skip"></span>当前组合</span>
+      </div>
+      <div class="breakdown" id="emInfo"></div>
+      <div class="viz-controls">
+        <button class="etm-btn" id="emPrev" type="button">上一步</button>
+        <button class="etm-btn" id="emNext" type="button">下一步</button>
+        <button class="etm-btn" id="emReset" type="button">重置</button>
+      </div>
+    </div>
+
+    <p>合并到边分树的同一个节点时，只有「左配右、右配左」两种跨向组合跨越当前重心边，直接更新答案；同侧的组合不跨这条边，它们会在更深层自己的分离边上被枚举，这里不用管。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 640 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="跨向组合的枚举" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="11" text-anchor="middle">
+          <rect x="120" y="30" width="120" height="34" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+          <text x="180" y="51" fill="#1f2328">i 树的节点</text>
+          <rect x="400" y="30" width="120" height="34" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+          <text x="460" y="51" fill="#1f2328">j 树的节点</text>
+          <text x="180" y="90" fill="#2563eb">左侧</text>
+          <text x="180" y="160" fill="#2563eb">右侧</text>
+          <text x="460" y="90" fill="#ea580c">左侧</text>
+          <text x="460" y="160" fill="#ea580c">右侧</text>
+          <path d="M 195 82 C 240 110, 380 130, 445 86" stroke="#ea580c" stroke-width="2.4" fill="none"/>
+          <path d="M 445 154 C 380 185, 240 190, 195 152" stroke="#ea580c" stroke-width="2.4" fill="none"/>
+          <text x="320" y="118" fill="#ea580c">i 左 × j 右</text>
+          <text x="320" y="185" fill="#ea580c">j 左 × i 右</text>
+          <text x="180" y="205" fill="#6b7280">同侧组合不跨边</text>
+          <text x="460" y="205" fill="#6b7280">下沉到孩子再枚举</text>
+          <text x="320" y="222" fill="#1f2328">两种跨向各查一次最优端点组合，就是这一层全部的跨边点对</text>
+        </g>
+        <g stroke="#c9ced4" stroke-width="1.4" fill="none">
+          <line x1="180" y1="64" x2="180" y2="78"/>
+          <line x1="180" y1="96" x2="180" y2="146"/>
+          <line x1="460" y1="64" x2="460" y2="78"/>
+          <line x1="460" y1="96" x2="460" y2="146"/>
+        </g>
+      </svg>
+      <figcaption>合并只枚举跨向组合：它们跨过当前重心边，正是答案要的位置；同侧组合留给更深的层。</figcaption>
+    </figure>
+
+    <p>还有一个省事的地方：点对的六种组合里允许暂时存下 (u, u) 这样的退化对，它单独算值时按 0 处理，不会真的参与竞争；真正的组合都在不同子树之间，端点不会重合。</p>
+    <p>完整代码如下。</p>
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">using</span> <span class="kw">ll</span> = <span class="kw">long</span> <span class="kw">long</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = MAXN &lt;&lt; 1;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 20;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = MAXN * 20;
+    <span class="kw">const</span> <span class="kw">ll</span> INF = 1LL &lt;&lt; 60;
+    <span class="kw">int</span> n, cntn;
+
+    <span class="kw">int</span> head0[MAXN];
+    <span class="kw">int</span> next0[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to0[MAXN &lt;&lt; 1];
+    <span class="kw">ll</span> weight0[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cnt0;
+
+    <span class="kw">int</span> head1[MAXM];
+    <span class="kw">int</span> next1[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to1[MAXM &lt;&lt; 1];
+    <span class="kw">ll</span> weight1[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cnt1;
+
+    <span class="kw">int</span> head2[MAXN];
+    <span class="kw">int</span> next2[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to2[MAXN &lt;&lt; 1];
+    <span class="kw">ll</span> weight2[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cnt2;
+
+    <span class="kw">int</span> head3[MAXN];
+    <span class="kw">int</span> next3[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to3[MAXN &lt;&lt; 1];
+    <span class="kw">ll</span> weight3[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cnt3;
+
+    <span class="kw">ll</span> dep2[MAXN];
+    <span class="kw">ll</span> dist3[MAXN];
+
+    <span class="kw">bool</span> vis[MAXM];
+    <span class="kw">int</span> siz[MAXM];
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> lg2[MAXN];
+    <span class="kw">int</span> rmq[MAXN][MAXP];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> up[MAXN];
+    <span class="kw">int</span> root[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> lx[MAXT];
+    <span class="kw">int</span> ly[MAXT];
+    <span class="kw">ll</span> lxv[MAXT];
+    <span class="kw">ll</span> lyv[MAXT];
+    <span class="kw">int</span> rx[MAXT];
+    <span class="kw">int</span> ry[MAXT];
+    <span class="kw">ll</span> rxv[MAXT];
+    <span class="kw">ll</span> ryv[MAXT];
+    <span class="kw">int</span> cntt;
+
+    <span class="kw">ll</span> ans;
+
+    <span class="kw">void</span> <span class="fn">addEdge0</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">ll</span> w) {
+        next0[++cnt0] = head0[u];
+        to0[cnt0] = v;
+        weight0[cnt0] = w;
+        head0[u] = cnt0;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge1</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">ll</span> w) {
+        next1[++cnt1] = head1[u];
+        to1[cnt1] = v;
+        weight1[cnt1] = w;
+        head1[u] = cnt1;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge2</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">ll</span> w) {
+        next2[++cnt2] = head2[u];
+        to2[cnt2] = v;
+        weight2[cnt2] = w;
+        head2[u] = cnt2;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge3</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">ll</span> w) {
+        next3[++cnt3] = head3[u];
+        to3[cnt3] = v;
+        weight3[cnt3] = w;
+        head3[u] = cnt3;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfsTree2</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">ll</span> dep) {
+        dep2[u] = dep;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head2[u]; e &gt; 0; e = next2[e]) {
+            <span class="kw">int</span> v = to2[e];
+            <span class="kw">if</span> (v != fa) {
+                dfsTree2(v, u, dep + weight2[e]);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">rebuildTree1</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        <span class="kw">int</span> last = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head0[u]; e &gt; 0; e = next0[e]) {
+            <span class="kw">int</span> v = to0[e];
+            <span class="kw">ll</span> w = weight0[e];
+            <span class="kw">if</span> (v != fa) {
+                <span class="kw">if</span> (last == 0) {
+                    last = u;
+                    addEdge1(u, v, w);
+                    addEdge1(v, u, w);
+                } <span class="kw">else</span> {
+                    <span class="kw">int</span> add = ++cntn;
+                    addEdge1(last, add, 0);
+                    addEdge1(add, last, 0);
+                    addEdge1(add, v, w);
+                    addEdge1(v, add, w);
+                    last = add;
+                }
+                rebuildTree1(v, u);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">getSize</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head1[u]; e &gt; 0; e = next1[e]) {
+            <span class="kw">int</span> v = to1[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[e &gt;&gt; 1]) {
+                getSize(v, u);
+                siz[u] += siz[v];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getCentroidEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        getSize(u, fa);
+        <span class="kw">int</span> total = siz[u];
+        <span class="kw">int</span> half = total &gt;&gt; 1;
+        <span class="kw">bool</span> find = <span class="kw">false</span>;
+        <span class="kw">while</span> (!find) {
+            find = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> e = head1[u]; e &gt; 0; e = next1[e]) {
+                <span class="kw">int</span> v = to1[e];
+                <span class="kw">if</span> (v != fa &amp;&amp; !vis[e &gt;&gt; 1] &amp;&amp; siz[v] &gt; half) {
+                    fa = u;
+                    u = v;
+                    find = <span class="kw">false</span>;
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+        <span class="kw">int</span> best = 0, edge = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head1[u]; e &gt; 0; e = next1[e]) {
+            <span class="kw">if</span> (!vis[e &gt;&gt; 1]) {
+                <span class="kw">int</span> v = to1[e];
+                <span class="kw">int</span> sub = (v == fa ? (total - siz[u]) : siz[v]);
+                <span class="kw">if</span> (sub &gt; best) {
+                    best = sub;
+                    edge = e;
+                }
+            }
+        }
+        <span class="kw">return</span> edge;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfsTree1</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">ll</span> path, <span class="kw">int</span> op) {
+        <span class="kw">if</span> (u &lt;= n) {
+            <span class="kw">if</span> (up[u] == 0) {
+                up[u] = ++cntt;
+                root[u] = cntt;
+            }
+            <span class="kw">int</span> cur = up[u];
+            <span class="kw">int</span> nxt = ++cntt;
+            <span class="kw">ll</span> val = path + dep2[u];
+            <span class="kw">if</span> (op == 0) {
+                ls[cur] = nxt;
+                lx[cur] = ly[cur] = u;
+                lxv[cur] = lyv[cur] = val;
+            } <span class="kw">else</span> {
+                rs[cur] = nxt;
+                rx[cur] = ry[cur] = u;
+                rxv[cur] = ryv[cur] = val;
+            }
+            up[u] = nxt;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head1[u]; e &gt; 0; e = next1[e]) {
+            <span class="kw">int</span> v = to1[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[e &gt;&gt; 1]) {
+                dfsTree1(v, u, path + weight1[e], op);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">solveTree1</span>(<span class="kw">int</span> u) {
+        <span class="kw">int</span> edge = getCentroidEdge(u, 0);
+        <span class="kw">if</span> (edge &gt; 0) {
+            vis[edge &gt;&gt; 1] = <span class="kw">true</span>;
+            <span class="kw">int</span> v1 = to1[edge];
+            <span class="kw">int</span> v2 = to1[edge ^ 1];
+            dfsTree1(v1, 0, 0, 0);
+            dfsTree1(v2, 0, weight1[edge], 1);
+            solveTree1(v1);
+            solveTree1(v2);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getUp</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">return</span> dfn[x] &lt; dfn[y] ? x : y;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfsTree3</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">ll</span> dist) {
+        dfn[u] = ++cntd;
+        rmq[dfn[u]][0] = fa;
+        dist3[u] = dist;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head3[u]; e &gt; 0; e = next3[e]) {
+            <span class="kw">int</span> v = to3[e];
+            <span class="kw">if</span> (v != fa) {
+                dfsTree3(v, u, dist + weight3[e]);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">rmqTree3</span>() {
+        dfsTree3(1, 0, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            lg2[i] = lg2[i &gt;&gt; 1] + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> pre = 0, cur = 1; cur &lt;= lg2[n]; pre++, cur++) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i + (1 &lt;&lt; cur) - 1 &lt;= n; i++) {
+                rmq[i][cur] = getUp(rmq[i][pre], rmq[i + (1 &lt;&lt; pre)][pre]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">lcaTree3</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">if</span> (x == y) {
+            <span class="kw">return</span> x;
+        }
+        x = dfn[x];
+        y = dfn[y];
+        <span class="kw">if</span> (x &gt; y) {
+            swap(x, y);
+        }
+        x++;
+        <span class="kw">int</span> k = lg2[y - x + 1];
+        <span class="kw">return</span> getUp(rmq[x][k], rmq[y - (1 &lt;&lt; k) + 1][k]);
+    }
+
+    <span class="kw">ll</span> <span class="fn">getDist3</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">int</span> l = lcaTree3(x, y);
+        <span class="kw">return</span> dist3[x] + dist3[y] - dist3[l] * 2;
+    }
+
+    <span class="kw">ll</span> <span class="fn">getDist</span>(<span class="kw">int</span> x, <span class="kw">int</span> y, <span class="kw">ll</span> xv, <span class="kw">ll</span> yv) {
+        <span class="kw">if</span> (x == y) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">return</span> getDist3(x, y) + xv + yv;
+    }
+
+    <span class="kw">int</span> a, b, c, d;
+    <span class="kw">ll</span> av, bv, cv, dv;
+
+    <span class="kw">void</span> <span class="fn">getInfo</span>(<span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> iop, <span class="kw">int</span> jop) {
+        <span class="kw">if</span> (iop == 0) {
+            a = lx[i]; b = ly[i]; av = lxv[i]; bv = lyv[i];
+        } <span class="kw">else</span> {
+            a = rx[i]; b = ry[i]; av = rxv[i]; bv = ryv[i];
+        }
+        <span class="kw">if</span> (jop == 0) {
+            c = lx[j]; d = ly[j]; cv = lxv[j]; dv = lyv[j];
+        } <span class="kw">else</span> {
+            c = rx[j]; d = ry[j]; cv = rxv[j]; dv = ryv[j];
+        }
+    }
+
+    <span class="kw">ll</span> <span class="fn">bestCross</span>(<span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> iop, <span class="kw">int</span> jop) {
+        getInfo(i, j, iop, jop);
+        <span class="kw">ll</span> p1 = getDist(a, c, av, cv);
+        <span class="kw">ll</span> p2 = getDist(a, d, av, dv);
+        <span class="kw">ll</span> p3 = getDist(b, c, bv, cv);
+        <span class="kw">ll</span> p4 = getDist(b, d, bv, dv);
+        <span class="kw">return</span> max(max(p1, p2), max(p3, p4));
+    }
+
+    <span class="kw">int</span> x, y;
+    <span class="kw">ll</span> xv, yv;
+    <span class="kw">ll</span> bestDist;
+
+    <span class="kw">void</span> <span class="fn">better</span>(<span class="kw">int</span> curx, <span class="kw">int</span> cury, <span class="kw">ll</span> curxv, <span class="kw">ll</span> curyv) {
+        <span class="kw">if</span> (curx == 0 || cury == 0) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">ll</span> curDist = getDist(curx, cury, curxv, curyv);
+        <span class="kw">if</span> (curDist &gt; bestDist) {
+            x = curx; y = cury; xv = curxv; yv = curyv;
+            bestDist = curDist;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">mergeInfo</span>(<span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> op) {
+        getInfo(i, j, op, op);
+        x = y = 0;
+        xv = yv = 0;
+        bestDist = -INF;
+        better(a, b, av, bv);
+        better(c, d, cv, dv);
+        better(a, c, av, cv);
+        better(a, d, av, dv);
+        better(b, c, bv, cv);
+        better(b, d, bv, dv);
+        <span class="kw">if</span> (op == 0) {
+            lx[i] = x; ly[i] = y; lxv[i] = xv; lyv[i] = yv;
+        } <span class="kw">else</span> {
+            rx[i] = x; ry[i] = y; rxv[i] = xv; ryv[i] = yv;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">mergeTree</span>(<span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">ll</span> add) {
+        <span class="kw">if</span> (i == 0 || j == 0) {
+            <span class="kw">return</span> i + j;
+        }
+        <span class="kw">if</span> (ls[i] &gt; 0 &amp;&amp; rs[j] &gt; 0) {
+            ans = max(ans, bestCross(i, j, 0, 1) + add);
+        }
+        <span class="kw">if</span> (rs[i] &gt; 0 &amp;&amp; ls[j] &gt; 0) {
+            ans = max(ans, bestCross(i, j, 1, 0) + add);
+        }
+        mergeInfo(i, j, 0);
+        mergeInfo(i, j, 1);
+        ls[i] = mergeTree(ls[i], ls[j], add);
+        rs[i] = mergeTree(rs[i], rs[j], add);
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        <span class="kw">for</span> (<span class="kw">int</span> e = head2[u]; e &gt; 0; e = next2[e]) {
+            <span class="kw">int</span> v = to2[e];
+            <span class="kw">if</span> (v != fa) {
+                compute(v, u);
+                root[u] = mergeTree(root[u], root[v], -dep2[u] * 2);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">int</span> u, v;
+        <span class="kw">ll</span> w;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v &gt;&gt; w;
+            addEdge0(u, v, w);
+            addEdge0(v, u, w);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v &gt;&gt; w;
+            addEdge2(u, v, w);
+            addEdge2(v, u, w);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v &gt;&gt; w;
+            addEdge3(u, v, w);
+            addEdge3(v, u, w);
+        }
+        cntn = n;
+        cnt1 = 1;
+        ans = -INF;
+        dfsTree2(1, 0, 0);
+        rebuildTree1(1, 0);
+        solveTree1(1);
+        rmqTree3();
+        compute(1, 0);
+        cout &lt;&lt; ans &lt;&lt; '\n';
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+
+    <h2>三、复杂度分析</h2>
+    <p>两道题的主导都是信息树节点的总数，每层每个点一个节点，一共 n log n 个。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>三度化与建边分树（t1）</td><td><code class="inline">O(n log n)</code></td><td rowspan="5"><code class="inline">O(n log n)</code>（信息树节点，题 4 开 27n、题 5 开 20n）</td></tr>
+        <tr><td>题目 4：沿 t2 合并</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>题目 5：dfn 序 + 倍增表（t3）</td><td><code class="inline">O(n log n)</code> 预处理，单查 <code class="inline">O(1)</code></td></tr>
+        <tr><td>题目 5：沿 t2 合并（每节点常数次组合）</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>两题总计</td><td><code class="inline">O(n log n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>直径结论把每侧的信息压成 O(1)，合并只花常数；没有它，每侧要维护的点对会是平方级。</p>
+
+    <h2>四、最后</h2>
+    <p>边分树的合并把「分治时统计答案」变成了「数据结构上拼信息」：跨重心边的点对在合并的节点上被枚举，同侧的往下沉。两棵树、三棵树的距离题都吃这一套。</p>
+    <p>下一讲换欧拉路径，从树回到一般的图：研究怎么把每条边恰好走一遍。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var svg = document.getElementById('emSvg');
+  var info = document.getElementById('emInfo');
+  var prev = document.getElementById('emPrev');
+  var next = document.getElementById('emNext');
+  var reset = document.getElementById('emReset');
+
+  var PTS = {
+    a1:{x:100,y:80,w:2}, b1:{x:250,y:80,w:1}, a2:{x:400,y:80,w:1}, b2:{x:550,y:80,w:2}
+  };
+  var D = {
+    'a1,b1':3, 'a1,a2':4, 'a1,b2':7, 'a2,b1':1, 'b1,b2':4, 'a2,b2':3
+  };
+  function dist(x,y){
+    var k = [x,y].sort().join(',');
+    return D[k];
+  }
+
+  var COMBOS = [
+    {p:'a1', q:'b1', note:'A 自己的最优对'},
+    {p:'a2', q:'b2', note:'B 自己的最优对'},
+    {p:'a1', q:'a2', note:'跨集合组合'},
+    {p:'a1', q:'b2', note:'跨集合组合'},
+    {p:'b1', q:'a2', note:'跨集合组合'},
+    {p:'b1', q:'b2', note:'跨集合组合'}
+  ];
+
+  function val(c){
+    return PTS[c.p].w + PTS[c.q].w + dist(c.p, c.q);
+  }
+
+  var STEPS = [{p:null, q:null}];
+  COMBOS.forEach(function(c){ STEPS.push(c); });
+  STEPS.push({p:'a1', q:'b2', final:true});
+
+  function render(){
+    var at = window.__emAt = window.__emAt || 0;
+    var st = STEPS[at];
+    var p = [];
+    var done = COMBOS.slice(0, Math.min(Math.max(0, at), COMBOS.length));
+    var best = 0, bestIdx = -1;
+    for (var i = 0; i < done.length; i++){
+      if (val(COMBOS[i]) > best){ best = val(COMBOS[i]); bestIdx = i; }
+    }
+    p.push('<line x1="100" y1="80" x2="550" y2="80" stroke="#c9ced4" stroke-width="2"/>');
+    [[100,250,'3'],[250,400,'1'],[400,550,'3']].forEach(function(seg){
+      p.push('<text x="'+((seg[0]+seg[1])/2)+'" y="70" text-anchor="middle" fill="#6b7280">'+seg[2]+'</text>');
+    });
+    Object.keys(PTS).forEach(function(k){
+      var pt = PTS[k];
+      var inA = (k === 'a1' || k === 'b1');
+      var isCur = st.p === k || st.q === k;
+      var fill = isCur ? '#ffedd5' : (inA ? '#dbeafe' : '#ffedd5');
+      var stroke = isCur ? '#ea580c' : (inA ? '#2563eb' : '#ea580c');
+      p.push('<circle cx="'+pt.x+'" cy="'+pt.y+'" r="15" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+(isCur?2.6:1.5)+'"/>');
+      p.push('<text x="'+pt.x+'" y="'+(pt.y+4)+'" text-anchor="middle" fill="#1f2328">'+k+'</text>');
+      p.push('<text x="'+pt.x+'" y="'+(pt.y+42)+'" text-anchor="middle" fill="#6b7280">W='+pt.w+'</text>');
+    });
+    if (st.p && st.q){
+      p.push('<path d="M '+PTS[st.p].x+' 96 Q '+(PTS[st.p].x+PTS[st.q].x)/2+' 140 '+PTS[st.q].x+' 96" stroke="#ea580c" stroke-width="2.2" fill="none" stroke-dasharray="5 4"/>');
+      p.push('<text x="'+((PTS[st.p].x+PTS[st.q].x)/2)+'" y="152" text-anchor="middle" fill="#ea580c">距离 '+dist(st.p, st.q)+'</text>');
+    }
+    var rows = [];
+    var yBase = 195;
+    p.push('<text x="60" y="'+(yBase-12)+'" fill="#1f2328" font-size="12">组合</text>');
+    COMBOS.forEach(function(c, i){
+      var x = 60 + i * 90;
+      var shown = i < done.length || (st.p === c.p && st.q === c.q);
+      var v = val(c);
+      var color = (bestIdx === i || (st.final && i === 3)) ? '#ea580c' : (shown ? '#2563eb' : '#c9ced4');
+      var isCur = (st.p === c.p && st.q === c.q);
+      p.push('<rect x="'+x+'" y="'+yBase+'" width="80" height="46" rx="6" fill="'+(isCur?'#ffedd5':'#f6f7f9')+'" stroke="'+color+'" stroke-width="'+(isCur||bestIdx===i||(st.final&&i===3)?2:1)+'"/>');
+      p.push('<text x="'+(x+40)+'" y="'+(yBase+19)+'" text-anchor="middle" fill="#1f2328">('+c.p+','+c.q+')</text>');
+      if (shown){
+        p.push('<text x="'+(x+40)+'" y="'+(yBase+37)+'" text-anchor="middle" fill="'+((bestIdx===i||(st.final&&i===3))?'#ea580c':'#2563eb')+'">'+v+'</text>');
+      }
+    });
+    p.push('<text x="60" y="'+(yBase+72)+'" fill="#6b7280">值 = W(a) + W(b) + 距离(a,b)，右侧逐格点亮</text>');
+
+    svg.innerHTML = p.join('');
+    var msg;
+    if (at === 0){
+      msg = '集合 A 的最优对是 (a1, b1)，集合 B 的最优对是 (a2, b2)。直径结论说：合并后最优对在这四个端点的两两组合里。';
+    } else if (st.final){
+      msg = '六种组合里最大的是 (a1, b2) = 11，一个跨集合的组合。新集合的最优对就存它，端点仍出自原来的四个。';
+    } else {
+      var c = COMBOS[at - 1];
+      msg = '('+c.p+', '+c.q+')：'+PTS[c.p].w+' + '+PTS[c.q].w+' + '+dist(c.p, c.q)+' = '+val(c)+'。'+c.note+'。';
+      if (bestIdx >= 0){
+        msg += ' 当前最大 ' + best + '。';
+      }
+    }
+    info.innerHTML = '<div><strong>'+(st.final ? '结论' : (at === 0 ? '初始' : '组合 ' + at + ' / 6'))+'</strong><span>：</span></div><div>'+msg+'</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if (window.__emAt > 0){ window.__emAt--; render(); } });
+  next.addEventListener('click', function(){ if (window.__emAt < STEPS.length - 1){ window.__emAt++; render(); } });
+  reset.addEventListener('click', function(){ window.__emAt = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

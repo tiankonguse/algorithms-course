@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>莫队 + 前缀差分 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.mp-cell{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+  font-size:14px;font-variant-numeric:tabular-nums;
+}
+.mp-cell.on1{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.mp-cell.on2{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+.mp-cell.both{background:#fde9d9;border-color:#c2410c;color:#c2410c;font-weight:600;}
+.mp-cell.win{background:var(--accent-soft);border-color:var(--accent);font-weight:600;}
+.mp-label{font-size:11px;color:var(--text-dim);font-variant-numeric:tabular-nums;}
+.mp-row{display:flex;gap:6px;align-items:center;margin-bottom:6px;}
+.mp-tag{width:104px;font-size:13px;color:var(--text-dim);flex:0 0 auto;text-align:right;padding-right:8px;}
+.mp-tasks{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px;}
+.mp-task{border:1px solid var(--border);border-radius:14px;padding:2px 10px;font-size:12px;color:var(--text-dim);font-variant-numeric:tabular-nums;}
+.mp-task.now{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;}
+.mp-task.done{background:var(--bg-soft);}
+.viz-controls button{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 14px;
+  font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+}
+.viz-controls button:hover{border-color:var(--accent);color:var(--accent);}
+.viz-controls button:disabled{opacity:.4;cursor:default;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>莫队 + 前缀差分</h1>
+    <p class="intro">两道题的答案都不是「窗口里有什么」，而是「窗口里的元素两两配成多少对」。把区间拆成两个前缀之差，莫队维护的对象就从元素换成前缀状态。</p>
+
+    <h2>零、背景</h2>
+    <p>上一节把左指针的移动也离线掉，省下的是扫描。这一节回到窗口本身，问的是另一件事：窗口里到底该维护什么。</p>
+    <p>莫队只要求两件事：查询能离线、窗口能 O(1) 增删。至于窗口里维护的是什么，没有限制。</p>
+    <p>有一类题不一样：单个元素自己说不出答案，答案藏在元素的配对关系里。这类题常用前缀差分处理，把区间上的量写成两个前缀的差，于是窗口从原数组挪到前缀数组上，增删的还是单个元素。</p>
+    <p>下面两题一个字符串、一个数组，做法不同，思路是同一个。</p>
+
+    <h2>一、美好的每一天</h2>
+    <p>给定一个长度为 n 的字符串 str，只含小写字母。一个子串重排之后能成为回文串，就叫达标子串。m 条查询，每条给 l r，打印 str[l..r] 上有多少个达标子串。</p>
+    <p>1 ≤ n、m ≤ 6×10⁴。测试链接：<a href="https://www.luogu.com.cn/problem/P3604" target="_blank" rel="noopener">P3604</a></p>
+
+    <h2>二、朴素做法</h2>
+    <p>枚举 str[l..r] 的每个子串，数一遍各字符的奇偶，统计至多一个奇数的有多少个。子串 O(n²) 个，每个还要数一遍，单次查询就到 O(n²) 或 O(26n²)，m 次完全跑不动。</p>
+    <p>换个角度看这个条件。重排之后能成为回文串，等价于「至多一个字符出现奇数次」。</p>
+    <p>用 26 位二进制记一个集合里各字符的奇偶：第 i 位是 1 表示第 i 个字符出现了奇数次。记 pref[i] 是 str[1..i] 的这个状态，pref[0] = 0。</p>
+    <p>那么子串 str[l..r] 的奇偶状态就是 pref[r] ^ pref[l-1]。它达标，当且仅当这个异或值里至多有一个 1 位，也就是两个前缀状态相等、或者只差一个字符。</p>
+    <p>于是查询 [l, r] 换了个说法：在状态数组 pref[0..n] 的区间 [l-1, r] 里，有多少对下标 (i, j)、i &lt; j，满足 pref[i] 与 pref[j] 相等或只差一位。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>子串对应两个前缀状态：str[1..3] 的两端是 p0 与 p3，异或只有一个 1 位，达标</figcaption>
+    </figure>
+
+    <h2>三、窗口挪到状态数组上</h2>
+    <p>问题变成了「状态数组的区间 [l-1, r] 上有多少达标对」，这正是莫队能处理的形式：窗口在 pref 数组上滑动，每次只增删一个状态。</p>
+    <p>加入状态 s 时，它和窗口里已有的每个状态都要配一次。达标的只有两类：和它相等的，以及和它差一位的（26 种）。所以新增的对数是 cnt[s] 加上 26 个 cnt[s ^ (1&lt;&lt;i)]。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> s) {
+    curAns += cnt[s];                        <span class="cm">// 和已有状态相等的</span>
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 26; i++) {
+        curAns += cnt[s ^ (1 &lt;&lt; i)];        <span class="cm">// 和已有状态只差一位的</span>
+    }
+    cnt[s]++;
+}
+<span class="kw">void</span> <span class="fn">del</span>(<span class="kw">int</span> s) {
+    cnt[s]--;
+    curAns -= cnt[s];
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 26; i++) {
+        curAns -= cnt[s ^ (1 &lt;&lt; i)];
+    }
+}</pre>
+    <p>删除是加入的逆过程，注意先减 cnt 再算贡献，顺序反了会把自己也算进配对里。</p>
+    <p>剩下的是下标对齐。状态的编号比字符多一个，代码里把 pref 整体后移一位，让 pref[i] 落在下标 i+1 上；查询的右端点跟着加一，l 不动。写进代码就是 prepare 里那几行。</p>
+    <p>点「下一步」，看窗口在状态数组上怎么走。字符串取 abacbcac，四条查询依次是 [1,3]、[2,5]、[1,8]、[4,7]。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　美好的每一天：窗口在 9 个前缀状态上滑动（块大小 3）</div>
+      <div id="p1svg"></div>
+      <div class="breakdown" id="p1bd"></div>
+      <div class="viz-controls">
+        <button id="p1auto">自动播放</button>
+        <button id="p1step">下一步</button>
+        <button id="p1reset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot" style="background:var(--accent-soft);border-color:var(--accent);"></span>当前状态窗口</span>
+        <span><span class="dot full"></span>已在窗口内的状态</span>
+      </div>
+    </div>
+
+    <h2>四、题目1 代码</h2>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Query {
+        <span class="kw">int</span> l, r, id;
+    };
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 60002;
+    <span class="kw">const</span> <span class="kw">int</span> MAXV = 1 &lt;&lt; 26;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+    Query query[MAXN];
+
+    <span class="kw">int</span> bi[MAXN];
+    <span class="kw">int</span> cnt[MAXV];
+    <span class="kw">long</span> <span class="kw">long</span> curAns = 0;
+    <span class="kw">long</span> <span class="kw">long</span> ans[MAXN];
+
+    <span class="kw">bool</span> <span class="fn">QueryCmp</span>(Query &amp;a, Query &amp;b) {
+        <span class="kw">if</span> (bi[a.l] != bi[b.l]) {
+            <span class="kw">return</span> bi[a.l] &lt; bi[b.l];
+        }
+        <span class="kw">if</span> (bi[a.l] &amp; 1) {
+            <span class="kw">return</span> a.r &lt; b.r;
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> a.r &gt; b.r;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> s) {
+        curAns += cnt[s];
+        cnt[s]++;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 26; i++) {
+            curAns += cnt[s ^ (1 &lt;&lt; i)];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">del</span>(<span class="kw">int</span> s) {
+        cnt[s]--;
+        curAns -= cnt[s];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 26; i++) {
+            curAns -= cnt[s ^ (1 &lt;&lt; i)];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>() {
+        <span class="kw">int</span> winl = 1, winr = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> jobl = query[i].l;
+            <span class="kw">int</span> jobr = query[i].r;
+            <span class="kw">int</span> id = query[i].id;
+            <span class="kw">while</span> (winl &gt; jobl) {
+                add(arr[--winl]);
+            }
+            <span class="kw">while</span> (winr &lt; jobr) {
+                add(arr[++winr]);
+            }
+            <span class="kw">while</span> (winl &lt; jobl) {
+                del(arr[winl++]);
+            }
+            <span class="kw">while</span> (winr &gt; jobr) {
+                del(arr[winr--]);
+            }
+            ans[id] = curAns;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            arr[i] ^= arr[i - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = n; i &gt;= 0; i--) {
+            arr[i + 1] = arr[i];
+        }
+        n++;
+        <span class="kw">int</span> blen = (<span class="kw">int</span>)sqrt(n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            query[i].r++;
+        }
+        sort(query + 1, query + m + 1, QueryCmp);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">char</span> c;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; c;
+            arr[i] = 1 &lt;&lt; (c - 'a');
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; query[i].l &gt;&gt; query[i].r;
+            query[i].id = i;
+        }
+        prepare();
+        compute();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>五、简单的询问</h2>
+    <p>给定一个长度为 n 的数组 arr，下标从 1 到 n。get(l, r, x) 表示 arr[l..r] 上 x 出现了几次。q 条查询，每条给 l1 r1 l2 r2，打印 Σ<sub>x</sub> get(l1, r1, x) × get(l2, r2, x)。</p>
+    <p>1 ≤ n、q ≤ 5×10⁴，1 ≤ arr[i] ≤ n。测试链接：<a href="https://www.luogu.com.cn/problem/P5268" target="_blank" rel="noopener">P5268</a></p>
+    <p>朴素做法是把两个区间各数一遍再对乘，单次 O(n)。</p>
+    <p>这里的量也藏在配对里：答案是两个区间的「计数向量」做内积。把 get 写成前缀之差，get(l, r, x) = P(r, x) − P(l-1, x)，两个差相乘展开成四项。</p>
+    <p>于是每条查询拆成四个子任务，每个子任务问的是「arr[1..a] 和 arr[1..b] 两个前缀的计数向量内积是多少」，带符号累加。</p>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>一条查询拆成四个前缀对，左上与右下取正、右上与左下取负</figcaption>
+    </figure>
+
+    <h2>六、莫队的状态换成两个前缀长度</h2>
+    <p>子任务的参数不是区间 (l, r)，而是两个前缀的长度 (siz1, siz2)。莫队照样能跑：维护 cnt1、cnt2 两个计数数组，以及 curAns = Σ<sub>x</sub> cnt1[x] × cnt2[x]。</p>
+    <p>把 siz1 加一，就是往第一个前缀里添一个数 v，内积只增加 cnt2[v]；siz2 加一同理，只增加 cnt1[v]。删的时候先减再算，方向相反。</p>
+    <pre class="code"><span class="kw">while</span> (win1 &lt; job1) {          <span class="cm">// 第一个前缀变长</span>
+    win1++;
+    cnt1[arr[win1]]++;
+    curAns += cnt2[arr[win1]];
+}
+<span class="kw">while</span> (win1 &gt; job1) {          <span class="cm">// 第一个前缀变短</span>
+    cnt1[arr[win1]]--;
+    curAns -= cnt2[arr[win1]];
+    win1--;
+}</pre>
+    <p>排序规则不变，第一关键字换成 siz1 所在块。这里还有个小动作：如果 siz1 &gt; siz2 就交换，让所有子任务的 siz1 都不超过 siz2，指针的摆动范围小一半。</p>
+    <p>下面是 arr = [1, 2, 1, 3, 2] 的三条查询，拆成 12 个子任务后按块排序依次处理。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　简单的询问：两个前缀指针交替移动</div>
+      <div id="p2svg"></div>
+      <div class="mp-tasks" id="p2tasks"></div>
+      <div class="breakdown" id="p2bd"></div>
+      <div class="viz-controls">
+        <button id="p2auto">自动播放</button>
+        <button id="p2step">下一步</button>
+        <button id="p2reset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot" style="background:var(--full-bg);border-color:var(--full);"></span>前缀 1：arr[1..siz1]</span>
+        <span><span class="dot" style="background:var(--partial-bg);border-color:var(--partial);"></span>前缀 2：arr[1..siz2]</span>
+      </div>
+    </div>
+
+    <h2>七、题目2 代码</h2>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Query {
+        <span class="kw">int</span> siz1, siz2, op, id;
+    };
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 50001;
+    <span class="kw">int</span> n, q, cntq;
+    <span class="kw">int</span> arr[MAXN];
+    Query query[MAXN &lt;&lt; 2];
+    <span class="kw">int</span> bi[MAXN];
+
+    <span class="kw">int</span> cnt1[MAXN];
+    <span class="kw">int</span> cnt2[MAXN];
+    <span class="kw">long</span> <span class="kw">long</span> curAns = 0;
+    <span class="kw">long</span> <span class="kw">long</span> ans[MAXN];
+
+    <span class="kw">bool</span> <span class="fn">QueryCmp</span>(Query &amp;a, Query &amp;b) {
+        <span class="kw">if</span> (bi[a.siz1] != bi[b.siz1]) {
+            <span class="kw">return</span> bi[a.siz1] &lt; bi[b.siz1];
+        }
+        <span class="kw">if</span> (bi[a.siz1] &amp; 1) {
+            <span class="kw">return</span> a.siz2 &lt; b.siz2;
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> a.siz2 &gt; b.siz2;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">addQuery</span>(<span class="kw">int</span> siz1, <span class="kw">int</span> siz2, <span class="kw">int</span> op, <span class="kw">int</span> id) {
+        query[++cntq].siz1 = siz1;
+        query[cntq].siz2 = siz2;
+        query[cntq].op = op;
+        query[cntq].id = id;
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>() {
+        <span class="kw">int</span> win1 = 0, win2 = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntq; i++) {
+            <span class="kw">int</span> job1 = query[i].siz1;
+            <span class="kw">int</span> job2 = query[i].siz2;
+            <span class="kw">int</span> op = query[i].op;
+            <span class="kw">int</span> id = query[i].id;
+            <span class="kw">while</span> (win1 &lt; job1) {
+                win1++;
+                cnt1[arr[win1]]++;
+                curAns += cnt2[arr[win1]];
+            }
+            <span class="kw">while</span> (win1 &gt; job1) {
+                cnt1[arr[win1]]--;
+                curAns -= cnt2[arr[win1]];
+                win1--;
+            }
+            <span class="kw">while</span> (win2 &lt; job2) {
+                win2++;
+                cnt2[arr[win2]]++;
+                curAns += cnt1[arr[win2]];
+            }
+            <span class="kw">while</span> (win2 &gt; job2) {
+                cnt2[arr[win2]]--;
+                curAns -= cnt1[arr[win2]];
+                win2--;
+            }
+            ans[id] += curAns * op;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">int</span> blen = (<span class="kw">int</span>)sqrt(n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntq; i++) {
+            <span class="kw">if</span> (query[i].siz1 &gt; query[i].siz2) {
+                swap(query[i].siz1, query[i].siz2);
+            }
+        }
+        sort(query + 1, query + cntq + 1, QueryCmp);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        cin &gt;&gt; q;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, l1, r1, l2, r2; i &lt;= q; i++) {
+            cin &gt;&gt; l1 &gt;&gt; r1 &gt;&gt; l2 &gt;&gt; r2;
+            addQuery(r1, r2, 1, i);
+            addQuery(r1, l2 - 1, -1, i);
+            addQuery(l1 - 1, r2, -1, i);
+            addQuery(l1 - 1, l2 - 1, 1, i);
+        }
+        prepare();
+        compute();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>八、复杂度分析</h2>
+    <p>两题的骨架都是莫队，区别只在一次增删的代价。</p>
+    <p>题目1：状态数组长 n+1，窗口增删一次要扫 26 个字母，O(26) 视作常数。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>预处理前缀状态</td><td><code class="inline">O(26n)</code></td></tr>
+        <tr><td>查询排序</td><td><code class="inline">O(m log m)</code></td></tr>
+        <tr><td>窗口增删一步（<code class="inline">add</code> / <code class="inline">del</code>）</td><td><code class="inline">O(26)</code></td></tr>
+        <tr><td>指针总移动</td><td><code class="inline">O((n + m)√n)</code></td></tr>
+        <tr><td>全部 m 次查询</td><td><code class="inline">O(26(n + m)√n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间上要开一个大小 2²⁶ 的计数数组，因为状态就是 26 位二进制，这是这题最占地方的部分，约 2²⁶ × 4 字节；查询数组 O(m)。</p>
+    <p>题目2：一次查询拆成四个子任务，子任务数变成 4q，窗口增删是 O(1)。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>每条查询拆子任务</td><td><code class="inline">O(1)</code>，共 <code class="inline">4q</code> 个</td></tr>
+        <tr><td>子任务排序</td><td><code class="inline">O(q log q)</code></td></tr>
+        <tr><td>窗口增删一步</td><td><code class="inline">O(1)</code></td></tr>
+        <tr><td>指针总移动</td><td><code class="inline">O((n + q)√n)</code></td></tr>
+        <tr><td>全部 q 次查询</td><td><code class="inline">O((n + q)√n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间上是两个计数数组 cnt1、cnt2（值域 n）和 4q 个子任务，O(n + q)。</p>
+
+    <h2>九、最后</h2>
+    <p>两题做的事同一件：把「区间内的配对关系」翻译成「两个前缀之差」，然后让莫队在前缀数组上滑。</p>
+    <p>题目2 走得更远一点，它的窗口状态干脆不是区间而是两个前缀长度，说明莫队的窗口只是一个二维点，横纵两轴放什么由题目决定。</p>
+    <p>下一题换个方向：区间上的信息不再是数，而是字符串，得先把串压成一个整数才能放进计数数组。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  /* ================= 题1：美好的每一天 ================= */
+  const S = 'abacbcac';
+  const N = S.length;
+  const pref = [0];
+  for (let i = 0; i < N; i++) pref.push(pref[pref.length - 1] ^ (1 << (S.charCodeAt(i) - 97)));
+  const M = pref.length;
+
+  function setStr(mask){
+    let t = '';
+    for (let i = 0; i < 26; i++) if ((mask >> i) & 1) t += String.fromCharCode(97 + i);
+    return t || '∅';
+  }
+
+  const QS = [[1,3],[2,5],[1,8],[4,7]];
+  const jobs = QS.map(function(q, i){ return { a:q[0]-1, b:q[1], l:q[0], r:q[1], id:i }; });
+  const BLEN = 3;
+  const blockOf = a => Math.floor(a / BLEN) + 1;
+  const order = jobs.map(function(_, i){ return i; }).sort(function(x, y){
+    const bx = blockOf(jobs[x].a), by = blockOf(jobs[y].a);
+    if (bx !== by) return bx - by;
+    return (bx & 1) ? jobs[x].b - jobs[y].b : jobs[y].b - jobs[x].b;
+  });
+
+  let curL = 0, curR = -1, qi = 0, curAns = 0, moves = 0, lastOp = '';
+  const cnt = Object.create(null);
+  const ans1 = new Array(jobs.length), done1 = new Array(jobs.length).fill(false);
+
+  function contrib(s){
+    let c = cnt[s] || 0;
+    for (let i = 0; i < 26; i++) c += (cnt[s ^ (1 << i)] || 0);
+    return c;
+  }
+  function addState(s){ const d = contrib(s); curAns += d; cnt[s] = (cnt[s] || 0) + 1; return d; }
+  function delState(s){ cnt[s]--; const d = contrib(s); curAns -= d; return d; }
+
+  const svg1 = document.getElementById('p1svg');
+  const bd1 = document.getElementById('p1bd');
+  const bStep1 = document.getElementById('p1step');
+  const bAuto1 = document.getElementById('p1auto');
+  const bReset1 = document.getElementById('p1reset');
+
+  function render1(){
+    const cx = i => 88 + 56 * i;
+    const bx = j => 96 + 56 * j;
+    let s = '<svg viewBox="0 0 600 176" role="img" aria-label="前缀状态窗口示意">';
+    // 字符行
+    s += '<text x="96" y="16" font-size="11" fill="#6b7280">str</text>';
+    for (let j = 0; j < N; j++) {
+      s += '<rect x="' + bx(j) + '" y="24" width="48" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>';
+      s += '<text x="' + (bx(j) + 24) + '" y="42" text-anchor="middle" font-size="13" fill="#1f2328">' + S[j] + '</text>';
+    }
+    // 窗口框
+    if (curR >= curL) {
+      const wx = cx(curL) - 24 - 5, ww = (cx(curR) - cx(curL)) + 48 + 10;
+      s += '<rect x="' + wx + '" y="70" width="' + ww + '" height="42" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-dasharray="4 3"/>';
+    }
+    // 前缀状态行
+    s += '<text x="96" y="66" font-size="11" fill="#6b7280">pref</text>';
+    for (let i = 0; i < M; i++) {
+      const inWin = (i >= curL && i <= curR);
+      s += '<rect x="' + (cx(i) - 24) + '" y="76" width="48" height="30" rx="5" fill="' +
+           (inWin ? '#dbeafe' : '#f6f7f9') + '" stroke="' + (inWin ? '#2563eb' : '#e6e8eb') + '"/>';
+      s += '<text x="' + cx(i) + '" y="96" text-anchor="middle" font-size="12" fill="' +
+           (inWin ? '#2563eb' : '#6b7280') + '">' + setStr(pref[i]) + '</text>';
+      s += '<text x="' + cx(i) + '" y="124" text-anchor="middle" font-size="10" fill="#9aa0a6">p' + i + '</text>';
+    }
+    // 底部说明
+    const cur = qi < jobs.length ? jobs[order[qi]] : null;
+    const tip = cur ? ('目标窗口 [p' + cur.a + ', p' + cur.b + ']　对应查询 [' + cur.l + ', ' + cur.r + ']')
+                    : '四条查询全部回答完毕';
+    s += '<text x="300" y="152" text-anchor="middle" font-size="12" fill="#6b7280">' + tip + '</text>';
+    s += '<text x="300" y="170" text-anchor="middle" font-size="12" fill="#6b7280">窗口内达标对数 curAns = <tspan font-weight="600" fill="#1f2328">' + curAns + '</tspan></text>';
+    s += '</svg>';
+    svg1.innerHTML = s;
+
+    let h = '';
+    if (qi < jobs.length) {
+      const c = jobs[order[qi]];
+      h += '<div class="row">莫队顺序第 ' + (qi+1) + ' / ' + jobs.length + ' 条：查询 [' + c.l + ', ' + c.r +
+           ']　目标窗口 [p' + c.a + ', p' + c.b + ']</div>';
+      h += '<div class="row">当前窗口 [' + (curR < curL ? '空' : 'p' + curL + ', p' + curR) +
+           ']　curAns = <b>' + curAns + '</b>　已移动 <span class="num">' + moves + '</span> 步</div>';
+    } else {
+      h += '<div class="row">四条查询全部回答完毕</div>';
+      h += '<div class="row">共移动 <span class="num">' + moves + '</span> 步</div>';
+    }
+    if (lastOp) h += '<div class="row" style="color:var(--text-dim)">' + lastOp + '</div>';
+    const got = done1.map(function(d, i){ return d ? ('q' + i + '=' + ans1[i]) : null; }).filter(Boolean);
+    if (got.length) h += '<div class="row total">已答：' + got.join('　') + '</div>';
+    bd1.innerHTML = h;
+    bStep1.disabled = (qi >= jobs.length);
+  }
+
+  function step1(){
+    if (qi >= jobs.length) { render1(); return; }
+    const c = jobs[order[qi]];
+    if (curL === c.a && curR === c.b) {
+      ans1[order[qi]] = curAns;
+      done1[order[qi]] = true;
+      lastOp = '窗口到位，查询 [' + c.l + ', ' + c.r + '] 的答案 = ' + curAns;
+      qi++;
+      render1();
+      return;
+    }
+    moves++;
+    if (curL > c.a) { const v = pref[--curL]; const d = addState(v); lastOp = '加入 p' + curL + ' = ' + setStr(v) + '，新增 ' + d + ' 对'; }
+    else if (curR < c.b) { const v = pref[++curR]; const d = addState(v); lastOp = '加入 p' + curR + ' = ' + setStr(v) + '，新增 ' + d + ' 对'; }
+    else if (curL < c.a) { const v = pref[curL]; const d = delState(v); lastOp = '移出 p' + curL + ' = ' + setStr(v) + '，减少 ' + (-d) + ' 对'; curL++; }
+    else { const v = pref[curR]; const d = delState(v); lastOp = '移出 p' + curR + ' = ' + setStr(v) + '，减少 ' + (-d) + ' 对'; curR--; }
+    render1();
+  }
+
+  let t1 = null;
+  function stop1(){ if (t1) { clearInterval(t1); t1 = null; } bAuto1.textContent = '自动播放'; }
+  function reset1(){
+    curL = 0; curR = -1; qi = 0; curAns = 0; moves = 0; lastOp = '';
+    for (const k in cnt) delete cnt[k];
+    done1.fill(false);
+    stop1(); render1();
+  }
+  bStep1.addEventListener('click', step1);
+  bReset1.addEventListener('click', reset1);
+  bAuto1.addEventListener('click', function(){
+    if (t1) { stop1(); return; }
+    bAuto1.textContent = '暂停';
+    t1 = setInterval(function(){ if (qi >= jobs.length) stop1(); else step1(); }, 420);
+  });
+  render1();
+
+  /* ================= 题2：简单的询问 ================= */
+  const A2 = [0, 1, 2, 1, 3, 2];
+  const N2 = 5;
+  const Q2 = [[1,3,2,5],[1,1,3,3],[2,4,1,5]];
+  const tasks = [];
+  Q2.forEach(function(q, i){
+    const l1 = q[0], r1 = q[1], l2 = q[2], r2 = q[3];
+    tasks.push({ s1:r1, s2:r2, op:1, qid:i });
+    tasks.push({ s1:r1, s2:l2-1, op:-1, qid:i });
+    tasks.push({ s1:l1-1, s2:r2, op:-1, qid:i });
+    tasks.push({ s1:l1-1, s2:l2-1, op:1, qid:i });
+  });
+  tasks.forEach(function(t){ if (t.s1 > t.s2) { const x = t.s1; t.s1 = t.s2; t.s2 = x; } });
+  const BLEN2 = 2;
+  const bi = v => (v === 0 ? 0 : Math.floor((v - 1) / BLEN2) + 1);
+  const order2 = tasks.map(function(_, i){ return i; }).sort(function(x, y){
+    const bx = bi(tasks[x].s1), by = bi(tasks[y].s1);
+    if (bx !== by) return bx - by;
+    return (bx & 1) ? tasks[x].s2 - tasks[y].s2 : tasks[y].s2 - tasks[x].s2;
+  });
+
+  let w1 = 0, w2 = 0, ti = 0, cur2 = 0, moves2 = 0, lastOp2 = '';
+  const c1 = {}, c2 = {};
+  const ans2 = Q2.map(() => 0);
+
+  const svg2 = document.getElementById('p2svg');
+  const bd2 = document.getElementById('p2bd');
+  const tasksEl = document.getElementById('p2tasks');
+  const bStep2 = document.getElementById('p2step');
+  const bAuto2 = document.getElementById('p2auto');
+  const bReset2 = document.getElementById('p2reset');
+
+  function cntStr(c){
+    const ks = Object.keys(c).filter(k => c[k] > 0).sort();
+    return ks.length ? ks.map(k => k + ':' + c[k]).join(' ') : '空';
+  }
+
+  function render2(){
+    const cx = i => 120 + 56 * i;
+    let s = '<svg viewBox="0 0 600 168" role="img" aria-label="两个前缀指针示意">';
+    s += '<text x="120" y="16" font-size="11" fill="#6b7280">arr</text>';
+    for (let i = 1; i <= N2; i++) {
+      s += '<rect x="' + (cx(i) - 24) + '" y="22" width="48" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>';
+      s += '<text x="' + cx(i) + '" y="40" text-anchor="middle" font-size="13" fill="#1f2328">' + A2[i] + '</text>';
+      s += '<text x="' + cx(i) + '" y="60" text-anchor="middle" font-size="10" fill="#9aa0a6">' + i + '</text>';
+    }
+    [1, 2].forEach(function(row){
+      const y = 74 + (row - 1) * 40;
+      const len = row === 1 ? w1 : w2;
+      const col = row === 1 ? '#2563eb' : '#ea580c';
+      const bg = row === 1 ? '#dbeafe' : '#ffedd5';
+      s += '<text x="104" y="' + (y + 20) + '" text-anchor="end" font-size="12" fill="' + col + '">前缀' + row + '</text>';
+      for (let i = 1; i <= N2; i++) {
+        const on = i <= len;
+        s += '<rect x="' + (cx(i) - 24) + '" y="' + y + '" width="48" height="28" rx="5" fill="' +
+             (on ? bg : '#f6f7f9') + '" stroke="' + (on ? col : '#e6e8eb') + '"/>';
+        s += '<text x="' + cx(i) + '" y="' + (y + 19) + '" text-anchor="middle" font-size="12" fill="' +
+             (on ? col : '#c9ced4') + '">' + (on ? A2[i] : '·') + '</text>';
+      }
+      s += '<text x="' + (cx(N2) + 34) + '" y="' + (y + 20) + '" font-size="11" fill="#9aa0a6">siz' + row + '=' + len + '</text>';
+    });
+    const t = ti < tasks.length ? tasks[order2[ti]] : null;
+    const tip = t ? ('子任务 (siz1=' + t.s1 + ', siz2=' + t.s2 + '，符号 ' + (t.op > 0 ? '+1' : '−1') + '，属于查询 ' + (t.qid+1) + ')')
+                  : '12 个子任务处理完毕';
+    s += '<text x="300" y="160" text-anchor="middle" font-size="12" fill="#6b7280">' + tip + '</text>';
+    s += '</svg>';
+    svg2.innerHTML = s;
+
+    let ch = '';
+    order2.forEach(function(id, k){
+      const t = tasks[id];
+      let cls = 'mp-task';
+      if (k < ti) cls += ' done'; else if (k === ti) cls += ' now';
+      ch += '<span class="' + cls + '">(' + t.s1 + ',' + t.s2 + ')' + (t.op > 0 ? '+' : '−') + 'q' + (t.qid+1) + '</span>';
+    });
+    tasksEl.innerHTML = ch;
+
+    let h = '';
+    if (ti < tasks.length) {
+      h += '<div class="row">第 ' + (ti+1) + ' / ' + tasks.length + ' 个子任务　已移动 <span class="num">' + moves2 + '</span> 步</div>';
+    } else {
+      h += '<div class="row">12 个子任务处理完毕，共移动 <span class="num">' + moves2 + '</span> 步</div>';
+    }
+    h += '<div class="row">cnt1 = ' + cntStr(c1) + '　cnt2 = ' + cntStr(c2) + '</div>';
+    h += '<div class="row">curAns = Σ cnt1·cnt2 = <b>' + cur2 + '</b></div>';
+    if (lastOp2) h += '<div class="row" style="color:var(--text-dim)">' + lastOp2 + '</div>';
+    h += '<div class="row total">查询累计：' + Q2.map(function(q, i){ return 'q' + (i+1) + '=' + ans2[i]; }).join('　') + '</div>';
+    bd2.innerHTML = h;
+    bStep2.disabled = (ti >= tasks.length);
+  }
+
+  function step2(){
+    if (ti >= tasks.length) { render2(); return; }
+    const t = tasks[order2[ti]];
+    if (w1 === t.s1 && w2 === t.s2) {
+      ans2[t.qid] += cur2 * t.op;
+      lastOp2 = '到位，查询 ' + (t.qid+1) + ' 累加 ' + (t.op > 0 ? '+' : '−') + cur2;
+      ti++;
+      render2();
+      return;
+    }
+    moves2++;
+    if (w1 < t.s1) { w1++; const v = A2[w1]; c1[v] = (c1[v]||0) + 1; cur2 += (c2[v]||0); lastOp2 = '前缀1 加 ' + v + '，内积 +' + (c2[v]||0); }
+    else if (w1 > t.s1) { const v = A2[w1]; c1[v]--; cur2 -= (c2[v]||0); lastOp2 = '前缀1 减 ' + v + '，内积 −' + (c2[v]||0); w1--; }
+    else if (w2 < t.s2) { w2++; const v = A2[w2]; c2[v] = (c2[v]||0) + 1; cur2 += (c1[v]||0); lastOp2 = '前缀2 加 ' + v + '，内积 +' + (c1[v]||0); }
+    else { const v = A2[w2]; c2[v]--; cur2 -= (c1[v]||0); lastOp2 = '前缀2 减 ' + v + '，内积 −' + (c1[v]||0); w2--; }
+    render2();
+  }
+
+  let t2 = null;
+  function stop2(){ if (t2) { clearInterval(t2); t2 = null; } bAuto2.textContent = '自动播放'; }
+  function reset2(){
+    w1 = 0; w2 = 0; ti = 0; cur2 = 0; moves2 = 0; lastOp2 = '';
+    for (const k in c1) delete c1[k];
+    for (const k in c2) delete c2[k];
+    ans2.fill(0);
+    stop2(); render2();
+  }
+  bStep2.addEventListener('click', step2);
+  bReset2.addEventListener('click', reset2);
+  bAuto2.addEventListener('click', function(){
+    if (t2) { stop2(); return; }
+    bAuto2.textContent = '暂停';
+    t2 = setInterval(function(){ if (ti >= tasks.length) stop2(); else step2(); }, 420);
+  });
+  render2();
+
+  /* ================= 图示 ================= */
+  /* 图①：子串 ↔ 两个前缀状态 */
+  const fig1 = document.getElementById('fig1');
+  if (fig1) {
+    const cx = i => 92 + 56 * i;
+    const bx = j => 100 + 56 * j;
+    let s = '<svg viewBox="0 0 680 250" role="img" aria-label="前缀状态与子串对应关系">';
+    s += '<text x="100" y="18" font-size="12" fill="#6b7280">str（下标 1..8）</text>';
+    for (let j = 0; j < N; j++) {
+      s += '<rect x="' + bx(j) + '" y="26" width="48" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>';
+      s += '<text x="' + (bx(j) + 24) + '" y="44" text-anchor="middle" font-size="13" fill="#1f2328">' + S[j] + '</text>';
+      s += '<text x="' + (bx(j) + 24) + '" y="66" text-anchor="middle" font-size="10" fill="#9aa0a6">' + (j+1) + '</text>';
+    }
+    s += '<text x="100" y="94" font-size="12" fill="#6b7280">pref（奇数次出现的字符集合）</text>';
+    for (let i = 0; i < M; i++) {
+      s += '<rect x="' + (cx(i) - 24) + '" y="102" width="48" height="28" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>';
+      s += '<text x="' + cx(i) + '" y="121" text-anchor="middle" font-size="12" fill="#1f2328">' + setStr(pref[i]) + '</text>';
+      s += '<text x="' + cx(i) + '" y="146" text-anchor="middle" font-size="10" fill="#9aa0a6">p' + i + '</text>';
+    }
+    // 达标的一对：p0 与 p3
+    s += '<rect x="' + (cx(0) - 26) + '" y="98" width="52" height="34" rx="6" fill="none" stroke="#2563eb" stroke-width="1.5"/>';
+    s += '<rect x="' + (cx(3) - 26) + '" y="98" width="52" height="34" rx="6" fill="none" stroke="#2563eb" stroke-width="1.5"/>';
+    s += '<line x1="' + cx(0) + '" y1="136" x2="' + cx(3) + '" y2="136" stroke="#2563eb" stroke-width="1.5"/>';
+    s += '<text x="' + ((cx(0) + cx(3)) / 2) + '" y="152" text-anchor="middle" font-size="11" fill="#2563eb">p0 ⊕ p3 = {b}</text>';
+    // 不达标的一对：p1 与 p5
+    s += '<line x1="' + cx(1) + '" y1="168" x2="' + cx(5) + '" y2="168" stroke="#ea580c" stroke-width="1.5"/>';
+    s += '<text x="' + ((cx(1) + cx(5)) / 2) + '" y="184" text-anchor="middle" font-size="11" fill="#ea580c">p1 ⊕ p5 = {a, c}</text>';
+    s += '<text x="340" y="214" text-anchor="middle" font-size="13" fill="#6b7280">异或值里 1 的个数 ≤ 1 就达标：前者 1 个（str[1..3] = aba），后者 2 个（str[2..5] = bacb）</text>';
+    s += '<text x="340" y="238" text-anchor="middle" font-size="13" fill="#6b7280">查询 [l, r] 就是问状态区间 [p(l−1), p(r)] 里有多少达标对</text>';
+    s += '</svg>';
+    fig1.innerHTML = s;
+  }
+
+  /* 图②：一条查询拆成四个前缀对 */
+  const fig2 = document.getElementById('fig2');
+  if (fig2) {
+    const LX = 150, RX = 500, TY = 56, BY = 168;
+    let s = '<svg viewBox="0 0 680 250" role="img" aria-label="一条查询拆成四个前缀对">';
+    s += '<text x="340" y="22" text-anchor="middle" font-size="13" fill="#6b7280">一条查询 (l1, r1, l2, r2) 拆成四个 (前缀1 长度, 前缀2 长度) 子任务</text>';
+    const pairs = [[TY, TY, '+'], [TY, BY, '−'], [BY, TY, '−'], [BY, BY, '+']];
+    pairs.forEach(function(p){
+      const col = p[2] === '+' ? '#2563eb' : '#ea580c';
+      s += '<line x1="' + LX + '" y1="' + p[0] + '" x2="' + RX + '" y2="' + p[1] + '" stroke="' + col + '" stroke-width="1.5"/>';
+      s += '<text x="' + ((LX + RX) / 2 + (p[0] === p[1] ? 0 : (p[0] < p[1] ? 14 : -14))) + '" y="' + ((p[0] + p[1]) / 2 + 4) +
+           '" text-anchor="middle" font-size="14" font-weight="600" fill="' + col + '">' + p[2] + '</text>';
+    });
+    const nodes = [
+      [LX, TY, '前缀1 = r1（长）', '#2563eb'],
+      [LX, BY, '前缀1 = l1 − 1（短）', '#2563eb'],
+      [RX, TY, '前缀2 = r2（长）', '#ea580c'],
+      [RX, BY, '前缀2 = l2 − 1（短）', '#ea580c']
+    ];
+    nodes.forEach(function(nd){
+      s += '<rect x="' + (nd[0] - 88) + '" y="' + (nd[1] - 18) + '" width="176" height="36" rx="6" fill="#ffffff" stroke="' + nd[3] + '"/>';
+      s += '<text x="' + nd[0] + '" y="' + (nd[1] + 5) + '" text-anchor="middle" font-size="12" fill="' + nd[3] + '">' + nd[2] + '</text>';
+    });
+    s += '<text x="340" y="214" text-anchor="middle" font-size="13" fill="#6b7280">答案 = F(r1, r2) − F(r1, l2−1) − F(l1−1, r2) + F(l1−1, l2−1)</text>';
+    s += '<text x="340" y="238" text-anchor="middle" font-size="13" fill="#6b7280">F(a, b) = Σ cnt1(x)·cnt2(x)，cnt1 数 arr[1..a]，cnt2 数 arr[1..b]</text>';
+    s += '</svg>';
+    fig2.innerHTML = s;
+  }
+})();
+</script>
+</body>
+</html>

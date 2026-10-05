@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>边双缩点与树上统计 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .ec-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .ec-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .ec-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #ecSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .ec-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>边双缩点与树上统计</h1>
+    <p class="intro">缩点把图变成树之后，树上能做的事情全能搬过来。这一节的四道题分别用上倍增 LCA、dfn 序 LCA 配点差分、边差分判方向、树形 dp 计数，全是上一节的缩点模版再加几行。题目本身都不算新，值钱的地方是「图上的哪句话对应到树上是哪件事」。</p>
+
+    <h2>零、背景</h2>
+    <p>还是那句老话：边双缩完点，桥变成树边，连通图变成一棵树。之后的所有问题都在这棵树上做。</p>
+    <p>树上常用的三件套，这几道题都会用到。求两点距离靠 LCA，<code class="inline">dist(x,y) = dep[x] + dep[y] - 2 dep[lca]</code>；一条路径上的点被覆盖多少次，靠点差分，在 x、y 处加、在 lca 及其父亲处减；一条路径上的边被覆盖多少次，靠边差分，在 x、y 处加、在 lca 处减两次。</p>
+    <p>点差分最后对子树求和，边差分同样对子树求和，只是边记在它下面的那个点上。这两套模板各题都会反复出现。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="缩点树上的路径、子树与覆盖" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="118" y="98" width="186" height="130" rx="10" fill="#eef4ff" stroke="#9aa0a6" stroke-width="1.2" stroke-dasharray="6 4"/>
+        <text x="126" y="92" font-size="10" fill="#6b7280">子树 2</text>
+        <g stroke="#c9ced4" stroke-width="1.4" fill="none">
+          <line x1="310" y1="50" x2="200" y2="120"/>
+          <line x1="200" y1="120" x2="140" y2="200"/>
+          <line x1="200" y1="120" x2="260" y2="200"/>
+          <line x1="310" y1="50" x2="420" y2="120"/>
+          <line x1="420" y1="120" x2="420" y2="200"/>
+        </g>
+        <g stroke="#ea580c" stroke-width="2.6" fill="none">
+          <line x1="140" y1="200" x2="200" y2="120"/>
+          <line x1="200" y1="120" x2="310" y2="50"/>
+          <line x1="310" y1="50" x2="420" y2="120"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="200" cy="120" r="15"/>
+          <circle cx="140" cy="200" r="15"/>
+          <circle cx="260" cy="200" r="15"/>
+          <circle cx="420" cy="120" r="15"/>
+          <circle cx="420" cy="200" r="15"/>
+        </g>
+        <circle cx="310" cy="50" r="16" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="200" y="124">2</text>
+          <text x="140" y="204">4</text>
+          <text x="260" y="204">5</text>
+          <text x="420" y="124">3</text>
+          <text x="420" y="204">6</text>
+          <text x="310" y="54">1</text>
+        </g>
+        <text x="330" y="42" font-size="10" fill="#ea580c">LCA(4,3) = 1</text>
+        <text x="330" y="222" font-size="11" fill="#6b7280">路径 4 → 3，虚线框是节点 2 的子树</text>
+        <text x="30" y="238" font-size="11" fill="#374151">缩点树上：路径靠 LCA，子树覆盖靠差分</text>
+      </svg>
+      <figcaption>缩点成树后，两点路径用 LCA 拼接，路径覆盖用差分、最后对子树求和统计</figcaption>
+    </figure>
+
+    <h2>一、题目4：神会作弊</h2>
+    <p>无向连通图，两点之间的重边只连一次。定义距离：如果 x、y 在同一个边双里，距离是 1；否则是先缩点，再取两点在树上简单路径经过的节点数。q 次询问 x、y 的距离，输出它的二进制形式。</p>
+    <p>「同一分量距离为 1」和「树上路径节点数」其实是一句话：路径上的节点数，等于边数加一。同分量时 x 缩点后等于 y，边数是 0，加一正好是 1。</p>
+    <p>重边要先处理。题目保证重边只连一次，所以按端点排序去重即可。这里的排序还有个附带好处：tarjan 里用边编号判父边，去重之后也不会有平行边来捣乱。</p>
+    <p>然后就是标准倍增 LCA。dfs 一遍求出深度和 <code class="inline">stjump[u][p]</code>，查询时先把深的那个提到同深度，再一起往上跳，得到 LCA，距离就是 <code class="inline">dep[x] + dep[y] - 2 dep[lca] + 1</code>。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 226" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="倍增 LCA 求树上距离" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#c9ced4" stroke-width="1.4" fill="none">
+          <line x1="150" y1="60" x2="90" y2="130"/>
+          <line x1="150" y1="60" x2="220" y2="130"/>
+          <line x1="90" y1="130" x2="60" y2="200"/>
+          <line x1="90" y1="130" x2="150" y2="200"/>
+        </g>
+        <g stroke="#ea580c" stroke-width="2.4" fill="none">
+          <line x1="150" y1="200" x2="90" y2="130"/>
+          <line x1="90" y1="130" x2="150" y2="60"/>
+          <line x1="150" y1="60" x2="220" y2="130"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="90" cy="130" r="15"/>
+          <circle cx="60" cy="200" r="15"/>
+          <circle cx="150" cy="200" r="15"/>
+          <circle cx="220" cy="130" r="15"/>
+        </g>
+        <circle cx="150" cy="60" r="16" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="150" y="64">1</text>
+          <text x="90" y="134">2</text>
+          <text x="60" y="204">3</text>
+          <text x="150" y="204">x</text>
+          <text x="220" y="134">y</text>
+        </g>
+        <g font-size="10" fill="#6b7280" text-anchor="middle">
+          <text x="150" y="46">dep 0</text>
+          <text x="74" y="126">dep 1</text>
+          <text x="238" y="126">dep 1</text>
+          <text x="150" y="220">dep 2</text>
+        </g>
+        <text x="300" y="70" font-size="12" fill="#374151">dist = dep[x] + dep[y] − 2·dep[LCA]</text>
+        <text x="300" y="94" font-size="12" fill="#374151">节点数 = dist + 1</text>
+        <text x="300" y="128" font-size="11" fill="#6b7280">示例：x(2) 与 y(1)</text>
+        <text x="300" y="148" font-size="11" fill="#6b7280">LCA = 1，dist = 2，节点数 = 3</text>
+        <text x="300" y="180" font-size="11" fill="#2563eb">stjump[u][p]：u 向上 2^p 步的祖先</text>
+      </svg>
+      <figcaption>缩点树上距离差一个「节点数」的口径：路径边数再加一，同分量时正好是 1</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Edge {
+        <span class="kw">int</span> u, v;
+    };
+
+    <span class="kw">bool</span> <span class="fn">EdgeCmp</span>(Edge e1, Edge e2) {
+        <span class="kw">if</span> (e1.u != e2.u) {
+            <span class="kw">return</span> e1.u &lt; e2.u;
+        }
+        <span class="kw">return</span> e1.v &lt; e2.v;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 10001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 50001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 15;
+    <span class="kw">int</span> n, m, q;
+    Edge edgeArr[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> ebccCnt;
+
+    <span class="kw">int</span> dep[MAXN];
+    <span class="kw">int</span> stjump[MAXN][MAXP];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">buildGraph</span>() {
+        sort(edgeArr + 1, edgeArr + m + 1, EdgeCmp);
+        <span class="kw">int</span> k = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= m; i++) {
+            <span class="kw">if</span> (edgeArr[k].u != edgeArr[i].u || edgeArr[k].v != edgeArr[i].v) {
+                edgeArr[++k] = edgeArr[i];
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= k; i++) {
+            addEdge(edgeArr[i].u, edgeArr[i].v);
+            addEdge(edgeArr[i].v, edgeArr[i].u);
+        }
+        m = k;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u, <span class="kw">int</span> preEdge) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">if</span> ((e ^ 1) == preEdge) {
+                <span class="kw">continue</span>;
+            }
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v, e);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                low[u] = min(low[u], dfn[v]);
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            ebccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = ebccCnt;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= ebccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> ebcc1 = belong[edgeArr[i].u];
+            <span class="kw">int</span> ebcc2 = belong[edgeArr[i].v];
+            <span class="kw">if</span> (ebcc1 != ebcc2) {
+                addEdge(ebcc1, ebcc2);
+                addEdge(ebcc2, ebcc1);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        dep[u] = dep[fa] + 1;
+        stjump[u][0] = fa;
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt; MAXP; p++) {
+            stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa) {
+                dfs(v, u);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getLca</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">if</span> (dep[a] &lt; dep[b]) {
+            swap(a, b);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (dep[stjump[a][p]] &gt;= dep[b]) {
+                a = stjump[a][p];
+            }
+        }
+        <span class="kw">if</span> (a == b) {
+            <span class="kw">return</span> a;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (stjump[a][p] != stjump[b][p]) {
+                a = stjump[a][p];
+                b = stjump[b][p];
+            }
+        }
+        <span class="kw">return</span> stjump[a][0];
+    }
+
+    <span class="kw">int</span> <span class="fn">getDist</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">return</span> dep[x] + dep[y] - 2 * dep[getLca(x, y)];
+    }
+
+    <span class="kw">string</span> toBinaryString(<span class="kw">int</span> x) {
+        <span class="kw">if</span> (x == 0) {
+            <span class="kw">return</span> "0";
+        }
+        <span class="kw">string</span> s;
+        <span class="kw">while</span> (x &gt; 0) {
+            s.push_back((x &amp; 1) ? '1' : '0');
+            x &gt;&gt;= 1;
+        }
+        reverse(s.begin(), s.end());
+        <span class="kw">return</span> s;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cntg = 1;
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= m; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            edgeArr[i].u = min(u, v);
+            edgeArr[i].v = max(u, v);
+        }
+        buildGraph();
+        tarjan(1, 0);
+        condense();
+        dfs(1, 0);
+        cin &gt;&gt; q;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x, y; i &lt;= q; i++) {
+            cin &gt;&gt; x &gt;&gt; y;
+            x = belong[x];
+            y = belong[y];
+            cout &lt;&lt; toBinaryString(getDist(x, y) + 1) &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>二、题目5：旅行家</h2>
+    <p>无向连通图，每个点有点权。一条路径要求点可重复经过、边不能重复。q 次操作，每次从 x 出发到 y，把所有可能的路径都走一遍；某个点被任一条路径经过一次，点权就计入收益，之后再经过不重复计。求总收益。</p>
+    <p>「点可以重复、边不能重复」又一次把边双搬了出来：一个边双里的所有点，都能被从任一端进入的路径覆盖到。所以从 x 到 y 的所有可能路径，合起来覆盖的点，正好是缩点树上 x 到 y 路径上那些边双里的全部点。</p>
+    <p>先把每个边双的点权之和记在 <code class="inline">sum[边双]</code> 上，在 tarjan 弹栈时顺手累加。缩点之后，每次操作就是给树上一条路径打一个「访问标记」；一个边双只要被打过一次标记，它的 <code class="inline">sum</code> 就算进答案。</p>
+    <p>「路径打标记、最后看每个点被覆盖几次」是树上点差分的经典用法：<code class="inline">cnt[x]++</code>、<code class="inline">cnt[y]++</code>、<code class="inline">cnt[lca]--</code>、<code class="inline">cnt[fa[lca]]--</code>，然后对子树求和。和大于 0 的点就是被覆盖到的点。这里的 LCA 用 dfn 序加稀疏表求，做到 O(1)。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="树上点差分四端标记" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#c9ced4" stroke-width="1.4" fill="none">
+          <line x1="230" y1="50" x2="140" y2="130"/>
+          <line x1="230" y1="50" x2="330" y2="130"/>
+          <line x1="140" y1="130" x2="90" y2="205"/>
+          <line x1="140" y1="130" x2="200" y2="205"/>
+        </g>
+        <g stroke="#ea580c" stroke-width="2.6" fill="none">
+          <line x1="200" y1="205" x2="140" y2="130"/>
+          <line x1="140" y1="130" x2="230" y2="50"/>
+          <line x1="230" y1="50" x2="330" y2="130"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="140" cy="130" r="15"/>
+          <circle cx="330" cy="130" r="15"/>
+        </g>
+        <circle cx="230" cy="50" r="16" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <circle cx="90" cy="205" r="14" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.3"/>
+        <circle cx="200" cy="205" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="140" y="134">2</text>
+          <text x="330" y="134">y</text>
+          <text x="230" y="54">1</text>
+          <text x="90" y="209">0</text>
+          <text x="200" y="209">x</text>
+        </g>
+        <text x="230" y="30" font-size="10" fill="#ea580c" text-anchor="middle">lca</text>
+        <text x="70" y="228" font-size="10" fill="#9aa0a6">fa(lca)</text>
+        <g font-size="11" text-anchor="middle">
+          <text x="200" y="182" fill="#2563eb">x +1</text>
+          <text x="330" y="112" fill="#2563eb">y +1</text>
+          <text x="258" y="72" fill="#ea580c">lca −1</text>
+          <text x="90" y="186" fill="#6b7280">fa −1</text>
+        </g>
+        <text x="420" y="70" font-size="12" fill="#374151">四个端点打完标记，</text>
+        <text x="420" y="90" font-size="12" fill="#374151">对子树求和：</text>
+        <text x="420" y="122" font-size="11" fill="#6b7280">和 &gt; 0 的点被路径覆盖</text>
+        <text x="420" y="144" font-size="11" fill="#6b7280">就把它的 sum 计入收益</text>
+        <text x="420" y="180" font-size="11" fill="#2563eb">一次操作 = 四个单点修改</text>
+      </svg>
+      <figcaption>路径覆盖用点差分：两端各加一、LCA 与 LCA 的父亲各减一，子树求和后为正的点即被覆盖</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">树上点差分怎么算路径覆盖</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">在缩点树上走一遍题目5。点「下一步」，看一条路径的四个端点标记怎么打、LCA 怎么找、子树求和后哪些点被判为覆盖。</p>
+      <svg id="ecSvg" viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="树上点差分演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>路径经过的点</span>
+        <span><span class="dot partial"></span>被覆盖（子树和 &gt; 0）</span>
+        <span><span class="dot skip"></span>未覆盖</span>
+      </div>
+      <div class="breakdown" id="ecInfo"></div>
+      <div class="viz-controls">
+        <button class="ec-btn" id="ecPrev" type="button">上一步</button>
+        <button class="ec-btn" id="ecNext" type="button">下一步</button>
+        <button class="ec-btn" id="ecReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 2000001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 20;
+    <span class="kw">int</span> n, m, q;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> a[MAXM];
+    <span class="kw">int</span> b[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sum[MAXN];
+    <span class="kw">int</span> ebccCnt;
+
+    <span class="kw">int</span> lg2[MAXN];
+    <span class="kw">int</span> rmq[MAXN][MAXP];
+
+    <span class="kw">int</span> useCnt[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u, <span class="kw">int</span> preEdge) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">if</span> ((e ^ 1) == preEdge) {
+                <span class="kw">continue</span>;
+            }
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v, e);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                low[u] = min(low[u], dfn[v]);
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            ebccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = ebccCnt;
+                sum[ebccCnt] += arr[pop];
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= ebccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> ebcc1 = belong[a[i]];
+            <span class="kw">int</span> ebcc2 = belong[b[i]];
+            <span class="kw">if</span> (ebcc1 != ebcc2) {
+                addEdge(ebcc1, ebcc2);
+                addEdge(ebcc2, ebcc1);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getUp</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">return</span> dfn[x] &lt; dfn[y] ? x : y;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        dfn[u] = ++cntd;
+        rmq[dfn[u]][0] = fa;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa) {
+                dfs(v, u);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">buildRmq</span>() {
+        cntd = 0;
+        dfs(1, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= ebccCnt; i++) {
+            lg2[i] = lg2[i &gt;&gt; 1] + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> pre = 0, cur = 1; cur &lt;= lg2[ebccCnt]; pre++, cur++) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i + (1 &lt;&lt; cur) - 1 &lt;= ebccCnt; i++) {
+                rmq[i][cur] = getUp(rmq[i][pre], rmq[i + (1 &lt;&lt; pre)][pre]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getFather</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> rmq[dfn[x]][0];
+    }
+
+    <span class="kw">int</span> <span class="fn">getLCA</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">if</span> (x == y) {
+            <span class="kw">return</span> x;
+        }
+        x = dfn[x];
+        y = dfn[y];
+        <span class="kw">if</span> (x &gt; y) {
+            swap(x, y);
+        }
+        x++;
+        <span class="kw">int</span> k = lg2[y - x + 1];
+        <span class="kw">return</span> getUp(rmq[x][k], rmq[y - (1 &lt;&lt; k) + 1][k]);
+    }
+
+    <span class="kw">void</span> <span class="fn">dfsOnTree</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa) {
+                dfsOnTree(v, u);
+                useCnt[u] += useCnt[v];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cntg = 1;
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; a[i] &gt;&gt; b[i];
+            addEdge(a[i], b[i]);
+            addEdge(b[i], a[i]);
+        }
+        tarjan(1, 0);
+        condense();
+        buildRmq();
+        cin &gt;&gt; q;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x, y, xylca, lcafa; i &lt;= q; i++) {
+            cin &gt;&gt; x &gt;&gt; y;
+            x = belong[x];
+            y = belong[y];
+            xylca = getLCA(x, y);
+            lcafa = getFather(xylca);
+            useCnt[x]++;
+            useCnt[y]++;
+            useCnt[xylca]--;
+            useCnt[lcafa]--;
+        }
+        dfsOnTree(1, 0);
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= ebccCnt; i++) {
+            <span class="kw">if</span> (useCnt[i] &gt; 0) {
+                ans += sum[i];
+            }
+        }
+        cout &lt;&lt; ans &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>三、题目6：只能一个方向</h2>
+    <p>无向图，可能有多个连通块。q 条要求，每条是「从 x 出发能到 y」。要给每条无向边定一个唯一方向，问能否同时满足所有要求。</p>
+    <p>先看边双内部。边双里每条边都在某个环上，把环上的边顺次定向，内部就能互相到达。也就是说，一个边双内部的方向总能满足；需要操心的只有连接边双之间的桥。</p>
+    <p>缩点成森林。要求 x 能到 y，表示缩点树上 x 到 y 这条路径上的每条树边都要朝 y 那一侧；等价地，每条树边要么必须「向上」（朝根），要么必须「向下」。一条要求 x→y 会把它路径上的边全部要求成「x 到 y 的方向」。</p>
+    <p>于是对每条树边维护两个计数：<code class="inline">upCnt</code> 表示有多少要求要它向上，<code class="inline">downCnt</code> 表示要它向下。用边差分把每条要求的路径拆到两端：<code class="inline">upCnt[x]++</code>、<code class="inline">upCnt[lca]--</code>，<code class="inline">downCnt[y]++</code>、<code class="inline">downCnt[lca]--</code>，再对子树求和。</p>
+    <p>子树和出来之后，某条树边如果 <code class="inline">upCnt</code> 和 <code class="inline">downCnt</code> 都不为零，说明它被要求同时朝两个方向，矛盾，无解。另外要求的两端点如果不在同一连通块里，也无解。两个条件都过了就输出 Yes。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 236" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="边差分判方向冲突" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="ecAr1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+          </marker>
+          <marker id="ecAr2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <g stroke="#c9ced4" stroke-width="1.6" fill="none">
+          <line x1="200" y1="60" x2="110" y2="140"/>
+          <line x1="200" y1="60" x2="300" y2="140"/>
+        </g>
+        <line x1="110" y1="140" x2="200" y2="210" stroke="#2563eb" stroke-width="2.6" marker-end="url(#ecAr1)"/>
+        <line x1="300" y1="140" x2="200" y2="210" stroke="#2563eb" stroke-width="2.6" marker-end="url(#ecAr1)"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="200" cy="60" r="15"/>
+          <circle cx="110" cy="140" r="15"/>
+          <circle cx="300" cy="140" r="15"/>
+        </g>
+        <circle cx="200" cy="210" r="16" fill="#ffedd5" stroke="#ea580c" stroke-width="1.7"/>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="200" y="64">r</text>
+          <text x="110" y="144">x</text>
+          <text x="300" y="144">y</text>
+          <text x="200" y="214">v</text>
+        </g>
+        <text x="120" y="184" font-size="10" fill="#2563eb">都要求向上</text>
+        <text x="330" y="60" font-size="11" fill="#374151">路径 x→y 要求</text>
+        <text x="330" y="80" font-size="11" fill="#374151">两侧的边都朝 v 走；</text>
+        <text x="330" y="100" font-size="11" fill="#ea580c">v 到 r 这条边</text>
+        <text x="330" y="120" font-size="11" fill="#ea580c">被要求同时向上、向下</text>
+        <text x="330" y="140" font-size="11" fill="#ea580c">→ 冲突，无解</text>
+        <text x="30" y="40" font-size="11" fill="#6b7280">每条树边记 upCnt / downCnt</text>
+        <text x="30" y="228" font-size="11" fill="#6b7280">两个计数同时非零即矛盾</text>
+      </svg>
+      <figcaption>边差分统计每条树边被要求的方向，向上和向下同时出现就矛盾，方案不存在</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 20;
+    <span class="kw">int</span> n, m, q;
+    <span class="kw">int</span> a[MAXM];
+    <span class="kw">int</span> b[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> ebccCnt;
+
+    <span class="kw">int</span> block[MAXN];
+    <span class="kw">int</span> dep[MAXN];
+    <span class="kw">int</span> stjump[MAXN][MAXP];
+
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> upCnt[MAXN];
+    <span class="kw">int</span> downCnt[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u, <span class="kw">int</span> preEdge) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">if</span> ((e ^ 1) == preEdge) {
+                <span class="kw">continue</span>;
+            }
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v, e);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                low[u] = min(low[u], dfn[v]);
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            ebccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = ebccCnt;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= ebccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> ebcc1 = belong[a[i]];
+            <span class="kw">int</span> ebcc2 = belong[b[i]];
+            <span class="kw">if</span> (ebcc1 != ebcc2) {
+                addEdge(ebcc1, ebcc2);
+                addEdge(ebcc2, ebcc1);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">int</span> bid) {
+        block[u] = bid;
+        dep[u] = dep[fa] + 1;
+        stjump[u][0] = fa;
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt; MAXP; p++) {
+            stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa) {
+                dfs(v, u, bid);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getLca</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">if</span> (dep[a] &lt; dep[b]) {
+            swap(a, b);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (dep[stjump[a][p]] &gt;= dep[b]) {
+                a = stjump[a][p];
+            }
+        }
+        <span class="kw">if</span> (a == b) {
+            <span class="kw">return</span> a;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (stjump[a][p] != stjump[b][p]) {
+                a = stjump[a][p];
+                b = stjump[b][p];
+            }
+        }
+        <span class="kw">return</span> stjump[a][0];
+    }
+
+    <span class="kw">bool</span> <span class="fn">check</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        vis[u] = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa) {
+                <span class="kw">if</span> (!check(v, u)) {
+                    <span class="kw">return</span> <span class="kw">false</span>;
+                }
+                upCnt[u] += upCnt[v];
+                downCnt[u] += downCnt[v];
+            }
+        }
+        <span class="kw">return</span> upCnt[u] == 0 || downCnt[u] == 0;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cntg = 1;
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; q;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; a[i] &gt;&gt; b[i];
+            addEdge(a[i], b[i]);
+            addEdge(b[i], a[i]);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i, 0);
+            }
+        }
+        condense();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, b = 0; i &lt;= ebccCnt; i++) {
+            <span class="kw">if</span> (block[i] == 0) {
+                dfs(i, 0, ++b);
+            }
+        }
+        <span class="kw">bool</span> ans = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x, y, xylca; i &lt;= q; i++) {
+            cin &gt;&gt; x &gt;&gt; y;
+            x = belong[x];
+            y = belong[y];
+            <span class="kw">if</span> (block[x] != block[y]) {
+                ans = <span class="kw">false</span>;
+                <span class="kw">break</span>;
+            }
+            xylca = getLca(x, y);
+            upCnt[x]++;
+            upCnt[xylca]--;
+            downCnt[y]++;
+            downCnt[xylca]--;
+        }
+        <span class="kw">if</span> (ans) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= ebccCnt; i++) {
+                <span class="kw">if</span> (!vis[i] &amp;&amp; !check(i, 0)) {
+                    ans = <span class="kw">false</span>;
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+        cout &lt;&lt; (ans ? "Yes" : "No") &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>四、题目7：建造军营</h2>
+    <p>无向连通图。选一个非空的城市集合建军营，再选一个道路集合派兵看守（可以不选）。敌人袭击任意一条没被看守的道路并切断它；如果出现两座军营不连通就算失败。求不败的方案数，对 1000000007 取余。</p>
+    <p>关键是把「哪些道路必须看守」想清楚。边双内部的边不用守：环上的边断一条还有别的路。真正要守的只有桥。选好军营之后，缩点树上由这些军营张出的最小连通子树里的每条桥都必须看守，其余的桥可守可不守。</p>
+    <p>于是树形 dp。<code class="inline">dp[u]</code> 记「子树 u 内军营非空、并且 u 到父亲那条桥强制看守」的方案数，<code class="inline">bridge[u]</code> 记子树 u 内的桥数。初值是 <code class="inline">2^siz[u] - 1</code>，即只在本边双里选非空军营，边双内部无边需要看守。</p>
+    <p>合并孩子 v（桥是 u-v）时分三类。v 侧没有军营：u-v 不用守、v 子树内的桥也都不用守，各有两种选择，贡献 <code class="inline">dp[u] · 2^bridge[v] · 2</code>。u 侧此前没有军营、军营全在 v 侧：u-v 必须守，u 侧旧桥自由，贡献 <code class="inline">2^bridge[u] · dp[v]</code>。两侧都有军营：u-v 必须守，贡献 <code class="inline">dp[u] · dp[v]</code>。三者相加更新 <code class="inline">dp[u]</code>，同时 <code class="inline">bridge[u]</code> 加上 <code class="inline">bridge[v] + 1</code>。</p>
+    <p>最后枚举「最浅的那个有军营的边双」i。i 之上的桥全都不需要守，可以自由选择，所以再乘上 <code class="inline">2^(bridge[1] - bridge[i] - 1)</code>；剩下的、不属于任何边双的桥也在末尾一次性乘 <code class="inline">2^(m - bridge[1])</code>。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="树形 dp 的三类合并" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="196" y="18" width="128" height="46" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="260" y="40" font-size="12" fill="#1f2328" text-anchor="middle">子树 u（军营非空）</text>
+        <text x="260" y="57" font-size="10" fill="#2563eb" text-anchor="middle">dp[u]</text>
+        <line x1="230" y1="64" x2="150" y2="120" stroke="#c9ced4" stroke-width="1.5"/>
+        <line x1="290" y1="64" x2="380" y2="120" stroke="#ea580c" stroke-width="2.4"/>
+        <rect x="80" y="120" width="150" height="42" rx="8" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.3"/>
+        <text x="155" y="138" font-size="11" fill="#374151" text-anchor="middle">v 侧无军营</text>
+        <text x="155" y="154" font-size="9.5" fill="#6b7280" text-anchor="middle">dp[u]·2^bridge[v]·2</text>
+        <rect x="334" y="120" width="130" height="42" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+        <text x="399" y="138" font-size="11" fill="#374151" text-anchor="middle">两侧都有军营</text>
+        <text x="399" y="154" font-size="10" fill="#ea580c" text-anchor="middle">dp[u]·dp[v]（u-v 必守）</text>
+        <text x="456" y="104" font-size="10" fill="#ea580c">u-v 必守</text>
+
+        <rect x="104" y="186" width="360" height="46" rx="8" fill="#eef4ff" stroke="#9aa0a6" stroke-width="1.2" stroke-dasharray="6 4"/>
+        <text x="120" y="206" font-size="11" fill="#374151">u 侧此前无军营、军营全在 v 侧：2^bridge[u]·dp[v]（u-v 必守）</text>
+        <text x="120" y="224" font-size="11" fill="#374151">bridge[u] += bridge[v] + 1（u-v 也变成必守）</text>
+      </svg>
+      <figcaption>合并孩子分三类：v 侧无营则桥自由，两侧都有营则桥必守，桥的计数随之更新</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">using</span> <span class="kw">ll</span> = <span class="kw">long</span> <span class="kw">long</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 1000001;
+    <span class="kw">const</span> <span class="kw">int</span> MOD = 1000000007;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> a[MAXM];
+    <span class="kw">int</span> b[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> ebccSiz[MAXN];
+    <span class="kw">int</span> ebccCnt;
+
+    <span class="kw">ll</span> power2[MAXM];
+    <span class="kw">ll</span> dp[MAXN];
+    <span class="kw">int</span> bridge[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u, <span class="kw">int</span> preEdge) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">if</span> ((e ^ 1) == preEdge) {
+                <span class="kw">continue</span>;
+            }
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v, e);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                low[u] = min(low[u], dfn[v]);
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            ebccCnt++;
+            ebccSiz[ebccCnt] = 0;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = ebccCnt;
+                ebccSiz[ebccCnt]++;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= ebccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> ebcc1 = belong[a[i]];
+            <span class="kw">int</span> ebcc2 = belong[b[i]];
+            <span class="kw">if</span> (ebcc1 != ebcc2) {
+                addEdge(ebcc1, ebcc2);
+                addEdge(ebcc2, ebcc1);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dpOnTree</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        dp[u] = power2[ebccSiz[u]] - 1;
+        bridge[u] = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa) {
+                dpOnTree(v, u);
+                dp[u] = (dp[u] * power2[bridge[v]] * 2 % MOD
+                        + power2[bridge[u]] * dp[v] % MOD
+                        + dp[u] * dp[v] % MOD) % MOD;
+                bridge[u] += bridge[v] + 1;
+            }
+        }
+    }
+
+    <span class="kw">ll</span> <span class="fn">compute</span>() {
+        power2[0] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            power2[i] = power2[i - 1] * 2 % MOD;
+        }
+        dpOnTree(1, 0);
+        <span class="kw">int</span> total = bridge[1];
+        <span class="kw">ll</span> ans = dp[1];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= ebccCnt; i++) {
+            ans = (ans + dp[i] * power2[total - bridge[i] - 1] % MOD) % MOD;
+        }
+        ans = ans * power2[m - total] % MOD;
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cntg = 1;
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; a[i] &gt;&gt; b[i];
+            addEdge(a[i], b[i]);
+            addEdge(b[i], a[i]);
+        }
+        tarjan(1, 0);
+        condense();
+        <span class="kw">ll</span> ans = compute();
+        cout &lt;&lt; ans &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>五、复杂度分析</h2>
+    <p>四道题都是先一遍 tarjan 缩点，再在缩点树上做一遍线性或对数级别的预处理，之后每条询问 O(log n) 或 O(1)。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>tarjan 求边双 + 缩点</td><td><code class="inline">O(n + m)</code></td><td rowspan="4"><code class="inline">O(n + m)</code>（倍增表 <code class="inline">O(n log n)</code>）</td></tr>
+        <tr><td>题目4 一次查询（倍增 LCA）</td><td><code class="inline">O(log n)</code></td></tr>
+        <tr><td>题目5 一次操作（dfn 序 RMQ，O(1) LCA + 点差分）</td><td><code class="inline">O(1)</code> 均摊</td></tr>
+        <tr><td>题目6 一次要求 + 收尾判定（倍增 LCA + 边差分）</td><td><code class="inline">O(log n)</code> / <code class="inline">O(n)</code></td></tr>
+        <tr><td>题目7 树形 dp</td><td><code class="inline">O(n)</code></td><td><code class="inline">O(n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>题目5 的 LCA 用 dfn 序加稀疏表，单次降到 O(1)，q 到 10⁶ 也扛得住。题目6 要先对每条要求判连通块、再边差分，最后对子树求一遍和，整体线性。题目7 的 <code class="inline">power2</code> 预处理到边数，dp 仍是每个点一次合并。</p>
+
+    <h2>六、最后</h2>
+    <p>四道题连着看，套路是一致的：先缩点，再在树上用 LCA、差分或 dp 收口。真正需要动脑的是把题目里的「路径 / 覆盖 / 定向 / 计数」翻译成树上的一句话，翻译对了，代码就是模板拼接。</p>
+    <p>边双这一支到这里告一段落，下一讲换割点和点双连通分量，圆方树那一套会重新把「点」而不是「边」压进方点里。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var svg = document.getElementById('ecSvg');
+  if (!svg) return;
+  var info = document.getElementById('ecInfo');
+  var prev = document.getElementById('ecPrev');
+  var next = document.getElementById('ecNext');
+  var reset = document.getElementById('ecReset');
+
+  var N = {1:[320,60],2:[200,140],3:[440,140],4:[130,230],5:[270,230]};
+  var E = [[1,2],[1,3],[2,4],[2,5]];
+  var PATHN = ['4','2','5'];
+  var PATHE = ['4-2','2-5'];
+  var MARK = {'4':'+1','5':'+1','2':'−1','1':'−1'};
+  var SUM  = {'4':'1','5':'1','2':'1','3':'0','1':'0'};
+  var VAL  = {'2':5,'4':6,'5':4};
+
+  var STEPS = [
+    {t:'一次操作 x=4 → y=5', s:'缩点树上，一条操作就是一条路径。先把它画出来：从 4 走到 5。'},
+    {t:'四个端点打标记', s:'点差分：x 加一、y 加一、LCA 减一、LCA 的父亲再减一。这里先标出加一的两端。'},
+    {t:'找 LCA', s:'LCA(4,5) = 2，它的父亲是 1。所以减一的标记打在 2 和 1 上。'},
+    {t:'子树求和', s:'自底向上求子树和。路径上的点 4、2、5 各得到 1，路径外的 3 和 1 是 0。'},
+    {t:'统计收益', s:'覆盖次数大于 0 的点就是被这条路径覆盖的点。把它们的点权加起来：5 + 6 + 4 = 15。'}
+  ];
+  var at = 0;
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+    p.push('<rect x="14" y="10" width="592" height="278" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+
+    E.forEach(function(e){
+      var a = N[e[0]], b = N[e[1]];
+      var key = Math.min(e[0],e[1]) + '-' + Math.max(e[0],e[1]);
+      var on = PATHE.indexOf(key) >= 0;
+      p.push('<line x1="'+a[0]+'" y1="'+a[1]+'" x2="'+b[0]+'" y2="'+b[1]+'" stroke="'+(on?'#ea580c':'#c9ced4')+'" stroke-width="'+(on?2.8:1.5)+'"/>');
+    });
+
+    Object.keys(N).forEach(function(k){
+      var c = N[k];
+      var covered = PATHN.indexOf(k) >= 0;
+      var fill = '#dbeafe', stroke = '#2563eb';
+      if (at >= 4 && covered){ fill = '#ffedd5'; stroke = '#ea580c'; }
+      else if (at >= 1 && !covered){ fill = '#f6f7f9'; stroke = '#9aa0a6'; }
+      p.push('<circle cx="'+c[0]+'" cy="'+c[1]+'" r="16" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.5"/>');
+      p.push('<text x="'+c[0]+'" y="'+(c[1]+4)+'" font-size="12" fill="#1f2328" text-anchor="middle">'+k+'</text>');
+      if (at >= 1 && at <= 2 && MARK[k] && !(at === 1 && MARK[k] === '−1')){
+        var col = MARK[k] === '+1' ? '#2563eb' : '#ea580c';
+        p.push('<text x="'+c[0]+'" y="'+(c[1]-22)+'" font-size="12" font-weight="600" fill="'+col+'" text-anchor="middle">'+MARK[k]+'</text>');
+      }
+      if (at >= 3){
+        p.push('<text x="'+c[0]+'" y="'+(c[1]+36)+'" font-size="11" fill="#6b7280" text-anchor="middle">和 '+SUM[k]+'</text>');
+      }
+    });
+
+    p.push('<text x="470" y="66" font-size="11" fill="#374151">本次操作：x = 4，y = 5</text>');
+    if (at >= 2) p.push('<text x="470" y="90" font-size="11" fill="#ea580c">LCA = 2，fa(LCA) = 1</text>');
+    if (at >= 1){
+      p.push('<text x="470" y="120" font-size="11" fill="#2563eb">4 +1，5 +1</text>');
+      p.push('<text x="470" y="140" font-size="11" fill="#ea580c">2 −1，1 −1</text>');
+    }
+    if (at >= 4){
+      p.push('<text x="470" y="176" font-size="11" fill="#374151">覆盖点：2、4、5</text>');
+      p.push('<text x="470" y="198" font-size="11" fill="#374151">点权：5 + 6 + 4</text>');
+      p.push('<text x="470" y="220" font-size="12" font-weight="600" fill="#ea580c">收益 = 15</text>');
+    }
+    p.push('<text x="40" y="278" font-size="11" fill="#6b7280">橙色是本次操作的路径，灰色是路径外的点</text>');
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div><strong>' + st.t + '</strong></div><div>' + st.s + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if (at > 0){ at--; render(); } });
+  next.addEventListener('click', function(){ if (at < STEPS.length - 1){ at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

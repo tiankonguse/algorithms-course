@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分块算法 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.blocks{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;}
+.block-group{display:flex;flex-direction:column;align-items:center;gap:6px;}
+.block-label{font-size:12px;color:var(--text-dim);}
+.block-row{display:flex;gap:4px;}
+.arr-cell{
+  width:40px;height:40px;display:flex;align-items:center;justify-content:center;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+  font-size:15px;font-variant-numeric:tabular-nums;
+  transition:background .12s,border-color .12s;
+}
+.arr-cell.full{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.arr-cell.partial{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+.arr-cell.dim{opacity:.35;}
+.block-sum{
+  font-size:12px;color:var(--text-dim);background:var(--bg-soft);
+  border-radius:6px;padding:2px 10px;border:1px solid var(--border);
+}
+.block-sum.full{background:var(--full-bg);border-color:var(--full);color:var(--full);}
+
+
+@media(max-width:760px){
+  .arr-cell{width:34px;height:34px;font-size:13px;}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>分块算法</h1>
+    <p class="intro">把数组切成若干块，整块的和预先算好。查询时整块直接取，只有两端的零散元素才逐个处理。</p>
+
+    <h2>零、背景</h2>
+    <p>比赛里经常遇到这种题：一个数组，改一改，查一查，两种操作混着来，做几万次。</p>
+    <p>线段树和树状数组能处理，复杂度是 O(log n)，但代码长，常数也不小。</p>
+    <p>分块是另一条路。思路直白，代码短，复杂度是 O(√n)。n 在 10⁵ 以内，或者对常数比较敏感的时候，往往够用。</p>
+    <p>下面从一个具体问题出发，把分块是怎么来的推一遍。</p>
+
+    <h2>一、问题</h2>
+    <p>有一个长度为 n 的数组 a，要支持两种操作。</p>
+    <ul>
+      <li>查询：给一个区间 [l, r]，求 a[l] 到 a[r] 的和。</li>
+      <li>修改：把 a[i] 改成新值 x。</li>
+    </ul>
+    <p>两种操作交替出现，一共 m 次。</p>
+    <p>举例用下面这个数组，n = 16。</p>
+    <pre class="code">a = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3]</pre>
+    <p>后面的图和演示都用这一份数据。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>查询的时候，从 l 一路加到 r。</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+    <span class="kw">int</span> ans = 0;
+    <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++)
+        ans += a[i];
+    <span class="kw">return</span> ans;
+}</pre>
+    <p>修改不用循环，直接赋值 a[i] = x。</p>
+    <p>可以发现，查询最坏要加 n 个数，是 O(n)；修改是 O(1)。m 次操作里大部分是查询时，总时间就是 O(nm)。n 和 m 都到 10⁵，这个量级跑不完。</p>
+
+    <h2>三、分块</h2>
+    <p>查询慢在一个一个地加。</p>
+    <p>那能不能先把一部分和算好存起来，查询时直接取？可以。把数组切成若干段，每段叫做一个块，然后预先算出每个块的和 block_sum。</p>
+    <p>切法很随意，按位置每 B 个元素切一刀就行，最后一个块可以不满。第 i 个元素属于第几块，就是 i / B。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>16 个元素按位置切成 4 块，每块的和预先算好，之后整块就能一步取出</figcaption>
+    </figure>
+
+    <p>预处理只要扫一遍数组，把每个元素加到它所在块的和上，O(n)。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ①　块大小 B 变化时，数组怎么切</div>
+      <div class="blocks" id="viz1"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>块大小</label>
+          <input type="range" id="bs1" min="1" max="16" value="4">
+          <span class="val" id="bs1val">4</span>
+        </div>
+        <div class="ctl">
+          <label>块数</label>
+          <span class="val" id="bn1">4</span>
+        </div>
+      </div>
+      <div class="legend">
+        <span>每块下方标注了该块的预存和</span>
+      </div>
+    </div>
+
+    <h2>四、查询</h2>
+    <p>现在看查询 [l, r]。区间里的元素按块分成三类。</p>
+    <p>第一类是完整块，整个块都落在 [l, r] 里面，直接把 block_sum 加上，一步到位。</p>
+    <p>第二类是左端的零散元素。l 不一定正好在块首，它所在块里位于 l 之前的元素不属于区间，所以这一整块不能拿来用，只能从 l 一个一个加到块尾。</p>
+    <p>第三类是右端的零散元素，同理，从块首一个一个加到 r。</p>
+    <p>具体来说，l 恰好在块首时左端没有零散元素，r 恰好在块尾时右端没有零散元素。l 和 r 落在同一个块里时，整个区间都是零散元素，一个完整块也取不到。</p>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>查询 [2, 12]：两端零散元素逐个加，中间两个完整块直接取块和</figcaption>
+    </figure>
+
+    <p>于是查询就按这三段依次处理，代码也是这三段的直接翻译。</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+    <span class="kw">int</span> ans = 0;
+    <span class="kw">while</span> (l &lt;= r &amp;&amp; l % BS != 0) {    <span class="cm">// 左端零散元素，逐个加</span>
+        ans += a[l]; l++;
+    }
+    <span class="kw">while</span> (l + BS - 1 &lt;= r) {            <span class="cm">// 完整块，直接取块和</span>
+        ans += block_sum[<span class="fn">bid</span>(l)]; l += BS;
+    }
+    <span class="kw">while</span> (l &lt;= r) {                     <span class="cm">// 右端零散元素，逐个加</span>
+        ans += a[l]; l++;
+    }
+    <span class="kw">return</span> ans;
+}</pre>
+    <p>完整块最多 n / B 个，两端零散元素加起来最多 2B 个，所以一次查询是 O(n/B + B)。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ②　查询 [l, r]，块大小固定为 4</div>
+      <div class="blocks" id="viz2"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>l</label>
+          <input type="range" id="sl" min="0" max="15" value="2">
+          <span class="val" id="slval">2</span>
+        </div>
+        <div class="ctl">
+          <label>r</label>
+          <input type="range" id="sr" min="0" max="15" value="12">
+          <span class="val" id="srval">12</span>
+        </div>
+      </div>
+      <div class="legend">
+        <span><span class="dot full"></span>完整块（直接取预存和）</span>
+        <span><span class="dot partial"></span>零散元素（逐个累加）</span>
+      </div>
+      <div class="breakdown" id="bd"></div>
+    </div>
+
+    <h2>五、修改</h2>
+    <p>改 a[i] 时，把它所在块的和加上新旧值的差就行。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">update</span>(<span class="kw">int</span> pos, <span class="kw">int</span> val) {
+    block_sum[<span class="fn">bid</span>(pos)] += val - a[pos];  <span class="cm">// 加上新旧值的差</span>
+    a[pos] = val;
+}</pre>
+    <p>这里有个细节，得先算差值再覆盖，顺序反了旧值就丢了。代价是 O(1)。</p>
+
+    <h2>六、块大小取多少</h2>
+    <p>一次查询的代价是 n/B + B。</p>
+    <p>B 取得太小，块就多，完整块那一半 n/B 变大；B 取得太大，零散元素那一半 2B 变大。</p>
+    <p>可以发现，两边相等时总和最小，也就是 n/B = B，得 B = √n，此时查询是 O(√n)。</p>
+    <p>实际做题不必严格卡在 √n。题目对修改和查询的偏重不一样，取 √n 附近的整数往往更快，例如 400、700 这类常见值，按实测调。</p>
+
+    <h2>七、代码</h2>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">const</span> <span class="kw">int</span> N = 16;
+<span class="kw">int</span> a[N] = {3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3};
+<span class="kw">int</span> n = N;
+
+<span class="kw">int</span> BS, BN;
+<span class="kw">int</span> block_sum[N];            <span class="cm">// 块数不会超过 n，按 n 开够用</span>
+
+<span class="kw">int</span> <span class="fn">bid</span>(<span class="kw">int</span> i) {              <span class="cm">// 第 i 个元素属于第几块</span>
+    <span class="kw">return</span> i / BS;
+}
+
+<span class="cm">// 预处理：算好每个块的和</span>
+<span class="kw">void</span> <span class="fn">build</span>() {
+    BS = (<span class="kw">int</span>)<span class="fn">sqrt</span>(n);            <span class="cm">// 块大小，√16 = 4</span>
+    BN = (n + BS - 1) / BS;       <span class="cm">// 块数</span>
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++)
+        block_sum[<span class="fn">bid</span>(i)] += a[i];
+}
+
+<span class="cm">// 修改：改一个元素，同步更新它所在块的和</span>
+<span class="kw">void</span> <span class="fn">update</span>(<span class="kw">int</span> pos, <span class="kw">int</span> val) {
+    block_sum[<span class="fn">bid</span>(pos)] += val - a[pos];
+    a[pos] = val;
+}
+
+<span class="cm">// 查询：区间 [l, r] 的和</span>
+<span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+    <span class="kw">int</span> ans = 0;
+    <span class="kw">while</span> (l &lt;= r &amp;&amp; l % BS != 0) {  <span class="cm">// 左端零散元素，逐个加</span>
+        ans += a[l]; l++;
+    }
+    <span class="kw">while</span> (l + BS - 1 &lt;= r) {          <span class="cm">// 完整块，直接取块和</span>
+        ans += block_sum[<span class="fn">bid</span>(l)]; l += BS;
+    }
+    <span class="kw">while</span> (l &lt;= r) {                   <span class="cm">// 右端零散元素，逐个加</span>
+        ans += a[l]; l++;
+    }
+    <span class="kw">return</span> ans;
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    <span class="fn">build</span>();
+    cout &lt;&lt; <span class="fn">query</span>(2, 12) &lt;&lt; endl;   <span class="cm">// 4+1 + 22 + 21 + 9 = 57</span>
+    <span class="fn">update</span>(0, 10);
+    cout &lt;&lt; <span class="fn">query</span>(0, 3) &lt;&lt; endl;    <span class="cm">// 16</span>
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <h2>八、复杂度分析</h2>
+    <p>设 n 为数组长度，B 为块大小，块数是 n/B。</p>
+    <p>预处理是扫一遍数组把每个块的和累加起来，O(n)。查询前一半是完整块，最多 n/B 个，后一半是两端零散元素，最多 2B 个，合起来 O(n/B + B)。修改只动一个元素和一个块和，O(1)。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>预处理 <code class="inline">build</code></td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>查询 <code class="inline">query</code></td><td><code class="inline">O(n/B + B)</code>，B = √n 时是 <code class="inline">O(√n)</code></td></tr>
+        <tr><td>修改 <code class="inline">update</code></td><td><code class="inline">O(1)</code></td></tr>
+        <tr><td>m 次操作总计</td><td><code class="inline">O(n + m√n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间上只多开了一个 block_sum，长度是块数 n/B，取 B = √n 时是 O(√n)。原数组本身不算额外开销。</p>
+    <p>对比一下，朴素做法 m 次查询是 O(nm)，分块把每次查询从 O(n) 压到 O(√n)，这就是它带来的收益。</p>
+
+    <h2>九、最后</h2>
+    <p>分块的价值不在复杂度有多低，而在通用。</p>
+    <p>只要块内的信息能快速合并、又能快速重建，同一个骨架就能套到不同问题上。求区间和时块内存的是和，求区间最大值时块内存的是最大值，求区间众数时块内存的是计数表，查询的写法都是两端零散逐个处理、中间整块直接取。</p>
+    <p>代价是复杂度只有 O(√n)，n 到 10⁵ 以上就吃力了，那时候还是得上线段树或者树状数组。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  const A = [3,1,4,1,5,9,2,6,5,3,5,8,9,7,9,3];
+  const N = A.length;
+
+  function blockSums(bs){
+    const sums = [];
+    for(let i=0;i<N;i+=bs){
+      let s=0;
+      for(let j=i;j<Math.min(i+bs,N);j++) s+=A[j];
+      sums.push(s);
+    }
+    return sums;
+  }
+
+  /* 分析区间 [l,r] 在块大小 bs 下的完整块 / 零散元素 */
+  function analyze(l, r, bs){
+    const lb = Math.floor(l/bs), rb = Math.floor(r/bs);
+    const partialLeft=[], fullBlocks=[], partialRight=[];
+    if(lb===rb){
+      for(let i=l;i<=r;i++) partialLeft.push(i);
+    }else{
+      const leftEnd=(lb+1)*bs-1;
+      for(let i=l;i<=leftEnd;i++) partialLeft.push(i);
+      for(let b=lb+1;b<rb;b++) fullBlocks.push(b);
+      const rightStart=rb*bs;
+      for(let i=rightStart;i<=r;i++) partialRight.push(i);
+    }
+    return {partialLeft, fullBlocks, partialRight};
+  }
+
+  /* 演示①：分块结构 */
+  const viz1 = document.getElementById('viz1');
+  const bs1 = document.getElementById('bs1');
+  const bs1val = document.getElementById('bs1val');
+  const bn1 = document.getElementById('bn1');
+
+  function renderBlocks(target, bs, highlight){
+    const sums = blockSums(bs);
+    target.innerHTML='';
+    sums.forEach((s,b)=>{
+      const g=document.createElement('div');
+      g.className='block-group';
+      const lab=document.createElement('div');
+      lab.className='block-label';
+      lab.textContent='块 '+b;
+      g.appendChild(lab);
+      const row=document.createElement('div');
+      row.className='block-row';
+      for(let j=b*bs;j<Math.min(b*bs+bs,N);j++){
+        const c=document.createElement('div');
+        c.className='arr-cell';
+        c.textContent=A[j];
+        if(highlight){
+          if(highlight.fullIdx.has(j)) c.classList.add('full');
+          else if(highlight.partialIdx.has(j)) c.classList.add('partial');
+          else c.classList.add('dim');
+        }
+        row.appendChild(c);
+      }
+      g.appendChild(row);
+      const sum=document.createElement('div');
+      sum.className='block-sum';
+      sum.textContent='和 = '+s;
+      if(highlight && highlight.fullBlocks.has(b)) sum.classList.add('full');
+      g.appendChild(sum);
+      target.appendChild(g);
+    });
+    return sums;
+  }
+
+  function refreshViz1(){
+    const bs=parseInt(bs1.value,10);
+    bs1val.textContent=bs;
+    renderBlocks(viz1, bs, null);
+    bn1.textContent=blockSums(bs).length;
+  }
+
+  /* 演示②：区间查询 */
+  const viz2 = document.getElementById('viz2');
+  const sl=document.getElementById('sl');
+  const sr=document.getElementById('sr');
+  const slval=document.getElementById('slval');
+  const srval=document.getElementById('srval');
+  const bd=document.getElementById('bd');
+  const BS2=4;
+
+  function refreshViz2(){
+    let l=parseInt(sl.value,10), r=parseInt(sr.value,10);
+    if(l>r){ const t=l;l=r;r=t; }
+    sl.value=l; sr.value=r;
+    slval.textContent=l; srval.textContent=r;
+
+    const {partialLeft, fullBlocks, partialRight} = analyze(l, r, BS2);
+    const fullIdx=new Set(), partialIdx=new Set();
+    partialLeft.forEach(i=>partialIdx.add(i));
+    partialRight.forEach(i=>partialIdx.add(i));
+    fullBlocks.forEach(b=>{
+      for(let j=b*BS2;j<Math.min(b*BS2+BS2,N);j++) fullIdx.add(j);
+    });
+    renderBlocks(viz2, BS2, {fullIdx, partialIdx, fullBlocks:new Set(fullBlocks)});
+
+    // 生成求和拆解
+    const rows=[];
+    let total=0;
+    if(partialLeft.length){
+      const sum=partialLeft.reduce((s,i)=>s+A[i],0);
+      total+=sum;
+      rows.push('左端零散：'+partialLeft.map(i=>'a['+i+']').join(' + ')+' = '+sum);
+    }
+    fullBlocks.forEach(b=>{
+      const s=blockSums(BS2)[b];
+      total+=s;
+      rows.push('完整块 '+b+'：block_sum['+b+'] = '+s);
+    });
+    if(partialRight.length){
+      const sum=partialRight.reduce((s,i)=>s+A[i],0);
+      total+=sum;
+      rows.push('右端零散：'+partialRight.map(i=>'a['+i+']').join(' + ')+' = '+sum);
+    }
+    bd.innerHTML=
+      rows.map(x=>'<div class="row">'+x+'</div>').join('') +
+      '<div class="total">区间 ['+l+', '+r+'] 的和 = '+total+'</div>' +
+      '<div class="row" style="color:var(--text-dim)">完整块 '+fullBlocks.length+' 个 + 零散元素 '+(partialLeft.length+partialRight.length)+' 个</div>';
+  }
+
+  bs1.addEventListener('input', refreshViz1);
+  sl.addEventListener('input', refreshViz2);
+  sr.addEventListener('input', refreshViz2);
+
+  refreshViz1();
+  refreshViz2();
+
+  /* ---------- 图示 ---------- */
+  const CW=36, CG=3, BG=14, FB=4, X0=13;
+  const BW = FB*CW + (FB-1)*CG;          // 块宽 153
+  const cellX = i => X0 + Math.floor(i/FB)*(BW+BG) + (i%FB)*(CW+CG);
+  const blockX = b => X0 + b*(BW+BG);
+  const sums4 = blockSums(4);
+
+  /* 图①：分块结构 */
+  const fig1 = document.getElementById('fig1');
+  if (fig1) {
+    let s = '<svg viewBox="0 0 680 118" role="img" aria-label="分块结构示意图">';
+    for (let b=0; b<4; b++) {
+      const bx = blockX(b);
+      s += '<text x="'+(bx+BW/2)+'" y="16" text-anchor="middle" font-size="11" fill="#6b7280">块 '+b+'</text>';
+      s += '<rect x="'+(bx-5)+'" y="22" width="'+(BW+10)+'" height="44" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>';
+      for (let j=b*FB; j<b*FB+FB; j++) {
+        s += '<rect x="'+cellX(j)+'" y="28" width="'+CW+'" height="'+CW+'" rx="6" fill="#ffffff" stroke="#e6e8eb"/>';
+        s += '<text x="'+(cellX(j)+CW/2)+'" y="51" text-anchor="middle" font-size="14" fill="#1f2328">'+A[j]+'</text>';
+        s += '<text x="'+(cellX(j)+CW/2)+'" y="76" text-anchor="middle" font-size="10" fill="#9aa0a6">'+j+'</text>';
+      }
+      s += '<rect x="'+bx+'" y="84" width="'+BW+'" height="26" rx="6" fill="#dbeafe" stroke="#2563eb"/>';
+      s += '<text x="'+(bx+BW/2)+'" y="102" text-anchor="middle" font-size="13" font-weight="600" fill="#2563eb">block_sum['+b+'] = '+sums4[b]+'</text>';
+    }
+    s += '</svg>';
+    fig1.innerHTML = s;
+  }
+
+  /* 图②：查询 [2,12] 的三类元素 */
+  const fig2 = document.getElementById('fig2');
+  if (fig2) {
+    const L=2, R=12;
+    const kindOf = i => {
+      if (i < L || i > R) return 'dim';
+      const b = Math.floor(i/FB);
+      if (b > Math.floor(L/FB) && b < Math.floor(R/FB)) return 'full';
+      return 'partial';
+    };
+    const ST = {
+      dim:     {fill:'#f6f7f9', stroke:'#e6e8eb', text:'#9aa0a6'},
+      full:    {fill:'#dbeafe', stroke:'#2563eb', text:'#2563eb'},
+      partial: {fill:'#ffedd5', stroke:'#ea580c', text:'#ea580c'}
+    };
+    let s = '<svg viewBox="0 0 680 200" role="img" aria-label="区间查询的三类元素示意图">';
+    for (let b=0; b<4; b++) {
+      s += '<text x="'+(blockX(b)+BW/2)+'" y="16" text-anchor="middle" font-size="11" fill="#6b7280">块 '+b+'</text>';
+    }
+    for (let i=0; i<N; i++) {
+      const st = ST[kindOf(i)];
+      s += '<rect x="'+cellX(i)+'" y="26" width="'+CW+'" height="'+CW+'" rx="6" fill="'+st.fill+'" stroke="'+st.stroke+'"/>';
+      s += '<text x="'+(cellX(i)+CW/2)+'" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="'+st.text+'">'+A[i]+'</text>';
+      s += '<text x="'+(cellX(i)+CW/2)+'" y="75" text-anchor="middle" font-size="10" fill="#9aa0a6">'+i+'</text>';
+    }
+    // 三段标注
+    const segs = [
+      [2, 3, '左端零散', '#ea580c'],
+      [4, 7, '完整块 1', '#2563eb'],
+      [8, 11, '完整块 2', '#2563eb'],
+      [12, 12, '右端零散', '#ea580c']
+    ];
+    segs.forEach(function(g){
+      const x1 = cellX(g[0]), x2 = cellX(g[1]) + CW, y = 92;
+      s += '<path d="M'+x1+' '+(y+6)+' L'+x1+' '+y+' L'+x2+' '+y+' L'+x2+' '+(y+6)+'" fill="none" stroke="'+g[3]+'" stroke-width="1.5"/>';
+      s += '<text x="'+((x1+x2)/2)+'" y="'+(y+22)+'" text-anchor="middle" font-size="12" fill="'+g[3]+'">'+g[2]+'</text>';
+    });
+    s += '<text x="340" y="148" text-anchor="middle" font-size="15" font-weight="600">' +
+         '<tspan fill="#ea580c">a[2] + a[3]</tspan><tspan fill="#6b7280"> + </tspan>' +
+         '<tspan fill="#2563eb">block_sum[1] + block_sum[2]</tspan><tspan fill="#6b7280"> + </tspan>' +
+         '<tspan fill="#ea580c">a[12]</tspan><tspan fill="#6b7280"> = </tspan>' +
+         '<tspan fill="#1f2328">4 + 1 + 22 + 21 + 9 = 57</tspan></text>';
+    s += '<text x="340" y="172" text-anchor="middle" font-size="12" fill="#6b7280">分块：2 个块和 + 2 个零散元素，共 4 次加法</text>';
+    s += '<text x="340" y="192" text-anchor="middle" font-size="12" fill="#9aa0a6">朴素：a[2] 到 a[12] 逐个加，共 11 次加法</text>';
+    s += '</svg>';
+    fig2.innerHTML = s;
+  }
+})();
+</script>
+</body>
+</html>

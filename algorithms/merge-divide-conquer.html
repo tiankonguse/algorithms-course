@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>归并分治：小和与翻转对</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.ss-cell{display:inline-block;width:36px;height:36px;line-height:36px;text-align:center;border:1px solid #c9ced4;border-radius:4px;margin:0 2px;font-family:monospace;font-size:14px;background:#f6f7f9}
+.ss-cell.active{background:#dbeafe;border-color:#2563eb;color:#1e40af;font-weight:bold}
+.ss-cell.counted{background:#ffedd5;border-color:#ea580c;color:#9a3412}
+.ss-cell.done{background:#e8f5e9;border-color:#4caf50;color:#1b5e20}
+.ss-label{font-size:11px;color:#666;margin-top:2px}
+.viz-canvas{min-height:280px;display:flex;flex-direction:column;align-items:center;gap:12px;padding:12px 0}
+.pointer-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center;font-family:monospace;font-size:13px}
+.pointer-row span{background:#f0f4ff;padding:2px 8px;border-radius:4px}
+.ans-box{font-size:18px;font-weight:bold;color:#2563eb;margin:8px 0}
+.phase-tag{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:bold;margin-bottom:8px}
+.phase-count{background:#dbeafe;color:#1e40af}
+.phase-merge{background:#ffedd5;color:#9a3412}
+.arr-row{display:flex;align-items:flex-end;gap:4px}
+.arr-block{text-align:center}
+</style>
+</head>
+<body>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main">
+<section class="algo-section">
+
+<h1>归并分治：小和与翻转对</h1>
+<p class="intro">归并排序的 merge 过程不只能排序。两个有序段并排放在一起时，指针单调前移的特性可以顺手统计很多东西。这一讲用两道经典题把「归并分治」的判据和写法讲透。</p>
+
+<h2>零、背景</h2>
+<p>上一讲把归并排序本身讲完了：分两半、各自排好、再用 merge 合成整体。merge 里两个指针 a 和 b 各走各的，谁小取谁，全程不回头。</p>
+<p>这个「不回头」很值钱。如果一道题的答案可以拆成「左半自己的答案 + 右半自己的答案 + 跨越左右产生的答案」，而跨越左右那部分恰好能在两个段各自有序时用单调指针算出来，那归并排序的框架就能直接套上去，排序只是顺带的副产品。</p>
+<p>这套思路叫归并分治。下面先给判据，再用两道题落地。</p>
+
+<h2>一、归并分治的四条判据</h2>
+<p>拿到一道题，按下面四条依次问自己：</p>
+<p>1）大范围上的答案，等不等于左部分的答案加右部分的答案，再加跨越左右产生的答案？</p>
+<p>2）算跨越左右那部分时，如果加上「左、右各自有序」这个设定，会不会获得计算上的便利？</p>
+<p>3）以上两条都成立，这道题很可能能用归并分治解决。</p>
+<p>4）求解时只需要在归并排序的过程里插入一段统计代码，因为要让左右各自有序才能获得便利。</p>
+<p>第 2 条是核心。「有序」带来的便利通常是指针单调：一个指针只管往右走，不需要回退，所以统计阶段的总代价是 O(n) 而不是 O(n²)。整道题的复杂度就和归并排序一样，是 O(n log n)。</p>
+<p>有些归并分治的题也能用线段树、树状数组做，复杂度同样最优。那些数据结构后面会讲，这里先把最朴素的归并框架吃透。</p>
+
+<figure class="fig" id="fig1"></figure>
+
+<h2>二、小和问题</h2>
+<p>给定一个数组，对每个元素，把它左边所有小于等于它的数加起来，再把每个元素的结果累加，得到的总和叫「小和」。</p>
+<p>拿 s = [1, 3, 5, 2, 4, 6] 算一遍：</p>
+<p>s[0]=1，左边没有数，贡献 0。</p>
+<p>s[1]=3，左边小于等于 3 的是 1，贡献 1。</p>
+<p>s[2]=5，左边小于等于 5 的是 1、3，贡献 4。</p>
+<p>s[3]=2，左边小于等于 2 的是 1，贡献 1。</p>
+<p>s[4]=4，左边小于等于 4 的是 1、3、2，贡献 6。</p>
+<p>s[5]=6，左边小于等于 6 的是 1、3、5、2、4，贡献 15。</p>
+<p>小和 = 0 + 1 + 4 + 1 + 6 + 15 = 27。</p>
+
+<figure class="fig" id="fig2"></figure>
+
+<p>暴力做法是两层循环：对每个 j，扫一遍左边所有 i，a[i] &le; a[j] 就累加。时间 O(n²)，n = 50000 时实测约 99 毫秒。n 再大就撑不住了。</p>
+
+<h2>三、小和的归并解法</h2>
+<p>用归并分治的四条判据套一下。</p>
+<p>第 1 条：整个数组的小和 = 左半内部的小和 + 右半内部的小和 + 「左半元素和右半元素之间」产生的小和。前两部分递归解决，第三部分是跨越左右的答案。</p>
+<p>第 2 条：算跨越左右的小和时，如果左半和右半各自有序，会发生什么？对右半的每个元素 a[j]，左半里所有小于等于 a[j] 的元素一定排在最前面。用一个指针 i 从左半头部开始往右走，遇到 a[i] &le; a[j] 就把 a[i] 加进 sum、i 前移；遇到第一个大于 a[j] 的就停。这一轮的 sum 就是 a[j] 贡献的跨左右小和。</p>
+<p>关键是 i 不回头。处理完 a[j] 再处理 a[j+1] 时，a[j+1] &ge; a[j]（右半有序），所以之前已经加进 sum 的那些元素仍然满足条件，i 从当前位置继续走就行。整个统计阶段 i 和 j 加起来最多走 n 步，代价 O(n)。</p>
+
+<figure class="fig" id="fig3"></figure>
+
+<p>统计完之后，照常做 merge 把左右合成一个有序段，返回给上一层。整个过程就是归并排序多了一段统计代码。</p>
+<p>有个溢出的坑。小和的结果可能很大：n = 100000、所有元素都是 10⁹ 时，小和约为 5&times;10¹⁸，远超 int 的上限 2.1&times;10⁹。返回值必须用 long long。课程代码里 merge 函数的 sum 变量写成了 int，在数值大时也会溢出，稳妥起见改成 long long。</p>
+
+    <pre class="code"><span class="kw">long</span> <span class="kw">long</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> j = m + 1, i = l; j &lt;= r; j++) {
+            <span class="kw">long</span> <span class="kw">long</span> sum = 0;
+            <span class="kw">while</span> (i &lt;= m &amp;&amp; arr[i] &lt;= arr[j]) {
+                sum += arr[i++];
+            }
+            ans += sum;
+        }
+        <span class="kw">int</span> i = l, a = l, b = m + 1;
+        <span class="kw">while</span> (a &lt;= m &amp;&amp; b &lt;= r)
+            help[i++] = arr[a] &lt;= arr[b] ? arr[a++] : arr[b++];
+        <span class="kw">while</span> (a &lt;= m) help[i++] = arr[a++];
+        <span class="kw">while</span> (b &lt;= r) help[i++] = arr[b++];
+        <span class="kw">for</span> (i = l; i &lt;= r; i++) arr[i] = help[i];
+        <span class="kw">return</span> ans;
+    }</pre>
+
+<p>递归部分和归并排序一模一样，只是多返回了 merge 的统计值：</p>
+
+    <pre class="code"><span class="kw">long</span> <span class="kw">long</span> <span class="fn">smallSum</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == r) <span class="kw">return</span> 0;
+        <span class="kw">int</span> m = (l + r) &gt;&gt; 1;
+        <span class="kw">return</span> smallSum(l, m)
+             + smallSum(m + 1, r)
+             + merge(l, m, r);
+    }</pre>
+
+<p>n = 50000 时，归并版实测约 3.5 毫秒，暴力版约 99 毫秒，差 28 倍。n 越大差距越明显。</p>
+
+<div class="viz" id="viz1">
+  <div class="viz-controls"></div>
+  <div class="viz-canvas"></div>
+  <div class="breakdown"></div>
+</div>
+
+<h2>四、翻转对</h2>
+<p>给定数组 nums，如果 i &lt; j 且 nums[i] &gt; 2 &times; nums[j]，就把 (i, j) 称作一个翻转对。返回数组中翻转对的数量。</p>
+<p>这道题和小和同属归并分治，但统计的方向反过来了。小和是「对每个右元素，看左半有多少满足条件」；翻转对是「对每个左元素，看右半有多少满足条件」。</p>
+<p>为什么方向反过来？因为条件是 nums[i] &gt; 2 &times; nums[j]，i 在左、j 在右。如果对每个右元素 j 去看左半有多少 i 满足，左半的指针仍然可以单调前移（左半有序，a[i] 越大越容易满足），其实也能做。但课程里选的是对每个左元素 i 去数右半，两种写法都对，下面按课程的写法讲。</p>
+<p>左半和右半各自有序后，对每个左元素 a[i]，用指针 j 从右半头部开始走，遇到 a[i] &gt; 2 &times; a[j] 就 j 前移，直到条件不满足。此时 j 走过的格子数就是这个 a[i] 贡献的翻转对数量。</p>
+<p>j 同样不回头：下一个 a[i+1] &ge; a[i]（左半有序），之前满足条件的右元素仍然满足，j 从当前位置继续走。</p>
+
+<figure class="fig" id="fig4"></figure>
+
+<p>这里有个必须注意的溢出。2 &times; nums[j] 可能超出 int 范围：nums[j] = 1.5&times;10⁹ 时，2 &times; nums[j] = 3&times;10⁹，用 int 算会溢出成负数 -1294967296，比较结果完全错误。必须把两边都强转成 long long 再比：(long long)a[i] &gt; (long long)a[j] * 2。</p>
+
+<h2>五、翻转对的代码</h2>
+<p>merge 函数的统计阶段遍历左半，j 单调前移：</p>
+
+    <pre class="code"><span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span>* arr, <span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = l, j = m + 1; i &lt;= m; i++) {
+            <span class="kw">while</span> (j &lt;= r &amp;&amp; (<span class="kw">long</span> <span class="kw">long</span>)arr[i] &gt; (<span class="kw">long</span> <span class="kw">long</span>)arr[j] * 2)
+                j++;
+            ans += j - m - 1;
+        }
+        <span class="kw">int</span> i = l, a = l, b = m + 1;
+        <span class="kw">while</span> (a &lt;= m &amp;&amp; b &lt;= r)
+            help[i++] = arr[a] &lt;= arr[b] ? arr[a++] : arr[b++];
+        <span class="kw">while</span> (a &lt;= m) help[i++] = arr[a++];
+        <span class="kw">while</span> (b &lt;= r) help[i++] = arr[b++];
+        <span class="kw">for</span> (i = l; i &lt;= r; i++) arr[i] = help[i];
+        <span class="kw">return</span> ans;
+    }</pre>
+
+<p>递归部分和小和完全同构：</p>
+
+    <pre class="code"><span class="kw">int</span> <span class="fn">counts</span>(<span class="kw">int</span>* arr, <span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == r) <span class="kw">return</span> 0;
+        <span class="kw">int</span> m = (l + r) &gt;&gt; 1;
+        <span class="kw">return</span> counts(arr, l, m)
+             + counts(arr, m + 1, r)
+             + merge(arr, l, m, r);
+    }</pre>
+
+<p>n = 50000 时，归并版实测约 3.2 毫秒，暴力版约 2972 毫秒，差 931 倍。翻转对的暴力是两层循环里还带一次乘法，比小和的暴力更慢，归并的优势更明显。</p>
+
+<div class="viz" id="viz2">
+  <div class="viz-controls"></div>
+  <div class="viz-canvas"></div>
+  <div class="breakdown"></div>
+</div>
+
+<h2>六、两种统计的方向</h2>
+<p>小和和翻转对放在一起看，最容易混淆的是统计阶段指针的方向。</p>
+<p>小和的条件是 a[i] &le; a[j]，i 在左、j 在右。课程写法是「外层遍历右元素 j，内层指针 i 在左半单调前移」。因为右半有序，j 增大时阈值 a[j] 也增大，i 不需要回退。</p>
+<p>翻转对的条件是 a[i] &gt; 2 &times; a[j]。课程写法是「外层遍历左元素 i，内层指针 j 在右半单调前移」。因为左半有序，i 增大时 a[i] 也增大，能满足条件的右元素只会更多，j 不需要回退。</p>
+<p>两种写法的共同点是：被遍历的那一侧有序，导致阈值单调变化，另一侧的指针因此只进不退。统计阶段总代价 O(n)，叠上 log n 层递归就是 O(n log n)。</p>
+<p>方向选反了会怎样？比如小和改成「外层遍历左元素 i，内层看右半有多少 j 满足 a[i] &le; a[j]」。右半有序，对每个 i 可以二分找到第一个大于等于 a[i] 的位置，代价变成 O(n log n) 每层，总复杂度 O(n log²n)。也能做，但多了一个 log 因子。归并分治追求的是用单调指针把每层压回 O(n)。</p>
+
+<figure class="fig" id="fig5"></figure>
+
+<h2>复杂度分析</h2>
+<table class="complexity">
+<tr><th>算法</th><th>时间</th><th>空间</th><th>说明</th></tr>
+<tr><td>小和（暴力）</td><td>O(n²)</td><td>O(1)</td><td>两层循环，n=50000 约 99ms</td></tr>
+<tr><td>小和（归并分治）</td><td>O(n log n)</td><td>O(n)</td><td>help 数组，n=50000 约 3.5ms</td></tr>
+<tr><td>翻转对（暴力）</td><td>O(n²)</td><td>O(1)</td><td>两层循环带乘法，n=50000 约 2972ms</td></tr>
+<tr><td>翻转对（归并分治）</td><td>O(n log n)</td><td>O(n)</td><td>help 数组，n=50000 约 3.2ms</td></tr>
+</table>
+<p>两道题的额外空间都是 O(n)，来自 merge 用的 help 数组。递归栈深度是 O(log n)，和归并排序一致。</p>
+
+<h2>总结</h2>
+<p>归并分治的核心是四条判据，其中最关键的一条是「左右有序后，跨越左右的答案能不能用单调指针在 O(n) 内算出来」。能，就套归并排序的框架，排序只是副产品。</p>
+<p>小和问题：外层遍历右元素，左指针 i 单调前移累加 sum，返回值必须 long long。</p>
+<p>翻转对：外层遍历左元素，右指针 j 单调前移计数，2 &times; a[j] 必须强转 long long 防溢出。</p>
+<p>两道题的统计方向相反，但道理一样：被遍历侧有序导致阈值单调，另一侧指针只进不退。写代码时先想清楚「外层遍历哪一侧、另一侧的指针为什么不需要回退」，再动手。</p>
+<p>归并分治还能解决更难的问题，比如二维平面上最近点对，那是后面的内容。下一讲换随机快速排序。</p>
+
+</section>
+</main>
+<aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+'use strict';
+
+// ===== mulberry32 =====
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296}}
+
+// ===== common SVG helpers =====
+function svgEl(tag, attrs){
+  var e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (var k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+function text(x, y, str, size, anchor, fill){
+  var t = svgEl('text', {x:x, y:y, 'font-size':size||12, 'text-anchor':anchor||'middle', fill:fill||'#333', 'font-family':'monospace'});
+  t.textContent = str;
+  return t;
+}
+function rect(x, y, w, h, fill, stroke, r){
+  var attrs = {x:x, y:y, width:w, height:h, fill:fill||'#fff', stroke:stroke||'#c9ced4', 'stroke-width':1};
+  if (r) attrs.rx = r;
+  return svgEl('rect', attrs);
+}
+function line(x1, y1, x2, y2, stroke, w){
+  return svgEl('line', {x1:x1, y1:y1, x2:x2, y2:y2, stroke:stroke||'#999', 'stroke-width':w||1});
+}
+
+// ===== Figure 1: 归并分治三部分 + 4 conditions =====
+(function(){
+  var fig = document.getElementById('fig1');
+  var svg = svgEl('svg', {viewBox:'0 0 660 300', width:'100%'});
+  // title
+  svg.appendChild(text(330, 24, '归并分治：答案 = 左 + 右 + 跨左右', 14, 'middle', '#1e40af'));
+  // three boxes
+  var boxes = [
+    {x:40, y:60, w:170, h:80, label:'左半答案', sub:'递归解决', color:'#dbeafe', border:'#2563eb'},
+    {x:245, y:60, w:170, h:80, label:'右半答案', sub:'递归解决', color:'#dbeafe', border:'#2563eb'},
+    {x:450, y:60, w:170, h:80, label:'跨左右答案', sub:'左右有序后 O(n) 统计', color:'#ffedd5', border:'#ea580c'}
+  ];
+  boxes.forEach(function(b){
+    svg.appendChild(rect(b.x, b.y, b.w, b.h, b.color, b.border, 6));
+    svg.appendChild(text(b.x+b.w/2, b.y+32, b.label, 14, 'middle', '#333'));
+    svg.appendChild(text(b.x+b.w/2, b.y+56, b.sub, 11, 'middle', '#666'));
+  });
+  // plus signs
+  svg.appendChild(text(225, 105, '+', 20, 'middle', '#666'));
+  svg.appendChild(text(430, 105, '+', 20, 'middle', '#666'));
+  // arrow down to merge
+  svg.appendChild(line(330, 145, 330, 175, '#2563eb', 2));
+  svg.appendChild(text(330, 170, '归并排序框架（顺带排序）', 12, 'middle', '#2563eb'));
+  // conditions checklist
+  svg.appendChild(text(330, 200, '四条判据', 13, 'middle', '#1e40af'));
+  var conds = [
+    '① 答案 = 左 + 右 + 跨左右',
+    '② 左右有序后，跨左右能用单调指针 O(n) 算出',
+    '③ ①② 成立 → 大概率可用归并分治',
+    '④ 在归并排序过程中插入统计代码即可'
+  ];
+  conds.forEach(function(c, i){
+    svg.appendChild(text(330, 224 + i*18, c, 11, 'middle', '#444'));
+  });
+  fig.appendChild(svg);
+  var cap = document.createElement('figcaption');
+  cap.textContent = '归并分治把答案拆成三部分，跨左右那部分靠左右有序后的单调指针在 O(n) 内解决。';
+  fig.appendChild(cap);
+})();
+
+// ===== Figure 2: 小和示例 =====
+(function(){
+  var fig = document.getElementById('fig2');
+  var svg = svgEl('svg', {viewBox:'0 0 660 260', width:'100%'});
+  svg.appendChild(text(330, 22, '小和示例：s = [1, 3, 5, 2, 4, 6]，小和 = 27', 13, 'middle', '#1e40af'));
+  var arr = [1,3,5,2,4,6];
+  var cellW = 50, cellH = 36, startX = 60, baseY = 50;
+  // array row
+  arr.forEach(function(v, i){
+    svg.appendChild(rect(startX + i*cellW, baseY, cellW-4, cellH, '#f6f7f9', '#c9ced4', 4));
+    svg.appendChild(text(startX + i*cellW + (cellW-4)/2, baseY+23, v, 14, 'middle', '#333'));
+    svg.appendChild(text(startX + i*cellW + (cellW-4)/2, baseY+cellH+14, 's['+i+']', 10, 'middle', '#888'));
+  });
+  // contributions
+  var contribs = [
+    {idx:0, left:'无', sum:0},
+    {idx:1, left:'1', sum:1},
+    {idx:2, left:'1, 3', sum:4},
+    {idx:3, left:'1', sum:1},
+    {idx:4, left:'1, 3, 2', sum:6},
+    {idx:5, left:'1, 3, 5, 2, 4', sum:15}
+  ];
+  var rowY = 120;
+  svg.appendChild(text(70, rowY, '元素', 11, 'start', '#666'));
+  svg.appendChild(text(200, rowY, '左边 ≤ 它的数', 11, 'start', '#666'));
+  svg.appendChild(text(420, rowY, '贡献', 11, 'start', '#666'));
+  svg.appendChild(text(520, rowY, '累加', 11, 'start', '#666'));
+  var total = 0;
+  contribs.forEach(function(c, i){
+    var y = rowY + 20 + i*18;
+    total += c.sum;
+    svg.appendChild(text(70, y, 's['+c.idx+']='+arr[c.idx], 11, 'start', '#333'));
+    svg.appendChild(text(200, y, c.left, 11, 'start', '#333'));
+    svg.appendChild(text(420, y, String(c.sum), 11, 'start', '#ea580c'));
+    svg.appendChild(text(520, y, String(total), 11, 'start', '#2563eb'));
+  });
+  svg.appendChild(text(330, 248, '小和 = 0+1+4+1+6+15 = 27', 14, 'middle', '#1e40af'));
+  fig.appendChild(svg);
+  var cap = document.createElement('figcaption');
+  cap.textContent = '逐元素计算小和：每个元素的贡献是左边所有小于等于它的数之和，最后累加。';
+  fig.appendChild(cap);
+})();
+
+// ===== Figure 3: 小和 merge 统计阶段 =====
+(function(){
+  var fig = document.getElementById('fig3');
+  var svg = svgEl('svg', {viewBox:'0 0 660 280', width:'100%'});
+  svg.appendChild(text(330, 22, '小和统计阶段：左=[1,3,5] 右=[2,4,6]，跨左右小和=14', 13, 'middle', '#1e40af'));
+  var left = [1,3,5], right = [2,4,6];
+  var cellW = 44, cellH = 32;
+  var lx = 80, rx = 380, ly = 55, ry = 55;
+  // left array
+  svg.appendChild(text(lx + 3*cellW/2, ly-8, '左半（有序）', 11, 'middle', '#666'));
+  left.forEach(function(v, i){
+    svg.appendChild(rect(lx + i*cellW, ly, cellW-4, cellH, '#dbeafe', '#2563eb', 4));
+    svg.appendChild(text(lx + i*cellW + (cellW-4)/2, ly+21, v, 13, 'middle', '#1e40af'));
+  });
+  // right array
+  svg.appendChild(text(rx + 3*cellW/2, ry-8, '右半（有序）', 11, 'middle', '#666'));
+  right.forEach(function(v, i){
+    svg.appendChild(rect(rx + i*cellW, ry, cellW-4, cellH, '#ffedd5', '#ea580c', 4));
+    svg.appendChild(text(rx + i*cellW + (cellW-4)/2, ry+21, v, 13, 'middle', '#9a3412'));
+  });
+  // step by step
+  var steps = [
+    {j:0, jval:2, i:1, sum:1, note:'i 走到 3（3>2 停），sum=1'},
+    {j:1, jval:4, i:2, sum:4, note:'i 走到 5（5>4 停），sum=1+3=4'},
+    {j:2, jval:6, i:3, sum:9, note:'i 走完，sum=4+5=9'}
+  ];
+  var sy = 120;
+  svg.appendChild(text(60, sy, 'j', 11, 'middle', '#666'));
+  svg.appendChild(text(100, sy, 'a[j]', 11, 'middle', '#666'));
+  svg.appendChild(text(150, sy, 'i 停在', 11, 'middle', '#666'));
+  svg.appendChild(text(230, sy, 'sum', 11, 'middle', '#666'));
+  svg.appendChild(text(320, sy, 'ans += sum', 11, 'middle', '#666'));
+  svg.appendChild(text(480, sy, '说明', 11, 'start', '#666'));
+  var ans = 0;
+  steps.forEach(function(s, i){
+    var y = sy + 22 + i*22;
+    ans += s.sum;
+    svg.appendChild(text(60, y, String(s.j), 11, 'middle', '#333'));
+    svg.appendChild(text(100, y, String(s.jval), 11, 'middle', '#ea580c'));
+    svg.appendChild(text(150, y, 'i='+s.i, 11, 'middle', '#2563eb'));
+    svg.appendChild(text(230, y, String(s.sum), 11, 'middle', '#333'));
+    svg.appendChild(text(320, y, 'ans='+ans, 11, 'middle', '#1e40af'));
+    svg.appendChild(text(420, y, s.note, 10, 'start', '#666'));
+  });
+  svg.appendChild(text(330, 220, 'i 全程从 0 走到 3，不回头。统计阶段总移动 ≤ n。', 12, 'middle', '#444'));
+  svg.appendChild(text(330, 248, '跨左右小和 = 1+4+9 = 14，总小和 = 左(5)+右(8)+14 = 27', 13, 'middle', '#1e40af'));
+  fig.appendChild(svg);
+  var cap = document.createElement('figcaption');
+  cap.textContent = '对每个右元素 j，左指针 i 单调前移累加 sum；i 不回头，统计阶段 O(n)。';
+  fig.appendChild(cap);
+})();
+
+// ===== Figure 4: 翻转对统计阶段 =====
+(function(){
+  var fig = document.getElementById('fig4');
+  var svg = svgEl('svg', {viewBox:'0 0 660 280', width:'100%'});
+  svg.appendChild(text(330, 22, '翻转对统计阶段：左=[3,7,9] 右=[1,2,4,8]，共 6 对', 13, 'middle', '#1e40af'));
+  var left = [3,7,9], right = [1,2,4,8];
+  var cellW = 44, cellH = 32;
+  var lx = 60, rx = 360, ly = 55, ry = 55;
+  svg.appendChild(text(lx + 3*cellW/2, ly-8, '左半（有序）', 11, 'middle', '#666'));
+  left.forEach(function(v, i){
+    svg.appendChild(rect(lx + i*cellW, ly, cellW-4, cellH, '#dbeafe', '#2563eb', 4));
+    svg.appendChild(text(lx + i*cellW + (cellW-4)/2, ly+21, v, 13, 'middle', '#1e40af'));
+  });
+  svg.appendChild(text(rx + 4*cellW/2, ry-8, '右半（有序）', 11, 'middle', '#666'));
+  right.forEach(function(v, i){
+    svg.appendChild(rect(rx + i*cellW, ry, cellW-4, cellH, '#ffedd5', '#ea580c', 4));
+    svg.appendChild(text(rx + i*cellW + (cellW-4)/2, ry+21, v, 13, 'middle', '#9a3412'));
+  });
+  var steps = [
+    {i:0, ival:3, j:1, cnt:1, note:'j 走到 2（3>4? 停），1 对：(3,1)'},
+    {i:1, ival:7, j:2, cnt:2, note:'j 走到 4（7>8? 停），2 对：(7,1)(7,2)'},
+    {i:2, ival:9, j:3, cnt:3, note:'j 走到 8（9>16? 停），3 对：(9,1)(9,2)(9,4)'}
+  ];
+  var sy = 120;
+  svg.appendChild(text(50, sy, 'i', 11, 'middle', '#666'));
+  svg.appendChild(text(90, sy, 'a[i]', 11, 'middle', '#666'));
+  svg.appendChild(text(140, sy, 'j 停在', 11, 'middle', '#666'));
+  svg.appendChild(text(220, sy, '本 i 贡献', 11, 'middle', '#666'));
+  svg.appendChild(text(320, sy, 'ans', 11, 'middle', '#666'));
+  svg.appendChild(text(400, sy, '说明', 11, 'start', '#666'));
+  var ans = 0;
+  steps.forEach(function(s, i){
+    var y = sy + 22 + i*22;
+    ans += s.cnt;
+    svg.appendChild(text(50, y, String(s.i), 11, 'middle', '#333'));
+    svg.appendChild(text(90, y, String(s.ival), 11, 'middle', '#2563eb'));
+    svg.appendChild(text(140, y, 'j='+s.j, 11, 'middle', '#ea580c'));
+    svg.appendChild(text(220, y, String(s.cnt)+' 对', 11, 'middle', '#333'));
+    svg.appendChild(text(320, y, String(ans), 11, 'middle', '#1e40af'));
+    svg.appendChild(text(380, y, s.note, 10, 'start', '#666'));
+  });
+  svg.appendChild(text(330, 220, 'j 全程从 0 走到 3，不回头。条件 a[i]>2*a[j] 必须用 long long。', 12, 'middle', '#444'));
+  svg.appendChild(text(330, 248, '翻转对总数 = 1+2+3 = 6', 13, 'middle', '#1e40af'));
+  fig.appendChild(svg);
+  var cap = document.createElement('figcaption');
+  cap.textContent = '对每个左元素 i，右指针 j 单调前移计数；j 不回头，统计阶段 O(n)。';
+  fig.appendChild(cap);
+})();
+
+// ===== Figure 5: 耗时对比 + 方向对照 =====
+(function(){
+  var fig = document.getElementById('fig5');
+  var svg = svgEl('svg', {viewBox:'0 0 660 300', width:'100%'});
+  svg.appendChild(text(330, 22, '暴力 vs 归并分治（n=50000，对数刻度）', 13, 'middle', '#1e40af'));
+  // bar chart
+  var data = [
+    {label:'小和\n暴力', val:98.62, color:'#9aa0a6'},
+    {label:'小和\n归并', val:3.50, color:'#2563eb'},
+    {label:'翻转对\n暴力', val:2971.66, color:'#9aa0a6'},
+    {label:'翻转对\n归并', val:3.19, color:'#ea580c'}
+  ];
+  var chartX = 60, chartY = 50, chartW = 540, chartH = 140;
+  var maxLog = Math.log10(3000);
+  var barW = 80, gap = (chartW - barW*4) / 5;
+  data.forEach(function(d, i){
+    var h = (Math.log10(d.val) / maxLog) * chartH;
+    var x = chartX + gap + i*(barW+gap);
+    var y = chartY + chartH - h;
+    svg.appendChild(rect(x, y, barW, h, d.color, d.color, 3));
+    // value label
+    svg.appendChild(text(x+barW/2, y-6, d.val+'ms', 11, 'middle', '#333'));
+    // x label
+    var lines = d.label.split('\n');
+    lines.forEach(function(ln, li){
+      svg.appendChild(text(x+barW/2, chartY+chartH+16+li*14, ln, 10, 'middle', '#555'));
+    });
+  });
+  // axis
+  svg.appendChild(line(chartX, chartY+chartH, chartX+chartW, chartY+chartH, '#ccc', 1));
+  // direction comparison
+  var dy = 230;
+  svg.appendChild(text(330, dy, '两种统计方向对照', 12, 'middle', '#1e40af'));
+  svg.appendChild(rect(60, dy+12, 260, 50, '#f0f7ff', '#2563eb', 4));
+  svg.appendChild(text(190, dy+32, '小和：外层遍历右元素 j', 12, 'middle', '#1e40af'));
+  svg.appendChild(text(190, dy+50, '左指针 i 单调前移，累加 sum', 11, 'middle', '#444'));
+  svg.appendChild(rect(340, dy+12, 260, 50, '#fff7ed', '#ea580c', 4));
+  svg.appendChild(text(470, dy+32, '翻转对：外层遍历左元素 i', 12, 'middle', '#9a3412'));
+  svg.appendChild(text(470, dy+50, '右指针 j 单调前移，计数', 11, 'middle', '#444'));
+  fig.appendChild(svg);
+  var cap = document.createElement('figcaption');
+  cap.textContent = 'n=50000 时归并分治比暴力快 28~931 倍；两道题统计方向相反，但指针都只进不退。';
+  fig.appendChild(cap);
+})();
+
+// ===== Demo 1: Small Sum merge =====
+(function(){
+  var viz = document.getElementById('viz1');
+  var controls = viz.querySelector('.viz-controls');
+  var canvas = viz.querySelector('.viz-canvas');
+  var breakdown = viz.querySelector('.breakdown');
+
+  var presets = [
+    {name:'示例 [1,3,5 | 2,4,6]', left:[1,3,5], right:[2,4,6]},
+    {name:'随机 1', left:[2,5,7,9], right:[1,3,4,8]},
+    {name:'随机 2', left:[1,4,6], right:[2,3,5,7,8]}
+  ];
+  var curPreset = 0;
+  var steps = [];
+  var stepIdx = 0;
+
+  function buildSteps(){
+    var L = presets[curPreset].left.slice();
+    var R = presets[curPreset].right.slice();
+    var st = [];
+    // counting phase
+    var i = 0, sum = 0, ans = 0;
+    st.push({phase:'count', desc:'开始统计阶段：左='+JSON.stringify(L)+' 右='+JSON.stringify(R), i:i, j:0, sum:sum, ans:ans, merged:null});
+    for (var j = 0; j < R.length; j++){
+      while (i < L.length && L[i] <= R[j]){
+        sum += L[i];
+        i++;
+        st.push({phase:'count', desc:'L['+(i-1)+']='+L[i-1]+' ≤ R['+j+']='+R[j]+'，sum += '+L[i-1]+' → sum='+sum, i:i, j:j, sum:sum, ans:ans, merged:null, highlightLeft:i-1});
+      }
+      ans += sum;
+      st.push({phase:'count', desc:'R['+j+']='+R[j]+' 贡献 sum='+sum+'，ans += '+sum+' → ans='+ans, i:i, j:j, sum:sum, ans:ans, merged:null, highlightRight:j});
+    }
+    st.push({phase:'count', desc:'统计结束：跨左右小和 = '+ans+'，i 走到 '+i+'（不回头）', i:i, j:R.length-1, sum:sum, ans:ans, merged:null});
+    // merge phase
+    var a = 0, b = 0, merged = [];
+    st.push({phase:'merge', desc:'开始 merge 阶段：合并两个有序段', i:-1, j:-1, sum:-1, ans:ans, merged:merged.slice(), a:a, b:b});
+    while (a < L.length && b < R.length){
+      if (L[a] <= R[b]){
+        merged.push(L[a]); a++;
+      } else {
+        merged.push(R[b]); b++;
+      }
+      st.push({phase:'merge', desc:'取 '+(a>0&&(b===0||L[a-1]!==undefined)?'L['+(a-1)+']='+L[a-1]:'R['+(b-1)+']='+R[b-1])+'，已合并 '+JSON.stringify(merged), i:-1, j:-1, sum:-1, ans:ans, merged:merged.slice(), a:a, b:b});
+    }
+    while (a < L.length){ merged.push(L[a]); a++; st.push({phase:'merge', desc:'左半剩余 '+L[a-1]+'，已合并 '+JSON.stringify(merged), i:-1, j:-1, sum:-1, ans:ans, merged:merged.slice(), a:a, b:b}); }
+    while (b < R.length){ merged.push(R[b]); b++; st.push({phase:'merge', desc:'右半剩余 '+R[b-1]+'，已合并 '+JSON.stringify(merged), i:-1, j:-1, sum:-1, ans:ans, merged:merged.slice(), a:a, b:b}); }
+    st.push({phase:'merge', desc:'merge 完成：'+JSON.stringify(merged)+'，跨左右小和='+ans, i:-1, j:-1, sum:-1, ans:ans, merged:merged.slice(), a:a, b:b, done:true});
+    return st;
+  }
+
+  function render(){
+    var s = steps[stepIdx];
+    var L = presets[curPreset].left;
+    var R = presets[curPreset].right;
+    var html = '';
+    html += '<div><span class="phase-tag '+(s.phase==='count'?'phase-count':'phase-merge')+'">'+(s.phase==='count'?'统计阶段':'合并阶段')+'</span></div>';
+    // left array
+    html += '<div style="display:flex;gap:40px;flex-wrap:wrap;justify-content:center">';
+    html += '<div class="arr-block"><div style="font-size:11px;color:#666;margin-bottom:4px">左半（有序）</div><div class="arr-row">';
+    for (var k = 0; k < L.length; k++){
+      var cls = 'ss-cell';
+      if (s.phase === 'count'){
+        if (k < s.i) cls += ' counted';
+        else if (k === s.i) cls += ' active';
+      } else if (s.phase === 'merge'){
+        if (k < s.a) cls += ' done';
+        else if (k === s.a) cls += ' active';
+      }
+      html += '<div class="'+cls+'">'+L[k]+'</div>';
+    }
+    html += '</div></div>';
+    // right array
+    html += '<div class="arr-block"><div style="font-size:11px;color:#666;margin-bottom:4px">右半（有序）</div><div class="arr-row">';
+    for (var k = 0; k < R.length; k++){
+      var cls = 'ss-cell';
+      if (s.phase === 'count'){
+        if (k < s.j) cls += ' done';
+        else if (k === s.j) cls += ' active';
+      } else if (s.phase === 'merge'){
+        if (k < s.b) cls += ' done';
+        else if (k === s.b) cls += ' active';
+      }
+      html += '<div class="'+cls+'">'+R[k]+'</div>';
+    }
+    html += '</div></div></div>';
+    // stats
+    html += '<div class="pointer-row">';
+    if (s.phase === 'count'){
+      html += '<span>i = '+s.i+'</span><span>j = '+s.j+'</span><span>sum = '+s.sum+'</span>';
+    }
+    html += '<span style="background:#ffedd5">ans = '+s.ans+'</span>';
+    html += '</div>';
+    // merged array
+    if (s.merged !== null && s.merged.length > 0){
+      html += '<div style="margin-top:8px"><div style="font-size:11px;color:#666;margin-bottom:4px">已合并</div><div class="arr-row">';
+      for (var k = 0; k < s.merged.length; k++){
+        html += '<div class="ss-cell done">'+s.merged[k]+'</div>';
+      }
+      html += '</div></div>';
+    }
+    if (s.done){
+      html += '<div class="ans-box">完成！跨左右小和 = '+s.ans+'</div>';
+    }
+    canvas.innerHTML = html;
+    breakdown.innerHTML = '<p><strong>第 '+(stepIdx+1)+'/'+steps.length+' 步：</strong>'+s.desc+'</p>';
+  }
+
+  function makeControls(){
+    controls.innerHTML = '';
+    // preset select
+    var sel = document.createElement('select');
+    sel.style.marginRight = '8px';
+    presets.forEach(function(p, i){
+      var opt = document.createElement('option');
+      opt.value = i; opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+    sel.value = curPreset;
+    sel.addEventListener('change', function(){
+      curPreset = parseInt(sel.value);
+      steps = buildSteps(); stepIdx = 0; render();
+    });
+    controls.appendChild(sel);
+    // buttons
+    var btnNext = document.createElement('button');
+    btnNext.textContent = '下一步';
+    btnNext.addEventListener('click', function(){ if(stepIdx < steps.length-1){stepIdx++; render();} });
+    controls.appendChild(btnNext);
+    var btnReset = document.createElement('button');
+    btnReset.textContent = '重置';
+    btnReset.addEventListener('click', function(){ stepIdx = 0; render(); });
+    controls.appendChild(btnReset);
+  }
+
+  makeControls();
+  steps = buildSteps();
+  render();
+})();
+
+// ===== Demo 2: Reverse Pairs merge =====
+(function(){
+  var viz = document.getElementById('viz2');
+  var controls = viz.querySelector('.viz-controls');
+  var canvas = viz.querySelector('.viz-canvas');
+  var breakdown = viz.querySelector('.breakdown');
+
+  var presets = [
+    {name:'示例 [3,7,9 | 1,2,4,8]', left:[3,7,9], right:[1,2,4,8]},
+    {name:'随机 1', left:[2,5,8], right:[1,3,4,6]},
+    {name:'随机 2', left:[1,4,6,9], right:[2,3,5,7]}
+  ];
+  var curPreset = 0;
+  var steps = [];
+  var stepIdx = 0;
+
+  function buildSteps(){
+    var L = presets[curPreset].left.slice();
+    var R = presets[curPreset].right.slice();
+    var st = [];
+    // counting phase
+    var j = 0, ans = 0;
+    st.push({phase:'count', desc:'开始统计阶段：左='+JSON.stringify(L)+' 右='+JSON.stringify(R), i:0, j:j, ans:ans, merged:null});
+    for (var i = 0; i < L.length; i++){
+      var startJ = j;
+      while (j < R.length && (L[i] > 2*R[j])){
+        j++;
+        st.push({phase:'count', desc:'L['+i+']='+L[i]+' > 2×R['+(j-1)+']='+R[j-1]+'（='+(2*R[j-1])+'），j++ → j='+j, i:i, j:j, ans:ans, merged:null, highlightRight:j-1});
+      }
+      var cnt = j - 0; // local index = number counted so far for this i
+      // Actually cnt for this i = j (since j starts at 0 in local right indices)
+      // But j never resets, so cnt = j means all elements up to j satisfy for this i
+      ans += cnt;
+      st.push({phase:'count', desc:'L['+i+']='+L[i]+' 贡献 '+cnt+' 对（j 停在 '+j+'），ans += '+cnt+' → ans='+ans, i:i, j:j, ans:ans, merged:null, highlightLeft:i});
+    }
+    st.push({phase:'count', desc:'统计结束：翻转对 = '+ans+'，j 走到 '+j+'（不回头）', i:L.length, j:j, ans:ans, merged:null});
+    // merge phase
+    var a = 0, b = 0, merged = [];
+    st.push({phase:'merge', desc:'开始 merge 阶段：合并两个有序段', i:-1, j:-1, ans:ans, merged:merged.slice(), a:a, b:b});
+    while (a < L.length && b < R.length){
+      var taken;
+      if (L[a] <= R[b]){ taken = 'L['+a+']='+L[a]; merged.push(L[a]); a++; }
+      else { taken = 'R['+b+']='+R[b]; merged.push(R[b]); b++; }
+      st.push({phase:'merge', desc:'取 '+taken+'，已合并 '+JSON.stringify(merged), i:-1, j:-1, ans:ans, merged:merged.slice(), a:a, b:b});
+    }
+    while (a < L.length){ merged.push(L[a]); var v=L[a]; a++; st.push({phase:'merge', desc:'左半剩余 '+v+'，已合并 '+JSON.stringify(merged), i:-1, j:-1, ans:ans, merged:merged.slice(), a:a, b:b}); }
+    while (b < R.length){ merged.push(R[b]); var v=R[b]; b++; st.push({phase:'merge', desc:'右半剩余 '+v+'，已合并 '+JSON.stringify(merged), i:-1, j:-1, ans:ans, merged:merged.slice(), a:a, b:b}); }
+    st.push({phase:'merge', desc:'merge 完成：'+JSON.stringify(merged)+'，翻转对='+ans, i:-1, j:-1, ans:ans, merged:merged.slice(), a:a, b:b, done:true});
+    return st;
+  }
+
+  function render(){
+    var s = steps[stepIdx];
+    var L = presets[curPreset].left;
+    var R = presets[curPreset].right;
+    var html = '';
+    html += '<div><span class="phase-tag '+(s.phase==='count'?'phase-count':'phase-merge')+'">'+(s.phase==='count'?'统计阶段':'合并阶段')+'</span></div>';
+    html += '<div style="display:flex;gap:40px;flex-wrap:wrap;justify-content:center">';
+    html += '<div class="arr-block"><div style="font-size:11px;color:#666;margin-bottom:4px">左半（有序）</div><div class="arr-row">';
+    for (var k = 0; k < L.length; k++){
+      var cls = 'ss-cell';
+      if (s.phase === 'count'){
+        if (k < s.i) cls += ' done';
+        else if (k === s.i) cls += ' active';
+      } else if (s.phase === 'merge'){
+        if (k < s.a) cls += ' done';
+        else if (k === s.a) cls += ' active';
+      }
+      html += '<div class="'+cls+'">'+L[k]+'</div>';
+    }
+    html += '</div></div>';
+    html += '<div class="arr-block"><div style="font-size:11px;color:#666;margin-bottom:4px">右半（有序）</div><div class="arr-row">';
+    for (var k = 0; k < R.length; k++){
+      var cls = 'ss-cell';
+      if (s.phase === 'count'){
+        if (k < s.j) cls += ' counted';
+        else if (k === s.j) cls += ' active';
+      } else if (s.phase === 'merge'){
+        if (k < s.b) cls += ' done';
+        else if (k === s.b) cls += ' active';
+      }
+      html += '<div class="'+cls+'">'+R[k]+'</div>';
+    }
+    html += '</div></div></div>';
+    html += '<div class="pointer-row">';
+    if (s.phase === 'count'){
+      html += '<span>i = '+s.i+'</span><span>j = '+s.j+'</span>';
+    }
+    html += '<span style="background:#ffedd5">ans = '+s.ans+'</span>';
+    html += '</div>';
+    if (s.merged !== null && s.merged.length > 0){
+      html += '<div style="margin-top:8px"><div style="font-size:11px;color:#666;margin-bottom:4px">已合并</div><div class="arr-row">';
+      for (var k = 0; k < s.merged.length; k++){
+        html += '<div class="ss-cell done">'+s.merged[k]+'</div>';
+      }
+      html += '</div></div>';
+    }
+    if (s.done){
+      html += '<div class="ans-box">完成！翻转对 = '+s.ans+'</div>';
+    }
+    canvas.innerHTML = html;
+    breakdown.innerHTML = '<p><strong>第 '+(stepIdx+1)+'/'+steps.length+' 步：</strong>'+s.desc+'</p>';
+  }
+
+  function makeControls(){
+    controls.innerHTML = '';
+    var sel = document.createElement('select');
+    sel.style.marginRight = '8px';
+    presets.forEach(function(p, i){
+      var opt = document.createElement('option');
+      opt.value = i; opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+    sel.value = curPreset;
+    sel.addEventListener('change', function(){
+      curPreset = parseInt(sel.value);
+      steps = buildSteps(); stepIdx = 0; render();
+    });
+    controls.appendChild(sel);
+    var btnNext = document.createElement('button');
+    btnNext.textContent = '下一步';
+    btnNext.addEventListener('click', function(){ if(stepIdx < steps.length-1){stepIdx++; render();} });
+    controls.appendChild(btnNext);
+    var btnReset = document.createElement('button');
+    btnReset.textContent = '重置';
+    btnReset.addEventListener('click', function(){ stepIdx = 0; render(); });
+    controls.appendChild(btnReset);
+  }
+
+  makeControls();
+  steps = buildSteps();
+  render();
+})();
+
+})();
+</script>
+</body>
+</html>

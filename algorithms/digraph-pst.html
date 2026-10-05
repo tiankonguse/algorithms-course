@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>主席树优化建图 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .ps-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .ps-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .ps-btn:disabled{opacity:.4;cursor:default;}
+  @media(max-width:760px){
+    .ps-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>主席树优化建图：任意区间连边降到 O(log v) 条边</h1>
+    <p class="intro">树状数组只会切前缀 [1..p]，范围换成任意区间 [l..r] 就没了办法。线段树天然会拆区间，但袋子是动态的，点一个个进袋，静态树插不进去。按入袋顺序给线段树开版本，每次 add 只新建 O(log v) 个节点，任意区间的连边也就稳定在 O(log v) 条。</p>
+
+    <h2>零、背景</h2>
+    <p>前一页处理的是「前缀范围连边」：树状数组把前缀拆成 log 个槽位，槽位挂链，动态进袋没问题。可惜树状数组的分解只认前缀，lowbit 循环从 p 一路减到 0，拆出来的永远是 [1..p] 的若干段。</p>
+    <p>题目把范围改成了任意区间 [l..r]。会拆任意区间的结构是线段树：一个区间在树上分解成不超过 2·log v 个节点。经典的线段树优化建图就是这么做的，但那套做法默认点集是静态的，先把整棵树建好，再把点挂上去。</p>
+    <p>这一页的袋子是动态的。直接的想法是「线段树 + 版本」：每入袋一个点就开一个新版本，新版本只重造一条路径上的节点，其余部分共享旧版本。这正是主席树（可持久化线段树）的形态。</p>
+
+    <h2>一、问题</h2>
+    <p>接口和前一页几乎一样，只是前缀全部换成任意区间：</p>
+    <table class="complexity">
+      <thead><tr><th>方法</th><th>语义</th></tr></thead>
+      <tbody>
+        <tr><td><code class="inline">add(x, xv)</code></td><td>编号 x、点权 xv 的点进入袋子；已入袋则忽略</td></tr>
+        <tr><td><code class="inline">rangeToX(l, r, x, w)</code></td><td>袋中点权范围 l 到 r 的每个点，向点 x 连边权 w 的边</td></tr>
+        <tr><td><code class="inline">xToRange(x, l, r, w)</code></td><td>点 x 向袋中点权范围 l 到 r 的每个点，连边权 w 的边</td></tr>
+        <tr><td><code class="inline">rangeToRange(l1, r1, l2, r2, w)</code></td><td>点权 l1 到 r1 的每个点，向点权 l2 到 r2 的每个点，连边权 w 的边</td></tr>
+      </tbody>
+    </table>
+    <p>同样用 dijkstra 做对数器：优化版和暴力版在相同的随机操作流下建图，两份最短路必须逐对相等。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>暴力还是扫袋子：rangeToX 找出点权落在 [l..r] 的点各连一条边，rangeToRange 是双重过滤。n、m 上 10⁵ 时边数 10¹⁰ 级，和前一页同一个死法。</p>
+    <p>先看静态版本怎么优化，再处理动态。这一步的方向感很重要：线段树要把「一片」压缩成「几个节点」，靠的是每个节点代表一段值域。</p>
+
+    <h2>三、两棵方向相反的树</h2>
+    <p>在值域 1 到 v 上建两棵线段树。出树（out 树）的边从儿子指向父亲，点 x 入袋时向自己值所在的叶子连一条边；查询 rangeToX(l, r, x, w) 把 [l..r] 分解成若干节点，每个节点向 x 连一条 w 边。点从叶子往上爬，爬到任何一个覆盖自己的分解节点，再花 w 到达 x。</p>
+    <p>入树（in 树）方向整个反过来：边从父亲指向儿子，叶子向点连边；xToRange 里 x 连向分解节点，顺着树往下流就到范围里的每个点。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 286" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="出树与入树的边方向" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="psa" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="psb" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+          </marker>
+          <marker id="pso" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <text x="30" y="22" font-size="13" fill="#1f2328">出树：儿子 → 父亲，点挂在叶子上，分解节点 → x</text>
+        <g font-size="11" text-anchor="middle">
+          <rect x="90" y="40" width="52" height="24" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="116" y="56" fill="#2563eb">1~4</text>
+          <rect x="30" y="100" width="52" height="24" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="56" y="116" fill="#2563eb">1~2</text>
+          <rect x="150" y="100" width="52" height="24" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="176" y="116" fill="#2563eb">3~4</text>
+          <rect x="8" y="160" width="40" height="24" rx="5" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="28" y="176" fill="#1f2328">1</text>
+          <rect x="58" y="160" width="40" height="24" rx="5" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="78" y="176" fill="#1f2328">2</text>
+          <rect x="128" y="160" width="40" height="24" rx="5" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="148" y="176" fill="#1f2328">3</text>
+          <rect x="178" y="160" width="40" height="24" rx="5" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="198" y="176" fill="#1f2328">4</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.4" fill="none" marker-end="url(#psa)">
+          <line x1="48" y1="124" x2="96" y2="66"/>
+          <line x1="168" y1="124" x2="136" y2="66"/>
+          <line x1="30" y1="158" x2="44" y2="126"/>
+          <line x1="76" y1="158" x2="64" y2="126"/>
+          <line x1="148" y1="158" x2="162" y2="126"/>
+          <line x1="188" y1="158" x2="176" y2="126"/>
+        </g>
+        <circle cx="28" cy="212" r="12" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+        <text x="28" y="216" font-size="11" fill="#ea580c" text-anchor="middle" font-weight="600">甲</text>
+        <circle cx="148" cy="212" r="12" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+        <text x="148" y="216" font-size="11" fill="#ea580c" text-anchor="middle" font-weight="600">乙</text>
+        <line x1="28" y1="199" x2="28" y2="186" stroke="#ea580c" stroke-width="1.5" marker-end="url(#pso)"/>
+        <line x1="148" y1="199" x2="148" y2="186" stroke="#ea580c" stroke-width="1.5" marker-end="url(#pso)"/>
+        <rect x="252" y="100" width="64" height="26" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <text x="284" y="117" font-size="12" fill="#ea580c" text-anchor="middle" font-weight="600">目标 x</text>
+        <line x1="84" y1="112" x2="248" y2="112" stroke="#ea580c" stroke-width="1.7" marker-end="url(#pso)"/>
+        <text x="166" y="104" font-size="10" fill="#ea580c" text-anchor="middle">w（分解节点 [1~2]）</text>
+        <line x1="148" y1="140" x2="148" y2="130" stroke="#ea580c" stroke-width="1.7"/>
+        <line x1="148" y1="130" x2="256" y2="118" stroke="#ea580c" stroke-width="1.7" marker-end="url(#pso)"/>
+        <text x="200" y="132" font-size="10" fill="#ea580c" text-anchor="middle">w（分解节点 [3]）</text>
+        <text x="30" y="248" font-size="12" fill="#6b7280">查询 [1, 3] 分解成 [1~2] 和 [3]，甲从叶 1 爬到 [1~2]，乙从叶 3 就是分解节点</text>
+
+        <text x="360" y="22" font-size="13" fill="#1f2328">入树：父亲 → 儿子，x → 分解节点</text>
+        <g font-size="11" text-anchor="middle">
+          <rect x="450" y="40" width="52" height="24" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="476" y="56" fill="#2563eb">1~4</text>
+          <rect x="390" y="100" width="52" height="24" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="416" y="116" fill="#2563eb">1~2</text>
+          <rect x="510" y="100" width="52" height="24" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="536" y="116" fill="#2563eb">3~4</text>
+          <rect x="368" y="160" width="40" height="24" rx="5" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="388" y="176" fill="#1f2328">1</text>
+          <rect x="418" y="160" width="40" height="24" rx="5" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="438" y="176" fill="#1f2328">2</text>
+          <rect x="488" y="160" width="40" height="24" rx="5" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="508" y="176" fill="#1f2328">3</text>
+          <rect x="538" y="160" width="40" height="24" rx="5" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="558" y="176" fill="#1f2328">4</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.4" fill="none" marker-end="url(#psa)">
+          <line x1="460" y1="66" x2="432" y2="98"/>
+          <line x1="492" y1="66" x2="520" y2="98"/>
+          <line x1="404" y1="124" x2="392" y2="158"/>
+          <line x1="428" y1="124" x2="436" y2="158"/>
+          <line x1="524" y1="124" x2="512" y2="158"/>
+          <line x1="548" y1="124" x2="556" y2="158"/>
+        </g>
+        <circle cx="388" cy="212" r="12" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+        <text x="388" y="216" font-size="11" fill="#ea580c" text-anchor="middle" font-weight="600">甲</text>
+        <circle cx="508" cy="212" r="12" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+        <text x="508" y="216" font-size="11" fill="#ea580c" text-anchor="middle" font-weight="600">乙</text>
+        <line x1="388" y1="184" x2="388" y2="198" stroke="#ea580c" stroke-width="1.5" marker-end="url(#pso)"/>
+        <line x1="508" y1="184" x2="508" y2="198" stroke="#ea580c" stroke-width="1.5" marker-end="url(#pso)"/>
+        <rect x="352" y="100" width="0" height="0"/>
+        <rect x="330" y="40" width="0" height="0"/>
+        <line x1="342" y1="52" x2="388" y2="108" stroke="#ea580c" stroke-width="1.7" marker-end="url(#pso)"/>
+        <text x="344" y="86" font-size="10" fill="#ea580c">x → [1~2]</text>
+        <line x1="342" y1="52" x2="502" y2="112" stroke="#ea580c" stroke-width="1.7" marker-end="url(#pso)"/>
+        <circle cx="342" cy="52" r="12" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <text x="342" y="56" font-size="11" fill="#ea580c" text-anchor="middle" font-weight="600">x</text>
+        <text x="360" y="240" font-size="12" fill="#6b7280">同一次 xToRange(x, 1, 3, w)：</text>
+        <text x="360" y="258" font-size="12" fill="#6b7280">x 连向 [1~2] 和 [3]，往下就到甲和乙</text>
+      </svg>
+      <figcaption>出树自底向上汇聚，入树自顶向下分发，两个方向各养一棵树</figcaption>
+    </figure>
+
+    <h2>四、动态袋子：按入袋顺序开版本</h2>
+    <p>静态树的问题在「点什么时候挂上去」。如果先把树建死，再让点连向叶子，其实是可行的，这一页的查询永远看整个袋子，树的形态从没变过。真正需要版本的是另一件事：查询要区分时间。第四页的 P7477 里，位置 i 的连边只能看到 i 左侧已入袋的点，查询必须挂在版本 i−1 上，静态树给不了历史。</p>
+    <p>「线段树 + 版本」统一实现：每执行一次 add，版本号加一，出树、入树各开一个新根。新根到新叶的一条路径上逐层新建节点，路径之外的儿子指针直接抄旧版本。一个点入袋，出树、入树各新建 O(log v) 个节点。</p>
+    <p>还有一个不能省的细节：新节点要向同位置的旧节点连一条 0 权边（旧 → 新）。历史点的叶子连在旧节点上，它往上爬时会路过被替换过的位置；没有这条迁移边，老点就永远困在旧版本里，够不着新版本上的分解节点。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 268" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="两个版本的共享与迁移" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="psm" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <text x="30" y="22" font-size="13" fill="#1f2328">版本 1：甲（值 2）入袋，路径 1~4、1~2、2 各建新节点</text>
+        <g font-size="11" text-anchor="middle">
+          <rect x="104" y="40" width="52" height="24" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+          <text x="130" y="56" fill="#2563eb" font-weight="600">1~4</text>
+          <rect x="44" y="100" width="52" height="24" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+          <text x="70" y="116" fill="#2563eb" font-weight="600">1~2</text>
+          <rect x="164" y="100" width="52" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="190" y="116" fill="#9aa0a6">3~4</text>
+          <rect x="22" y="160" width="40" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="42" y="176" fill="#9aa0a6">1</text>
+          <rect x="72" y="160" width="40" height="24" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+          <text x="92" y="176" fill="#2563eb" font-weight="600">2</text>
+          <rect x="142" y="160" width="40" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="162" y="176" fill="#9aa0a6">3</text>
+          <rect x="192" y="160" width="40" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="212" y="176" fill="#9aa0a6">4</text>
+        </g>
+        <circle cx="92" cy="212" r="12" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+        <text x="92" y="216" font-size="11" fill="#ea580c" text-anchor="middle" font-weight="600">甲</text>
+        <line x1="92" y1="199" x2="92" y2="186" stroke="#ea580c" stroke-width="1.5" marker-end="url(#psm)"/>
+
+        <text x="330" y="22" font-size="13" fill="#1f2328">版本 2：乙（值 3）入袋，左边共享</text>
+        <g font-size="11" text-anchor="middle">
+          <rect x="404" y="40" width="52" height="24" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+          <text x="430" y="56" fill="#2563eb" font-weight="600">1~4</text>
+          <rect x="344" y="100" width="52" height="24" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="370" y="116" fill="#2563eb">1~2</text>
+          <rect x="464" y="100" width="52" height="24" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+          <text x="490" y="116" fill="#2563eb" font-weight="600">3~4</text>
+          <rect x="322" y="160" width="40" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="342" y="176" fill="#9aa0a6">1</text>
+          <rect x="372" y="160" width="40" height="24" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="392" y="176" fill="#2563eb">2</text>
+          <rect x="442" y="160" width="40" height="24" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+          <text x="462" y="176" fill="#2563eb" font-weight="600">3</text>
+          <rect x="492" y="160" width="40" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="512" y="176" fill="#9aa0a6">4</text>
+        </g>
+        <circle cx="462" cy="212" r="12" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+        <text x="462" y="216" font-size="11" fill="#ea580c" text-anchor="middle" font-weight="600">乙</text>
+        <line x1="462" y1="199" x2="462" y2="186" stroke="#ea580c" stroke-width="1.5" marker-end="url(#psm)"/>
+        <line x1="158" y1="52" x2="402" y2="52" stroke="#ea580c" stroke-width="1.7" marker-end="url(#psm)"/>
+        <text x="280" y="44" font-size="11" fill="#ea580c" text-anchor="middle">旧根 → 新根（迁移边，0 权）</text>
+        <text x="30" y="248" font-size="12" fill="#6b7280">虚线框是直接共享版本 1 的节点；甲以后要走到版本 2 的分解节点，靠的正是那条迁移边</text>
+      </svg>
+      <figcaption>新版本只重造一条路径，甲的 [1~2] 原样共享，迁移边负责把老点接进新版本</figcaption>
+    </figure>
+
+    <h2>五、查询挂在版本上</h2>
+    <p>rangeToX(l, r, x, w) 在出树的当前版本根上分解 [l..r]，命中的节点各向 x 连一条 w 边；xToRange 对称地用入树。分解走的是当前根，路径上自然混着各个版本出生的节点，共享的旧节点一样能用，这正是可持久化省下的部分。</p>
+    <p>rangeToRange(l1, r1, l2, r2, w) 和前一页一样造两个虚点 X、Y 桥接：出树分解连向 X，X 向 Y 连 w，Y 连向入树分解。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 184" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="查询挂不同版本的差别" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="psq" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+          </marker>
+          <marker id="psq2" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <text x="30" y="24" font-size="13" fill="#1f2328">版本时间线：每次 add 开一个新根，旧根原样保留</text>
+        <line x1="60" y1="60" x2="560" y2="60" stroke="#e6e8eb" stroke-width="2"/>
+        <g font-size="11" text-anchor="middle">
+          <circle cx="70" cy="60" r="10" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4"/>
+          <text x="70" y="90" fill="#9aa0a6">版本 0</text>
+          <text x="70" y="106" fill="#9aa0a6">空骨架</text>
+          <circle cx="190" cy="60" r="10" fill="#eef4ff" stroke="#2563eb" stroke-width="1.6"/>
+          <text x="190" y="90" fill="#2563eb">版本 1</text>
+          <text x="190" y="106" fill="#2563eb">① 入袋</text>
+          <circle cx="310" cy="60" r="10" fill="#eef4ff" stroke="#2563eb" stroke-width="1.6"/>
+          <text x="310" y="90" fill="#2563eb">版本 2</text>
+          <text x="310" y="106" fill="#2563eb">② 入袋</text>
+          <circle cx="430" cy="60" r="10" fill="#eef4ff" stroke="#2563eb" stroke-width="1.6"/>
+          <text x="430" y="90" fill="#2563eb">版本 3</text>
+          <text x="430" y="106" fill="#2563eb">③ 入袋</text>
+          <circle cx="540" cy="60" r="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+          <text x="540" y="90" fill="#2563eb" font-weight="600">最新版本</text>
+          <text x="540" y="106" fill="#2563eb">整个袋子</text>
+        </g>
+        <path d="M250 40 C 262 20, 290 20, 302 46" fill="none" stroke="#ea580c" stroke-width="1.7" marker-end="url(#psq2)"/>
+        <text x="276" y="18" font-size="11" fill="#ea580c" text-anchor="middle">挂在版本 2：只看到 ① ②</text>
+        <path d="M370 74 C 400 108, 480 108, 532 72" fill="none" stroke="#2563eb" stroke-width="1.7" marker-end="url(#psq)"/>
+        <text x="452" y="126" font-size="11" fill="#2563eb" text-anchor="middle">挂在最新版本：① ② ③ 全部可见</text>
+        <text x="30" y="152" font-size="12" fill="#6b7280">题目 2 的查询全挂在最新版本上；题目 5 的查询要挂在版本 i−1 上</text>
+        <text x="30" y="172" font-size="12" fill="#6b7280">「看哪个时刻的袋子」就是版本的全部意义</text>
+      </svg>
+      <figcaption>版本数组和线段树一样是静态可随机访问的，查询挂哪个根，语义就跟着变</figcaption>
+    </figure>
+
+    <h2>六、演示</h2>
+    <p>值域 1 到 8 的出树。三个点依次入袋开出三个版本，然后做一次 rangeToX(2, 6, x, w)，最后把同一个查询挂回版本 1 对比。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　版本生长与区间查询</div>
+      <div id="psSvg"></div>
+      <div class="breakdown" id="psStatus"></div>
+      <div class="viz-controls">
+        <button class="ps-btn" id="psAuto">自动播放</button>
+        <button class="ps-btn" id="psStep">下一步</button>
+        <button class="ps-btn" id="psReset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot full"></span>当前版本新建的节点</span>
+        <span><span class="dot partial"></span>更早版本出生的节点</span>
+        <span><span class="dot skip"></span>版本 0 的空骨架</span>
+      </div>
+    </div>
+
+    <h2>七、代码</h2>
+    <p>出树用 buildOut 建空骨架，addOut 开新版本；入树方向相反。查询函数带区间参数的重载版本递归分解，外层包装挂在当前版本根上。对数器部分省略。</p>
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 1001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXV = 1001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 4000001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXE = 8000001;
+    <span class="kw">int</span> n, v, cntt;
+
+    <span class="kw">bool</span> inBag[MAXN];
+
+    <span class="kw">int</span> head[MAXT];
+    <span class="kw">int</span> nxt[MAXE];
+    <span class="kw">int</span> to[MAXE];
+    <span class="kw">int</span> weight[MAXE];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> rootOut[MAXN];
+    <span class="kw">int</span> rootIn[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> curVersion;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        weight[cntg] = w;
+        head[u] = cntg;
+    }
+
+    <span class="kw">int</span> <span class="fn">buildOut</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> rt = ++cntt;
+        <span class="kw">if</span> (l &lt; r) {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            ls[rt] = buildOut(l, mid);
+            rs[rt] = buildOut(mid + 1, r);
+            addEdge(ls[rt], rt, 0);
+            addEdge(rs[rt], rt, 0);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">buildIn</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> rt = ++cntt;
+        <span class="kw">if</span> (l &lt; r) {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            ls[rt] = buildIn(l, mid);
+            rs[rt] = buildIn(mid + 1, r);
+            addEdge(rt, ls[rt], 0);
+            addEdge(rt, rs[rt], 0);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">addOut</span>(<span class="kw">int</span> jobx, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = ++cntt;
+        ls[rt] = ls[i];
+        rs[rt] = rs[i];
+        addEdge(i, rt, 0);
+        <span class="kw">if</span> (l == r) {
+            addEdge(jobx, rt, 0);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobv &lt;= mid) {
+                ls[rt] = addOut(jobx, jobv, l, mid, ls[rt]);
+                addEdge(ls[rt], rt, 0);
+            } <span class="kw">else</span> {
+                rs[rt] = addOut(jobx, jobv, mid + 1, r, rs[rt]);
+                addEdge(rs[rt], rt, 0);
+            }
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">addIn</span>(<span class="kw">int</span> jobx, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = ++cntt;
+        ls[rt] = ls[i];
+        rs[rt] = rs[i];
+        addEdge(rt, i, 0);
+        <span class="kw">if</span> (l == r) {
+            addEdge(rt, jobx, 0);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobv &lt;= mid) {
+                ls[rt] = addIn(jobx, jobv, l, mid, ls[rt]);
+                addEdge(rt, ls[rt], 0);
+            } <span class="kw">else</span> {
+                rs[rt] = addIn(jobx, jobv, mid + 1, r, rs[rt]);
+                addEdge(rt, rs[rt], 0);
+            }
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> x, <span class="kw">int</span> xv) {
+        <span class="kw">if</span> (!inBag[x]) {
+            inBag[x] = <span class="kw">true</span>;
+            curVersion++;
+            rootOut[curVersion] = addOut(x, xv, 1, v, rootOut[curVersion - 1]);
+            rootIn[curVersion] = addIn(x, xv, 1, v, rootIn[curVersion - 1]);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">rangeToX</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> jobx, <span class="kw">int</span> jobw, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            addEdge(i, jobx, jobw);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                rangeToX(jobl, jobr, jobx, jobw, l, mid, ls[i]);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                rangeToX(jobl, jobr, jobx, jobw, mid + 1, r, rs[i]);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">rangeToX</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> x, <span class="kw">int</span> w) {
+        rangeToX(l, r, x, w, 1, v, rootOut[curVersion]);
+    }
+
+    <span class="kw">void</span> <span class="fn">xToRange</span>(<span class="kw">int</span> jobx, <span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> jobw, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            addEdge(jobx, i, jobw);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                xToRange(jobx, jobl, jobr, jobw, l, mid, ls[i]);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                xToRange(jobx, jobl, jobr, jobw, mid + 1, r, rs[i]);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">xToRange</span>(<span class="kw">int</span> x, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> w) {
+        xToRange(x, l, r, w, 1, v, rootIn[curVersion]);
+    }
+
+    <span class="kw">void</span> <span class="fn">rangeToRange</span>(<span class="kw">int</span> l1, <span class="kw">int</span> r1, <span class="kw">int</span> l2, <span class="kw">int</span> r2, <span class="kw">int</span> w) {
+        <span class="kw">int</span> x = ++cntt;
+        <span class="kw">int</span> y = ++cntt;
+        rangeToX(l1, r1, x, 0);
+        xToRange(y, l2, r2, 0);
+        addEdge(x, y, w);
+    }</pre>
+
+    <h2>八、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>新增规模</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>建空骨架（出树 + 入树）</td><td><code class="inline">O(v)</code></td><td>节点 2·(2v − 1) 个</td></tr>
+        <tr><td>add(x, xv)</td><td><code class="inline">O(log v)</code></td><td>两棵树各 log v 个节点、O(log v) 条边</td></tr>
+        <tr><td>rangeToX / xToRange</td><td><code class="inline">O(log v)</code></td><td>分解不超过 2·log v 个节点，边同阶</td></tr>
+        <tr><td>rangeToRange</td><td><code class="inline">O(log v)</code></td><td>虚点 2 个、边 O(log v) 条</td></tr>
+        <tr><td>建图总规模</td><td colspan="2">节点 <code class="inline">2v + n·log v + 2m</code>，边 <code class="inline">O((n + m)·log v)</code></td></tr>
+        <tr><td>查询任意历史版本</td><td colspan="2"><code class="inline">O(log v)</code>，版本数组随机访问</td></tr>
+      </tbody>
+    </table>
+    <p>时间上每个操作都卡在线段树高度 log v 上，和树状数组版本一个量级，常数稍大，分解最多 2·log v 个节点，还要带上版本指针的拷贝。</p>
+    <p>空间比树状数组版本多一块：两棵骨架共 O(v)，加上 n 次入袋的 O(n log v) 新节点。值域大时同样先离散化，把 v 压到 n 的量级。</p>
+
+    <h2>九、最后</h2>
+    <p>主席树优化建图用版本换来了两样东西：任意区间的分解能力，以及「查询只看某个时刻」的历史能力。前者是线段树本身给的，后者才是可持久化的价值，第四页的 P7477 会把版本 i−1 精确地用在位置 i 的蕴含边上。</p>
+    <p>和前一页对比一下选型：范围永远是前缀、又关心时间的话，树状数组的链天然按时间增长，代码短得多；范围是任意区间才值得上主席树。两者处理的都是「值域上的范围」，如果约束变成「两个、三个权值同时不超过」，那已经不是范围问题，是偏序问题，下一页交给 CDQ 分治。</p>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var NW = 58, NH = 24;
+  var NODES = {
+    '1~8': {x: 320, y: 24},
+    '1~4': {x: 170, y: 82}, '5~8': {x: 470, y: 82},
+    '1~2': {x: 96, y: 140}, '3~4': {x: 244, y: 140}, '5~6': {x: 396, y: 140}, '7~8': {x: 544, y: 140},
+    '1': {x: 58, y: 198}, '2': {x: 134, y: 198}, '3': {x: 206, y: 198}, '4': {x: 282, y: 198},
+    '5': {x: 358, y: 198}, '6': {x: 434, y: 198}, '7': {x: 506, y: 198}, '8': {x: 582, y: 198}
+  };
+  var EDGES = [
+    ['1~8','1~4'], ['1~8','5~8'], ['1~4','1~2'], ['1~4','3~4'], ['5~8','5~6'], ['5~8','7~8'],
+    ['1~2','1'], ['1~2','2'], ['3~4','3'], ['3~4','4'], ['5~6','5'], ['5~6','6'], ['7~8','7'], ['7~8','8']
+  ];
+  var born = {'1~8':0,'1~4':0,'5~8':0,'1~2':0,'3~4':0,'5~6':0,'7~8':0,'1':0,'2':0,'3':0,'4':0,'5':0,'6':0,'7':0,'8':0};
+  var v1Path = ['1~8','1~4','3~4','3'];
+  var v2Path = ['1~8','5~8','5~6','6'];
+  var v3Path = ['1~8','1~4','1~2','2'];
+  var points = { '①': {leaf:'3', vx: 262, vy: 230}, '②': {leaf:'6', vx: 428, vy: 230}, '③': {leaf:'2', vx: 116, vy: 230} };
+
+  function nodeRect(label, mode, big){
+    var n = NODES[label];
+    var fill = mode === 'new' ? '#dbeafe' : mode === 'old' ? '#eef4ff' : mode === 'ghost' ? '#fff' : '#f6f7f9';
+    var stroke = mode === 'new' ? '#2563eb' : mode === 'old' ? '#2563eb' : mode === 'ghost' ? '#c9ced4' : '#e6e8eb';
+    var color = mode === 'skeleton' ? '#9aa0a6' : mode === 'ghost' ? '#c9ced4' : '#2563eb';
+    var dash = mode === 'ghost' ? ' stroke-dasharray="4 3"' : '';
+    var w = big ? 62 : NW;
+    var s = '<rect x="' + (n.x - w / 2) + '" y="' + n.y + '" width="' + w + '" height="' + NH + '" rx="5" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + (mode === 'new' ? 1.8 : 1.3) + '"' + dash + '/>';
+    s += '<text x="' + n.x + '" y="' + (n.y + 16) + '" font-size="11" text-anchor="middle" fill="' + color + '" font-weight="' + (mode === 'new' ? 600 : 400) + '">' + label + '</text>';
+    return s;
+  }
+
+  var frames = [
+    { ver: 0, bornNow: [], pts: [],
+      text: '版本 0：值域 1~8 的空骨架，任何叶子都还没挂点。出树边从儿子指向父亲（图里连线省略方向），查询分解出的节点向目标连边。' },
+    { ver: 1, bornNow: v1Path, setBorn: v1Path, pts: ['①'],
+      text: 'add(1, 3) → 版本 1：值 3 的路径 1~8 → 1~4 → 3~4 → 3 各建一个新节点（深蓝），① 向新叶子 [3] 连边。每个新节点还从旧版本同位置节点连来一条 0 权迁移边。' },
+    { ver: 2, bornNow: v2Path, setBorn: v2Path, pts: ['①','②'],
+      text: 'add(2, 6) → 版本 2：值 6 的路径 1~8 → 5~8 → 5~6 → 6 建新节点。左边的 1~4、3~4、3 直接共享版本 1，主席树省空间就省在这里。② 连向新叶子 [6]。' },
+    { ver: 3, bornNow: v3Path, setBorn: v3Path, pts: ['①','②','③'],
+      text: 'add(3, 2) → 版本 3：值 2 的路径 1~8 → 1~4 → 1~2 → 2 建新节点。此时根是版本 3 的，1~2 下面挂着 ③，3~4 下面挂着 ①，5~6 下面挂着 ②。' },
+    { ver: 3, bornNow: [], pts: ['①','②','③'], query: { l: 2, r: 6, x: 5, w: 5 },
+      text: 'rangeToX(2, 6, 5, w=5)：在最新版本（版本 3）上分解 [2..6]，命中 [2]、[3~4]、[5~6] 三个节点，各向 5 号点连一条 w 边。三个节点分别出生在版本 3、1、2，共享的旧节点照样能当分解节点用。①②③ 全部可达。' },
+    { ver: 1, bornNow: [], view: 1, pts: ['①'], query: { l: 2, r: 6, x: 5, w: 5 },
+      text: '同一个查询挂在版本 1：分解还是 [2]、[3~4]、[5~6]，但这时只有 ① 入了袋，[2] 和 [5~6] 还是空骨架，连不出任何点。查询挂哪个版本，看到的就是那个时刻的袋子，这正是综合题需要的语义。' }
+  ];
+  var bornState = {};
+  var acc = Object.assign({}, born);
+  frames.forEach(function(f, i){
+    if (f.setBorn) f.setBorn.forEach(function(k){ acc[k] = f.ver; });
+    bornState[i] = Object.assign({}, acc);
+  });
+
+  function build(f, fi){
+    var svg = '<svg viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+    svg += '<defs><marker id="pm" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/></marker></defs>';
+    svg += '<text x="30" y="18" font-size="13" fill="#1f2328">当前视角：版本 ' + (f.view || f.ver) + '</text>';
+    var st = bornState[fi];
+    var curBorn = f.view || f.ver;
+    EDGES.forEach(function(e){
+      var a = NODES[e[0]], b = NODES[e[1]];
+      svg += '<line x1="' + a.x + '" y1="' + (a.y + NH) + '" x2="' + b.x + '" y2="' + b.y + '" stroke="#e6e8eb" stroke-width="1.2"/>';
+    });
+    var qNodes = f.query ? ['2', '3~4', '5~6'] : [];
+    for (var label in NODES) {
+      var mode;
+      if (f.view) {
+        mode = v1Path.indexOf(label) >= 0 ? 'old' : 'skeleton';
+      } else {
+        mode = f.bornNow && f.bornNow.indexOf(label) >= 0 ? 'new' : st[label] > 0 ? 'old' : 'skeleton';
+      }
+      svg += nodeRect(label, mode, false);
+    }
+    var pts = f.view ? ['①'] : (f.pts || ['①','②','③']);
+    pts.forEach(function(p){
+      var pt = points[p];
+      var leaf = NODES[pt.leaf];
+      var ghost = f.view && v1Path.indexOf(pt.leaf) < 0;
+      if (ghost) return;
+      svg += '<circle cx="' + pt.vx + '" cy="' + pt.vy + '" r="13" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>';
+      svg += '<text x="' + pt.vx + '" y="' + (pt.vy + 4) + '" font-size="12" text-anchor="middle" fill="#ea580c" font-weight="600">' + p + '</text>';
+      svg += '<line x1="' + pt.vx + '" y1="' + (pt.vy - 14) + '" x2="' + leaf.x + '" y2="' + (leaf.y + NH + 2) + '" stroke="#ea580c" stroke-width="1.4" marker-end="url(#pm)"/>';
+    });
+    if (f.query) {
+      var tx = 320, ty = 268;
+      svg += '<rect x="' + (tx - 56) + '" y="' + ty + '" width="112" height="30" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>';
+      svg += '<text x="' + tx + '" y="' + (ty + 20) + '" font-size="13" text-anchor="middle" fill="#ea580c" font-weight="600">5 号点 x</text>';
+      qNodes.forEach(function(qn){
+        var n = NODES[qn];
+        svg += '<rect x="' + (n.x - 29) + '" y="' + n.y + '" width="58" height="' + NH + '" rx="5" fill="none" stroke="#ea580c" stroke-width="2.2"/>';
+        svg += '<line x1="' + n.x + '" y1="' + (n.y + NH) + '" x2="' + tx + '" y2="' + (ty - 2) + '" stroke="#ea580c" stroke-width="1.7" marker-end="url(#pm)"/>';
+        svg += '<text x="' + ((n.x + tx) / 2) + '" y="' + ((n.y + NH + ty) / 2) + '" font-size="10" fill="#ea580c" text-anchor="middle">w=5</text>';
+      });
+    }
+    svg += '</svg>';
+    return svg;
+  }
+
+  var svgEl = document.getElementById('psSvg');
+  var statusEl = document.getElementById('psStatus');
+  var btnStep = document.getElementById('psStep');
+  var btnAuto = document.getElementById('psAuto');
+  var btnReset = document.getElementById('psReset');
+  var cur = 0;
+  var timer = null;
+
+  function render() {
+    var f = frames[cur];
+    svgEl.innerHTML = build(f, cur);
+    statusEl.innerHTML = '<div class="row">第 ' + cur + ' / ' + (frames.length - 1) + ' 步</div>' +
+                         '<div class="row" style="margin-top:4px;">' + f.text + '</div>';
+    btnStep.disabled = (cur >= frames.length - 1);
+  }
+  function step() {
+    if (cur >= frames.length - 1) { render(); return; }
+    cur++;
+    render();
+  }
+  function stopAuto() {
+    if (timer) { clearInterval(timer); timer = null; }
+    btnAuto.textContent = '自动播放';
+  }
+  function toggleAuto() {
+    if (timer) { stopAuto(); return; }
+    btnAuto.textContent = '暂停';
+    timer = setInterval(function() {
+      if (cur >= frames.length - 1) { stopAuto(); return; }
+      cur++;
+      render();
+    }, 3200);
+  }
+  function reset() {
+    stopAuto();
+    cur = 0;
+    render();
+  }
+  btnStep.addEventListener('click', step);
+  btnAuto.addEventListener('click', toggleAuto);
+  btnReset.addEventListener('click', reset);
+  render();
+})();
+</script>
+</body>
+</html>

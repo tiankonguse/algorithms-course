@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2-SAT 的建模与判定 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .sp2-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .sp2-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .sp2-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  @media(max-width:760px){
+    .sp2-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>2-SAT 的建模与判定</h1>
+    <p class="intro">上一页把约束压成线性条数的边之后，判定还是跑一遍 tarjan。这一页换两个角度：题目本身不是布尔变量，得先把取值翻译过来；区间合法性有单调性，干脆不把图建出来，用并查集判定加一倍增表直接数答案。</p>
+
+    <h2>零、背景</h2>
+    <p>上一页的骨架是「建图加 tarjan 判矛盾」。这一页两道题的共同点是约束本身不直接给出 2-SAT 变量，或者根本不需要把图建出来。</p>
+    <p>题目4 里一个地点有三种可选的赛车，三不是二，得想办法把它掰成布尔。题目5 的每条限制是双向蕴含，正好等价于并查集的一次合并；区间是不是合法只看合并过程有没有出现冲突，于是可以只用并查集判定，再用整体二分和倍增表把每个询问的答案算出来。原理部分见 <a href="sat.html">2-SAT 与前缀优化建图</a>，优化建图三种结构见 <a href="satproblems.html">2-SAT 的优化建图</a>。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="x 类地面的三种取值拆成两次布尔枚举" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#c9ced4" stroke-width="1.3" fill="none">
+          <line x1="90" y1="112" x2="155" y2="60"/>
+          <line x1="92" y1="120" x2="155" y2="120"/>
+          <line x1="90" y1="128" x2="155" y2="180"/>
+        </g>
+        <circle cx="70" cy="120" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <g fill="#eef4ff" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="170" cy="55" r="15"/>
+          <circle cx="170" cy="120" r="15"/>
+          <circle cx="170" cy="185" r="15"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="70" y="124">x</text>
+          <text x="170" y="59">A</text>
+          <text x="170" y="124">B</text>
+          <text x="170" y="189">C</text>
+        </g>
+        <text x="70" y="164" font-size="11" fill="#6b7280" text-anchor="middle">x 类地面</text>
+        <g stroke="#9aa0a6" stroke-width="1.8" fill="none">
+          <line x1="216" y1="120" x2="268" y2="120"/>
+        </g>
+        <polygon points="268,120 258,115 258,125" fill="#9aa0a6"/>
+        <rect x="282" y="34" width="320" height="186" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="302" y="64" font-size="12" fill="#374151">枚举每个 x 类地点禁掉一辆车</text>
+        <text x="302" y="100" font-size="12" fill="#1f2328">禁 A → 许可 {B, C}，真 = B，假 = C</text>
+        <text x="302" y="128" font-size="12" fill="#1f2328">禁 B → 许可 {A, C}，真 = A，假 = C</text>
+        <text x="302" y="164" font-size="11" fill="#6b7280">d ≤ 8，共 2^d ≤ 256 种，逐个建图判可行</text>
+        <text x="302" y="192" font-size="11" fill="#6b7280">任何方案里 x 用的车，总落在某次枚举里</text>
+        <text x="310" y="240" font-size="11" fill="#6b7280" text-anchor="middle">三种取值拆成两次布尔枚举，用 2^d 覆盖所有可能</text>
+      </svg>
+      <figcaption>x 类地面的三种取值没法直接成布尔变量，枚举禁掉哪一辆之后只剩两辆，就回到 2-SAT</figcaption>
+    </figure>
+
+    <h2>一、题目4：游戏</h2>
+    <p>n 个地点，地面有 x、a、b、c 四种类型；赛车有 A、B、C 三辆。a 类地面不能跑 A，b 类不能跑 B，c 类不能跑 C，x 类没有限制。另外给 m 条限制，格式是 pos1 car1 pos2 car2，含义是：如果 pos1 用 car1，那么 pos2 必须用 car2。求任意一组安排，无解输出 −1。x 类地面的个数 d 不超过 8。</p>
+
+    <p>先看不带 x 的地面。a 类地面能跑的车是 B、C 两辆，b 类是 A、C，c 类是 A、B，都正好两辆。两辆就是一个布尔变量：变量真表示选第一辆，假表示选第二辆。2-SAT 的变量有了。</p>
+    <p>麻烦在 x 类地面，它能跑三辆，三个取值没法直接成一个布尔变量。注意到 d ≤ 8，可以枚举：对每个 x 类地点，强行规定它不许跑 A 或者不许跑 B，于是它只剩两辆可选，回到布尔。2^d ≤ 256 种情况，每种建一次图跑一次 tarjan。</p>
+    <p>枚举禁 A 和禁 B 两种就够了吗，够了。任何一组方案里，某个 x 地点用的车只可能是 A、B、C 之一。它用 A，就对应禁 B 的那次枚举，那一次允许 A、C；它用 B，对应禁 A 的那次，允许 B、C；它用 C，两次枚举都允许。所以任何一组合法方案，总能在某一次枚举里被完整地表达出来。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 262" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="一条限制的三种连边情况" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="20" y="26" width="580" height="58" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="36" y="56" font-size="12" fill="#374151">情况一：car1 在 pos1 的地面上被禁</text>
+        <text x="36" y="76" font-size="11" fill="#6b7280">前提永远不成立，这条限制对任何赋值都满足</text>
+        <text x="400" y="62" font-size="11" fill="#9aa0a6">不连边</text>
+
+        <rect x="20" y="98" width="580" height="58" rx="8" fill="#eef4ff" stroke="#2563eb"/>
+        <text x="36" y="128" font-size="12" fill="#374151">情况二：car2 在 pos2 的地面上被禁</text>
+        <text x="36" y="148" font-size="11" fill="#6b7280">car1 也不能用，把「pos1 用 car1」逼成假</text>
+        <text x="400" y="134" font-size="11" fill="#2563eb">id1 → ¬id1</text>
+
+        <rect x="20" y="170" width="580" height="58" rx="8" fill="#ffedd5" stroke="#ea580c"/>
+        <text x="36" y="200" font-size="12" fill="#374151">情况三：两辆车都允许</text>
+        <text x="36" y="220" font-size="11" fill="#6b7280">正常连边，并补上逆否边保证图对称</text>
+        <text x="400" y="194" font-size="11" fill="#ea580c">id1 → id2</text>
+        <text x="400" y="216" font-size="11" fill="#ea580c">¬id2 → ¬id1</text>
+
+        <text x="310" y="252" font-size="11" fill="#6b7280" text-anchor="middle">id1、id2 是把对应取值定位到布尔变量后的字面量节点</text>
+      </svg>
+      <figcaption>限制的翻译分三种情况，前提不成立就跳过，结论不成立就硬性否定前提，都成立才连一对对称边</figcaption>
+    </figure>
+
+    <p>限制怎么连边。设限制是「pos1 用 car1 则 pos2 用 car2」。先看前提：如果 car1 在 pos1 的地面上是被禁的车，这个前提永远不会成立，限制自动满足，直接跳过。</p>
+    <p>否则把 car1 定位到 pos1 的两个布尔之一，记作字面量 id1。再看结论：如果 car2 在 pos2 的地面上被禁，那么「pos1 用 car1」这件事本身就不允许发生，连一条 id1 → ¬id1，把它逼成假。否则把 car2 记成 id2，连 id1 → id2，同时补上逆否边 ¬id2 → ¬id1。</p>
+    <p>判定照旧：同一个地点的两个字面量落在同一个强连通分量里就无解，否则按分量编号给每个地点挑第一辆或第二辆。一次枚举找不到方案就试下一种，全都失败才输出 −1。</p>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">int</span> n, d, m;
+
+    <span class="kw">char</span> ban[128];
+    <span class="kw">char</span> first[128];
+    <span class="kw">char</span> second[128];
+
+    <span class="kw">char</span> groundType[MAXN];
+    <span class="kw">int</span> pos1[MAXN];
+    <span class="kw">char</span> car1[MAXN];
+    <span class="kw">int</span> pos2[MAXN];
+    <span class="kw">char</span> car2[MAXN];
+
+    <span class="kw">int</span> posx[MAXN];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN];
+    <span class="kw">int</span> to[MAXN];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">char</span> ans[MAXN];
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        ban['a'] = 'A';
+        ban['b'] = 'B';
+        ban['c'] = 'C';
+        first['a'] = 'B';
+        first['b'] = 'A';
+        first['c'] = 'A';
+        second['a'] = 'C';
+        second['b'] = 'C';
+        second['c'] = 'B';
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">other</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &lt;= n ? i + n : i - n;
+    }
+
+    <span class="kw">void</span> <span class="fn">buildGraph</span>(<span class="kw">int</span> stax) {
+        <span class="kw">for</span> (<span class="kw">int</span> bit = 0, idx = 1; bit &lt; d; bit++, idx++) {
+            <span class="kw">if</span> (((stax &gt;&gt; bit) &amp; 1) == 1) {
+                groundType[posx[idx]] = 'a';
+            } <span class="kw">else</span> {
+                groundType[posx[idx]] = 'b';
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> p1 = pos1[i];
+            <span class="kw">char</span> g1 = groundType[p1];
+            <span class="kw">char</span> c1 = car1[i];
+            <span class="kw">if</span> (ban[g1] == c1) {
+                <span class="kw">continue</span>;
+            }
+            <span class="kw">int</span> id1 = c1 == first[g1] ? p1 : p1 + n;
+            <span class="kw">int</span> p2 = pos2[i];
+            <span class="kw">char</span> g2 = groundType[p2];
+            <span class="kw">char</span> c2 = car2[i];
+            <span class="kw">if</span> (ban[g2] == c2) {
+                addEdge(id1, other(id1));
+            } <span class="kw">else</span> {
+                <span class="kw">int</span> id2 = c2 == first[g2] ? p2 : p2 + n;
+                addEdge(id1, id2);
+                addEdge(other(id2), other(id1));
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">clear</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n &lt;&lt; 1; i++) {
+            head[i] = dfn[i] = belong[i] = 0;
+        }
+        cntg = cntd = top = sccCnt = 0;
+    }
+
+    <span class="kw">bool</span> <span class="fn">compute</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, sizx = 0; i &lt;= n; i++) {
+            <span class="kw">if</span> (groundType[i] == 'x') {
+                posx[++sizx] = i;
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> stax = 0; stax &lt; 1 &lt;&lt; d; stax++) {
+            buildGraph(stax);
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n &lt;&lt; 1; i++) {
+                <span class="kw">if</span> (dfn[i] == 0) {
+                    tarjan(i);
+                }
+            }
+            <span class="kw">bool</span> check = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+                <span class="kw">if</span> (belong[i] == belong[i + n]) {
+                    check = <span class="kw">false</span>;
+                    <span class="kw">break</span>;
+                }
+            }
+            <span class="kw">if</span> (check) {
+                <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+                    <span class="kw">char</span> ground = groundType[i];
+                    <span class="kw">if</span> (belong[i] &lt; belong[i + n]) {
+                        ans[i] = first[ground];
+                    } <span class="kw">else</span> {
+                        ans[i] = second[ground];
+                    }
+                }
+                <span class="kw">return</span> <span class="kw">true</span>;
+            }
+            clear();
+        }
+        <span class="kw">return</span> <span class="kw">false</span>;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        prepare();
+        cin &gt;&gt; n &gt;&gt; d;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; groundType[i];
+        }
+        cin &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; pos1[i] &gt;&gt; car1[i] &gt;&gt; pos2[i] &gt;&gt; car2[i];
+        }
+        <span class="kw">bool</span> check = compute();
+        <span class="kw">if</span> (check) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+                cout &lt;&lt; ans[i];
+            }
+        } <span class="kw">else</span> {
+            cout &lt;&lt; -1 &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>二、题目5：布尔</h2>
+    <p>n 个变量取值 0 或 1，m 条限制，第 i 条形如 u x v y：如果 u 的取值是 x，那么 v 的取值是 y；同时如果 v 的取值是 y，那么 u 的取值是 x。两个方向同时成立，合起来是一个双向蕴含。</p>
+    <p>限制编号 1 到 m，一个区间 [a, b] 合法，指区间内的限制同时成立时存在赋值方案。q 次询问 [l, r]，问把 [l, r] 最少切成多少段连续区间，每段都合法；做不到输出 −1。</p>
+
+    <p>先把限制看成一个等式。记字面量 L 为「u 取 x」，M 为「v 取 y」，限制说的就是 L 与 M 的取值必须相同，同时 ¬L 与 ¬M 的取值也必须相同。这正是 2-SAT 里「两个字面量绑在一起」的形态，可以用并查集维护：把 L 和 M 合并，把 ¬L 和 ¬M 也合并。过程中只要出现某个字面量和它的反面落在同一集合里，这一段就矛盾。</p>
+    <p>并查集要能撤销。区间合法性问的是「一条条加限制，加到哪一条第一次冲突」，这个位置要对很多起点并行地做，退回去时得把合并原样弹掉。所以并查集不写路径压缩，find 老老实实沿父指针往上走，合并按大小记栈，undo 把栈弹回去。</p>
+    <p>天生矛盾的限制要单独标记。如果一条限制里 u 等于 v 且 x 不等于 y，它等价于要求「u 取 x」和「u 取 ¬x」，单条就矛盾，任何包含它的区间都无解。用一个前缀和 error[] 记下这类限制的位置，询问时先看一眼区间里有没有，有就直接输出 −1。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="first 的单调性与可撤销并查集" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="30" font-size="11" fill="#374151">first[i]：从 i 起首次冲突的位置</text>
+        <line x1="40" y1="150" x2="310" y2="150" stroke="#c9ced4" stroke-width="1.4"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.3">
+          <circle cx="40" cy="150" r="9"/>
+          <circle cx="112" cy="150" r="9"/>
+          <circle cx="184" cy="150" r="9"/>
+          <circle cx="256" cy="150" r="9"/>
+        </g>
+        <g font-size="10" fill="#1f2328" text-anchor="middle">
+          <text x="40" y="178">1</text>
+          <text x="112" y="178">3</text>
+          <text x="184" y="178">5</text>
+          <text x="256" y="178">7</text>
+        </g>
+        <g stroke="#ea580c" stroke-width="1.6" fill="none">
+          <path d="M 44 146 Q 76 96 108 146"/>
+          <path d="M 116 146 Q 148 96 180 146"/>
+          <path d="M 188 146 Q 220 96 252 146"/>
+        </g>
+        <g font-size="10" fill="#ea580c" text-anchor="middle">
+          <text x="76" y="92">first=4</text>
+          <text x="148" y="92">first=6</text>
+          <text x="220" y="92">first=8</text>
+        </g>
+        <text x="30" y="220" font-size="11" fill="#6b7280">起点越靠右，冲突越晚出现</text>
+        <text x="30" y="240" font-size="11" fill="#6b7280">first 单调不减，位置可以一起二分</text>
+
+        <rect x="350" y="42" width="240" height="30" rx="5" fill="#eef4ff" stroke="#2563eb"/>
+        <rect x="350" y="80" width="240" height="30" rx="5" fill="#eef4ff" stroke="#2563eb"/>
+        <rect x="350" y="118" width="240" height="30" rx="5" fill="#eef4ff" stroke="#2563eb"/>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="470" y="62">Union(L, M)</text>
+          <text x="470" y="100">Union(¬L, ¬M)</text>
+          <text x="470" y="138">Union(⋯)</text>
+        </g>
+        <text x="352" y="34" font-size="11" fill="#374151">可撤销并查集</text>
+        <g stroke="#9aa0a6" stroke-width="1.6" fill="none">
+          <path d="M 344 128 Q 320 128 320 106 Q 320 84 342 84"/>
+        </g>
+        <polygon points="342,84 333,79 333,89" fill="#9aa0a6"/>
+        <text x="316" y="110" font-size="10" fill="#6b7280" text-anchor="end">undo</text>
+        <text x="350" y="178" font-size="11" fill="#6b7280">find 不压缩路径，</text>
+        <text x="350" y="198" font-size="11" fill="#6b7280">合并按大小记栈，</text>
+        <text x="350" y="218" font-size="11" fill="#6b7280">退到哪一步就弹到哪一步</text>
+      </svg>
+      <figcaption>first 有单调性，可以把所有起点一起做整体二分；每一步合并压进栈，回溯时原样弹回来</figcaption>
+    </figure>
+
+    <p>接下来求 first[i]：从位置 i 开始往右加限制，第一次出现冲突的位置。区间 [i, first[i]−1] 就是以 i 开头的最长合法区间。</p>
+    <p>first 有单调性。从 i 开始比从 i−1 开始少了一条限制 i−1 的约束，冲突只会来得更晚或者一样晚，所以 first[i] 不小于 first[i−1]。可以对所有 i 一起二分答案：整体二分把位置分成答案落在左半和右半的两批，左半需要的限制是右半的子集，于是增量地往并查集里加边，用完了再撤销。一趟下来只需 O(m log m) 级别的合并。</p>
+
+    <p>有了 first，询问还要数最少几段。这是经典的区间覆盖：从 l 出发，每次尽量往右跳。倍增表把「跳 2^p 段」预处理出来，st[i][0] 就是 first[i]，表示跳一段之后落到哪；st[i][p] 等于 st[st[i][p−1]][p−1]，表示跳 2^p 段。查询时从高位往低位贪心，只要 st[l][p] 不超过 r 就跳过去，并把答案加上 2^p，最后再补上收尾的一段。</p>
+
+    <div class="viz">
+      <div class="viz-title">倍增表数最少的合法段数</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">first[1..10] = 4, 4, 6, 7, 10, 10, 11, 11, 11, 11，询问 [1, 10]。点「下一步」，看贪心从高位到低位怎么跳，最后落在三段上。</p>
+      <svg id="sp2Svg" viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="倍增跳段演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>已确定覆盖的位置</span>
+        <span><span class="dot partial"></span>当前跳到的起点 l</span>
+        <span><span class="dot skip"></span>还没覆盖</span>
+      </div>
+      <div class="breakdown" id="sp2Info"></div>
+      <div class="viz-controls">
+        <button class="sp2-btn" id="sp2Prev" type="button">上一步</button>
+        <button class="sp2-btn" id="sp2Next" type="button">下一步</button>
+        <button class="sp2-btn" id="sp2Reset" type="button">重来</button>
+      </div>
+    </div>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 600001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXQ = 1000001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 20;
+    <span class="kw">int</span> n, m, q;
+
+    <span class="kw">int</span> error[MAXM];
+
+    <span class="kw">int</span> u[MAXM];
+    <span class="kw">int</span> v[MAXM];
+
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">int</span> rollback[MAXN][2];
+    <span class="kw">int</span> opsize;
+
+    <span class="kw">int</span> first[MAXM];
+
+    <span class="kw">int</span> st[MAXM + 1][MAXP];
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+        <span class="kw">while</span> (i != fa[i]) {
+            i = fa[i];
+        }
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">void</span> <span class="fn">Union</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">int</span> fx = find(x);
+        <span class="kw">int</span> fy = find(y);
+        <span class="kw">if</span> (fx != fy) {
+            <span class="kw">if</span> (siz[fx] &lt; siz[fy]) {
+                swap(fx, fy);
+            }
+            fa[fy] = fx;
+            siz[fx] += siz[fy];
+            rollback[++opsize][0] = fx;
+            rollback[opsize][1] = fy;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">undo</span>(<span class="kw">int</span> oldsiz) {
+        <span class="kw">while</span> (opsize &gt; oldsiz) {
+            <span class="kw">int</span> fx = rollback[opsize][0];
+            <span class="kw">int</span> fy = rollback[opsize--][1];
+            fa[fy] = fy;
+            siz[fx] -= siz[fy];
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">other</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> x &lt;= n ? x + n : x - n;
+    }
+
+    <span class="kw">bool</span> <span class="fn">conflict</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> find(x) == find(other(x));
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>(<span class="kw">int</span> ql, <span class="kw">int</span> qr, <span class="kw">int</span> vl, <span class="kw">int</span> vr) {
+        <span class="kw">if</span> (ql &gt; qr) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">if</span> (vl == vr) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = ql; i &lt;= qr; i++) {
+                first[i] = vl;
+            }
+            <span class="kw">return</span>;
+        }
+        <span class="kw">int</span> mid = (vl + vr) &gt;&gt; 1;
+        <span class="kw">int</span> backup1 = opsize;
+        <span class="kw">bool</span> bad = <span class="kw">false</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> i = max(qr + 1, vl); i &lt;= mid; i++) {
+            Union(u[i], v[i]);
+            Union(other(u[i]), other(v[i]));
+            <span class="kw">if</span> (conflict(u[i])) {
+                bad = <span class="kw">true</span>;
+                <span class="kw">break</span>;
+            }
+        }
+        <span class="kw">if</span> (bad) {
+            undo(backup1);
+            compute(ql, qr, vl, mid);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> backup2 = opsize;
+            <span class="kw">int</span> split = min(qr, mid);
+            <span class="kw">for</span> (; split &gt;= ql; split--) {
+                Union(u[split], v[split]);
+                Union(other(u[split]), other(v[split]));
+                <span class="kw">if</span> (conflict(u[split])) {
+                    <span class="kw">break</span>;
+                }
+            }
+            undo(backup2);
+            compute(split + 1, qr, mid + 1, vr);
+            undo(backup1);
+            <span class="kw">for</span> (<span class="kw">int</span> i = split + 1; i &lt;= qr &amp;&amp; i &lt; vl; i++) {
+                Union(u[i], v[i]);
+                Union(other(u[i]), other(v[i]));
+            }
+            compute(ql, split, vl, mid);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">buildst</span>() {
+        opsize = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= (n &lt;&lt; 1); i++) {
+            fa[i] = i;
+            siz[i] = 1;
+        }
+        compute(1, m, 1, m + 1);
+        <span class="kw">for</span> (<span class="kw">int</span> p = 0; p &lt; MAXP; p++) {
+            st[m + 1][p] = m + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = m; i &gt;= 1; i--) {
+            st[i][0] = first[i];
+            <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt; MAXP; p++) {
+                st[i][p] = st[st[i][p - 1]][p - 1];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; q;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x, y; i &lt;= m; i++) {
+            cin &gt;&gt; u[i] &gt;&gt; x &gt;&gt; v[i] &gt;&gt; y;
+            error[i] = u[i] == v[i] &amp;&amp; x != y ? 1 : 0;
+            u[i] = x == 0 ? u[i] : (u[i] + n);
+            v[i] = y == 0 ? v[i] : (v[i] + n);
+        }
+        buildst();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            error[i] += error[i - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, l, r; i &lt;= q; i++) {
+            cin &gt;&gt; l &gt;&gt; r;
+            <span class="kw">if</span> (error[r] - error[l - 1] &gt; 0) {
+                cout &lt;&lt; -1 &lt;&lt; "\n";
+            } <span class="kw">else</span> {
+                <span class="kw">int</span> ans = 0;
+                <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+                    <span class="kw">if</span> (st[l][p] &lt;= r) {
+                        l = st[l][p];
+                        ans += 1 &lt;&lt; p;
+                    }
+                }
+                ans++;
+                cout &lt;&lt; ans &lt;&lt; "\n";
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>三、复杂度分析</h2>
+    <p>题目4 的开销全在枚举次数上；题目5 的判定不做建图，复杂度落在并查集的合并次数和倍增表的规模上。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>步骤</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>题目4 一次枚举（建图 + tarjan）</td><td><code class="inline">O(n + m)</code></td><td rowspan="2"><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>题目4 整体（枚举 2^d 种，d ≤ 8）</td><td><code class="inline">O(2^d (n + m))</code></td></tr>
+        <tr><td>题目5 整体二分求 first[]</td><td><code class="inline">O(m log m)</code> 次合并</td><td rowspan="3"><code class="inline">O(n + m log m)</code></td></tr>
+        <tr><td>题目5 建倍增表</td><td><code class="inline">O(m log m)</code></td></tr>
+        <tr><td>题目5 单次询问</td><td><code class="inline">O(log m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>题目4 的枚举上限由 d 决定，d 只有 8，2^d 最多 256，乘上 O(n + m) 的建图和 tarjan 是能接受的量级。每一次枚举都重新建一遍图，图上的点数只有 2n，边数由 m 条限制给出，最多两条。</p>
+    <p>题目5 的合并次数来自整体二分的每一层：每一层里每条限制最多被加入和撤销各一次。可撤销并查集不压缩路径，find 的代价是树高，按大小合并保证树高是 O(log n)，所以单次合并带一个很小的对数因子。倍增表按 log m 层预处理，每层 m 个位置，空间也是 O(m log m)。单次询问从高位往低位跳，总共 log m 次比较。</p>
+
+    <h2>四、最后</h2>
+    <p>这两道题的看点都不在建图本身。题目4 是把「三选一」拆成「先禁掉一个，再二选一」，枚举把三值问题搬回 2-SAT；题目5 是发现双向蕴含正好是并查集的一次合并，于是判定退化成一个非常轻的操作，能撤销、能大批量并行做。</p>
+    <p>上一页的三道题靠优化建图把边数压下来，这两道题一个靠枚举控制规模、一个干脆绕开建图，思路不同但落点一样：让一个本来不可做的规模变回可做的。</p>
+    <p>再往上走，2-SAT 还能和线段树分治、可持久化、树上问题拼在一起，建图和判定分开想就好。《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var FIRST = [0,4,4,6,7,10,10,11,11,11,11];   // index 1..10, 11 是哨兵
+  var L = 1, R = 10;
+  var svg = document.getElementById('sp2Svg');
+  var info = document.getElementById('sp2Info');
+  var prev = document.getElementById('sp2Prev');
+  var next = document.getElementById('sp2Next');
+  var reset = document.getElementById('sp2Reset');
+  var at = 0;
+
+  // 每一步：l 当前起点，cover 已覆盖到第几个位置，tp 当前检查的 p
+  var STEPS = [
+    {l:1, cover:0, tp:'3', info:'初始 l = 1，r = 10，ans = 0。倍增表从最高位开始试，看一次跳 2^p 段能到哪。'},
+    {l:1, cover:0, tp:'2', info:'p = 3：st[1][3] = 11，超过了 r = 10，不能跳，把位数降一位。'},
+    {l:1, cover:0, tp:'1', info:'p = 2：st[1][2] = 11，同样超过 10，继续降位。'},
+    {l:7, cover:6, tp:'0', info:'p = 1：st[1][1] = 7，没有超过 r = 10，跳过去，l 变成 7，ans 加上 2。前六个位置已经被两段盖住。'},
+    {l:7, cover:6, tp:'-', info:'p = 0：st[7][0] = first[7] = 11，还是超过 10，跳不动。贪心到头，ans 再加 1 收尾。'},
+    {l:11, cover:10, tp:'-', info:'答案是 3 段：[1, 3]、[4, 6]、[7, 10]。每段的右端点正好是下一段的 first 减一，全落在合法区间里。'}
+  ];
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+    var cw = 44, x0 = 60, cy = 55, ch = 36;
+    var i;
+
+    p.push('<text x="310" y="24" font-size="11" fill="#374151" text-anchor="middle">first[1..10] = 4, 4, 6, 7, 10, 10, 11, 11, 11, 11　　查询 [l, r] = [1, 10]</text>');
+
+    // 覆盖条
+    if (st.cover > 0) {
+      var w = cw * st.cover;
+      p.push('<rect x="'+x0+'" y="34" width="'+w+'" height="13" rx="3" fill="#ea580c" opacity="0.85"/>');
+      p.push('<text x="'+(x0+w+8)+'" y="45" font-size="10" fill="#ea580c">已覆盖 '+st.cover+' 个位置</text>');
+    }
+
+    for (i = 1; i <= 10; i++) {
+      var cx = x0 + cw * (i - 1);
+      var covered = i <= st.cover;
+      var isL = (i === st.l);
+      var fill = covered ? '#ffedd5' : '#eef4ff';
+      var stroke = covered ? '#ea580c' : '#2563eb';
+      var lw = isL ? 2.4 : 1.3;
+      if (isL) { fill = '#dbeafe'; stroke = '#2563eb'; }
+      p.push('<rect x="'+cx+'" y="'+cy+'" width="'+(cw-6)+'" height="'+ch+'" rx="4" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+lw+'"/>');
+      p.push('<text x="'+(cx+(cw-6)/2)+'" y="'+(cy+23)+'" font-size="12" fill="#1f2328" text-anchor="middle">'+i+'</text>');
+      p.push('<text x="'+(cx+(cw-6)/2)+'" y="'+(cy+ch+18)+'" font-size="10" fill="#2563eb" text-anchor="middle">'+FIRST[i]+'</text>');
+    }
+    p.push('<text x="20" y="'+(cy+ch+18)+'" font-size="10" fill="#6b7280">first</text>');
+
+    if (st.tp !== '-') {
+      p.push('<text x="20" y="132" font-size="11" fill="#ea580c">当前试 p = '+st.tp+'</text>');
+    }
+    if (st.l === 11) {
+      p.push('<text x="310" y="176" font-size="11" fill="#2563eb" text-anchor="middle">l 已经越过 r，收尾的一段补完，共 3 段</text>');
+      p.push('<text x="310" y="204" font-size="11" fill="#6b7280" text-anchor="middle">合法区间不是随便切的：每一段都从上次的 first 接上</text>');
+    } else {
+      p.push('<text x="20" y="176" font-size="11" fill="#6b7280">st[i][p] 表示从 i 起跳 2^p 段后落在的位置</text>');
+      p.push('<text x="20" y="204" font-size="11" fill="#6b7280">只要它不超过 r 就跳过去，ans 加上 2^p</text>');
+      p.push('<text x="20" y="232" font-size="11" fill="#374151">当前位置 l = '+st.l+'，已跳段数 '+((st.l===7)?2:0)+'</text>');
+    }
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div>' + st.info + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if(at > 0){ at--; render(); } });
+  next.addEventListener('click', function(){ if(at < STEPS.length - 1){ at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

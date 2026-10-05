@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CDQ 分治：时序上的平面问题 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .cp-cell{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
+    min-width:78px;height:48px;border:1px solid var(--border);border-radius:6px;background:var(--bg);
+    font-size:12px;line-height:1.35;margin:2px;vertical-align:top;padding:0 4px;}
+  .cp-cell .cp-idx{font-size:10px;color:#9aa0a6;}
+  .cp-cell.add{border-color:#2563eb;background:#dbeafe;}
+  .cp-cell.qry{border-color:#ea580c;background:#ffedd5;}
+  .cp-cell.on{outline:2px solid #2563eb;outline-offset:1px;}
+  .cp-cell.cur{outline:2px solid #ea580c;outline-offset:1px;}
+  .cp-lab{display:inline-block;min-width:104px;font-size:12px;color:#6b7280;vertical-align:top;margin-top:14px;}
+  .cp-row{margin:6px 0;}
+  .cp-cells{display:inline-block;}
+  .cp-res{margin-top:8px;font-size:13px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+  .cp-tag{display:inline-block;border:1px solid #2563eb;color:#2563eb;border-radius:4px;
+    padding:1px 8px;background:#eef4ff;font-size:12px;}
+  .cp-tag.warn{border-color:#ea580c;color:#ea580c;background:#ffedd5;}
+  .cp-num{font-weight:600;color:#ea580c;}
+  .cp-note{margin-top:6px;font-size:12.5px;color:#6b7280;}
+  @media(max-width:640px){.cp-cell{min-width:62px;font-size:11px;}.cp-lab{min-width:80px;}}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>CDQ 分治：时序上的平面问题</h1>
+    <p class="intro">操作一条条发生，查询只认它之前发生过的修改。时序一旦占住分治的那一维，平面的 x 就只能靠每层排序维持，y 也就只能交给树状数组。本页两道题：摩基亚是带修改的矩形求和，天使玩偶是曼哈顿距离最近点。</p>
+
+    <h2>零、背景</h2>
+    <p>上一页的两道题所有点一开始就给定，x 可以在最开始排一次序，分治维和排序维共用同一维，y 于是能被双指针白拿。</p>
+    <p>这一页多了操作时序。事件在数组里的先后就是时间，分治只能按时间来切，否则「只统计之前的修改」这个前提就没了。x 这一维被挤出去之后，只能退到每层 merge 里：扫完按 x 排序，让上一层能双指针推进。y 剩下来就只能上树状数组。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 236" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="时序、x、y 三层分工" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="12" fill="#1f2328">
+          <text x="16" y="34">① 时序：分治维</text>
+          <g text-anchor="middle">
+            <rect x="150" y="18" width="46" height="24" fill="#dbeafe" stroke="#2563eb"/><text x="173" y="34">t1</text>
+            <rect x="198" y="18" width="46" height="24" fill="#dbeafe" stroke="#2563eb"/><text x="221" y="34">t2</text>
+            <rect x="246" y="18" width="46" height="24" fill="#ffedd5" stroke="#ea580c"/><text x="269" y="34">t3</text>
+            <rect x="294" y="18" width="46" height="24" fill="#ffedd5" stroke="#ea580c"/><text x="317" y="34">t4</text>
+          </g>
+          <line x1="244" y1="12" x2="244" y2="50" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="4 3"/>
+          <text x="198" y="58" font-size="10.5" fill="#6b7280" text-anchor="middle">左半（早）</text>
+          <text x="284" y="58" font-size="10.5" fill="#6b7280" text-anchor="middle">右半（晚）</text>
+          <text x="360" y="34" font-size="11" fill="#6b7280">只有早的修改能贡献给晚的查询</text>
+
+          <text x="16" y="104">② x 维：每层排序</text>
+          <g text-anchor="middle">
+            <rect x="150" y="86" width="46" height="24" fill="#eef4ff" stroke="#2563eb"/><text x="173" y="102">x=1</text>
+            <rect x="198" y="86" width="46" height="24" fill="#eef4ff" stroke="#2563eb"/><text x="221" y="102">x=2</text>
+            <rect x="246" y="86" width="46" height="24" fill="#ffe8d4" stroke="#ea580c"/><text x="269" y="102">x=2</text>
+            <rect x="294" y="86" width="46" height="24" fill="#ffe8d4" stroke="#ea580c"/><text x="317" y="102">x=3</text>
+          </g>
+          <text x="222" y="122" font-size="10.5" fill="#2563eb" text-anchor="middle">左半按 x 有序</text>
+          <text x="306" y="122" font-size="10.5" fill="#ea580c" text-anchor="middle">右半按 x 有序</text>
+          <text x="360" y="102" font-size="11" fill="#6b7280">merge 扫完排序，交给上一层</text>
+
+          <text x="16" y="176">③ y 维：树状数组</text>
+          <g text-anchor="middle">
+            <rect x="150" y="158" width="34" height="24" fill="#eef4ff" stroke="#2563eb"/><text x="167" y="174">y=1</text>
+            <rect x="186" y="158" width="34" height="24" fill="#eef4ff" stroke="#2563eb"/><text x="203" y="174">y=2</text>
+            <rect x="222" y="158" width="34" height="24" fill="#eef4ff" stroke="#2563eb"/><text x="239" y="174">y=5</text>
+          </g>
+          <path d="M150 196 L256 196" stroke="#9aa0a6" stroke-width="1.2"/>
+          <path d="M150 196 L150 190 M256 196 L256 190" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="203" y="212" font-size="10.5" fill="#6b7280" text-anchor="middle">add(y) 与 query(y) 走前缀</text>
+          <text x="290" y="174" font-size="11" fill="#6b7280">和 x 的推进不同序，</text>
+          <text x="290" y="192" font-size="11" fill="#6b7280">双指针推不动了</text>
+        </g>
+      </svg>
+      <figcaption>时序占住分治，x 靠每层排序维持，y 交给树状数组，这三层各有各的位置。</figcaption>
+    </figure>
+
+    <h2>一、题目5：摩基亚</h2>
+    <p>给定数字 w，表示一个 w × w 的正方形区域，所有位置都在其中。接下来 m 条操作，两种类型：操作 1 x y v 表示坐标 (x, y) 位置增加了 v 个人；操作 2 a b c d 打印左上角 (a, b)、右下角 (c, d) 区域里的人数。1 ≤ w ≤ 2×10⁶，1 ≤ m ≤ 2×10⁵，0 ≤ v ≤ 10⁴。测试链接：<a href="https://www.luogu.com.cn/problem/P4390" target="_blank" rel="noopener">洛谷 P4390</a>。</p>
+    <p>和上一页一样，先把矩形查询拆成四个前缀事件，系数是 +1、−1、−1、+1。加人操作直接当成一个 op = 1 的事件。数组里的先后顺序就是时序，这就是大顺序。</p>
+    <p>merge 里 p2 从左往右扫右半，p1 把左半里 x 不超过 arr[p2].x 的元素推过来，遇到加人事件就 add(arr[p1].y, arr[p1].v)，遇到查询事件就 ans[q] += v × query(arr[p2].y)。扫完先把 add 过的位置逐个减回去，再把整段按 x 排序。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 196" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="清空树状数组" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <rect x="30" y="30" width="150" height="36" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="105" y="53">add(y, +v)</text>
+          <rect x="210" y="30" width="150" height="36" rx="6" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="285" y="53">query(y) 取前缀和</text>
+          <rect x="390" y="30" width="150" height="36" rx="6" fill="#eef4ff" stroke="#2563eb"/>
+          <text x="465" y="53">add(y, −v) 撤销</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.4" fill="none">
+          <path d="M180 48 L202 48"/><path d="M202 48 L196 42 M202 48 L196 54"/>
+          <path d="M360 48 L382 48"/><path d="M382 48 L376 42 M382 48 L376 54"/>
+        </g>
+        <g font-size="11.5" fill="#6b7280">
+          <text x="30" y="98">撤销这一步不能偷懒成「把整个树状数组清成 0」。</text>
+          <text x="30" y="120">值域是 2×10⁶ 量级，每层都清一遍就是 O(V·log E)，直接把复杂度顶穿。</text>
+          <text x="30" y="142">只把这次 add 过的位置减回去，代价和 add 的次数同阶。</text>
+          <text x="30" y="172">另一个细节：树状数组的下标不能是 0，所以所有坐标读入后先加一，</text>
+          <text x="30" y="186">w 也要跟着加一，它同时是树状数组的上界。</text>
+        </g>
+      </svg>
+      <figcaption>树状数组的清空只能逐个撤销，坐标整体加一避免下标 0。</figcaption>
+    </figure>
+
+    <div class="viz" id="cpMokia">
+      <p class="viz-title">摩基亚：一次 merge 里的 x 双指针与 y 树状数组</p>
+      <div class="cp-row"><span class="cp-lab">左半（早，按 x）</span><span class="cp-cells" id="cpLeft"></span></div>
+      <div class="cp-row"><span class="cp-lab">右半（晚，按 x）</span><span class="cp-cells" id="cpRight"></span></div>
+      <div class="cp-res" id="cpRes"></div>
+      <div class="cp-note" id="cpBit"></div>
+      <div class="viz-controls">
+        <button id="cpPrev" type="button">上一步</button>
+        <button id="cpNext" type="button">下一步</button>
+        <button id="cpReset" type="button">重置</button>
+      </div>
+      <p class="note" id="cpInfo"></p>
+    </div>
+
+    <p>演示里 ans 拿到的是 +8 和 −5 两块，本层合计 +3。左半内部、右半内部还会各自补上自己的部分，最后按查询编号打印。</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> op, x, y, v, q;
+    };
+
+    <span class="kw">bool</span> <span class="fn">NodeCmp</span>(Node a, Node b) {
+        <span class="kw">return</span> a.x &lt; b.x;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXV = 2000002;
+    <span class="kw">const</span> <span class="kw">int</span> INF = 1000000001;
+    <span class="kw">int</span> w;
+
+    Node arr[MAXM];
+    <span class="kw">int</span> cnte = 0;
+    <span class="kw">int</span> cntq = 0;
+
+    <span class="kw">int</span> tree[MAXV];
+
+    <span class="kw">int</span> ans[MAXM];
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &amp; -i;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        <span class="kw">while</span> (i &lt;= w) {
+            tree[i] += v;
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> ret = 0;
+        <span class="kw">while</span> (i &gt; 0) {
+            ret += tree[i];
+            i -= lowbit(i);
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">addPeople</span>(<span class="kw">int</span> x, <span class="kw">int</span> y, <span class="kw">int</span> v) {
+        arr[++cnte].op = 1;
+        arr[cnte].x = x;
+        arr[cnte].y = y;
+        arr[cnte].v = v;
+    }
+
+    <span class="kw">void</span> <span class="fn">addQuery</span>(<span class="kw">int</span> x, <span class="kw">int</span> y, <span class="kw">int</span> v, <span class="kw">int</span> q) {
+        arr[++cnte].op = 2;
+        arr[cnte].x = x;
+        arr[cnte].y = y;
+        arr[cnte].v = v;
+        arr[cnte].q = q;
+    }
+
+    <span class="kw">void</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+        <span class="kw">int</span> p1, p2;
+        <span class="kw">for</span> (p1 = l - 1, p2 = m + 1; p2 &lt;= r; p2++) {
+            <span class="kw">while</span> (p1 + 1 &lt;= m &amp;&amp; arr[p1 + 1].x &lt;= arr[p2].x) {
+                p1++;
+                <span class="kw">if</span> (arr[p1].op == 1) {
+                    add(arr[p1].y, arr[p1].v);
+                }
+            }
+            <span class="kw">if</span> (arr[p2].op == 2) {
+                ans[arr[p2].q] += arr[p2].v * query(arr[p2].y);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= p1; i++) {
+            <span class="kw">if</span> (arr[i].op == 1) {
+                add(arr[i].y, -arr[i].v);
+            }
+        }
+        sort(arr + l, arr + r + 1, NodeCmp);
+    }
+
+    <span class="kw">void</span> <span class="fn">cdq</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">int</span> mid = (l + r) / 2;
+        cdq(l, mid);
+        cdq(mid + 1, r);
+        merge(l, mid, r);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        <span class="kw">int</span> tmp;
+        cin &gt;&gt; tmp &gt;&gt; w;
+        w++;
+        <span class="kw">int</span> op, x, y, v, a, b, c, d;
+        cin &gt;&gt; op;
+        <span class="kw">while</span> (op != 3) {
+            <span class="kw">if</span> (op == 1) {
+                cin &gt;&gt; x &gt;&gt; y &gt;&gt; v;
+                x++; y++;
+                addPeople(x, y, v);
+            } <span class="kw">else</span> {
+                cin &gt;&gt; a &gt;&gt; b &gt;&gt; c &gt;&gt; d;
+                a++; b++; c++; d++;
+                addQuery(c, d, 1, ++cntq);
+                addQuery(a - 1, b - 1, 1, cntq);
+                addQuery(a - 1, d, -1, cntq);
+                addQuery(c, b - 1, -1, cntq);
+            }
+            cin &gt;&gt; op;
+        }
+        cdq(1, cnte);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntq; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>二、题目6：天使玩偶</h2>
+    <p>规定 (x₁, y₁) 和 (x₂, y₂) 之间的距离是 |x₁ − x₂| + |y₁ − y₂|。一开始给定 n 个点的位置，接下来 m 条操作：操作 1 x y 添加一个点，操作 2 x y 打印已经添加的所有点中到 (x, y) 最近的那个点的距离。1 ≤ n、m ≤ 3×10⁵，0 ≤ x、y ≤ 10⁶。测试链接：<a href="https://www.luogu.com.cn/problem/P4169" target="_blank" rel="noopener">洛谷 P4169</a>。</p>
+    <p>先只看左下方的点，也就是 xⱼ ≤ xᵢ 且 yⱼ ≤ yᵢ 的那些。这时候绝对值可以直接拆掉，距离写成 (xᵢ + yᵢ) − (xⱼ + yⱼ)。于是问题变成：在 y 不超过 yᵢ 的点里，找 xⱼ + yⱼ 最大的那个。这正是树状数组能维护的前缀最大值。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="四个方向的变换" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="11" fill="#6b7280" text-anchor="middle">
+          <path d="M60 30 L60 214 L250 214" stroke="#9aa0a6" stroke-width="1.3" fill="none"/>
+          <text x="50" y="228">0</text><text x="254" y="228">x</text><text x="56" y="24">y</text>
+        </g>
+        <circle cx="156" cy="122" r="5" fill="#2563eb"/>
+        <text x="168" y="118" font-size="11" fill="#1f2328" text-anchor="start">查询点 (4,3)</text>
+        <rect x="60" y="122" width="96" height="92" fill="#dbeafe" fill-opacity=".55" stroke="#2563eb" stroke-width="1.2"/>
+        <rect x="156" y="62" width="94" height="60" fill="#ffedd5" fill-opacity=".55" stroke="#ea580c" stroke-width="1.2"/>
+        <rect x="156" y="122" width="94" height="92" fill="#eef4ff" fill-opacity=".7" stroke="#2563eb" stroke-width="1.2"/>
+        <rect x="60" y="62" width="96" height="60" fill="#f6f7f9" fill-opacity=".9" stroke="#9aa0a6" stroke-width="1.2"/>
+        <g font-size="10.5" fill="#6b7280" text-anchor="middle">
+          <text x="108" y="176">左下</text>
+          <text x="203" y="98">右下</text>
+          <text x="203" y="176">右上</text>
+          <text x="108" y="98">左上</text>
+        </g>
+        <g font-size="12" fill="#1f2328">
+          <text x="300" y="52">to1：原样　→ 统计左下</text>
+          <text x="300" y="86">to2：x → v − x　→ 统计右下</text>
+          <text x="300" y="120">to3：x、y 都翻　→ 统计右上</text>
+          <text x="300" y="154">to4：y → v − y　→ 统计左上</text>
+        </g>
+        <g font-size="11.5" fill="#6b7280">
+          <text x="300" y="192">v 取所有坐标的最大值再加一。</text>
+          <text x="300" y="212">四次跑完同一个 CDQ，答案取最小。</text>
+          <text x="300" y="234">四个方向合起来就是全体点。</text>
+        </g>
+      </svg>
+      <figcaption>翻转坐标把另外三个方向也变成「左下」，四次 CDQ 覆盖了平面上所有点。</figcaption>
+    </figure>
+
+    <p>分治的形状和上一题完全一样：时序当大顺序，merge 里按 x 双指针，y 交给树状数组。区别只有树状数组里存的东西：上一题是前缀人数和，这一题是前缀最大的 x + y，所以 add 改成取 max，query 也改成取 max，初始值不是 0 而是 −INF。</p>
+    <p>清空同样不能整体重置。代码里的做法是：add 时把经过的每个位置更新成最大值，撤销时沿同样的路径把这些位置写回 −INF。因为只走 add 过的那些位置，代价和本层 add 的次数同阶。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="前缀最大值" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="11" fill="#6b7280" text-anchor="middle">
+          <text x="70" y="176">y = 1</text><text x="130" y="176">2</text><text x="190" y="176">3</text>
+          <text x="250" y="176">4</text><text x="310" y="176">5</text><text x="370" y="176">6</text>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb">
+          <rect x="54" y="120" width="32" height="40"/><rect x="114" y="60" width="32" height="100"/>
+          <rect x="174" y="100" width="32" height="60"/><rect x="234" y="30" width="32" height="130"/>
+          <rect x="294" y="140" width="32" height="20"/><rect x="354" y="110" width="32" height="50"/>
+        </g>
+        <g font-size="10.5" fill="#1f2328" text-anchor="middle">
+          <text x="70" y="112">3</text><text x="130" y="52">9</text><text x="190" y="92">6</text>
+          <text x="250" y="22">12</text><text x="310" y="132">1</text><text x="370" y="102">5</text>
+        </g>
+        <rect x="54" y="30" width="212" height="130" fill="#ea580c" fill-opacity=".08" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="5 3"/>
+        <text x="160" y="18" font-size="11" fill="#ea580c" text-anchor="middle">query(4)：y ≤ 4 的最大 x+y = 12</text>
+        <g font-size="11.5" fill="#6b7280">
+          <text x="410" y="60">more(i, num)：沿 lowbit 往上取 max</text>
+          <text x="410" y="84">query(i)：沿 lowbit 往下取 max</text>
+          <text x="410" y="108">clear(i)：沿 lowbit 往上写回 −INF</text>
+          <text x="410" y="140">树状数组初值也全是 −INF，</text>
+          <text x="410" y="160">所以 query 不到点时会拿到 −INF，</text>
+          <text x="410" y="180">减出来的距离是个大数，不影响取最小。</text>
+        </g>
+      </svg>
+      <figcaption>把前缀和换成前缀最大值，more 与 query 的循环方向不变，只是加法换成了 max。</figcaption>
+    </figure>
+
+    <div class="viz" id="cpAngel">
+      <p class="viz-title">天使玩偶：四次变换与最近距离</p>
+      <div id="cpSvg"></div>
+      <div class="cp-res" id="cpAns"></div>
+      <div class="viz-controls">
+        <button id="cpAPrev" type="button">上一步</button>
+        <button id="cpANext" type="button">下一步</button>
+        <button id="cpAReset" type="button">重置</button>
+      </div>
+      <p class="note" id="cpAInfo"></p>
+    </div>
+
+    <p>演示里 v = 6（坐标最大值 5 加一）。四次变换各自命中一个方向上的点，距离依次是 4、无、2、5，取最小得 2。真实的四个点里最近的是 (5, 4)，曼哈顿距离 1 + 1 = 2，对得上。</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> op, x, y, q;
+    };
+
+    <span class="kw">bool</span> <span class="fn">NodeCmp</span>(Node a, Node b) {
+        <span class="kw">return</span> a.x &lt; b.x;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 300001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXV = 1000002;
+    <span class="kw">const</span> <span class="kw">int</span> INF = 1000000001;
+    <span class="kw">int</span> n, m, v;
+
+    Node tim[MAXN &lt;&lt; 1];
+    Node arr[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cnte = 0;
+    <span class="kw">int</span> cntq = 0;
+
+    <span class="kw">int</span> tree[MAXV];
+
+    <span class="kw">int</span> ans[MAXN];
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &amp; -i;
+    }
+
+    <span class="kw">void</span> <span class="fn">more</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">while</span> (i &lt;= v) {
+            tree[i] = max(tree[i], num);
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> ret = -INF;
+        <span class="kw">while</span> (i &gt; 0) {
+            ret = max(ret, tree[i]);
+            i -= lowbit(i);
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">clear</span>(<span class="kw">int</span> i) {
+        <span class="kw">while</span> (i &lt;= v) {
+            tree[i] = -INF;
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+        <span class="kw">int</span> p1, p2;
+        <span class="kw">for</span> (p1 = l - 1, p2 = m + 1; p2 &lt;= r; p2++) {
+            <span class="kw">while</span> (p1 + 1 &lt;= m &amp;&amp; arr[p1 + 1].x &lt;= arr[p2].x) {
+                p1++;
+                <span class="kw">if</span> (arr[p1].op == 1) {
+                    more(arr[p1].y, arr[p1].x + arr[p1].y);
+                }
+            }
+            <span class="kw">if</span> (arr[p2].op == 2) {
+                ans[arr[p2].q] = min(ans[arr[p2].q], arr[p2].x + arr[p2].y - query(arr[p2].y));
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= p1; i++) {
+            <span class="kw">if</span> (arr[i].op == 1) {
+                clear(arr[i].y);
+            }
+        }
+        sort(arr + l, arr + r + 1, NodeCmp);
+    }
+
+    <span class="kw">void</span> <span class="fn">cdq</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        cdq(l, mid);
+        cdq(mid + 1, r);
+        merge(l, mid, r);
+    }
+
+    <span class="kw">void</span> <span class="fn">to1</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnte; i++) {
+            arr[i] = tim[i];
+        }
+        cdq(1, cnte);
+    }
+
+    <span class="kw">void</span> <span class="fn">to2</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnte; i++) {
+            arr[i] = tim[i];
+            arr[i].x = v - arr[i].x;
+        }
+        cdq(1, cnte);
+    }
+
+    <span class="kw">void</span> <span class="fn">to3</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnte; i++) {
+            arr[i] = tim[i];
+            arr[i].x = v - arr[i].x;
+            arr[i].y = v - arr[i].y;
+        }
+        cdq(1, cnte);
+    }
+
+    <span class="kw">void</span> <span class="fn">to4</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnte; i++) {
+            arr[i] = tim[i];
+            arr[i].y = v - arr[i].y;
+        }
+        cdq(1, cnte);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x, y; i &lt;= n; i++) {
+            cin &gt;&gt; x &gt;&gt; y;
+            tim[++cnte].op = 1;
+            tim[cnte].x = ++x;
+            tim[cnte].y = ++y;
+            v = max(v, max(x, y));
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x, y; i &lt;= m; i++) {
+            cin &gt;&gt; op &gt;&gt; x &gt;&gt; y;
+            tim[++cnte].op = op;
+            tim[cnte].x = ++x;
+            tim[cnte].y = ++y;
+            <span class="kw">if</span> (op == 2) {
+                tim[cnte].q = ++cntq;
+            }
+            v = max(v, max(x, y));
+        }
+        v++;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= v; i++) {
+            tree[i] = -INF;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntq; i++) {
+            ans[i] = INF;
+        }
+        to1();
+        to2();
+        to3();
+        to4();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntq; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>三、复杂度分析</h2>
+    <p>两题的骨架一致：分治 O(log E) 层，每层线性扫描加上树状数组的 O(log V) 调用。天使玩偶要多跑三遍，乘一个 4 的常数。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>题目</th><th>事件规模</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>摩基亚</td><td>E = m + 4·查询数</td><td><code class="inline">O(E·log E·log w)</code></td><td><code class="inline">O(E + w)</code></td></tr>
+        <tr><td>天使玩偶</td><td>E = n + m</td><td><code class="inline">O(4·E·log E·log V)</code></td><td><code class="inline">O(E + V)</code></td></tr>
+      </tbody>
+    </table>
+    <p>摩基亚的 E 不超过 10⁶，log E 与 log w 都在 20 附近，总量约 4×10⁸ 次基本操作，卡着过。天使玩偶的 E 是 6×10⁵，四遍之后也是这个量级。</p>
+    <p>空间上树状数组按值域开：摩基亚开到 w + 1，天使玩偶开到 V = 最大坐标 + 2，都是 10⁶ 量级的静态数组。事件数组与临时数组各一份，递归栈 O(log E)。</p>
+
+    <h2>四、最后</h2>
+    <p>回顾这三页，CDQ 分治的分工始终没变：一维排序、一维分治、一维数据结构。变的只是哪一维腾给谁。</p>
+    <p>三维偏序里 a 能提前排好，二维数点里 x 能提前排好，到了带时序的题，时间占了分治的位置，x 就只能在每层里现排。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+
+  // ===== 演示1：摩基亚的一次 merge =====
+  var left = [
+    {op:'add', x:1, y:2, v:3},
+    {op:'qry', x:2, y:4, v:1, q:1},
+    {op:'add', x:3, y:1, v:5},
+    {op:'qry', x:4, y:3, v:-1, q:1}
+  ];
+  var right = [
+    {op:'add', x:2, y:5, v:2},
+    {op:'qry', x:3, y:6, v:1, q:2},
+    {op:'add', x:5, y:2, v:4},
+    {op:'qry', x:6, y:1, v:-1, q:2}
+  ];
+  var steps = [];
+  var p1 = -1, bit = [], ans = {1:0, 2:0};
+  function prefix(y){
+    var s = 0;
+    for (var i = 0; i < bit.length; i++) if (bit[i].y <= y) s += bit[i].v;
+    return s;
+  }
+  function bitText(){
+    if (!bit.length) return '树状数组：空';
+    var parts = bit.map(function(e){ return 'y=' + e.y + ' → ' + e.v; });
+    return '树状数组（按 y 的前缀和）：' + parts.join('，');
+  }
+  steps.push({p1:-1, p2:-1, bit:[], ans:JSON.parse(JSON.stringify(ans)),
+    t:'左半是时间较早的四个事件、右半是较晚的四个，两边都已经按 x 排好。p1 停在左半之前。'});
+  for (var p2 = 0; p2 < right.length; p2++) {
+    var moved = [];
+    while (p1 + 1 < left.length && left[p1 + 1].x <= right[p2].x) {
+      p1++;
+      if (left[p1].op === 'add') { bit.push({y:left[p1].y, v:left[p1].v}); moved.push('add(y=' + left[p1].y + ', ' + left[p1].v + ')'); }
+      else { moved.push('左半查询（不 add）'); }
+    }
+    var extra = '';
+    if (right[p2].op === 'qry') {
+      var got = prefix(right[p2].y);
+      var delta = right[p2].v * got;
+      ans[right[p2].q] += delta;
+      extra = '右半查询 q' + right[p2].q + '：query(' + right[p2].y + ') = ' + got + '，乘系数 ' +
+        (right[p2].v > 0 ? '+1' : '−1') + ' → 贡献 ' + (delta >= 0 ? '+' : '') + delta + '。';
+    } else {
+      extra = '右半是加人事件，不取贡献。';
+    }
+    steps.push({p1:p1, p2:p2, bit:bit.slice(), ans:JSON.parse(JSON.stringify(ans)),
+      t:(moved.length ? '推进 ' + moved.join('、') + '。' : '没有新的左半元素满足 x 条件。') + extra});
+  }
+  steps.push({p1:left.length - 1, p2:right.length - 1, bit:[], ans:JSON.parse(JSON.stringify(ans)), final:true,
+    t:'收尾：把 add 过的位置逐个减回去，树状数组恢复成空，再把整段按 x 排序交给上一层。'});
+  var cur = 0;
+  function cellHtml(e, state){
+    var cls = 'cp-cell ' + (e.op === 'add' ? 'add' : 'qry') + (state === 'on' ? ' on' : (state === 'cur' ? ' cur' : ''));
+    var head = e.op === 'add' ? ('加 (' + e.x + ',' + e.y + ') +' + e.v) : ('查 (' + e.x + ',' + e.y + ') q' + e.q);
+    return '<span class="' + cls + '">' + head + '<span class="cp-idx">' +
+      (e.op === 'add' ? ('v=' + e.v) : ('系数 ' + (e.v > 0 ? '+1' : '−1'))) + '</span></span>';
+  }
+  function render(){
+    var s = steps[cur];
+    var lh = '', rh = '';
+    for (var i = 0; i < left.length; i++) lh += cellHtml(left[i], i <= s.p1 ? 'on' : '');
+    for (var j = 0; j < right.length; j++) rh += cellHtml(right[j], j === s.p2 ? 'cur' : '');
+    $('cpLeft').innerHTML = lh;
+    $('cpRight').innerHTML = rh;
+    $('cpRes').innerHTML = '<span class="cp-tag">ans[q1] = <span class="cp-num">' + s.ans[1] + '</span></span>' +
+      '<span class="cp-tag warn">ans[q2] = <span class="cp-num">' + (s.ans[2] >= 0 ? '+' : '') + s.ans[2] + '</span></span>' +
+      (s.final ? '<span class="cp-tag">本层合计 <span class="cp-num">+3</span></span>' : '');
+    $('cpBit').textContent = (s.bit && s.bit.length)
+      ? ('树状数组（按 y 的前缀和）：' + s.bit.map(function(e){ return 'y=' + e.y + ' → ' + e.v; }).join('，'))
+      : '树状数组：空';
+    $('cpInfo').textContent = '第 ' + (cur + 1) + ' / ' + steps.length + ' 步：' + s.t;
+    $('cpPrev').disabled = (cur === 0);
+    $('cpNext').disabled = (cur === steps.length - 1);
+  }
+  $('cpPrev').addEventListener('click', function(){ if (cur > 0) { cur--; render(); } });
+  $('cpNext').addEventListener('click', function(){ if (cur < steps.length - 1) { cur++; render(); } });
+  $('cpReset').addEventListener('click', function(){ cur = 0; render(); });
+  render();
+
+  // ===== 演示2：天使玩偶的四次变换 =====
+  var pts = [{x:2, y:1}, {x:5, y:4}, {x:1, y:5}];
+  var Q = {x:4, y:3};
+  var V = 6;
+  var names = ['P1', 'P2', 'P3'];
+  function transform(kind){
+    return pts.map(function(p){
+      var x = p.x, y = p.y;
+      if (kind === 2 || kind === 3) x = V - x;
+      if (kind === 3 || kind === 4) y = V - y;
+      return {x:x, y:y};
+    });
+  }
+  function queryPt(kind){
+    var x = Q.x, y = Q.y;
+    if (kind === 2 || kind === 3) x = V - x;
+    if (kind === 3 || kind === 4) y = V - y;
+    return {x:x, y:y};
+  }
+  var modes = [
+    {k:1, label:'to1：原样', dir:'左下', color:'#2563eb'},
+    {k:2, label:'to2：x → v − x', dir:'右下', color:'#ea580c'},
+    {k:3, label:'to3：x、y 都翻', dir:'右上', color:'#2563eb'},
+    {k:4, label:'to4：y → v − y', dir:'左上', color:'#ea580c'}
+  ];
+  var asteps = [];
+  var best = Infinity;
+  asteps.push({k:0, best:null,
+    t:'原坐标下三个点 P1(2,1)、P2(5,4)、P3(1,5)，查询点 Q(4,3)。真实最近的是 P2，距离 1 + 1 = 2。'});
+  for (var mi = 0; mi < modes.length; mi++) {
+    var m = modes[mi], tp = transform(m.k), tq = queryPt(m.k), hit = [];
+    for (var i = 0; i < tp.length; i++) {
+      if (tp[i].x <= tq.x && tp[i].y <= tq.y) {
+        var d = (tq.x + tq.y) - (tp[i].x + tp[i].y);
+        hit.push({i:i, d:d});
+      }
+    }
+    var md = hit.length ? Math.min.apply(null, hit.map(function(h){ return h.d; })) : null;
+    if (md !== null && md < best) best = md;
+    asteps.push({k:m.k, dir:m.dir, hit:hit, md:md, best:best,
+      t:m.label + '：变换后查询点 (' + tq.x + ',' + tq.y + ')，落在左下的点有 ' + hit.length + ' 个' +
+        (hit.length ? '，距离 ' + hit.map(function(h){ return names[h.i] + ' → ' + h.d; }).join('、') : '') +
+        '。' + (md !== null ? '本轮最小 ' + md + '，' : '本轮没有候选，') + '当前答案 ' + (best === Infinity ? '∞' : best) + '。'});
+  }
+  asteps.push({k:0, best:best, final:true,
+    t:'四轮跑完取最小得 2，与 P2 的真实曼哈顿距离一致。'});
+  var acur = 0;
+  function planeSvg(s){
+    var ox = 60, oy = 214, ux = 30, uy = 30;
+    function px(v){ return ox + v * ux; }
+    function py(v){ return oy - v * uy; }
+    var tp = s.k ? transform(s.k) : pts;
+    var tq = s.k ? queryPt(s.k) : Q;
+    var h = '<svg viewBox="0 0 660 250" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+    h += '<path d="M' + ox + ' 30 L' + ox + ' ' + oy + ' L250 ' + oy + '" stroke="#9aa0a6" stroke-width="1.3" fill="none"/>';
+    h += '<text x="' + (ox - 10) + '" y="' + (oy + 16) + '" font-size="11" fill="#6b7280" text-anchor="middle">0</text>';
+    h += '<text x="254" y="' + (oy + 16) + '" font-size="11" fill="#6b7280">x</text>';
+    h += '<text x="' + (ox - 4) + '" y="24" font-size="11" fill="#6b7280" text-anchor="end">y</text>';
+    if (s.k) {
+      var x0 = px(0), y0 = py(tq.y), w = px(tq.x) - px(0), hh = oy - py(tq.y);
+      h += '<rect x="' + x0 + '" y="' + y0 + '" width="' + w + '" height="' + hh +
+        '" fill="#2563eb" fill-opacity=".12" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="4 3"/>';
+      h += '<text x="' + (x0 + 6) + '" y="' + (y0 + 16) + '" font-size="10.5" fill="#2563eb">左下区域</text>';
+    }
+    for (var i = 0; i < tp.length; i++) {
+      var isHit = false;
+      if (s.hit) for (var j = 0; j < s.hit.length; j++) if (s.hit[j].i === i) isHit = true;
+      h += '<circle cx="' + px(tp[i].x) + '" cy="' + py(tp[i].y) + '" r="' + (isHit ? 6 : 4.5) +
+        '" fill="' + (isHit ? '#ea580c' : '#2563eb') + '"/>';
+      h += '<text x="' + (px(tp[i].x) + 9) + '" y="' + (py(tp[i].y) - 6) + '" font-size="11" fill="#1f2328">' +
+        names[i] + '(' + tp[i].x + ',' + tp[i].y + ')</text>';
+    }
+    h += '<circle cx="' + px(tq.x) + '" cy="' + py(tq.y) + '" r="5.5" fill="none" stroke="#ea580c" stroke-width="2"/>';
+    h += '<text x="' + (px(tq.x) + 9) + '" y="' + (py(tq.y) + 16) + '" font-size="11" fill="#ea580c">Q(' + tq.x + ',' + tq.y + ')</text>';
+    h += '<text x="300" y="52" font-size="12" fill="#1f2328">' + (s.k ? modes[s.k - 1].label + '，统计' + s.dir : '原坐标') + '</text>';
+    if (s.k) {
+      h += '<text x="300" y="80" font-size="11.5" fill="#6b7280">距离 = (x_q + y_q) − (x_p + y_p)</text>';
+      h += '<text x="300" y="100" font-size="11.5" fill="#6b7280">在 y ≤ ' + tq.y + ' 的点里找 x + y 最大</text>';
+    }
+    h += '</svg>';
+    return h;
+  }
+  function arender(){
+    var s = asteps[acur];
+    $('cpSvg').innerHTML = planeSvg(s);
+    var txt = '<span class="cp-tag">v = ' + V + '</span>';
+    if (s.md !== null && s.md !== undefined) txt += '<span class="cp-tag warn">本轮 ' + s.md + '</span>';
+    txt += '<span class="cp-tag">当前最小 <span class="cp-num">' + (s.best === null || s.best === undefined || s.best === Infinity ? '∞' : s.best) + '</span></span>';
+    if (s.final) txt += '<span class="cp-tag">答案 <span class="cp-num">' + s.best + '</span></span>';
+    $('cpAns').innerHTML = txt;
+    $('cpAInfo').textContent = '第 ' + (acur + 1) + ' / ' + asteps.length + ' 步：' + s.t;
+    $('cpAPrev').disabled = (acur === 0);
+    $('cpANext').disabled = (acur === asteps.length - 1);
+  }
+  $('cpAPrev').addEventListener('click', function(){ if (acur > 0) { acur--; arender(); } });
+  $('cpANext').addEventListener('click', function(){ if (acur < asteps.length - 1) { acur++; arender(); } });
+  $('cpAReset').addEventListener('click', function(){ acur = 0; arender(); });
+  arender();
+})();
+</script>
+</body>
+</html>

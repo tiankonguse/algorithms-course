@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>划分链表 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.pl-sel,.pl-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.pl-sel:focus{outline:none;border-color:var(--accent);}
+.pl-btn{cursor:pointer;}
+.pl-btn:hover{border-color:var(--accent);color:var(--accent);}
+.pl-btn:disabled{opacity:.4;cursor:default;}
+.pl-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.pl-ctl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>划分链表</h1>
+      <p class="intro">上一讲两个链表相加，结果里的节点全是 new 出来的。这一讲反过来：一个节点都不 new，把输入链上的节点原地重排，小于 x 的靠前，大于等于 x 的靠后，两段内部的顺序一个都不许动。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>链表题目在笔试、面试中的意义就是检验 coding 能力：思路一分钟讲完，代码能不能一遍写对才是分水岭。</p>
+      <p>这题还是快排里 partition 思路的链表版，但快排的 partition 靠交换，这题要求稳定。两条要求叠在一起：小于 x 的在前，大于等于 x 的在后，两段内部保持原始相对顺序。</p>
+
+      <h2 id="prob">一、问题</h2>
+      <p>给一个链表的头节点 <code class="inline">head</code> 和一个特定值 <code class="inline">x</code>，把链表分隔，使得所有小于 <code class="inline">x</code> 的节点都出现在大于等于 <code class="inline">x</code> 的节点之前，并保留两个分区中每个节点的初始相对位置。原题是 <a href="https://leetcode.cn/problems/partition-list/" target="_blank">86. 分隔链表</a>。</p>
+      <p>样例：<code class="inline">1→4→3→2→5→2</code>，<code class="inline">x = 3</code>。小于 3 的有 1、2、2，大于等于的有 4、3、5。答案是 <code class="inline">1→2→2→4→3→5</code>。</p>
+      <p>注意两个 2：输入里第一个 2 在第二个 2 前面，结果里还是。4 和 3 也一样，4 在输入里靠前，结果里还是靠前。这就是「初始相对位置」。</p>
+
+      <figure class="fig" id="figPart"></figure>
+
+      <h2 id="naive">二、先试试偷懒的写法：拷进数组</h2>
+      <p>如果允许开数组，这题两分钟写完：扫一遍链表，值小于 <code class="inline">x</code> 的放进一个数组，其余放进另一个数组，再把两个数组接回一条链。代码短，样例过，答案对。</p>
+      <p>但它没练到链表。链表题要考的是原地调整：节点一个不 new，把输入链上的 <code class="inline">next</code> 指针重新指一遍。数组版多花了 O(n) 空间，恰好是这题想省的东西。</p>
+
+              <pre class="code">ListNode* partitionNaive(ListNode* head, <span class="kw">int</span> x) {
+        vector&lt;ListNode*&gt; left, right;
+        <span class="kw">for</span> (ListNode* p = head; p != <span class="kw">nullptr</span>; p = p-&gt;next) {
+            <span class="kw">if</span> (p-&gt;val &lt; x) left.push_back(p);
+            <span class="kw">else</span> right.push_back(p);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i + 1 &lt; (<span class="kw">int</span>)left.size(); i++) {
+            left[i]-&gt;next = left[i + 1];
+        }
+        <span class="kw">if</span> (!left.empty()) {
+            left.back()-&gt;next = right.empty() ? <span class="kw">nullptr</span> : right[0];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i + 1 &lt; (<span class="kw">int</span>)right.size(); i++) {
+            right[i]-&gt;next = right[i + 1];
+        }
+        <span class="kw">if</span> (!right.empty()) {
+            right.back()-&gt;next = <span class="kw">nullptr</span>;
+        }
+        <span class="kw">return</span> left.empty() ? (right.empty() ? <span class="kw">nullptr</span> : right[0]) : left[0];
+    }</pre>
+
+      <p>这段代码正确，但把链表当数组用了。真正要练的是下面这种。</p>
+
+      <h2 id="two">三、双区尾插</h2>
+      <p>原地做法维护两套头尾指针：<code class="inline">leftHead</code>、<code class="inline">leftTail</code> 管小于 <code class="inline">x</code> 区，<code class="inline">rightHead</code>、<code class="inline">rightTail</code> 管大于等于 <code class="inline">x</code> 区。扫描原链，每遇到一个节点，先把 <code class="inline">next</code> 存下来，再断开 <code class="inline">head-&gt;next</code>，按值挂到对应区的尾部。</p>
+
+              <pre class="code"><span class="kw">struct</span> ListNode {
+        <span class="kw">int</span> val;
+        ListNode* next;
+        ListNode(<span class="kw">int</span> v) : val(v), next(<span class="kw">nullptr</span>) {}
+    };
+
+    ListNode* partition(ListNode* head, <span class="kw">int</span> x) {
+        ListNode* leftHead = <span class="kw">nullptr</span>;   <span class="cm">// &lt; x 的区域</span>
+        ListNode* leftTail = <span class="kw">nullptr</span>;
+        ListNode* rightHead = <span class="kw">nullptr</span>;  <span class="cm">// &gt;= x 的区域</span>
+        ListNode* rightTail = <span class="kw">nullptr</span>;
+        ListNode* next = <span class="kw">nullptr</span>;
+        <span class="kw">while</span> (head != <span class="kw">nullptr</span>) {
+            next = head-&gt;next;
+            head-&gt;next = <span class="kw">nullptr</span>;
+            <span class="kw">if</span> (head-&gt;val &lt; x) {
+                <span class="kw">if</span> (leftHead == <span class="kw">nullptr</span>) {
+                    leftHead = head;
+                } <span class="kw">else</span> {
+                    leftTail-&gt;next = head;
+                }
+                leftTail = head;
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (rightHead == <span class="kw">nullptr</span>) {
+                    rightHead = head;
+                } <span class="kw">else</span> {
+                    rightTail-&gt;next = head;
+                }
+                rightTail = head;
+            }
+            head = next;
+        }
+        <span class="kw">if</span> (leftHead == <span class="kw">nullptr</span>) {
+            <span class="kw">return</span> rightHead;
+        }
+        leftTail-&gt;next = rightHead;
+        <span class="kw">return</span> leftHead;
+    }</pre>
+
+      <p>为什么先存 <code class="inline">next</code>？确实，不存也行，只要你能保证后面的链不被弄丢。<code class="inline">head-&gt;next</code> 马上要被改写，改完就找不回原后继了，所以先拿一个变量接住。这和上一讲反转链表先存 <code class="inline">next</code> 是同一个动作。</p>
+      <p>挂的过程只有两种：区空，节点当区头；区不空，接在区尾后面。然后尾指针挪到新节点。四行 if 处理完一个节点，扫完整个链，最后把左区尾接到右区头。</p>
+
+      <figure class="fig" id="figFlow"></figure>
+
+      <h2 id="stable">四、稳定从哪来</h2>
+      <p>尾插天然稳定。扫描顺序就是输入顺序，每个节点都挂在区尾，区内的先后就是扫描到的先后，不用额外记任何东西。</p>
+      <p>对比快排的 partition：两个指针相向交换，换着换着顺序就乱了，所以快排不稳定。这题全程只有尾插、没有交换，两段内部的相对顺序一条都不动。</p>
+
+      <h2 id="edge">五、三个边界</h2>
+      <ul>
+        <li>左区空：所有节点都大于等于 <code class="inline">x</code>，直接返回 <code class="inline">rightHead</code>。</li>
+        <li>右区空：<code class="inline">leftTail-&gt;next = rightHead = nullptr</code>，等于白接一下。</li>
+        <li>空链表：循环不跑，<code class="inline">leftHead</code> 空，返回 <code class="inline">rightHead</code>（也是空）。</li>
+      </ul>
+      <p>拼接那步 <code class="inline">leftTail-&gt;next = rightHead</code> 只会执行一次。成不了环：每个节点的 <code class="inline">next</code> 在挂入前都被断开过，最后只有区尾的 <code class="inline">next</code> 被重接。</p>
+
+      <h2 id="complexity">六、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>写法</th><th>时间</th><th>额外空间</th></tr>
+        <tr><td>拷进数组再重建</td><td>O(n)</td><td>O(n)，两个数组</td></tr>
+        <tr><td>双区尾插（原地）</td><td>O(n)</td><td>O(1)，四个指针</td></tr>
+      </table>
+      <p>时间上没有优化空间，每个节点至少要被看一次。省下的在空间：不建新节点，结果链上的每个节点都是输入链上的原节点。</p>
+
+      <div class="viz" id="vizPart"></div>
+
+      <p>写完之后想验证「稳定」这条，把每个节点带上原始下标跑一遍对数器（005 那讲），随机数据刷几百组，重点看两件事：结果链长度没变，且两段内部的下标递增。下面这个演示可以当对照组，随机刷几轮，看两个相等的值顺序动不动。</p>
+
+      <h2 id="last7">七、最后</h2>
+      <p>链表划分就一句话：扫描一遍，按值尾插到两个区的末尾，一个节点都不 new。稳定不是碰巧：尾插让区内的先后等于扫描的先后，两段内部顺序自然保住。</p>
+      <p>三个边界写代码时容易漏：左区空直接返回右区头，右区空时 <code class="inline">leftTail->next</code> 白接一下空指针，空链表直接返回空。拼接那步只会执行一次，成环的担忧不存在，每个节点的 next 在挂入前都被断开过。</p>
+      <p>原地写法的四个指针指向的都是输入链上的原节点，时间 O(n)、额外空间 O(1)；拷数组写法同样 O(n)，但要多开两个数组。下一讲队列和栈，容器里照样是「指针 + 下标」这一套。</p>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var NS = 'http://www.w3.org/2000/svg';
+  function S(tag, attrs, parent) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function T(parent, x, y, text, opt) {
+    opt = opt || {};
+    var t = S('text', {
+      x: x, y: y, 'font-size': opt.size || 13, fill: opt.fill || '#3c4043',
+      'text-anchor': opt.anchor || 'start', 'font-family': 'ui-monospace, Menlo, monospace'
+    }, parent);
+    if (opt.bold) t.setAttribute('font-weight', 'bold');
+    if (opt.mono === false) t.setAttribute('font-family', 'inherit');
+    if (opt.dy) t.setAttribute('dy', opt.dy);
+    t.textContent = text;
+    return t;
+  }
+  function node(parent, x, y, w, h, label, opt) {
+    opt = opt || {};
+    var r = S('rect', {
+      x: x, y: y, width: w, height: h, rx: 5,
+      fill: opt.fill || '#dbeafe', stroke: opt.stroke || '#2563eb', 'stroke-width': 1.4
+    }, parent);
+    var t = T(parent, x + w / 2, y + h / 2 + 5, label, {
+      anchor: 'middle', size: opt.size || 13, fill: opt.textFill || '#1f2937', bold: opt.bold
+    });
+    return { r: r, t: t };
+  }
+  function arrow(parent, x1, y1, x2, y2, opt) {
+    opt = opt || {};
+    S('line', {
+      x1: x1, y1: y1, x2: x2 - 7, y2: y2,
+      stroke: opt.stroke || '#9aa0a6', 'stroke-width': 1.4
+    }, parent);
+    var ang = Math.atan2(y2 - y1, x2 - x1);
+    var L = 7, p1 = [x2 - L * Math.cos(ang - 0.42), y2 - L * Math.sin(ang - 0.42)];
+    var p2 = [x2 - L * Math.cos(ang + 0.42), y2 - L * Math.sin(ang + 0.42)];
+    S('polygon', {
+      points: x2 + ',' + y2 + ' ' + p1[0] + ',' + p1[1] + ' ' + p2[0] + ',' + p2[1],
+      fill: opt.stroke || '#9aa0a6'
+    }, parent);
+  }
+  function curve(parent, x1, y1, x2, y2, opt) {
+    opt = opt || {};
+    S('path', {
+      d: 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + (y1 + (y2 - y1) * 0.5) + ' ' + x2 + ',' + (y1 + (y2 - y1) * 0.5) + ' ' + x2 + ',' + y2,
+      fill: 'none', stroke: opt.stroke || '#9aa0a6', 'stroke-width': 1.4,
+      'marker-end': 'url(#arw)'
+    }, parent);
+  }
+  function defs(svg) {
+    var d = S('defs', {}, svg);
+    var m = S('marker', {
+      id: 'arw', viewBox: '0 0 10 10', refX: 9, refY: 5,
+      markerWidth: 6, markerHeight: 6, orient: 'auto-start-reverse'
+    }, d);
+    S('path', { d: 'M0,0 L10,5 L0,10 z', fill: '#9aa0a6' }, m);
+    return d;
+  }
+  function mount(fig, h, cap) {
+    var svg = S('svg', { viewBox: '0 0 660 ' + h, xmlns: NS }, fig);
+    defs(svg);
+    if (cap) {
+      var fc = document.createElement('figcaption');
+      fc.textContent = cap;
+      fig.appendChild(fc);
+    }
+    return svg;
+  }
+  function chain(parent, x, y, vals, opt) {
+    opt = opt || {};
+    var w = opt.w || 40, h = opt.h || 34, gap = opt.gap || 18;
+    var cur = x;
+    for (var i = 0; i < vals.length; i++) {
+      var st = opt.state ? opt.state(i) : {};
+      node(parent, cur, y, w, h, String(vals[i]), {
+        fill: st.fill || '#dbeafe', stroke: st.stroke || '#2563eb',
+        textFill: st.textFill || '#1f2937', bold: st.bold, size: st.size || 13
+      });
+      if (i < vals.length - 1) {
+        arrow(parent, cur + w, y + h / 2, cur + w + gap, y + h / 2, { stroke: st.stroke || '#2563eb' });
+      }
+      cur += w + gap;
+    }
+    return cur - gap;
+  }
+
+  /* ---------- 图 1：问题定义与样例分区 ---------- */
+  (function () {
+    var fig = document.getElementById('figPart');
+    var svg = mount(fig, 346, '按值分进两区，两段内部顺序不动，最后接成一条链');
+
+    T(svg, 30, 30, '输入 1→4→3→2→5→2，x = 3', { size: 13, bold: true, mono: false });
+    var orig = [1, 4, 3, 2, 5, 2];
+    chain(svg, 30, 44, orig);
+
+    T(svg, 30, 150, '< 3 区', { size: 13, bold: true, fill: '#2563eb' });
+    chain(svg, 110, 128, [1, 2, 2], { state: function () { return { fill: '#dbeafe', stroke: '#2563eb' }; } });
+    T(svg, 30, 234, '>= 3 区', { size: 13, bold: true, fill: '#ea580c' });
+    chain(svg, 110, 212, [4, 3, 5], { state: function () { return { fill: '#ffedd5', stroke: '#ea580c' }; } });
+
+    var from = [[50, 78], [108, 78], [166, 78], [224, 78], [282, 78], [340, 78]];
+    var to = [
+      [130, 128, '#2563eb'], [130, 212, '#ea580c'], [188, 212, '#ea580c'],
+      [188, 128, '#2563eb'], [246, 212, '#ea580c'], [246, 128, '#2563eb']
+    ];
+    for (var i = 0; i < 6; i++) {
+      curve(svg, from[i][0], from[i][1], to[i][0], to[i][1], { stroke: to[i][2] });
+    }
+
+    T(svg, 30, 306, '结果', { size: 13, bold: true, mono: false });
+    chain(svg, 30, 282, [1, 2, 2, 4, 3, 5], {
+      state: function (i) {
+        return i < 3 ? { fill: '#dbeafe', stroke: '#2563eb' } : { fill: '#ffedd5', stroke: '#ea580c' };
+      }
+    });
+    T(svg, 30, 276, 'leftTail->next = rightHead', { size: 11, fill: '#9aa0a6' });
+  })();
+
+  /* ---------- 图 2：一轮迭代的数据流 ---------- */
+  (function () {
+    var fig = document.getElementById('figFlow');
+    var svg = mount(fig, 250, '每个节点：先存 next，断开 head->next，按值挂到对应区的尾部');
+
+    S('rect', { x: 40, y: 24, width: 110, height: 32, rx: 5, fill: '#f6f7f9', stroke: '#c9ced4', 'stroke-width': 1.2, 'stroke-dasharray': '4 3' }, svg);
+    T(svg, 95, 45, 'next（先存好）', { anchor: 'middle', size: 12, fill: '#9aa0a6' });
+
+    node(svg, 40, 120, 110, 52, 'head', { fill: '#ffedd5', stroke: '#ea580c', bold: true, size: 15 });
+    T(svg, 95, 160, 'val', { anchor: 'middle', size: 11, fill: '#9aa0a6' });
+
+    S('line', { x1: 95, y1: 56, x2: 95, y2: 74, stroke: '#9aa0a6', 'stroke-width': 1.2, 'stroke-dasharray': '3 3' }, svg);
+    S('line', { x1: 85, y1: 66, x2: 105, y2: 74, stroke: '#9aa0a6', 'stroke-width': 1.2 }, svg);
+    S('line', { x1: 105, y1: 66, x2: 85, y2: 74, stroke: '#9aa0a6', 'stroke-width': 1.2 }, svg);
+    T(svg, 118, 64, '断开', { size: 11, fill: '#9aa0a6' });
+
+    S('rect', { x: 240, y: 124, width: 120, height: 44, rx: 5, fill: '#eef4ff', stroke: '#2563eb', 'stroke-width': 1.4 }, svg);
+    T(svg, 300, 151, 'val < x ?', { anchor: 'middle', size: 14, bold: true });
+
+    S('rect', { x: 460, y: 36, width: 150, height: 48, rx: 5, fill: '#dbeafe', stroke: '#2563eb', 'stroke-width': 1.4 }, svg);
+    T(svg, 535, 56, 'leftTail（< x 区尾）', { anchor: 'middle', size: 12, fill: '#1f2937' });
+    T(svg, 535, 74, '挂在这里', { anchor: 'middle', size: 11, fill: '#9aa0a6' });
+
+    S('rect', { x: 460, y: 172, width: 150, height: 48, rx: 5, fill: '#ffedd5', stroke: '#ea580c', 'stroke-width': 1.4 }, svg);
+    T(svg, 535, 192, 'rightTail（>= x 区尾）', { anchor: 'middle', size: 12, fill: '#1f2937' });
+    T(svg, 535, 210, '挂在这里', { anchor: 'middle', size: 11, fill: '#9aa0a6' });
+
+    arrow(svg, 150, 146, 240, 146, { stroke: '#2563eb' });
+    arrow(svg, 360, 138, 460, 64, { stroke: '#2563eb' });
+    arrow(svg, 360, 154, 460, 192, { stroke: '#ea580c' });
+
+    T(svg, 30, 236, '比较只决定挂哪边；断开是每个节点都做的，防止两区串起来', { size: 12, fill: '#9aa0a6' });
+  })();
+
+  /* ---------- 演示：逐帧划分 ---------- */
+  (function () {
+    var host = document.getElementById('vizPart');
+    var wrap = document.createElement('div');
+    wrap.className = 'viz';
+    wrap.id = 'vizPartBody';
+    wrap.innerHTML =
+      '<div class="viz-title">逐帧划分：每个节点从原链摘下来，挂到对应区的尾部</div>' +
+      '<div class="viz-body"></div>' +
+      '<div class="legend">' +
+      '<span><i class="dot"></i>小于 x 区</span>' +
+      '<span><i class="dot partial"></i>大于等于 x 区</span>' +
+      '<span><i class="dot skip"></i>还没处理</span>' +
+      '</div>' +
+      '<div class="breakdown"></div>' +
+      '<div class="viz-controls"></div>';
+    host.parentNode.replaceChild(wrap, host);
+
+    var body = wrap.querySelector('.viz-body');
+    var bd = wrap.querySelector('.breakdown');
+    var ctl = wrap.querySelector('.viz-controls');
+
+    var DATA = {
+      '样例 1,4,3,2,5,2': { a: [1, 4, 3, 2, 5, 2], x: 3 },
+      '全小于 2,1,3': { a: [2, 1, 3], x: 5 },
+      '全大于 5,6,7': { a: [5, 6, 7], x: 3 },
+      '单节点 4': { a: [4], x: 3 }
+    };
+
+    var sp = document.createElement('span');
+    sp.className = 'pl-ctl';
+    sp.innerHTML = '数据 <select class="pl-sel"></select>';
+    ctl.appendChild(sp);
+    var sel = sp.querySelector('select');
+    Object.keys(DATA).forEach(function (k) {
+      var o = document.createElement('option'); o.value = k; o.textContent = k; sel.appendChild(o);
+    });
+    var oR = document.createElement('option'); oR.value = '随机'; oR.textContent = '随机'; sel.appendChild(oR);
+
+    var btnPrev = document.createElement('button');
+    btnPrev.className = 'pl-btn'; btnPrev.type = 'button'; btnPrev.textContent = '上一步';
+    var btnNext = document.createElement('button');
+    btnNext.className = 'pl-btn'; btnNext.type = 'button'; btnNext.textContent = '下一步';
+    var btnAuto = document.createElement('button');
+    btnAuto.className = 'pl-btn'; btnAuto.type = 'button'; btnAuto.textContent = '自动播放';
+    var btnReset = document.createElement('button');
+    btnReset.className = 'pl-btn'; btnReset.type = 'button'; btnReset.textContent = '重置';
+    ctl.appendChild(btnPrev); ctl.appendChild(btnNext); ctl.appendChild(btnAuto); ctl.appendChild(btnReset);
+
+    function mulberry32(a) {
+      return function () {
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        var t = Math.imul(a ^ (a >>> 15), a | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    function randomData() {
+      var r = mulberry32(20261004);
+      var n = 3 + Math.floor(r() * 7);
+      var a = [];
+      for (var i = 0; i < n; i++) a.push(Math.floor(r() * 10));
+      var x = Math.floor(r() * 10);
+      return { a: a, x: x };
+    }
+
+    var cur = 0, steps = [], A = null, X = 0, timer = null;
+
+    function gen(nums, x) {
+      var st = [];
+      var left = [], right = [], rest = nums.slice();
+      st.push({ left: [], right: [], rest: rest.slice(), cur: null, x: x, msg: '初始：' + nums.join(' → ') + '，x = ' + x });
+      while (rest.length) {
+        var v = rest.shift();
+        var nxt = rest.length ? rest[0] : null;
+        var msg;
+        if (v < x) {
+          left.push(v);
+          msg = v + ' < ' + x + '：先存 next（' + (nxt === null ? 'null' : nxt) + '），断开，挂到左区尾部';
+        } else {
+          right.push(v);
+          msg = v + ' >= ' + x + '：先存 next（' + (nxt === null ? 'null' : nxt) + '），断开，挂到右区尾部';
+        }
+        st.push({ left: left.slice(), right: right.slice(), rest: rest.slice(), cur: v, x: x, msg: msg });
+      }
+      st.push({
+        left: left.slice(), right: right.slice(), rest: [], cur: null, x: x, done: true,
+        msg: 'leftTail->next = rightHead，拼接完成：' + left.concat(right).join(' → ')
+      });
+      return st;
+    }
+
+    function drawRow(parent, y, vals, label, labelColor, emptyText) {
+      T(parent, 20, y + 21, label, { size: 13, bold: true, fill: labelColor });
+      if (!vals.length) {
+        T(parent, 108, y + 22, emptyText || '（空）', { size: 12, fill: '#c9ced4' });
+        return;
+      }
+      var x = 108, w = 38, gap = 20;
+      for (var i = 0; i < vals.length; i++) {
+        var f = '#dbeafe', s = '#2563eb';
+        if (labelColor === '#ea580c') { f = '#ffedd5'; s = '#ea580c'; }
+        node(parent, x, y, w, 32, String(vals[i]), { fill: f, stroke: s });
+        if (i < vals.length - 1) {
+          S('line', { x1: x + w, y1: y + 16, x2: x + w + gap - 6, y2: y + 16, stroke: s, 'stroke-width': 1.4 }, parent);
+          S('polygon', {
+            points: (x + w + gap) + ',' + (y + 16) + ' ' + (x + w + gap - 7) + ',' + (y + 12) + ' ' + (x + w + gap - 7) + ',' + (y + 20),
+            fill: s
+          }, parent);
+        }
+        x += w + gap;
+      }
+    }
+
+    function render() {
+      var st = steps[cur];
+      var old = body.querySelector('svg');
+      if (old) body.removeChild(old);
+      var svg = S('svg', { viewBox: '0 0 660 268', xmlns: NS }, body);
+
+      T(svg, 20, 36, '原链剩余', { size: 13, bold: true, fill: '#9aa0a6' });
+      if (st.cur !== null) {
+        node(svg, 108, 20, 38, 32, String(st.cur), { fill: '#fff7ed', stroke: '#ea580c', 'stroke-width': 2, bold: true });
+        T(svg, 108 + 19, 14, '当前', { size: 11, anchor: 'middle', fill: '#ea580c' });
+        var x = 108 + 38 + 20;
+        for (var i = 0; i < st.rest.length; i++) {
+          node(svg, x, 20, 38, 32, String(st.rest[i]), { fill: '#f6f7f9', stroke: '#c9ced4' });
+          if (i < st.rest.length - 1) {
+            S('line', { x1: x + 38, y1: 36, x2: x + 52, y2: 36, stroke: '#c9ced4', 'stroke-width': 1.4 }, svg);
+            S('polygon', {
+              points: (x + 58) + ',' + 36 + ' ' + (x + 51) + ',' + 32 + ' ' + (x + 51) + ',' + 40,
+              fill: '#c9ced4'
+            }, svg);
+          }
+          x += 58;
+        }
+      } else if (st.done) {
+        T(svg, 108, 36, '全部处理完', { size: 12, fill: '#c9ced4' });
+      } else {
+        var x0 = 108;
+        for (var j = 0; j < st.rest.length; j++) {
+          node(svg, x0, 20, 38, 32, String(st.rest[j]), { fill: '#f6f7f9', stroke: '#c9ced4' });
+          if (j < st.rest.length - 1) {
+            S('line', { x1: x0 + 38, y1: 36, x2: x0 + 52, y2: 36, stroke: '#c9ced4', 'stroke-width': 1.4 }, svg);
+            S('polygon', {
+              points: (x0 + 58) + ',' + 36 + ' ' + (x0 + 51) + ',' + 32 + ' ' + (x0 + 51) + ',' + 40,
+              fill: '#c9ced4'
+            }, svg);
+          }
+          x0 += 58;
+        }
+      }
+
+      drawRow(svg, 98, st.left, '< x', '#2563eb');
+      drawRow(svg, 178, st.right, '>= x', '#ea580c');
+
+      T(svg, 20, 252, st.msg, { size: 13, fill: st.done ? '#ea580c' : '#3c4043' });
+
+      bd.innerHTML = '';
+      var r1 = document.createElement('div'); r1.className = 'row';
+      r1.innerHTML = '第 <span class="num">' + cur + '</span> / ' + (steps.length - 1) + ' 步';
+      var r2 = document.createElement('div'); r2.className = 'row';
+      r2.innerHTML = '左区 <span class="num">' + st.left.length + '</span> 个，右区 <span class="num">' + st.right.length + '</span> 个，已处理 <span class="num">' +
+        (A.length - st.rest.length) + '</span> / ' + A.length;
+      bd.appendChild(r1); bd.appendChild(r2);
+      btnNext.disabled = (cur >= steps.length - 1);
+      btnPrev.disabled = (cur <= 0);
+    }
+
+    function reset() {
+      var d;
+      if (sel.value === '随机') d = randomData();
+      else d = DATA[sel.value];
+      A = d.a.slice(); X = d.x;
+      steps = gen(A, X); cur = 0; render();
+    }
+    btnNext.addEventListener('click', function () { if (cur < steps.length - 1) { cur++; render(); } });
+    btnPrev.addEventListener('click', function () { if (cur > 0) { cur--; render(); } });
+    btnReset.addEventListener('click', function () { stopAuto(); reset(); });
+    sel.addEventListener('change', function () { stopAuto(); reset(); });
+    function stopAuto() { if (timer) { clearInterval(timer); timer = null; btnAuto.textContent = '自动播放'; } }
+    btnAuto.addEventListener('click', function () {
+      if (timer) { stopAuto(); return; }
+      btnAuto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (cur >= steps.length - 1) { stopAuto(); return; }
+        cur++; render();
+      }, 900);
+    });
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

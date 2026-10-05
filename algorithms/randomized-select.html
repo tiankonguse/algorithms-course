@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>随机选择算法 - 算法课程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.demo-array { display:flex; gap:3px; margin:10px 0; flex-wrap:wrap; align-items:flex-end; }
+.demo-cell { width:38px; height:38px; display:flex; align-items:center; justify-content:center; border:2px solid #cbd5e1; border-radius:5px; font-family:monospace; font-size:14px; position:relative; background:#f8fafc; transition:all .15s; }
+.demo-cell.lt { background:#dbeafe; border-color:#2563eb; }
+.demo-cell.eq { background:#dcfce7; border-color:#16a34a; }
+.demo-cell.gt { background:#ffedd5; border-color:#ea580c; }
+.demo-cell.dim { opacity:.35; }
+.demo-cell.ans { outline:3px solid #7c3aed; outline-offset:1px; background:#ede9fe; }
+.demo-label { position:absolute; top:-16px; font-size:10px; font-weight:bold; left:50%; transform:translateX(-50%); white-space:nowrap; }
+.demo-label.first { color:#2563eb; }
+.demo-label.last { color:#ea580c; }
+.demo-label.i { color:#7c3aed; }
+.demo-label.pivot { color:#16a34a; }
+.range-bar { height:6px; background:#e2e8f0; border-radius:3px; margin:6px 0; position:relative; }
+.range-fill { height:100%; background:linear-gradient(90deg,#2563eb,#7c3aed); border-radius:3px; transition:width .3s; }
+.demo-stats { font-family:monospace; font-size:12px; color:#475569; margin:6px 0; line-height:1.6; }
+.demo-msg { font-size:13px; color:#334155; min-height:18px; margin:4px 0; }
+.viz-controls { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0; align-items:center; }
+.viz-controls button { padding:5px 14px; border:1px solid #cbd5e1; border-radius:5px; background:#fff; cursor:pointer; font-size:13px; }
+.viz-controls button:hover { background:#f1f5f9; }
+.viz-controls select { padding:4px 8px; border:1px solid #cbd5e1; border-radius:5px; font-size:13px; }
+.viz-controls .ctl { display:flex; align-items:center; gap:4px; font-size:12px; color:#64748b; }
+.bar-chart { display:flex; align-items:flex-end; gap:6px; height:160px; padding:10px 0; border-bottom:2px solid #cbd5e1; margin:10px 0; }
+.bar-col { display:flex; flex-direction:column; align-items:center; gap:4px; flex:1; }
+.bar-fill { width:100%; max-width:40px; border-radius:3px 3px 0 0; transition:height .3s; min-height:2px; }
+.bar-label { font-size:10px; color:#64748b; font-family:monospace; }
+.bar-val { font-size:10px; color:#334155; font-family:monospace; font-weight:bold; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>随机选择算法</h1>
+      <p class="intro">给一个无序数组，找第 K 大的元素。排序后取是 O(n log n)，但题目要求 O(n)。快排的 partition 把数组分成小于、等于、大于三段，等于段已经在最终位置上了。如果答案落在等于段里，直接返回；否则只需要去左边或右边一边找。每轮 partition 扔掉一半以上的元素，总代价就是 n + n/2 + n/4 + … = O(n)。这就是随机选择算法，LeetCode 215 的标准解法。</p>
+
+      <h2>零、背景</h2>
+      <p>先看一个反直觉的事实。找数组里的最大值，扫一遍就行，O(n)。找第二大呢？扫一遍也能搞定，维护两个变量。找第 K 大呢？K 大一点，比如 K=n/2（中位数），直觉上是不是得排个序？</p>
+      <p>排序确实能做，O(n log n)。但排序把所有元素的位置都确定了，而我们只关心一个位置的元素，第 K 大那个。多做了 n-K 个元素的定位工作，这些都是浪费。能不能只把答案那个位置的元素定下来，不管其他元素的顺序？</p>
+      <p>上一讲的快排 partition 正好提供了这个能力。选一个数 x，一轮 partition 之后，等于 x 的元素已经在它们最终排序后的位置上了。如果第 K 大的位置落在等于段里，答案就是 x；如果在左边，就只去左边找；右边同理。每轮只走一侧，这就是随机选择的核心。</p>
+
+      <h2>一、问题定义</h2>
+      <p>给定整数数组 nums 和整数 k，返回数组中第 k 个最大的元素。注意是排序后的第 k 大，不是第 k 个不同的元素。比如 [3,2,1,5,6,4]，k=2，答案是 5。</p>
+      <p>题目明确要求时间复杂度 O(n)。排序做法 O(n log n) 在 n=10⁶ 时约 43ms，随机选择约 7ms，差 6 倍。n 越大差距越明显。</p>
+
+      <figure class="fig" id="fig-problem">
+        <figcaption>第 K 大问题：数组 [3,2,1,5,6,4]，k=2，排序后 [6,5,4,3,2,1]，第 2 大是 5。排序把 6 个位置全定了，但我们只关心位置 1。</figcaption>
+      </figure>
+
+      <h2>二、朴素做法：排序后取</h2>
+      <p>最直接的做法是排完序取第 n-k 个元素。代码三行，但代价是 O(n log n)。n=100 万时 std::sort 约 43ms，随机选择约 7ms。如果只查一次，这个差距可能无所谓；但如果这个操作嵌在更大的算法里被反复调用（比如分治、数据流中位数），O(n) 和 O(n log n) 的区别就大了。</p>
+      <p>还有一个思路是用堆。维护一个大小为 k 的小根堆，遍历数组，比堆顶大就替换。时间 O(n log k)，当 k 接近 n/2 时就是 O(n log n)，不比排序好。k 很小（比如 k=1 找最大值）时堆是 O(n)，但那已经退化成扫一遍了。</p>
+
+      <figure class="fig" id="fig-compare">
+        <figcaption>三种做法的递归树对比：排序（快排）每轮 partition 后左右两侧都要递归，总共有 log n 层、每层 n 个元素；随机选择每轮只走一侧，元素数 n → n/2 → n/4 → …，总和 2n。</figcaption>
+      </figure>
+
+      <h2>三、核心思想：partition 后只走一侧</h2>
+      <p>快排的 partition 把 [l,r] 分成三段：[l, first-1] 全小于 x，[first, last] 全等于 x，[last+1, r] 全大于 x。等于段的元素已经在它们排序后的最终位置上了。first 到 last 这些下标，排序后的值就是 x。</p>
+      <p>我们要找的是排序后下标 idx 位置的值（第 k 大对应 idx = n-k）。三种情况：</p>
+      <p>1）idx < first：答案在左边，只递归 [l, first-1]。</p>
+      <p>2）idx > last：答案在右边，只递归 [last+1, r]。</p>
+      <p>3）first ≤ idx ≤ last：答案就是 x，直接返回。</p>
+      <p>和快排的区别就在这里：快排左右都要递归，选择只递归一侧。每轮 partition 处理的元素数是当前区间长度，下一轮至少扔掉等于段的元素。如果 x 选得好（接近中位数），每轮扔掉一半，总代价 n + n/2 + n/4 + … = 2n = O(n)。</p>
+
+      <figure class="fig" id="fig-converge">
+        <figcaption>一次完整选择过程：数组 12 个元素找第 5 大（idx=7）。第一轮 pivot=4，等于段 [4,6]，idx=7 在右边，区间缩小到 [7,11]；第二轮 pivot=7，等于段 [7,9]，idx=7 落在等于段，答案就是 7。两轮 partition 处理了 12+5=17 个元素，而排序要处理约 12×4=48 个。</figcaption>
+      </figure>
+
+      <h2>四、荷兰国旗 partition</h2>
+      <p>partition 用上一讲的荷兰国旗版本。三个指针 first、last、i：first 是小于区的末尾+1，last 是大于区的开头-1，i 是当前扫描位置。扫描规则三条：等于 x 时 i++；小于 x 时和 first 交换、first++ 和 i++；大于 x 时和 last 交换、last--（i 不动，因为换过来的元素还没看）。</p>
+      <p>first 和 last 是全局变量（或引用参数），partition 结束后等于段的边界就在这两个变量里。选择算法只走一侧，不需要像快排那样递归前用临时变量保存 first/last，因为下一轮只用到其中一个边界，另一个直接覆盖也没关系。</p>
+
+          <pre class="code"><span class="kw">int</span> first, last;
+
+    <span class="kw">void</span> <span class="fn">partition</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> x) {
+        first = l;
+        last = r;
+        <span class="kw">int</span> i = l;
+        <span class="kw">while</span> (i &lt;= last) {
+            <span class="kw">if</span> (arr[i] == x) {
+                i++;
+            } <span class="kw">else</span> <span class="kw">if</span> (arr[i] &lt; x) {
+                swap(arr[first++], arr[i++]);
+            } <span class="kw">else</span> {
+                swap(arr[i], arr[last--]);
+            }
+        }
+    }</pre>
+
+      <h2>五、随机选择算法</h2>
+      <p>主循环很简单：l 和 r 是当前区间，每次在 [l,r] 里随机选一个位置的值当 pivot，跑 partition，然后根据 idx 和 first/last 的关系缩小区间。落在等于段里就返回 arr[idx]。</p>
+      <p>随机选 pivot 这一步是必须的。固定选 arr[l] 或 arr[r]，遇到已排序数组会退化：每轮 pivot 是最小（或最大）值，等于段只有一个元素，区间只缩小 1，总代价 n + (n-1) + (n-2) + … = O(n²)。随机选之后，期望上每轮能扔掉相当比例的元素，复杂度收敛到 O(n)。</p>
+      <p>第 k 大转成下标 idx = n - k。比如 n=6、k=2，idx=4，排序后下标 4 的元素就是第 2 大（下标 0 是最大）。</p>
+
+          <pre class="code"><span class="kw">int</span> <span class="fn">randomizedSelect</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr, <span class="kw">int</span> idx) {
+        <span class="kw">for</span> (<span class="kw">int</span> l = 0, r = arr.size() - 1; l &lt;= r; ) {
+            <span class="kw">int</span> pivot = arr[l + rand() % (r - l + 1)];
+            partition(arr, l, r, pivot);
+            <span class="kw">if</span> (idx &lt; first) {
+                r = first - 1;
+            } <span class="kw">else</span> <span class="kw">if</span> (idx &gt; last) {
+                l = last + 1;
+            } <span class="kw">else</span> {
+                <span class="kw">return</span> arr[idx];
+            }
+        }
+        <span class="kw">return</span> -1;
+    }
+
+    <span class="kw">int</span> <span class="fn">findKthLargest</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> k) {
+        <span class="kw">return</span> randomizedSelect(nums, nums.size() - k);
+    }</pre>
+
+      <h2>六、为什么期望 O(n)</h2>
+      <p>定性理解：每轮 partition 处理 m 个元素，随机选的 pivot 有 50% 的概率落在中间 50% 的位置（即至少有 1/4 的元素比它小、至少有 1/4 的元素比它大）。这时下一轮区间长度最多是 3m/4。平均每两轮区间缩到 3/4，总代价 m + 3m/4 + (3m/4)² + … 是等比级数，和为 m / (1 - 3/4) = 4m = O(n)。</p>
+      <p>严格证明需要用指示变量和期望线性性，算法导论第 9.2 节有完整推导。结论是期望比较次数约 2n·H_n ≈ 2n ln n？不对，那是快排。随机选择的期望比较次数是 O(n)，常数因子大约 3~4。下面是实测数据。</p>
+
+      <figure class="fig" id="fig-cmpcnt">
+        <figcaption>期望比较次数实测（2000 组随机数组取中位数）：n 从 10 到 10 万，比较次数/n 稳定在 3.6~5.8 之间，大 n 时约 5.7n。对比快排的约 1.4n log₂n（n=10 万时约 23 万次），选择是 5.7 万次，差 4 倍。</figcaption>
+      </figure>
+
+      <p>递归深度也是 O(log n) 的期望。实测 n=10 万时平均深度 21.5 层（log₂n≈16.6），2000 组里最大 38 层。对比固定 pivot 在已排序数组上的 n 层深度，随机化把深度从 O(n) 降到了 O(log n)，不会爆栈。</p>
+
+      <h2>七、为什么必须随机</h2>
+      <p>固定选 arr[l] 当 pivot，已排序数组上每轮等于段只有 1 个元素，区间缩小 1，总比较次数是 O(n²)。实测 n=10000 时固定 pivot 比较 167 万次，随机 pivot 只有 5.6 万次，差 30 倍。n=50000 时差 100 倍以上。</p>
+      <p>有人会说「我用三数取中（选 arr[l]、arr[mid]、arr[r] 的中位数）不就行了」。三数取中对已排序数组有效，但对手可以构造一种数组让三数取中每次都选到极端值：只要知道你选哪三个位置，就能在那三个位置上放极端值。随机选就没有这个弱点：对手不知道你会选哪个位置。</p>
+      <p>当然，随机也有极小概率连续选到极端值，导致某一轮区间几乎没缩小。但概率是指数级衰减的：连续 20 轮都选到最差的 10% 位置，概率是 0.1²⁰，比宇宙中微子正好穿过你电脑的概率还低。工程上完全可以忽略。</p>
+
+      <figure class="fig" id="fig-degrade">
+        <figcaption>固定 pivot vs 随机 pivot 在已排序数组上的比较次数（对数刻度）：固定 pivot 接近 n²/4（n=10000 时 167 万），随机 pivot 稳定在约 5.7n（5.7 万）。差 30 倍，且 n 越大差距越大。</figcaption>
+      </figure>
+
+      <h2>八、BFPRT：不随机也能 O(n)</h2>
+      <p>随机选择的 O(n) 是期望复杂度，最坏情况仍然是 O(n²)（虽然概率极低）。有没有确定性的 O(n) 选择算法？有，BFPRT 算法（由 Blum、Floyd、Pratt、Rivest、Tarjan 五位大牛提出）。</p>
+      <p>核心思路：不用随机选 pivot，而是用一个确定性的方法选一个「保证不太差」的 pivot。把数组每 5 个分成一组，每组取中位数，再递归地取这些中位数的中位数当 pivot。可以证明这个 pivot 至少比 30% 的元素大、至少比 30% 的元素小，所以每轮至少扔掉 30% 的元素，递归式 T(n) = T(n/5) + T(7n/10) + O(n)，解出来是 O(n)。</p>
+      <p>但 BFPRT 常数很大（分组、排序每组、递归找中位数的中位数），工程上几乎没人用。随机选择实现简单、常数小、实际表现好，是面试和比赛的标准写法。BFPRT 更多是理论意义上的「确定性 O(n) 存在性证明」。</p>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>操作</th><th>时间</th><th>空间</th><th>说明</th></tr>
+        <tr><td>随机选择（期望）</td><td>O(n)</td><td>O(1)</td><td>迭代写法，每轮只走一侧，等比级数求和</td></tr>
+        <tr><td>随机选择（最坏）</td><td>O(n²)</td><td>O(1)</td><td>连续选到极端 pivot，概率指数级衰减</td></tr>
+        <tr><td>排序后取</td><td>O(n log n)</td><td>O(log n)</td><td>std::sort 是 introsort</td></tr>
+        <tr><td>堆（大小 k）</td><td>O(n log k)</td><td>O(k)</td><td>k≈n/2 时退化为 O(n log n)</td></tr>
+        <tr><td>BFPRT（确定性）</td><td>O(n)</td><td>O(log n)</td><td>常数大，工程上不用</td></tr>
+      </table>
+      <p>空间复杂度 O(1)：迭代写法只用几个指针变量，partition 是原地交换，没有额外数组。递归写法的话栈深度期望 O(log n)、最坏 O(n)，所以迭代版更安全。</p>
+
+      <h2>演示一：随机选择逐帧</h2>
+      <p>下面这个演示完整跑一遍随机选择算法。每一步显示当前区间 [l,r]、pivot 值、partition 的三段划分、以及根据 idx 缩小区间的决策。可以切换预设数组，也可以用随机数组。</p>
+      <div class="viz" id="viz1">
+        <div class="viz-controls">
+          <select id="v1-preset">
+            <option value="0">数组 A：[3,2,1,5,6,4] k=2</option>
+            <option value="1">数组 B：[7,10,4,3,20,15,8,12,1,6] k=4</option>
+            <option value="2">数组 C：[5,3,8,1,9,2,7,4,6] k=5（中位数）</option>
+            <option value="3">随机数组（12 元素）</option>
+          </select>
+          <button id="v1-next">下一步</button>
+          <button id="v1-reset">重置</button>
+        </div>
+        <div class="demo-array" id="v1-array"></div>
+        <div class="range-bar"><div class="range-fill" id="v1-range"></div></div>
+        <div class="demo-stats" id="v1-stats"></div>
+        <div class="demo-msg" id="v1-msg"></div>
+      </div>
+
+      <h2>演示二：比较次数与递归深度</h2>
+      <p>这个演示模拟多组随机数组，统计随机选择的比较次数和递归深度，随 n 变化的趋势。可以看到比较次数基本是线性的（约 5.7n），递归深度是对数级的。</p>
+      <div class="viz" id="viz2">
+        <div class="viz-controls">
+          <div class="ctl">n：<select id="v2-n">
+            <option value="10">10</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="500">500</option>
+            <option value="1000" selected>1000</option>
+            <option value="5000">5000</option>
+            <option value="10000">10000</option>
+          </select></div>
+          <div class="ctl">组数：<select id="v2-trials">
+            <option value="200">200</option>
+            <option value="500" selected>500</option>
+            <option value="1000">1000</option>
+          </select></div>
+          <button id="v2-run">运行</button>
+        </div>
+        <div class="demo-stats" id="v2-stats"></div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;">
+            <div style="font-size:12px;color:#64748b;margin-bottom:4px;">比较次数分布</div>
+            <div class="bar-chart" id="v2-cmp-chart"></div>
+          </div>
+          <div style="flex:1;min-width:200px;">
+            <div style="font-size:12px;color:#64748b;margin-bottom:4px;">递归深度分布</div>
+            <div class="bar-chart" id="v2-depth-chart"></div>
+          </div>
+        </div>
+      </div>
+
+      <h2>总结</h2>
+      <p>随机选择算法的要点：</p>
+      <p>1）核心是快排的 partition + 只走一侧。等于段已经在最终位置，答案落在等于段就直接返回，否则只去左边或右边。</p>
+      <p>2）每轮至少扔掉等于段的元素，随机 pivot 期望上每轮扔掉约一半，总代价 n + n/2 + n/4 + … = O(n)。实测约 5.7n 次比较。</p>
+      <p>3）必须随机选 pivot。固定选位置在已排序数组上退化成 O(n²)，三数取中可以被构造数据针对，随机选没有这个弱点。</p>
+      <p>4）迭代写法空间 O(1)，递归深度期望 O(log n) 不会爆栈。</p>
+      <p>5）BFPRT 是确定性 O(n)，但常数大、实现复杂，工程上用随机选择就够了。</p>
+      <p>这一讲是 partition 的第二个应用（第一个是快排）。后面讲堆、讲 Top-K 问题时，还会反复用到「不需要全排序，只找前 K 个」的思路，随机选择是这个思路的基础。</p>
+
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+// ============ SVG 图 ============
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,a|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296}}
+
+// 图1：问题示意
+(function(){
+  var fig=document.getElementById('fig-problem');
+  var W=660,H=180;
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%">';
+  var arr=[3,2,1,5,6,4], sorted=[6,5,4,3,2,1];
+  var cw=50,ch=44,gap=8,x0=60,y0=30;
+  // 原数组
+  svg+='<text x="10" y="'+(y0+28)+'" font-size="13" fill="#475569">原数组</text>';
+  for(var i=0;i<arr.length;i++){
+    var x=x0+i*(cw+gap);
+    svg+='<rect x="'+x+'" y="'+y0+'" width="'+cw+'" height="'+ch+'" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>';
+    svg+='<text x="'+(x+cw/2)+'" y="'+(y0+28)+'" text-anchor="middle" font-size="18" font-family="monospace" fill="#334155">'+arr[i]+'</text>';
+  }
+  // 箭头
+  svg+='<text x="'+(W/2)+'" y="95" text-anchor="middle" font-size="14" fill="#64748b">排序 → 取第 k=2 大</text>';
+  svg+='<line x1="'+(W/2-40)+'" y1="100" x2="'+(W/2+40)+'" y2="100" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr1)"/>';
+  svg+='<defs><marker id="arr1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#94a3b8"/></marker></defs>';
+  // 排序后
+  var y1=115;
+  svg+='<text x="10" y="'+(y1+28)+'" font-size="13" fill="#475569">排序后</text>';
+  for(var i=0;i<sorted.length;i++){
+    var x=x0+i*(cw+gap);
+    var hl=(i==1);
+    svg+='<rect x="'+x+'" y="'+y1+'" width="'+cw+'" height="'+ch+'" rx="6" fill="'+(hl?'#ede9fe':'#f8fafc')+'" stroke="'+(hl?'#7c3aed':'#cbd5e1')+'" stroke-width="2"/>';
+    svg+='<text x="'+(x+cw/2)+'" y="'+(y1+28)+'" text-anchor="middle" font-size="18" font-family="monospace" fill="'+(hl?'#7c3aed':'#334155')+'">'+sorted[i]+'</text>';
+    svg+='<text x="'+(x+cw/2)+'" y="'+(y1+ch+16)+'" text-anchor="middle" font-size="11" fill="#94a3b8">['+i+']</text>';
+    if(hl) svg+='<text x="'+(x+cw/2)+'" y="'+(y1-6)+'" text-anchor="middle" font-size="11" fill="#7c3aed" font-weight="bold">第2大</text>';
+  }
+  svg+='</svg>';
+  fig.innerHTML=svg+fig.innerHTML;
+})();
+
+// 图2：快排 vs 选择 递归树对比
+(function(){
+  var fig=document.getElementById('fig-compare');
+  var W=660,H=240;
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%">';
+  // 左：快排递归树
+  svg+='<text x="140" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#334155">快排：两侧都递归</text>';
+  function drawTree(cx,cy,w,depth,maxd,col){
+    if(depth>maxd)return;
+    svg+='<rect x="'+(cx-w/2)+'" y="'+cy+'" width="'+w+'" height="22" rx="4" fill="'+col+'" stroke="#2563eb" stroke-width="1.5"/>';
+    svg+='<text x="'+cx+'" y="'+(cy+15)+'" text-anchor="middle" font-size="11" font-family="monospace" fill="#1e40af">n='+Math.round(w/3)+'</text>';
+    if(depth<maxd){
+      var nw=w*0.42, ny=cy+38;
+      svg+='<line x1="'+cx+'" y1="'+(cy+22)+'" x2="'+(cx-nw/2-8)+'" y2="'+ny+'" stroke="#94a3b8" stroke-width="1"/>';
+      svg+='<line x1="'+cx+'" y1="'+(cy+22)+'" x2="'+(cx+nw/2+8)+'" y2="'+ny+'" stroke="#94a3b8" stroke-width="1"/>';
+      drawTree(cx-nw/2-8,ny,nw,depth+1,maxd,col);
+      drawTree(cx+nw/2+8,ny,nw,depth+1,maxd,col);
+    }
+  }
+  drawTree(140,35,120,0,3,'#dbeafe');
+  svg+='<text x="140" y="210" text-anchor="middle" font-size="12" fill="#64748b">每层 n 个元素，共 log n 层</text>';
+  svg+='<text x="140" y="228" text-anchor="middle" font-size="13" fill="#2563eb" font-weight="bold">总计 O(n log n)</text>';
+  // 右：选择递归树
+  svg+='<text x="480" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#334155">随机选择：只走一侧</text>';
+  var cx=480,cy=35,w=140;
+  for(var d=0;d<5;d++){
+    var col=d%2?'#fef3c7':'#dbeafe';
+    var border=d%2?'#ea580c':'#2563eb';
+    svg+='<rect x="'+(cx-w/2)+'" y="'+cy+'" width="'+w+'" height="22" rx="4" fill="'+col+'" stroke="'+border+'" stroke-width="1.5"/>';
+    svg+='<text x="'+cx+'" y="'+(cy+15)+'" text-anchor="middle" font-size="11" font-family="monospace" fill="#334155">n='+Math.round(w/1.4)+'</text>';
+    if(d<4){
+      var nw=w*0.55, ny=cy+38;
+      // 画一个被划掉的侧枝
+      svg+='<line x1="'+(cx-w/4)+'" y1="'+(cy+22)+'" x2="'+(cx-w/3-10)+'" y2="'+ny+'" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3,3"/>';
+      svg+='<text x="'+(cx-w/3-10)+'" y="'+(ny+14)+'" text-anchor="middle" font-size="10" fill="#cbd5e1">扔掉</text>';
+      svg+='<line x1="'+(cx+w/4)+'" y1="'+(cy+22)+'" x2="'+cx+'" y2="'+ny+'" stroke="'+border+'" stroke-width="1.5"/>';
+      cx=cx; w=nw; cy=ny;
+    }
+  }
+  svg+='<text x="480" y="210" text-anchor="middle" font-size="12" fill="#64748b">n + n/2 + n/4 + … = 2n</text>';
+  svg+='<text x="480" y="228" text-anchor="middle" font-size="13" fill="#ea580c" font-weight="bold">总计 O(n)</text>';
+  svg+='</svg>';
+  fig.innerHTML=svg+fig.innerHTML;
+})();
+
+// 图3：区间收敛过程
+(function(){
+  var fig=document.getElementById('fig-converge');
+  var W=660,H=200;
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%">';
+  var arr=[2,5,1,8,3,7,4,9,6,10,12,11];
+  var cw=36,ch=32,gap=3,x0=100;
+  // 三轮
+  var rounds=[
+    {l:0,r:11,pivot:4,first:3,last:5,idx:7,label:'第1轮 pivot=4，等于段[3,5]，idx=7在右边'},
+    {l:6,r:11,pivot:7,first:7,last:9,idx:7,label:'第2轮 pivot=7，等于段[7,9]，idx=7命中！'},
+  ];
+  var y=25;
+  rounds.forEach(function(rd,ri){
+    svg+='<text x="10" y="'+(y+20)+'" font-size="11" fill="#64748b">['+rd.l+','+rd.r+']</text>';
+    for(var i=rd.l;i<=rd.r;i++){
+      var x=x0+(i-rd.l)*(cw+gap);
+      var cls='';
+      if(i>=rd.first&&i<=rd.last) cls='eq';
+      else if(i<rd.first) cls='lt';
+      else cls='gt';
+      var fill=cls==='eq'?'#dcfce7':cls==='lt'?'#dbeafe':'#ffedd5';
+      var stroke=cls==='eq'?'#16a34a':cls==='lt'?'#2563eb':'#ea580c';
+      svg+='<rect x="'+x+'" y="'+y+'" width="'+cw+'" height="'+ch+'" rx="4" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.5"/>';
+      svg+='<text x="'+(x+cw/2)+'" y="'+(y+21)+'" text-anchor="middle" font-size="13" font-family="monospace" fill="#334155">'+arr[i]+'</text>';
+      if(i===rd.idx&&ri===1) svg+='<rect x="'+x+'" y="'+y+'" width="'+cw+'" height="'+ch+'" rx="4" fill="none" stroke="#7c3aed" stroke-width="3"/>';
+    }
+    svg+='<text x="'+(x0+12*(cw+gap)/2)+'" y="'+(y+ch+15)+'" text-anchor="middle" font-size="11" fill="#475569">'+rd.label+'</text>';
+    y+=65;
+  });
+  // 图例
+  var ly=170;
+  svg+='<rect x="180" y="'+ly+'" width="14" height="14" rx="2" fill="#dbeafe" stroke="#2563eb"/><text x="200" y="'+(ly+11)+'" font-size="11" fill="#475569">&lt;pivot</text>';
+  svg+='<rect x="260" y="'+ly+'" width="14" height="14" rx="2" fill="#dcfce7" stroke="#16a34a"/><text x="280" y="'+(ly+11)+'" font-size="11" fill="#475569">==pivot（最终位置）</text>';
+  svg+='<rect x="390" y="'+ly+'" width="14" height="14" rx="2" fill="#ffedd5" stroke="#ea580c"/><text x="410" y="'+(ly+11)+'" font-size="11" fill="#475569">&gt;pivot</text>';
+  svg+='<rect x="470" y="'+ly+'" width="14" height="14" rx="2" fill="none" stroke="#7c3aed" stroke-width="2"/><text x="490" y="'+(ly+11)+'" font-size="11" fill="#475569">答案位置 idx</text>';
+  svg+='</svg>';
+  fig.innerHTML=svg+fig.innerHTML;
+})();
+
+// 图4：期望比较次数
+(function(){
+  var fig=document.getElementById('fig-cmpcnt');
+  var W=660,H=235;
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%">';
+  var data=[
+    {n:10,cmp:36},{n:50,cmp:247},{n:100,cmp:533},{n:500,cmp:2806},
+    {n:1000,cmp:5738},{n:5000,cmp:28829},{n:10000,cmp:56430},{n:50000,cmp:288909},{n:100000,cmp:570654}
+  ];
+  var px=60,py=30,pw=560,ph=150;
+  // 轴
+  svg+='<line x1="'+px+'" y1="'+(py+ph)+'" x2="'+(px+pw)+'" y2="'+(py+ph)+'" stroke="#cbd5e1" stroke-width="1.5"/>';
+  svg+='<line x1="'+px+'" y1="'+py+'" x2="'+px+'" y2="'+(py+ph)+'" stroke="#cbd5e1" stroke-width="1.5"/>';
+  // 柱
+  var maxCmp=570654;
+  var bw=pw/data.length*0.6;
+  data.forEach(function(d,i){
+    var x=px+(i+0.2)*(pw/data.length);
+    var h=d.cmp/maxCmp*ph;
+    svg+='<rect x="'+x+'" y="'+(py+ph-h)+'" width="'+bw+'" height="'+h+'" rx="3" fill="#2563eb" opacity="0.8"/>';
+    svg+='<text x="'+(x+bw/2)+'" y="'+(py+ph-h-4)+'" text-anchor="middle" font-size="9" font-family="monospace" fill="#475569">'+(d.cmp/1000).toFixed(d.cmp>=10000?0:1)+'k</text>';
+    svg+='<text x="'+(x+bw/2)+'" y="'+(py+ph+14)+'" text-anchor="middle" font-size="9" font-family="monospace" fill="#64748b">'+(d.n>=1000?(d.n/1000)+'k':d.n)+'</text>';
+    // 比值
+    svg+='<text x="'+(x+bw/2)+'" y="'+(py+ph+26)+'" text-anchor="middle" font-size="8" fill="#94a3b8">'+(d.cmp/d.n).toFixed(1)+'n</text>';
+  });
+  svg+='<text x="'+(px+pw/2)+'" y="'+(py+ph+42)+'" text-anchor="middle" font-size="11" fill="#64748b">数组大小 n（对数刻度间距）</text>';
+  svg+='<text x="15" y="'+(py+ph/2)+'" text-anchor="middle" font-size="11" fill="#64748b" transform="rotate(-90,15,'+(py+ph/2)+')">比较次数</text>';
+  svg+='</svg>';
+  fig.innerHTML=svg+fig.innerHTML;
+})();
+
+// 图5：退化对比
+(function(){
+  var fig=document.getElementById('fig-degrade');
+  var W=660,H=200;
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%">';
+  var data=[
+    {n:100,fixed:1703,rand:533},
+    {n:500,fixed:18621,rand:2806},
+    {n:1000,fixed:53235,rand:5738},
+    {n:5000,fixed:591422,rand:28829},
+    {n:10000,fixed:1668283,rand:56430}
+  ];
+  var px=60,py=25,pw=560,ph=140;
+  svg+='<line x1="'+px+'" y1="'+(py+ph)+'" x2="'+(px+pw)+'" y2="'+(py+ph)+'" stroke="#cbd5e1" stroke-width="1.5"/>';
+  svg+='<line x1="'+px+'" y1="'+py+'" x2="'+px+'" y2="'+(py+ph)+'" stroke="#cbd5e1" stroke-width="1.5"/>';
+  // 对数刻度：用 log10
+  var maxLog=Math.log10(1668283);
+  var groupW=pw/data.length;
+  data.forEach(function(d,i){
+    var gx=px+i*groupW+groupW*0.15;
+    var bw=groupW*0.3;
+    // fixed
+    var hf=Math.log10(d.fixed)/maxLog*ph;
+    svg+='<rect x="'+gx+'" y="'+(py+ph-hf)+'" width="'+bw+'" height="'+hf+'" rx="2" fill="#ea580c" opacity="0.85"/>';
+    svg+='<text x="'+(gx+bw/2)+'" y="'+(py+ph-hf-3)+'" text-anchor="middle" font-size="8" font-family="monospace" fill="#ea580c">'+(d.fixed>=10000?(d.fixed/10000).toFixed(0)+'万':d.fixed)+'</text>';
+    // rand
+    var hr=Math.log10(d.rand)/maxLog*ph;
+    svg+='<rect x="'+(gx+bw+4)+'" y="'+(py+ph-hr)+'" width="'+bw+'" height="'+hr+'" rx="2" fill="#2563eb" opacity="0.85"/>';
+    svg+='<text x="'+(gx+bw*1.5+4)+'" y="'+(py+ph-hr-3)+'" text-anchor="middle" font-size="8" font-family="monospace" fill="#2563eb">'+d.rand+'</text>';
+    svg+='<text x="'+(gx+bw+2)+'" y="'+(py+ph+14)+'" text-anchor="middle" font-size="10" font-family="monospace" fill="#64748b">n='+d.n+'</text>';
+  });
+  // 图例
+  svg+='<rect x="200" y="180" width="12" height="12" rx="2" fill="#ea580c"/><text x="218" y="190" font-size="11" fill="#475569">固定 pivot（已排序数组）</text>';
+  svg+='<rect x="380" y="180" width="12" height="12" rx="2" fill="#2563eb"/><text x="398" y="190" font-size="11" fill="#475569">随机 pivot</text>';
+  svg+='<text x="'+(px+pw/2)+'" y="12" text-anchor="middle" font-size="11" fill="#64748b">比较次数（对数刻度纵轴）</text>';
+  svg+='</svg>';
+  fig.innerHTML=svg+fig.innerHTML;
+})();
+
+// ============ 演示一：随机选择逐帧 ============
+(function(){
+  var presets=[
+    {arr:[3,2,1,5,6,4],k:2},
+    {arr:[7,10,4,3,20,15,8,12,1,6],k:4},
+    {arr:[5,3,8,1,9,2,7,4,6],k:5},
+  ];
+  var state={arr:[],orig:[],l:0,r:0,idx:0,step:0,steps:[],first:0,last:0};
+
+  function buildSteps(arr,idx){
+    var steps=[];
+    var a=arr.slice();
+    var l=0,r=a.length-1;
+    while(l<=r){
+      var pivotIdx=l+Math.floor(Math.random()*(r-l+1));
+      var pivot=a[pivotIdx];
+      steps.push({type:'select',arr:a.slice(),l:l,r:r,pivot:pivot,pivotIdx:pivotIdx,msg:'在 ['+l+','+r+'] 中随机选位置 '+pivotIdx+'，pivot='+pivot});
+      // partition
+      var first=l,last=r,i=l;
+      while(i<=last){
+        if(a[i]===pivot){i++;}
+        else if(a[i]<pivot){var t=a[first];a[first]=a[i];a[i]=t;first++;i++;}
+        else{var t=a[i];a[i]=a[last];a[last]=t;last--;}
+      }
+      steps.push({type:'partition',arr:a.slice(),l:l,r:r,first:first,last:last,pivot:pivot,msg:'partition 完成：<x 段 ['+l+','+(first-1)+']，==x 段 ['+first+','+last+']，>x 段 ['+(last+1)+','+r+']'});
+      if(idx<first){steps.push({type:'decide',arr:a.slice(),l:l,r:r,first:first,last:last,dir:'left',msg:'idx='+idx+' < first='+first+'，去左边 ['+l+','+(first-1)+']'});r=first-1;}
+      else if(idx>last){steps.push({type:'decide',arr:a.slice(),l:l,r:r,first:first,last:last,dir:'right',msg:'idx='+idx+' > last='+last+'，去右边 ['+(last+1)+','+r+']'});l=last+1;}
+      else{steps.push({type:'found',arr:a.slice(),l:l,r:r,first:first,last:last,idx:idx,msg:'idx='+idx+' 落在等于段 ['+first+','+last+']，答案 = '+a[idx]});break;}
+    }
+    return steps;
+  }
+
+  function render(){
+    var cont=document.getElementById('v1-array');
+    var s=state.steps[state.step];
+    if(!s)return;
+    var a=s.arr;
+    cont.innerHTML='';
+    for(var i=0;i<a.length;i++){
+      var cell=document.createElement('div');
+      cell.className='demo-cell';
+      if(i<s.l||i>s.r) cell.classList.add('dim');
+      else if(s.type==='partition'||s.type==='decide'||s.type==='found'){
+        if(i>=s.first&&i<=s.last) cell.classList.add('eq');
+        else if(i<s.first) cell.classList.add('lt');
+        else cell.classList.add('gt');
+      }
+      if(s.type==='found'&&i===s.idx) cell.classList.add('ans');
+      cell.textContent=a[i];
+      // 标签
+      if(s.type==='select'&&i===s.pivotIdx){
+        var lb=document.createElement('span');lb.className='demo-label pivot';lb.textContent='pivot';cell.appendChild(lb);
+      }
+      if((s.type==='partition'||s.type==='decide'||s.type==='found')&&i===s.first&&s.first<=s.last){
+        var lb=document.createElement('span');lb.className='demo-label first';lb.textContent='first';cell.appendChild(lb);
+      }
+      if((s.type==='partition'||s.type==='decide'||s.type==='found')&&i===s.last){
+        var lb=document.createElement('span');lb.className='demo-label last';lb.textContent='last';cell.appendChild(lb);
+      }
+      cont.appendChild(cell);
+    }
+    // 区间条
+    var pct=(s.r-s.l+1)/a.length*100;
+    var leftPct=s.l/a.length*100;
+    document.getElementById('v1-range').style.width=pct+'%';
+    document.getElementById('v1-range').style.marginLeft=leftPct+'%';
+    // stats
+    document.getElementById('v1-stats').innerHTML=
+      '区间 ['+s.l+','+s.r+']（长度 '+(s.r-s.l+1)+'）｜idx='+state.idx+'（第 '+(a.length-state.idx)+' 大）｜步骤 '+(state.step+1)+'/'+state.steps.length;
+    document.getElementById('v1-msg').textContent=s.msg;
+  }
+
+  function reset(){
+    var pi=parseInt(document.getElementById('v1-preset').value);
+    var arr,k;
+    if(pi<3){arr=presets[pi].arr.slice();k=presets[pi].k;}
+    else{arr=[];for(var i=0;i<12;i++)arr.push(Math.floor(Math.random()*99)+1);k=1+Math.floor(Math.random()*12);}
+    state.arr=arr;state.orig=arr.slice();
+    state.idx=arr.length-k;
+    state.step=0;
+    state.steps=buildSteps(arr,state.idx);
+    render();
+  }
+
+  document.getElementById('v1-next').addEventListener('click',function(){
+    if(state.step<state.steps.length-1){state.step++;render();}
+  });
+  document.getElementById('v1-reset').addEventListener('click',reset);
+  document.getElementById('v1-preset').addEventListener('change',reset);
+  reset();
+})();
+
+// ============ 演示二：比较次数与递归深度 ============
+(function(){
+  function runOnce(n,rng){
+    var arr=[];
+    for(var i=0;i<n;i++)arr.push(Math.floor(rng()*100000));
+    var idx=Math.floor(rng()*n);
+    var cmp=0,depth=0,maxDepth=0;
+    var a=arr.slice();
+    function sel(l,r,d){
+      maxDepth=Math.max(maxDepth,d);
+      if(l>r)return;
+      var pivot=a[l+Math.floor(rng()*(r-l+1))];
+      var first=l,last=r,i=l;
+      while(i<=last){
+        cmp++;
+        if(a[i]===pivot)i++;
+        else if(a[i]<pivot){cmp++;var t=a[first];a[first]=a[i];a[i]=t;first++;i++;}
+        else{cmp++;var t=a[i];a[i]=a[last];a[last]=t;last--;}
+      }
+      if(idx<first)sel(l,first-1,d+1);
+      else if(idx>last)sel(last+1,r,d+1);
+    }
+    sel(0,n-1,1);
+    return{cmp:cmp,depth:maxDepth};
+  }
+
+  function makeChart(container,values,color,unit){
+    var cont=document.getElementById(container);
+    cont.innerHTML='';
+    // 分桶
+    var min=Math.min.apply(null,values),max=Math.max.apply(null,values);
+    var buckets=8;
+    var range=max-min||1;
+    var counts=new Array(buckets).fill(0);
+    var labels=new Array(buckets);
+    values.forEach(function(v){
+      var bi=Math.min(buckets-1,Math.floor((v-min)/range*buckets));
+      counts[bi]++;
+    });
+    var maxCount=Math.max.apply(null,counts);
+    for(var i=0;i<buckets;i++){
+      labels[i]=Math.round(min+range*i/buckets);
+    }
+    for(var i=0;i<buckets;i++){
+      var col=document.createElement('div');col.className='bar-col';
+      var val=document.createElement('div');val.className='bar-val';val.textContent=counts[i]||'';
+      var fill=document.createElement('div');fill.className='bar-fill';
+      fill.style.height=(counts[i]/maxCount*130)+'px';fill.style.background=color;
+      var lab=document.createElement('div');lab.className='bar-label';lab.textContent=labels[i];
+      col.appendChild(val);col.appendChild(fill);col.appendChild(lab);
+      cont.appendChild(col);
+    }
+  }
+
+  document.getElementById('v2-run').addEventListener('click',function(){
+    var n=parseInt(document.getElementById('v2-n').value);
+    var trials=parseInt(document.getElementById('v2-trials').value);
+    var rng=mulberry32(20261005+n*1000+trials);
+    var cmps=[],depths=[];
+    var sumC=0,sumD=0;
+    for(var t=0;t<trials;t++){
+      var r=runOnce(n,rng);
+      cmps.push(r.cmp);depths.push(r.depth);
+      sumC+=r.cmp;sumD+=r.depth;
+    }
+    cmps.sort(function(a,b){return a-b;});depths.sort(function(a,b){return a-b;});
+    var medC=cmps[Math.floor(cmps.length/2)];
+    var medD=depths[Math.floor(depths.length/2)];
+    document.getElementById('v2-stats').innerHTML=
+      'n='+n+'，'+trials+' 组随机数组｜比较次数：中位 '+medC+'（'+(medC/n).toFixed(2)+'n），平均 '+(sumC/trials).toFixed(0)+'，范围 '+cmps[0]+'~'+cmps[cmps.length-1]+
+      '<br>递归深度：中位 '+medD+'，平均 '+(sumD/trials).toFixed(1)+'，最大 '+depths[depths.length-1]+'（log₂n='+Math.log2(n).toFixed(1)+'）';
+    makeChart('v2-cmp-chart',cmps,'#2563eb','次');
+    makeChart('v2-depth-chart',depths,'#ea580c','层');
+  });
+  // 自动跑一次
+  document.getElementById('v2-run').click();
+})();
+})();
+</script>
+</body>
+</html>

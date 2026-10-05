@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>带修莫队 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.mm-btn{border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;}
+.mm-btn:hover{border-color:var(--accent);color:var(--accent);}
+.mm-btn:disabled{opacity:.4;cursor:default;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>带修莫队</h1>
+    <p class="intro">操作里混着修改，查询就不只是区间，还带一个时间点。给查询排三维序、块长换成 n 的 2/3 次方，总移动量 O(n 的 5/3 次方)。</p>
+
+    <h2>零、背景</h2>
+    <p>前面五个题的数组全程不变，查询只是换个区间。一旦中间夹着「把某个位置改成某个值」，窗口就不只在下标这一维上动了：回答第 5 条查询时，数组得是执行完前 3 次修改的样子，回答第 9 条时又得是执行完前 7 次的样子。</p>
+    <p>于是每条查询多出一个坐标：它发生在第几次修改之后。</p>
+
+    <h2>一、问题</h2>
+    <p>长度为 n 的数组，m 条操作两种。（P1903）</p>
+    <p>操作 Q l r：打印 [l, r] 上有几种不同的数。操作 R pos val：把 arr[pos] 改成 val。n、m 都到 2 × 10⁵。</p>
+    <p>查询依然是离线的，全部拿到手再一起回答。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>每条查询先把数组重放到它那个时间点，再扫一遍 [l, r]。重放最坏 O(m)，扫一遍 O(n)，m 条查询 O(m(n + m))。</p>
+    <p>浪费还是重复：相邻两条查询的时间点往往只差几次修改，却每次都从头重放。同理，前一条查 [2, 6]、这一条查 [3, 7]，也没必要从头扫。</p>
+
+    <h2>三、三维与块长</h2>
+    <p>给每次修改分配一个时间点，从 1 开始编号。查询写成 [jobl, jobr, jobt]，jobt 是它前面有多少次修改。</p>
+    <p>窗口也跟着变成两个：下标窗口 [winl, winr]，时间窗口 wint，表示数组已经改到第 wint 次修改。两者一起决定当前答案。</p>
+    <p>排序改成三个关键字：l 所在块 → r 所在块 → t 升序。注意第二关键字也分块，普通莫队那里是直接用 r 的数值排。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>l 块和 r 块定出一个组，组内 t 从小到大走；块长取 n 的 2/3 次方时三个方向的移动量一样大</figcaption>
+    </figure>
+
+    <p>块长为什么是 n 的 2/3 次方。设块长为 B，块数 n/B，组数 (n/B)²。</p>
+    <p>同一组内 l 和 r 都只在自己那块里动，每次查询最多各走 B 步，m 条查询合计 mB。换组时 r 最多跳一整个数组，组有 (n/B)² 个，合计 n³/B²。每组内 t 是升序的，走完一组最多 m 步，组数同样是 (n/B)²，合计 m·n²/B²。</p>
+    <p>把 B = n 的 2/3 次方代进去，三项分别是 n 的 5/3 次方、n 的 5/3 次方、n 的 5/3 次方，再加换 l 块时那点 n²/B，总代价是 O(n 的 5/3 次方)。取更小或更大的 B 都会让其中某一项变大。</p>
+
+    <h2>四、时间指针怎么走</h2>
+    <p>时间往前走是执行下一次修改，往后走是撤销上一次。写两个函数容易出错，用一个交换技巧就够：执行 update[t] 时，把 arr[pos] 的旧值换进 update[t].val。</p>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>每次执行都把旧值换回 update 里，前进和后退用的是同一个 moveTime</figcaption>
+    </figure>
+
+    <p>还有一个判断：这次改的位置如果不落在当前下标窗口里，答案不受影响，只改数组就行；落在窗口里，就要先 del 掉旧值、再 add 新值。</p>
+
+    <h2>五、代码</h2>
+    <p>下面是带修莫队的完整模版，答案维护的是不同数字个数。</p>
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Query {
+        <span class="kw">int</span> l, r, t, id;
+    };
+
+    <span class="kw">struct</span> Update {
+        <span class="kw">int</span> pos, val;
+    };
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXV = 1000001;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> bi[MAXN];
+
+    Query query[MAXN];
+    Update update[MAXN];
+    <span class="kw">int</span> cntq, cntu;
+
+    <span class="kw">int</span> cnt[MAXV];
+    <span class="kw">int</span> kind;
+
+    <span class="kw">int</span> ans[MAXN];
+
+    <span class="kw">bool</span> <span class="fn">QueryCmp</span>(Query &amp;a, Query &amp;b) {
+        <span class="kw">if</span> (bi[a.l] != bi[b.l]) {
+            <span class="kw">return</span> bi[a.l] &lt; bi[b.l];
+        }
+        <span class="kw">if</span> (bi[a.r] != bi[b.r]) {
+            <span class="kw">return</span> bi[a.r] &lt; bi[b.r];
+        }
+        <span class="kw">return</span> a.t &lt; b.t;
+    }
+
+    <span class="kw">void</span> <span class="fn">del</span>(<span class="kw">int</span> num) {
+        <span class="kw">if</span> (--cnt[num] == 0) {
+            kind--;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        <span class="kw">if</span> (++cnt[num] == 1) {
+            kind++;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">moveTime</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> tim) {
+        <span class="kw">int</span> pos = update[tim].pos;
+        <span class="kw">int</span> val = update[tim].val;
+        <span class="kw">if</span> (jobl &lt;= pos &amp;&amp; pos &lt;= jobr) {
+            del(arr[pos]);
+            add(val);
+        }
+        <span class="kw">int</span> tmp = arr[pos];
+        arr[pos] = val;
+        update[tim].val = tmp;
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>() {
+        <span class="kw">int</span> winl = 1, winr = 0, wint = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntq; i++) {
+            <span class="kw">int</span> jobl = query[i].l;
+            <span class="kw">int</span> jobr = query[i].r;
+            <span class="kw">int</span> jobt = query[i].t;
+            <span class="kw">int</span> id = query[i].id;
+            <span class="kw">while</span> (winl &gt; jobl) {
+                add(arr[--winl]);
+            }
+            <span class="kw">while</span> (winr &lt; jobr) {
+                add(arr[++winr]);
+            }
+            <span class="kw">while</span> (winl &lt; jobl) {
+                del(arr[winl++]);
+            }
+            <span class="kw">while</span> (winr &gt; jobr) {
+                del(arr[winr--]);
+            }
+            <span class="kw">while</span> (wint &lt; jobt) {
+                moveTime(jobl, jobr, ++wint);
+            }
+            <span class="kw">while</span> (wint &gt; jobt) {
+                moveTime(jobl, jobr, wint--);
+            }
+            ans[id] = kind;
+         }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">int</span> blen = max(1, (<span class="kw">int</span>)pow(n, 2.0 / 3));
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        sort(query + 1, query + cntq + 1, QueryCmp);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        <span class="kw">char</span> op;
+        <span class="kw">int</span> l, r, pos, val;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; op;
+            <span class="kw">if</span> (op == 'Q') {
+                cin &gt;&gt; l &gt;&gt; r;
+                cntq++;
+                query[cntq].l = l;
+                query[cntq].r = r;
+                query[cntq].t = cntu;
+                query[cntq].id = cntq;
+            } <span class="kw">else</span> {
+                cin &gt;&gt; pos &gt;&gt; val;
+                cntu++;
+                update[cntu].pos = pos;
+                update[cntu].val = val;
+            }
+        }
+        prepare();
+        compute();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntq; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+    <p>读入时顺手给每条查询记下 t = 当前的修改条数。排序用 QueryCmp，比较函数里第二关键字是 r 的块号，这是和普通莫队唯一的结构差别。</p>
+
+    <h2>六、出现一次的数有几种</h2>
+    <p>统计出现 1 次的数（SP30906 / ADAUNIQ）：操作 1 pos val 是修改，操作 2 l r 问 [l, r] 上有多少种数恰好出现一次。下标从 0 开始，代码里统一加 1 转成 1 起。</p>
+    <p>维护量换成 curCnt：出现次数恰好为 1 的数的种类数。加一个数时，次数从 0 变 1 就多一种，从 1 变 2 就少一种；删一个数时反过来。</p>
+    <pre class="code">    <pre class="code"><span class="kw">void</span> <span class="fn">del</span>(<span class="kw">int</span> num) {
+        <span class="kw">if</span> (cnt[num] == 1) {
+            curCnt--;
+        }
+        <span class="kw">if</span> (cnt[num] == 2) {
+            curCnt++;
+        }
+        cnt[num]--;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        <span class="kw">if</span> (cnt[num] == 0) {
+            curCnt++;
+        }
+        <span class="kw">if</span> (cnt[num] == 1) {
+            curCnt--;
+        }
+        cnt[num]++;
+    }</pre></pre>
+
+    <h2>七、出现次数集合的 mex</h2>
+    <p>机器学习（CF940F）：查询 [l, r] 上每种数字的出现次数构成一个集合，打印这个集合里没出现过的最小正数。</p>
+    <p>还是两层计数。cnt1[x] 是 x 出现几次，cnt2[c] 是出现次数为 c 的数有几种，答案就是最小的 c 使 cnt2[c] 为 0。</p>
+
+    <figure class="fig">
+      <div id="fig3"></div>
+      <figcaption>窗口里出现过的次数是 {1, 2}，第一个空档是 3，答案就是 3</figcaption>
+    </figure>
+
+    <p>找这个空档直接暴力从 1 往上扫。窗口长度是 len，出现次数大于 √len 的数最多 √len 个，能填上的大于 √len 的档位也就这么几个，所以扫到 √n 量级必定停下，单次 O(√n)。</p>
+    <pre class="code">    <pre class="code"><span class="kw">void</span> <span class="fn">del</span>(<span class="kw">int</span> num) {
+        cnt2[cnt1[num]]--;
+        cnt1[num]--;
+        cnt2[cnt1[num]]++;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        cnt2[cnt1[num]]--;
+        cnt1[num]++;
+        cnt2[cnt1[num]]++;
+    }</pre></pre>
+    <p>回答时那几行就是暴力扫。</p>
+    <pre class="code">    <pre class="code">        <span class="kw">int</span> ret = 1;
+            <span class="kw">while</span> (ret &lt;= n &amp;&amp; cnt2[ret] &gt; 0) {
+                ret++;
+            }
+            ans[id] = ret;</pre></pre>
+    <p>这里离散化要把修改里出现的值也收进来，否则改出来的新值没有下标可用。</p>
+
+    <h2>八、复杂度分析</h2>
+    <p>设块长 B = n 的 2/3 次方，n 与 m 同阶。</p>
+    <table class="complexity">
+      <thead><tr><th>操作</th><th>时间复杂度</th></tr></thead>
+      <tbody>
+        <tr><td>预处理：块号与排序</td><td>O(m log m)</td></tr>
+        <tr><td>下标移动一步（add / del）</td><td>O(1)</td></tr>
+        <tr><td>时间移动一步（moveTime）</td><td>O(1)</td></tr>
+        <tr><td>l、r 在组内移动合计</td><td>O(mB) = O(n 的 5/3 次方)</td></tr>
+        <tr><td>r 跨组跳转合计</td><td>O(n³/B²) = O(n 的 5/3 次方)</td></tr>
+        <tr><td>t 移动合计</td><td>O(m·n²/B²) = O(n 的 5/3 次方)</td></tr>
+        <tr><td>m 次查询合计</td><td>O(n 的 5/3 次方)</td></tr>
+      </tbody>
+    </table>
+    <p>题 8 每次回答多一个 O(√n) 的 mex 扫描，m 次是 O(m√n)，比 n 的 5/3 次方小一档，不影响总量级。</p>
+    <p>空间上要存查询数组、修改数组、答案数组，各 O(m)，加上计数数组 O(V)，额外空间 O(V + m)。</p>
+
+    <h2>九、最后</h2>
+    <p>带修莫队和普队的差别只有两处：排序多一个时间关键字、块长从 √n 换成 n 的 2/3 次方。窗口的 add / del 照旧按题目设计。</p>
+    <p>后面还会遇到只用加、不好删的维护量，那时要靠回滚来避开删除，是另一套改法。</p>
+
+    <div class="viz">
+      <div class="viz-title">下标窗口和时间窗口一起动</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">数组 [1, 2, 1, 3, 2, 4, 1, 3]，两条修改和四条查询。点「下一步」看两个指针怎么走，以及改的位置在窗口内外有什么不同。</p>
+      <svg id="mmSvg" viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="带修莫队演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>在下标窗口里</span>
+        <span><span class="dot partial"></span>刚变动的位置</span>
+        <span><span class="dot skip"></span>窗口外</span>
+      </div>
+      <div class="breakdown" id="mmInfo"></div>
+      <div class="viz-controls">
+        <button class="mm-btn" id="mmPrev" type="button">上一步</button>
+        <button class="mm-btn" id="mmNext" type="button">下一步</button>
+        <button class="mm-btn" id="mmReset" type="button">重来</button>
+      </div>
+    </div>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  /* ---------- 图①：三维分组 ---------- */
+  var g1 = document.getElementById('fig1');
+  if (g1) {
+    var s = '<svg viewBox="0 0 680 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="带修莫队的三维排序" ' +
+            'font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+    s += '<text x="30" y="24" font-size="13" fill="#4b5563">l 块 × r 块，每一格是一组</text>';
+    for (var i = 0; i < 3; i++) {
+      for (var j = 0; j < 3; j++) {
+        var x = 30 + j * 90, y = 40 + i * 60;
+        s += '<rect x="' + x + '" y="' + y + '" width="86" height="56" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>';
+        s += '<path d="M' + (x + 66) + ' ' + (y + 48) + ' L' + (x + 66) + ' ' + (y + 12) + '" stroke="#2563eb" stroke-width="1.5"/>';
+        s += '<path d="M' + (x + 62) + ' ' + (y + 18) + ' L' + (x + 66) + ' ' + (y + 12) + ' L' + (x + 70) + ' ' + (y + 18) + '" fill="none" stroke="#2563eb" stroke-width="1.5"/>';
+        s += '<text x="' + (x + 24) + '" y="' + (y + 34) + '" font-size="11" fill="#9aa0a6">组 ' + (i + 1) + ',' + (j + 1) + '</text>';
+      }
+    }
+    s += '<text x="30" y="232" font-size="12" fill="#4b5563">组内按 t 升序走（箭头方向），走完一组才换下一组</text>';
+    var tx = 330, ty = 60, lh = 28;
+    var lines = [
+      '排序：l 所在块 → r 所在块 → t',
+      '组内 l、r 各自最多动 B 步',
+      '组内 t 只增，一组最多走 m 步',
+      '块数 n/B，组数 (n/B)²',
+      '三项代价：mB、n³/B²、m·n²/B²',
+      'B = n 的 2/3 次方时三项都是 n 的 5/3 次方'
+    ];
+    lines.forEach(function (t, k) {
+      s += '<text x="' + tx + '" y="' + (ty + k * lh) + '" font-size="13" fill="#4b5563">' + t + '</text>';
+    });
+    s += '</svg>';
+    g1.innerHTML = s;
+  }
+
+  /* ---------- 图②：moveTime 的交换 ---------- */
+  var g2 = document.getElementById('fig2');
+  if (g2) {
+    var rows = [
+      ['1', '5', '执行前'],
+      ['5', '1', '执行 update[1]：时间前进'],
+      ['1', '5', '再执行一次：时间后退']
+    ];
+    var t = '<svg viewBox="0 0 680 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="moveTime 交换" ' +
+            'font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+    t += '<text x="60" y="20" font-size="13" fill="#4b5563">arr[3]</text>';
+    t += '<text x="240" y="20" font-size="13" fill="#4b5563">update[1].val</text>';
+    rows.forEach(function (r, i) {
+      var y = 34 + i * 62;
+      t += '<rect x="40" y="' + y + '" width="90" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/>';
+      t += '<text x="85" y="' + (y + 26) + '" font-size="15" text-anchor="middle" fill="#1d4ed8">' + r[0] + '</text>';
+      t += '<rect x="220" y="' + y + '" width="90" height="40" rx="6" fill="#ffedd5" stroke="#ea580c"/>';
+      t += '<text x="265" y="' + (y + 26) + '" font-size="15" text-anchor="middle" fill="#9a3412">' + r[1] + '</text>';
+      t += '<text x="340" y="' + (y + 26) + '" font-size="13" fill="#4b5563">' + r[2] + '</text>';
+      if (i < 2) {
+        t += '<path d="M85 ' + (y + 44) + ' L85 ' + (y + 58) + '" stroke="#9aa0a6" stroke-width="1.5"/>';
+        t += '<path d="M81 ' + (y + 53) + ' L85 ' + (y + 58) + ' L89 ' + (y + 53) + '" fill="none" stroke="#9aa0a6" stroke-width="1.5"/>';
+      }
+    });
+    t += '<text x="40" y="200" font-size="12" fill="#4b5563">pos 落在窗口内：del(arr[pos]) 再 add(val)，答案跟着变</text>';
+    t += '<text x="40" y="222" font-size="12" fill="#4b5563">pos 落在窗口外：只把数组改掉，答案不动</text>';
+    t += '</svg>';
+    g2.innerHTML = t;
+  }
+
+  /* ---------- 图③：mex ---------- */
+  var g3 = document.getElementById('fig3');
+  if (g3) {
+    var W = [1, 1, 2];
+    var c1 = [2, 1];
+    var c2v = [1, 1, 0, 0];
+    var u = '<svg viewBox="0 0 680 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="出现次数的 mex" ' +
+            'font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+    u += '<text x="20" y="20" font-size="13" fill="#4b5563">窗口里的数</text>';
+    W.forEach(function (v, k) {
+      var x = 20 + k * 34;
+      u += '<rect x="' + x + '" y="30" width="30" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/>';
+      u += '<text x="' + (x + 15) + '" y="50" font-size="14" text-anchor="middle" fill="#1d4ed8">' + v + '</text>';
+    });
+    u += '<text x="150" y="20" font-size="13" fill="#4b5563">cnt1：值 → 次数</text>';
+    c1.forEach(function (c, k) {
+      var y = 30 + k * 30;
+      u += '<rect x="150" y="' + y + '" width="70" height="26" fill="#f6f7f9" stroke="#e6e8eb"/>';
+      u += '<rect x="220" y="' + y + '" width="70" height="26" fill="#f6f7f9" stroke="#e6e8eb"/>';
+      u += '<text x="185" y="' + (y + 18) + '" font-size="12" text-anchor="middle" fill="#4b5563">值 ' + (k + 1) + '</text>';
+      u += '<text x="255" y="' + (y + 18) + '" font-size="12" text-anchor="middle" fill="#9a3412">' + c + '</text>';
+    });
+    u += '<text x="330" y="20" font-size="13" fill="#4b5563">cnt2：次数 → 有几种值</text>';
+    c2v.forEach(function (c, k) {
+      var y = 30 + k * 30;
+      var hit = (c === 0 && k === 2);
+      u += '<rect x="330" y="' + y + '" width="86" height="26" fill="' + (hit ? '#dbeafe' : '#f6f7f9') + '" stroke="' + (hit ? '#2563eb' : '#e6e8eb') + '"/>';
+      u += '<rect x="416" y="' + y + '" width="70" height="26" fill="' + (hit ? '#dbeafe' : '#f6f7f9') + '" stroke="' + (hit ? '#2563eb' : '#e6e8eb') + '"/>';
+      u += '<text x="373" y="' + (y + 18) + '" font-size="12" text-anchor="middle" fill="#4b5563">次数 ' + (k + 1) + '</text>';
+      u += '<text x="451" y="' + (y + 18) + '" font-size="12" text-anchor="middle" fill="#9a3412">' + c + '</text>';
+    });
+    u += '<text x="510" y="112" font-size="13" fill="#1d4ed8">← 第一个空档</text>';
+    u += '<text x="20" y="180" font-size="12" fill="#4b5563">出现过的次数是 {1, 2}，mex = 3</text>';
+    u += '<text x="20" y="200" font-size="12" fill="#4b5563">次数超过 √n 的档位最多填 √n 个，所以从 1 暴力扫上去停在 O(√n)</text>';
+    u += '</svg>';
+    g3.innerHTML = u;
+  }
+
+  /* ---------- 演示 ---------- */
+  var svg = document.getElementById('mmSvg');
+  var info = document.getElementById('mmInfo');
+  if (!svg) return;
+  var N = 8;
+  var A0 = [0, 1, 2, 1, 3, 2, 4, 1, 3];      // 1-based
+  var UPD0 = [{ pos: 3, val: 5 }, { pos: 5, val: 1 }];
+  var QS = [{ l: 1, r: 4, t: 0 }, { l: 2, r: 6, t: 1 }, { l: 1, r: 8, t: 2 }, { l: 3, r: 5, t: 2 }];
+  var order = [0, 1, 2, 3];
+
+  var frames = [];
+  (function build() {
+    var A = A0.slice();
+    var UPD = [null];
+    UPD0.forEach(function (u) { UPD.push({ pos: u.pos, val: u.val }); });
+    var cnt = [0, 0, 0, 0, 0, 0], kind = 0;
+    var wl = 1, wr = 0, wt = 0, out = [];
+    function snap(act, pos, tim) {
+      frames.push({
+        arr: A.slice(), wl: wl, wr: wr, wt: wt, kind: kind, cnt: cnt.slice(),
+        upd: UPD.slice(1).map(function (u) { return u.val; }), pos: pos, tim: tim, act: act, out: out.slice()
+      });
+    }
+    function add(x) { if (++cnt[x] === 1) kind++; }
+    function del(x) { if (--cnt[x] === 0) kind--; }
+    function moveTime(tim) {
+      var pos = UPD[tim].pos, val = UPD[tim].val;
+      var inside = (wl <= pos && pos <= wr);
+      if (inside) { del(A[pos]); add(val); }
+      var tmp = A[pos]; A[pos] = val; UPD[tim].val = tmp;
+      return inside;
+    }
+    snap('起始：窗口为空，时间停在 0', -1, -1);
+    order.forEach(function (qi) {
+      var q = QS[qi];
+      while (wl > q.l) { wl--; add(A[wl]); snap('左指针左移，加进 a[' + wl + '] = ' + A[wl], wl, -1); }
+      while (wr < q.r) { wr++; add(A[wr]); snap('右指针右移，加进 a[' + wr + '] = ' + A[wr], wr, -1); }
+      while (wl < q.l) { del(A[wl]); snap('左指针右移，拿掉 a[' + wl + '] = ' + A[wl], wl, -1); wl++; }
+      while (wr > q.r) { del(A[wr]); snap('右指针左移，拿掉 a[' + wr + '] = ' + A[wr], wr, -1); wr--; }
+      while (wt < q.t) { wt++; var ins = moveTime(wt); snap('时间前进到第 ' + wt + ' 次修改，改的是位置 ' + UPD[wt].pos + (ins ? '（在窗口内，答案变了）' : '（在窗口外，答案不动）'), UPD[wt].pos, wt); }
+      while (wt > q.t) { var ins2 = moveTime(wt); snap('时间后退，撤销第 ' + wt + ' 次修改', UPD[wt].pos, wt); wt--; }
+      out.push('q' + (qi + 1) + ' [' + q.l + ',' + q.r + '] = ' + kind);
+      snap('回答 q' + (qi + 1) + '：[' + q.l + ', ' + q.r + '] 上有 ' + kind + ' 种', -1, -1);
+    });
+  })();
+
+  var cur = 0;
+  function draw() {
+    var f = frames[cur], s = '';
+    for (var i = 1; i <= N; i++) {
+      var x = 20 + (i - 1) * 62, inw = (i >= f.wl && i <= f.wr);
+      var fill = (i === f.pos) ? '#ffedd5' : (inw ? '#dbeafe' : '#f6f7f9');
+      var stroke = (i === f.pos) ? '#ea580c' : (inw ? '#2563eb' : '#e6e8eb');
+      s += '<rect x="' + x + '" y="24" width="58" height="40" rx="6" fill="' + fill + '" stroke="' + stroke + '"/>';
+      s += '<text x="' + (x + 29) + '" y="50" font-size="15" text-anchor="middle" fill="#4b5563">' + f.arr[i] + '</text>';
+      s += '<text x="' + (x + 29) + '" y="76" font-size="11" text-anchor="middle" fill="#9aa0a6">' + i + '</text>';
+    }
+    s += '<rect x="536" y="24" width="70" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/>';
+    s += '<text x="571" y="49" font-size="13" text-anchor="middle" fill="#1d4ed8">' + f.kind + ' 种</text>';
+    s += '<text x="20" y="106" font-size="12" fill="#4b5563">修改操作（括号内是当前 val，执行后会换成旧值）</text>';
+    UPD0.forEach(function (u, k) {
+      var y = 120 + k * 24, done = (k + 1 <= f.wt);
+      s += '<rect x="20" y="' + (y - 13) + '" width="230" height="20" rx="4" fill="' + (done ? '#dbeafe' : '#f6f7f9') +
+           '" stroke="' + (done ? '#2563eb' : '#e6e8eb') + '"/>';
+      s += '<text x="30" y="' + (y + 2) + '" font-size="12" fill="' + (done ? '#1d4ed8' : '#9aa0a6') + '">t' + (k + 1) +
+           '：a[' + u.pos + '] ← ' + f.upd[k] + (done ? '　已执行' : '　未执行') + '</text>';
+    });
+    s += '<text x="290" y="144" font-size="12" fill="#4b5563">wint = ' + f.wt + '</text>';
+    s += '<text x="20" y="186" font-size="12" fill="#4b5563">cnt</text>';
+    for (var v = 1; v <= 5; v++) {
+      var cx = 60 + (v - 1) * 62;
+      s += '<rect x="' + cx + '" y="172" width="58" height="28" rx="5" fill="' + (f.cnt[v] > 0 ? '#ffedd5' : '#f6f7f9') +
+           '" stroke="' + (f.cnt[v] > 0 ? '#ea580c' : '#e6e8eb') + '"/>';
+      s += '<text x="' + (cx + 29) + '" y="191" font-size="13" text-anchor="middle" fill="#9a3412">' + f.cnt[v] + '</text>';
+      s += '<text x="' + (cx + 29) + '" y="212" font-size="11" text-anchor="middle" fill="#9aa0a6">值 ' + v + '</text>';
+    }
+    s += '<text x="20" y="240" font-size="12" fill="#4b5563">' + (f.out.length ? f.out.join('　') : '还没有输出') + '</text>';
+    s += '<text x="20" y="270" font-size="13" fill="#1d4ed8">' + f.act + '</text>';
+    s += '<text x="20" y="292" font-size="12" fill="#4b5563">窗口 ' + (f.wr < f.wl ? '空' : '[' + f.wl + ', ' + f.wr + ']') + '　时间点 ' + f.wt + '</text>';
+    svg.innerHTML = s;
+    if (info) info.textContent = f.act + '，kind = ' + f.kind;
+    document.getElementById('mmPrev').disabled = (cur === 0);
+    document.getElementById('mmNext').disabled = (cur === frames.length - 1);
+  }
+  document.getElementById('mmNext').onclick = function () { if (cur < frames.length - 1) { cur++; draw(); } };
+  document.getElementById('mmPrev').onclick = function () { if (cur > 0) { cur--; draw(); } };
+  document.getElementById('mmReset').onclick = function () { cur = 0; draw(); };
+  draw();
+})();
+</script>
+</body>
+</html>

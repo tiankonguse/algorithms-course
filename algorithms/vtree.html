@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>虚树的原理与建树 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .vt-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .vt-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .vt-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #vtSvg1 text, #vtSvg2 text{font-size:11px;}
+  @media(max-width:760px){
+    .vt-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>虚树的原理与建树</h1>
+    <p class="intro">一次查询只在树上挑了 k 个关键点，却要在整棵 n 个点的树上跑一遍树型 dp，代价是 O(n)。把关键点和它们两两的最低公共祖先抽出来，按 dfn 序排好连成边，就得到一棵只有 O(k) 个点的小树，叫做虚树。dp 搬上去，复杂度里就再也看不到 n。</p>
+
+    <h2>零、背景</h2>
+    <p>树上有一类查询长这样：每次给出 k 个关键点，问一个只和这 k 个点有关的树形问题。k 很小，但查询次数很多，所有查询给出的关键点总数加在一起也不算大。</p>
+    <p>直接做的话，一次查询就是一次整树 dfs。n = 10⁵、q = 10⁵ 的时候这个数是 10¹⁰，怎么算都过不去。可真正决定答案的只有那 k 个点，剩下 n - k 个点只是把关键点串起来的「路」。</p>
+    <p>虚树就是把这些「路」压成一条边：只留下关键点和必要的分叉点，原树上一整条路径在虚树里变成一条边。前置知识是树的 dfn 序、树上倍增求 LCA、树型 dp 和单调栈，这几样前面都单独讲过。</p>
+
+    <h2>一、问题</h2>
+    <p>输入一棵 n 个点的树，以及 q 条查询。每条查询给出 k 个互不相同的点，称作关键点；其余点称作非关键点。要在这 k 个点上回答一个树形问题，比如「最少切断几条边能让关键点两两不连通」「k 个点两两之间新建通道的代价和」。</p>
+    <p>数据范围的形状是这一类题的共同特征：n 和 q 都能到 10⁵，但所有查询给出的关键点总数有一个同样量级的上界。也就是说，k 的均值很小，只是查询条数多。</p>
+    <p>这一讲先解决结构问题：怎么从原树里快速取出一棵只含 O(k) 个点、又能完整表达关键点之间拓扑关系的小树。</p>
+
+    <h2>二、朴素做法为什么慢</h2>
+    <p>最直接的写法是每条查询在整棵树上重新做一次树型 dp。一次 O(n)，q 条就是 O(nq)。以题 1 为例 n、q 都能到 10⁵，光是这一个乘积就是 10¹⁰。</p>
+    <p>可以发现，两次查询之间整棵树没有任何变化，非关键点上的 dp 值也是一样的。每次都重算一遍整棵树，等于把完全相同的 O(n) 份无用功重复 q 次。</p>
+    <p>反过来看一次查询真正需要的：关键点彼此怎么连通、在哪个点分叉、分叉之间隔了多少条边。这三件事只跟关键点和它们的 LCA 有关，和其余 n - k 个点无关。把它们单独抽出来，规模立刻从 n 掉到 k。</p>
+
+    <h2>三、虚树的定义</h2>
+    <p>给定关键点集合 S，虚树的点集是 S 并上「dfn 序上相邻两个关键点的 LCA」，边则是在按 dfn 排序、去重之后，让每个点和它前一个点取 LCA 连过来。</p>
+    <p>为什么只要相邻对的 LCA？考虑 dfn 序上第 i 个和第 j 个关键点，i &lt; j，设 L = lca(aᵢ, aⱼ)。aᵢ 落在 L 的某一棵子树里，aⱼ 落在 L 的另一棵子树里（或者某个就是 L 本身）。从 i 走到 j，一定存在第一个「离开 aᵢ 所在子树」的位置 t，那么 aₜ 还在那棵子树、aₜ₊₁ 已经不在，两点的 LCA 恰好就是 L。任意两点的 LCA 都落在相邻对的 LCA 集合里，所以只取相邻对就够了。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="原树上的关键点与它们的 LCA" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#9aa0a6" stroke-width="1.2">
+          <line x1="205" y1="40" x2="95" y2="92"/>
+          <line x1="205" y1="40" x2="205" y2="92"/>
+          <line x1="205" y1="40" x2="315" y2="92"/>
+          <line x1="95" y1="92" x2="52" y2="144"/>
+          <line x1="95" y1="92" x2="138" y2="144"/>
+          <line x1="52" y1="144" x2="30" y2="196"/>
+          <line x1="52" y1="144" x2="76" y2="196"/>
+          <line x1="138" y1="144" x2="138" y2="196"/>
+          <line x1="205" y1="92" x2="180" y2="144"/>
+          <line x1="205" y1="92" x2="230" y2="144"/>
+          <line x1="315" y1="92" x2="295" y2="144"/>
+          <line x1="315" y1="92" x2="340" y2="144"/>
+        </g>
+        <g fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.4">
+          <circle cx="205" cy="40" r="14"/>
+          <circle cx="95" cy="92" r="14"/>
+          <circle cx="205" cy="92" r="14"/>
+          <circle cx="315" cy="92" r="14"/>
+          <circle cx="52" cy="144" r="14"/>
+          <circle cx="138" cy="144" r="14"/>
+          <circle cx="230" cy="144" r="14"/>
+          <circle cx="295" cy="144" r="14"/>
+          <circle cx="340" cy="144" r="14"/>
+          <circle cx="76" cy="196" r="14"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.6">
+          <circle cx="205" cy="40" r="14"/>
+          <circle cx="95" cy="92" r="14"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.6">
+          <circle cx="30" cy="196" r="14"/>
+          <circle cx="138" cy="196" r="14"/>
+          <circle cx="180" cy="144" r="14"/>
+          <circle cx="295" cy="144" r="14"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="205" y="45">1</text>
+          <text x="95" y="97">2</text>
+          <text x="205" y="97">3</text>
+          <text x="315" y="97">4</text>
+          <text x="52" y="149">5</text>
+          <text x="138" y="149">6</text>
+          <text x="180" y="149">10</text>
+          <text x="230" y="149">11</text>
+          <text x="295" y="149">12</text>
+          <text x="340" y="149">13</text>
+          <text x="30" y="201">7</text>
+          <text x="76" y="201">8</text>
+          <text x="138" y="201">9</text>
+        </g>
+        <rect x="398" y="24" width="248" height="194" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="414" y="46" font-size="11" fill="#374151">关键点 S = {7, 9, 10, 12}</text>
+        <text x="414" y="70" font-size="11" fill="#374151">dfn：7→4　9→7　10→9　12→12</text>
+        <text x="414" y="94" font-size="11" fill="#2563eb">按 dfn 排序：7　9　10　12</text>
+        <text x="414" y="118" font-size="11" fill="#374151">相邻对的 LCA：</text>
+        <text x="414" y="140" font-size="11" fill="#ea580c">lca(7, 9) = 2</text>
+        <text x="414" y="162" font-size="11" fill="#ea580c">lca(9, 10) = 1</text>
+        <text x="414" y="184" font-size="11" fill="#ea580c">lca(10, 12) = 1</text>
+        <text x="414" y="206" font-size="11" fill="#374151">虚树点集 {1, 2, 7, 9, 10, 12}</text>
+        <text x="30" y="230" font-size="10" fill="#6b7280">dfn 轴：把每个点按进入时刻排开，关键点在轴上就是稀疏的几个位置</text>
+        <g font-size="11" text-anchor="middle">
+          <rect x="43" y="238" width="38" height="28" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="62" y="257" fill="#1f2328">1</text>
+          <rect x="87" y="238" width="38" height="28" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="106" y="257" fill="#1f2328">2</text>
+          <rect x="131" y="238" width="38" height="28" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="150" y="257" fill="#1f2328">5</text>
+          <rect x="175" y="238" width="38" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="194" y="257" fill="#1f2328">7</text>
+          <rect x="219" y="238" width="38" height="28" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="238" y="257" fill="#1f2328">8</text>
+          <rect x="263" y="238" width="38" height="28" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="282" y="257" fill="#1f2328">6</text>
+          <rect x="307" y="238" width="38" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="326" y="257" fill="#1f2328">9</text>
+          <rect x="351" y="238" width="38" height="28" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="370" y="257" fill="#1f2328">3</text>
+          <rect x="395" y="238" width="38" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="414" y="257" fill="#1f2328">10</text>
+          <rect x="439" y="238" width="38" height="28" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="458" y="257" fill="#1f2328">11</text>
+          <rect x="483" y="238" width="38" height="28" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="502" y="257" fill="#1f2328">4</text>
+          <rect x="527" y="238" width="38" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="546" y="257" fill="#1f2328">12</text>
+          <rect x="571" y="238" width="38" height="28" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="590" y="257" fill="#1f2328">13</text>
+        </g>
+        <g font-size="9" fill="#9aa0a6" text-anchor="middle">
+          <text x="62" y="277">1</text><text x="106" y="277">2</text><text x="150" y="277">3</text>
+          <text x="194" y="277">4</text><text x="238" y="277">5</text><text x="282" y="277">6</text>
+          <text x="326" y="277">7</text><text x="370" y="277">8</text><text x="414" y="277">9</text>
+          <text x="458" y="277">10</text><text x="502" y="277">11</text><text x="546" y="277">12</text>
+          <text x="590" y="277">13</text>
+        </g>
+        <g font-size="10" fill="#6b7280">
+          <circle cx="40" cy="300" r="4" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="50" y="304">关键点</text>
+          <circle cx="130" cy="300" r="4" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="140" y="304">关键点的 LCA</text>
+          <circle cx="262" cy="300" r="4" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="272" y="304">其余点</text>
+        </g>
+      </svg>
+      <figcaption>13 个点的原树上取 4 个关键点，需要额外补的 LCA 只有 1 和 2，虚树点集一共 6 个</figcaption>
+    </figure>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 292" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="相邻对 LCA 覆盖任意两点 LCA" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#9aa0a6" stroke-width="1.3">
+          <line x1="322" y1="56" x2="185" y2="85"/>
+          <line x1="338" y1="56" x2="475" y2="85"/>
+        </g>
+        <rect x="70" y="85" width="230" height="60" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <rect x="360" y="85" width="230" height="60" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <circle cx="330" cy="42" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="330" y="47" font-size="11" fill="#1f2328" text-anchor="middle">L</text>
+        <g fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.3">
+          <circle cx="130" cy="115" r="14"/>
+          <circle cx="240" cy="115" r="14"/>
+          <circle cx="410" cy="115" r="14"/>
+          <circle cx="480" cy="115" r="14"/>
+          <circle cx="550" cy="115" r="14"/>
+        </g>
+        <g font-size="11" fill="#374151" text-anchor="middle">
+          <text x="130" y="120">a1</text>
+          <text x="240" y="120">a2</text>
+          <text x="410" y="120">a3</text>
+          <text x="480" y="120">a4</text>
+          <text x="550" y="120">a5</text>
+        </g>
+        <circle cx="240" cy="115" r="18" fill="none" stroke="#ea580c" stroke-width="1.8"/>
+        <circle cx="410" cy="115" r="18" fill="none" stroke="#ea580c" stroke-width="1.8"/>
+        <text x="80" y="80" font-size="10" fill="#9aa0a6">L 的一棵子树</text>
+        <text x="370" y="80" font-size="10" fill="#9aa0a6">L 的另一棵子树</text>
+        <text x="30" y="182" font-size="10" fill="#6b7280">dfn 轴上，L 的整棵子树是一段连续区间，关键点在其中按 dfn 排开：</text>
+        <g font-size="11" text-anchor="middle">
+          <rect x="100" y="194" width="60" height="30" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="130" y="214" fill="#1f2328">a1</text>
+          <rect x="205" y="194" width="60" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="235" y="214" fill="#1f2328">a2</text>
+          <rect x="310" y="194" width="60" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="340" y="214" fill="#1f2328">a3</text>
+          <rect x="415" y="194" width="60" height="30" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="445" y="214" fill="#1f2328">a4</text>
+          <rect x="520" y="194" width="60" height="30" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="550" y="214" fill="#1f2328">a5</text>
+        </g>
+        <text x="30" y="248" font-size="11" fill="#ea580c">a2 与 a3 在 dfn 序上相邻，且分居 L 的两棵子树 → lca(a2, a3) = L</text>
+        <text x="30" y="270" font-size="11" fill="#374151">所以任意两点的 LCA，都能在「dfn 序相邻那一对」的 LCA 里找到</text>
+      </svg>
+      <figcaption>从 aᵢ 走到 aⱼ 时第一次跨出子树的那对相邻点，它的 LCA 正好是 lca(aᵢ, aⱼ)</figcaption>
+    </figure>
+
+    <h2>四、准备：dfn 序与倍增 LCA</h2>
+    <p>建虚树之前，原树要先做一次 dfs，拿到每个点的深度 dep、dfn 序以及倍增表 stjump。之后每次查询都要按 dfn 排序、并且频繁求 LCA，这两件事都靠这一份预处理。</p>
+    <p>注意排序的比较函数比较的是 dfn 而不是点的编号，这是虚树里所有「相邻」的含义所在。</p>
+
+            <pre class="code"><span class="kw">bool</span> <span class="fn">cmp</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">return</span> dfn[x] &lt; dfn[y];
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdgeG</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nextg[++cntg] = headg[u];
+        tog[cntg] = v;
+        headg[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdgeV</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nextv[++cntv] = headv[u];
+        tov[cntv] = v;
+        headv[u] = cntv;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        dep[u] = dep[fa] + 1;
+        dfn[u] = ++cntd;
+        stjump[u][0] = fa;
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt; MAXP; p++) {
+            stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = headg[u]; e; e = nextg[e]) {
+            <span class="kw">if</span> (tog[e] != fa) {
+                dfs(tog[e], u);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getLca</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">if</span> (dep[a] &lt; dep[b]) {
+            swap(a, b);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (dep[stjump[a][p]] &gt;= dep[b]) a = stjump[a][p];
+        }
+        <span class="kw">if</span> (a == b) {
+            <span class="kw">return</span> a;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (stjump[a][p] != stjump[b][p]) {
+                a = stjump[a][p];
+                b = stjump[b][p];
+            }
+        }
+        <span class="kw">return</span> stjump[a][0];
+    }</pre>
+
+    <h2>五、建树方式一：二次排序 + LCA 连边</h2>
+    <p>四步走完就得到虚树：先把关键点按 dfn 排序；再把每个点和它后一个点的 LCA 一起塞进数组；然后整个数组按 dfn 再排一次并去重；最后让排序后的相邻两点 xᵢ、xᵢ₊₁ 连一条 lca(xᵢ, xᵢ₊₁) 指向 xᵢ₊₁ 的边。</p>
+    <p>去重那一步不能省：LCA 可能和某个关键点重合，也可能几个相邻对算出同一个 LCA。排完序之后相同的编号一定挨在一起，扫一遍留下第一次出现的即可。</p>
+    <p>排序后的第一个点就是虚树的头。这里有个细节：它不一定是原树的头，只是 dfn 最小的那个关键点；需要原树头参与计算时，要手动把它塞进关键点数组，题 3 和题 4 就是这么做的。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="二次排序加 LCA 连边的四步" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="30" font-size="11" fill="#374151">① 关键点按 dfn 排序</text>
+        <g font-size="11" text-anchor="middle">
+          <rect x="40" y="38" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="68" y="60" fill="#1f2328">7</text>
+          <rect x="160" y="38" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="188" y="60" fill="#1f2328">9</text>
+          <rect x="280" y="38" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="308" y="60" fill="#1f2328">10</text>
+          <rect x="400" y="38" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="428" y="60" fill="#1f2328">12</text>
+        </g>
+        <text x="30" y="96" font-size="11" fill="#374151">② 每一对相邻点中间插一个 LCA</text>
+        <g font-size="11" text-anchor="middle">
+          <rect x="40" y="104" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="68" y="126" fill="#1f2328">7</text>
+          <rect x="100" y="104" width="56" height="34" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="128" y="126" fill="#1f2328">2</text>
+          <rect x="160" y="104" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="188" y="126" fill="#1f2328">9</text>
+          <rect x="220" y="104" width="56" height="34" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="248" y="126" fill="#1f2328">1</text>
+          <rect x="280" y="104" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="308" y="126" fill="#1f2328">10</text>
+          <rect x="340" y="104" width="56" height="34" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="368" y="126" fill="#1f2328">1</text>
+          <rect x="400" y="104" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="428" y="126" fill="#1f2328">12</text>
+        </g>
+        <text x="470" y="126" font-size="10" fill="#9aa0a6">橙色是补进来的 LCA</text>
+        <text x="30" y="162" font-size="11" fill="#374151">③ 整段再按 dfn 排序，相邻相同只留一个</text>
+        <g font-size="11" text-anchor="middle">
+          <rect x="40" y="170" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="68" y="192" fill="#1f2328">1</text>
+          <rect x="100" y="170" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="128" y="192" fill="#1f2328">2</text>
+          <rect x="160" y="170" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="188" y="192" fill="#1f2328">7</text>
+          <rect x="220" y="170" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="248" y="192" fill="#1f2328">9</text>
+          <rect x="280" y="170" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="308" y="192" fill="#1f2328">10</text>
+          <rect x="340" y="170" width="56" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="368" y="192" fill="#1f2328">12</text>
+        </g>
+        <text x="410" y="192" font-size="10" fill="#9aa0a6">7 项去重后剩 6 项</text>
+        <text x="30" y="228" font-size="11" fill="#374151">④ 相邻两项连边：lca(前, 后) → 后</text>
+        <text x="30" y="250" font-size="11" fill="#ea580c">1→2　2→7　2→9　1→10　1→12</text>
+        <text x="30" y="270" font-size="10" fill="#6b7280">5 条边、6 个点，第一项 1 就是虚树的头</text>
+      </svg>
+      <figcaption>二次排序建树：排序、插 LCA、再排序去重、相邻连边，四步都在 dfn 序上做</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">二次排序建树，一步一步走</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">还是上面那棵树，关键点 {7, 9, 10, 12}。点「下一步」，看数组怎么变长、怎么去重、边怎么一条条连出来。</p>
+      <svg id="vtSvg1" viewBox="0 0 660 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="二次排序建虚树演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>关键点</span>
+        <span><span class="dot partial"></span>补进来的 LCA</span>
+        <span><span class="dot skip"></span>还没连的边</span>
+      </div>
+      <div class="breakdown" id="vtInfo1"></div>
+      <div class="viz-controls">
+        <button class="vt-btn" id="vtPrev1" type="button">上一步</button>
+        <button class="vt-btn" id="vtNext1" type="button">下一步</button>
+        <button class="vt-btn" id="vtReset1" type="button">重来</button>
+      </div>
+    </div>
+
+            <pre class="code"><span class="kw">int</span> <span class="fn">buildVirtualTree1</span>() {
+        sort(arr + 1, arr + k + 1, cmp);
+        <span class="kw">int</span> len = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; k; i++) {
+            tmp[++len] = arr[i];
+            tmp[++len] = getLca(arr[i], arr[i + 1]);
+        }
+        tmp[++len] = arr[k];
+        sort(tmp + 1, tmp + len + 1, cmp);
+        <span class="kw">int</span> unique = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= len; i++) {
+            <span class="kw">if</span> (tmp[unique] != tmp[i]) {
+                tmp[++unique] = tmp[i];
+            }
+        }
+        cntv = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= unique; i++) {
+            headv[tmp[i]] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; unique; i++) {
+            addEdgeV(getLca(tmp[i], tmp[i + 1]), tmp[i + 1]);
+        }
+        <span class="kw">return</span> tmp[1];
+    }</pre>
+
+    <h2>六、建树方式二：单调栈</h2>
+    <p>第二种做法只排一次序，用栈维护「从当前虚树头走到上一个处理完的点」这一条链。栈里的点按深度递增，栈底最深（dfn 最小）。</p>
+    <p>每来一个新点 x，先求 lca = lca(x, 栈顶)。只要栈顶下面那个点的 dfn 不小于 lca 的 dfn，说明栈顶这条分支已经走完了，把它和它下面那个点连起来并弹出。弹完之后：如果 lca 不等于栈顶，说明 lca 是个新分叉点，把它和栈顶连起来、用它替换栈顶；最后把 x 压进去。所有点处理完，把栈里剩下的相邻对依次连边。</p>
+    <p>两种做法建出的虚树完全一样。一般用第一种，理由是流程好记：排序、插 LCA、排序去重、连边，四步不会记错。</p>
+
+    <div class="viz">
+      <div class="viz-title">单调栈建树，一步一步走</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">同一组关键点 {7, 9, 10, 12}。左边是栈，右边是正在长出来的虚树。注意第 3 步：一次弹栈把 9 弹了出去，边 2→9 就是在弹出的那一刻连的。</p>
+      <svg id="vtSvg2" viewBox="0 0 660 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="单调栈建虚树演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>当前要处理的点 x</span>
+        <span><span class="dot partial"></span>刚求出的 lca</span>
+        <span><span class="dot skip"></span>栈里的链</span>
+      </div>
+      <div class="breakdown" id="vtInfo2"></div>
+      <div class="viz-controls">
+        <button class="vt-btn" id="vtPrev2" type="button">上一步</button>
+        <button class="vt-btn" id="vtNext2" type="button">下一步</button>
+        <button class="vt-btn" id="vtReset2" type="button">重来</button>
+      </div>
+    </div>
+
+            <pre class="code"><span class="kw">int</span> <span class="fn">buildVirtualTree2</span>() {
+        sort(arr + 1, arr + k + 1, cmp);
+        cntv = 0;
+        headv[arr[1]] = 0;
+        <span class="kw">int</span> top = 0;
+        stk[++top] = arr[1];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= k; i++) {
+            <span class="kw">int</span> x = arr[i];
+            <span class="kw">int</span> y = stk[top];
+            <span class="kw">int</span> lca = getLca(x, y);
+            <span class="kw">while</span> (top &gt; 1 &amp;&amp; dfn[stk[top - 1]] &gt;= dfn[lca]) {
+                addEdgeV(stk[top - 1], stk[top]);
+                top--;
+            }
+            <span class="kw">if</span> (lca != stk[top]) {
+                headv[lca] = 0;
+                addEdgeV(lca, stk[top]);
+                stk[top] = lca;
+            }
+            headv[x] = 0;
+            stk[++top] = x;
+        }
+        <span class="kw">while</span> (top &gt; 1) {
+            addEdgeV(stk[top - 1], stk[top]);
+            top--;
+        }
+        <span class="kw">return</span> stk[1];
+    }</pre>
+
+    <h2>七、虚树为什么够用</h2>
+    <p>点数是 O(k)：k 个关键点最多补进 k - 1 个 LCA，虚树点数不超过 2k - 1，边数比点数少 1。这和原树多大没有关系。</p>
+    <p>边的含义要记牢：虚树里一条边 (u, v) 代表原树上 u 到 v 的一条路径，这条路径中间不再有任何虚树上的点。所以边权可以是路径长度、路径上的最小边权、路径边权之和，取决于题目要什么。</p>
+    <p>还有两处可以按需要调整的开关。一是虚树的头不一定是原树的头，题目要明确以 1 号点为根时（比如「让所有关键点都到不了 1」），就把 1 号点额外塞进关键点数组。二是一般只连「上到下」的单向边，只有需要从下往上传递信息时才连双向，题 5 就是这种情况。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="原树与虚树的规模对比" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="25" y="30" font-size="11" fill="#374151">原树：13 个点、12 条边</text>
+        <text x="355" y="30" font-size="11" fill="#374151">虚树：6 个点、5 条边</text>
+        <rect x="20" y="40" width="292" height="165" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <rect x="348" y="40" width="292" height="165" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <g stroke="#9aa0a6" stroke-width="1.1">
+          <line x1="165" y1="62" x2="80" y2="95"/>
+          <line x1="165" y1="62" x2="165" y2="95"/>
+          <line x1="165" y1="62" x2="250" y2="95"/>
+          <line x1="80" y1="95" x2="48" y2="132"/>
+          <line x1="80" y1="95" x2="112" y2="132"/>
+          <line x1="48" y1="132" x2="30" y2="172"/>
+          <line x1="48" y1="132" x2="66" y2="172"/>
+          <line x1="112" y1="132" x2="112" y2="172"/>
+          <line x1="165" y1="95" x2="150" y2="132"/>
+          <line x1="165" y1="95" x2="182" y2="132"/>
+          <line x1="250" y1="95" x2="232" y2="132"/>
+          <line x1="250" y1="95" x2="268" y2="132"/>
+        </g>
+        <g fill="#ffffff" stroke="#c9ced4" stroke-width="1.2">
+          <circle cx="165" cy="62" r="11"/><circle cx="80" cy="95" r="11"/><circle cx="165" cy="95" r="11"/>
+          <circle cx="250" cy="95" r="11"/><circle cx="48" cy="132" r="11"/><circle cx="112" cy="132" r="11"/>
+          <circle cx="182" cy="132" r="11"/><circle cx="232" cy="132" r="11"/><circle cx="268" cy="132" r="11"/>
+          <circle cx="66" cy="172" r="11"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="165" cy="62" r="11"/><circle cx="80" cy="95" r="11"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.4">
+          <circle cx="30" cy="172" r="11"/><circle cx="112" cy="172" r="11"/>
+          <circle cx="150" cy="132" r="11"/><circle cx="232" cy="132" r="11"/>
+        </g>
+        <g font-size="10" fill="#374151" text-anchor="middle">
+          <text x="165" y="66">1</text><text x="80" y="99">2</text><text x="165" y="99">3</text>
+          <text x="250" y="99">4</text><text x="48" y="136">5</text><text x="112" y="136">6</text>
+          <text x="150" y="136">10</text><text x="182" y="136">11</text><text x="232" y="136">12</text>
+          <text x="268" y="136">13</text><text x="30" y="176">7</text><text x="66" y="176">8</text>
+          <text x="112" y="176">9</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.4">
+          <line x1="494" y1="66" x2="400" y2="112"/>
+          <line x1="494" y1="66" x2="494" y2="112"/>
+          <line x1="494" y1="66" x2="588" y2="112"/>
+          <line x1="400" y1="112" x2="360" y2="170"/>
+          <line x1="400" y1="112" x2="440" y2="170"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+          <circle cx="494" cy="66" r="16"/>
+          <circle cx="400" cy="112" r="16"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.5">
+          <circle cx="360" cy="170" r="16"/>
+          <circle cx="440" cy="170" r="16"/>
+          <circle cx="494" cy="112" r="16"/>
+          <circle cx="588" cy="112" r="16"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="494" y="71">1</text><text x="400" y="117">2</text>
+          <text x="360" y="175">7</text><text x="440" y="175">9</text>
+          <text x="494" y="117">10</text><text x="588" y="117">12</text>
+        </g>
+        <text x="330" y="130" font-size="18" fill="#9aa0a6">→</text>
+        <text x="300" y="150" font-size="10" fill="#9aa0a6">压缩</text>
+        <text x="25" y="232" font-size="11" fill="#374151">虚边对应的原树路径（括号里是长度）：</text>
+        <text x="25" y="252" font-size="11" fill="#ea580c">1→2：1-2（1）</text>
+        <text x="150" y="252" font-size="11" fill="#ea580c">2→7：2-5-7（2）</text>
+        <text x="300" y="252" font-size="11" fill="#ea580c">2→9：2-6-9（2）</text>
+        <text x="450" y="252" font-size="11" fill="#ea580c">1→10：1-3-10（2）</text>
+        <text x="25" y="272" font-size="11" fill="#ea580c">1→12：1-4-12（2）</text>
+        <text x="150" y="272" font-size="10" fill="#6b7280">虚树里一条边 = 原树一条路径，路径中间没有别的虚树点</text>
+      </svg>
+      <figcaption>13 个点压成 6 个点：虚树上每条边记着原树一段路径，长度可以在连边时顺手算出来</figcaption>
+    </figure>
+
+    <h2>八、复杂度分析</h2>
+    <p>设一次查询给出 k 个关键点，所有查询的 k 之和是 K，原树 n 个点。预处理只做一次，之后每条查询的代价只和 k 有关。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>步骤</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>预处理 dfs：dep、dfn、倍增表</td><td><code class="inline">O(n log n)</code></td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>关键点按 dfn 排序</td><td><code class="inline">O(k log k)</code></td><td><code class="inline">O(k)</code></td></tr>
+        <tr><td>相邻对求 LCA（k - 1 次）</td><td><code class="inline">O(k log n)</code></td><td><code class="inline">O(1)</code></td></tr>
+        <tr><td>二次排序 + 去重</td><td><code class="inline">O(k log k)</code></td><td><code class="inline">O(k)</code></td></tr>
+        <tr><td>相邻点连边</td><td><code class="inline">O(k)</code></td><td><code class="inline">O(k)</code></td></tr>
+        <tr><td>虚树上跑树型 dp</td><td><code class="inline">O(k)</code></td><td><code class="inline">O(k)</code></td></tr>
+        <tr><td>单次查询合计</td><td><code class="inline">O(k log k + k log n)</code></td><td><code class="inline">O(k)</code></td></tr>
+        <tr><td>全部 q 条查询</td><td><code class="inline">O(K log K + K log n)</code></td><td><code class="inline">O(K)</code></td></tr>
+      </tbody>
+    </table>
+    <p>口径按 O(k log n) 记，把排序那一项并进去了：k 的量级和 n 同阶时两者差不了多少。单调栈建树只排一次序，省掉的是二次排序的 O(k log k)，LCA 那部分一样。</p>
+    <p>和不建虚树的 O(nq) 比，差别就在 n 换成了 k。所有查询的关键点总数 K 有上界，这一条是虚树能用起来的前提。</p>
+
+    <h2>九、最后</h2>
+    <p>虚树的整套动作就三件：按 dfn 序把关键点排开，补进相邻对的 LCA，按相邻关系连边。得到的是一棵 O(k) 个点的小树，原树上一整段路径在这里只是一条带权边。</p>
+    <p>下一页拿这套结构去做六个题，前三道是模版题，后三道是经典题，能看出「边权怎么取、头节点要不要补、要不要连双向边」这三种开关分别在什么场合打开。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  // 示例：dfn 1:1 2:2 5:3 7:4 8:5 6:6 9:7 3:8 10:9 11:10 4:11 12:12 13:13
+  // 关键点 {7,9,10,12} → 虚树点 {1,2,7,9,10,12}，边 (1,2)(2,7)(2,9)(1,10)(1,12)
+  var VT = { 1:[330,120], 2:[190,180], 10:[330,180], 12:[470,180], 7:[110,250], 9:[270,250] };
+  var EDGES = [[1,2],[2,7],[2,9],[1,10],[1,12]];
+  var KEY = {7:1, 9:1, 10:1, 12:1};
+
+  var STEPS1 = [
+    { cells:[[7,'k'],[9,'k'],[10,'k'],[12,'k']], nEdge:0, showNodes:false,
+      t:'第一步：关键点按 dfn 排序',
+      s:'dfn 分别是 7→4、9→7、10→9、12→12，排完就是 7、9、10、12。' },
+    { cells:[[7,'k'],[2,'l'],[9,'k'],[1,'l'],[10,'k'],[1,'l'],[12,'k']], nEdge:0, showNodes:false,
+      t:'第二步：每一对相邻点中间插一个 LCA',
+      s:'lca(7,9)=2、lca(9,10)=1、lca(10,12)=1。数组从 4 项变成 7 项。' },
+    { cells:[[1,'k'],[2,'k'],[7,'k'],[9,'k'],[10,'k'],[12,'k']], nEdge:0, showNodes:true,
+      t:'第三步：整段按 dfn 再排一次并去重',
+      s:'1 出现了两次，去重后剩 6 项：1、2、7、9、10、12。第一项 1 就是虚树的头。' },
+    { cells:[[1,'k'],[2,'k'],[7,'k'],[9,'k'],[10,'k'],[12,'k']], nEdge:1, showNodes:true,
+      t:'第四步：lca(1,2)=1，连 1→2',
+      s:'第一对是 1 和 2，LCA 就是 1 自己，边是 1→2。' },
+    { cells:[[1,'k'],[2,'k'],[7,'k'],[9,'k'],[10,'k'],[12,'k']], nEdge:2, showNodes:true,
+      t:'连 2→7',
+      s:'lca(2,7)=2，边是 2→7，对应原树路径 2-5-7，长度 2。' },
+    { cells:[[1,'k'],[2,'k'],[7,'k'],[9,'k'],[10,'k'],[12,'k']], nEdge:3, showNodes:true,
+      t:'连 2→9',
+      s:'lca(2,9)=2，边是 2→9，对应原树路径 2-6-9，长度 2。7 和 9 在这里第一次分叉。' },
+    { cells:[[1,'k'],[2,'k'],[7,'k'],[9,'k'],[10,'k'],[12,'k']], nEdge:4, showNodes:true,
+      t:'连 1→10',
+      s:'lca(9,10)=1，边是 1→10，对应原树路径 1-3-10，长度 2。' },
+    { cells:[[1,'k'],[2,'k'],[7,'k'],[9,'k'],[10,'k'],[12,'k']], nEdge:5, showNodes:true,
+      t:'连 1→12',
+      s:'lca(10,12)=1，边是 1→12，对应原树路径 1-4-12，长度 2。' },
+    { cells:[[1,'k'],[2,'k'],[7,'k'],[9,'k'],[10,'k'],[12,'k']], nEdge:5, showNodes:true,
+      t:'建完了：6 个点、5 条边',
+      s:'k = 4 个关键点，虚树 6 个点 ≤ 2k - 1 = 7。原树 13 个点，这里一个都不需要访问。' }
+  ];
+
+  function cell1(i, kind){
+    var x = 40 + i * 68;
+    var f = kind === 'l' ? '#ffedd5' : '#dbeafe';
+    var s = kind === 'l' ? '#ea580c' : '#2563eb';
+    return '<rect x="' + x + '" y="30" width="62" height="38" rx="6" fill="' + f + '" stroke="' + s + '" stroke-width="1.4"/>';
+  }
+  function cellText1(i, v){
+    var x = 40 + i * 68 + 31;
+    return '<text x="' + x + '" y="55" font-size="12" fill="#1f2328" text-anchor="middle">' + v + '</text>';
+  }
+
+  function render1(){
+    var st = STEPS1[at1];
+    var p = [];
+    p.push('<text x="30" y="18" font-size="10" fill="#6b7280">当前数组（按 dfn 排好序）</text>');
+    for (var i = 0; i < st.cells.length; i++){
+      p.push(cell1(i, st.cells[i][1]));
+      p.push(cellText1(i, st.cells[i][0]));
+    }
+    p.push('<line x1="30" y1="82" x2="630" y2="82" stroke="#e6e8eb" stroke-width="1"/>');
+    p.push('<text x="30" y="100" font-size="10" fill="#6b7280">正在长出来的虚树</text>');
+    if (!st.showNodes){
+      p.push('<text x="330" y="190" font-size="11" fill="#9aa0a6" text-anchor="middle">还没有连边</text>');
+    } else {
+      var us = [1,2,7,9,10,12];
+      p.push('<g stroke="#9aa0a6" stroke-width="1.4">');
+      for (var e = 0; e < st.nEdge; e++){
+        var a = VT[EDGES[e][0]], b = VT[EDGES[e][1]];
+        p.push('<line x1="' + a[0] + '" y1="' + (a[1]+16) + '" x2="' + b[0] + '" y2="' + (b[1]-16) + '"/>');
+      }
+      p.push('</g>');
+      for (var j = 0; j < us.length; j++){
+        var u = us[j], c = VT[u];
+        var isK = !!KEY[u];
+        p.push('<circle cx="' + c[0] + '" cy="' + c[1] + '" r="16" fill="' + (isK ? '#ffedd5' : '#dbeafe') + '" stroke="' + (isK ? '#ea580c' : '#2563eb') + '" stroke-width="1.5"/>');
+        p.push('<text x="' + c[0] + '" y="' + (c[1]+4) + '" font-size="11" fill="#1f2328" text-anchor="middle">' + u + '</text>');
+      }
+      if (st.nEdge >= 5){
+        p.push('<text x="330" y="292" font-size="11" fill="#ea580c" text-anchor="middle">虚树完成：6 个点、5 条边，头是 1</text>');
+      }
+    }
+    p.push('<text x="30" y="318" font-size="10" fill="#6b7280">排序和去重都在 dfn 序上做；连边的方向是 lca(前, 后) → 后</text>');
+    svg1.innerHTML = p.join('');
+    info1.innerHTML = '<div><strong>' + st.t + '</strong></div><div>' + st.s + '</div>';
+    prev1.disabled = at1 === 0;
+    next1.disabled = at1 === STEPS1.length - 1;
+  }
+
+  var svg1 = document.getElementById('vtSvg1');
+  var info1 = document.getElementById('vtInfo1');
+  var prev1 = document.getElementById('vtPrev1');
+  var next1 = document.getElementById('vtNext1');
+  var reset1 = document.getElementById('vtReset1');
+  var at1 = 0;
+  prev1.addEventListener('click', function(){ if (at1 > 0){ at1--; render1(); } });
+  next1.addEventListener('click', function(){ if (at1 < STEPS1.length - 1){ at1++; render1(); } });
+  reset1.addEventListener('click', function(){ at1 = 0; render1(); });
+  render1();
+
+  // ---- 演示 2：单调栈 ----
+  var VT2 = { 1:[400,80], 2:[265,150], 10:[400,150], 12:[535,150], 7:[180,230], 9:[350,230] };
+  var STEPS2 = [
+    { stk:[], edges:[], t:'起点：关键点已按 dfn 排序',
+      s:'待处理序列是 7、9、10、12。栈空，虚树一条边都还没有。' },
+    { stk:[7], edges:[], t:'压入 7',
+      s:'栈里只有 7，栈底就是它。' },
+    { stk:[2,9], edges:[[2,7]], t:'处理 x = 9：lca(9,7) = 2',
+      s:'lca 不等于栈顶 7，说明 2 是个新分叉点：连边 2→7，用 2 替换栈顶，再把 9 压进去。' },
+    { stk:[1,10], edges:[[2,7],[2,9],[1,2]], t:'处理 x = 10：lca(10,9) = 1',
+      s:'栈顶下面那个点是 2，dfn[2] = 2 ≥ dfn[1] = 1，弹栈并连边 2→9；lca 又不等于栈顶 2，连边 1→2 并替换；压入 10。' },
+    { stk:[1,12], edges:[[2,7],[2,9],[1,2],[1,10]], t:'处理 x = 12：lca(12,10) = 1',
+      s:'栈顶下面是 1，dfn[1] = 1 ≥ dfn[1] = 1，弹栈并连边 1→10；这回 lca 就等于栈顶，不用再连；压入 12。' },
+    { stk:[1], edges:[[2,7],[2,9],[1,2],[1,10],[1,12]], t:'收尾：把栈里剩下的相邻对连完',
+      s:'连边 1→12，弹到只剩栈底。栈底 1 就是虚树的头。' },
+    { stk:[1], edges:[[2,7],[2,9],[1,2],[1,10],[1,12]], t:'建完了：和二次排序那版一模一样',
+      s:'同样是 6 个点、5 条边，边集完全一致，只是省掉了第二次排序。' }
+  ];
+
+  function render2(){
+    var st = STEPS2[at2];
+    var p = [];
+    p.push('<text x="40" y="18" font-size="10" fill="#6b7280">栈（下=栈底，上=栈顶）</text>');
+    for (var i = 0; i < st.stk.length; i++){
+      var y = 232 - i * 38;
+      p.push('<rect x="40" y="' + y + '" width="90" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>');
+      p.push('<text x="85" y="' + (y+22) + '" font-size="12" fill="#1f2328" text-anchor="middle">' + st.stk[i] + '</text>');
+    }
+    if (st.stk.length === 0){
+      p.push('<text x="85" y="250" font-size="11" fill="#9aa0a6" text-anchor="middle">空</text>');
+    }
+    p.push('<line x1="150" y1="60" x2="150" y2="290" stroke="#e6e8eb" stroke-width="1"/>');
+    var used = {};
+    for (var e = 0; e < st.edges.length; e++){
+      used[st.edges[e][0]] = 1; used[st.edges[e][1]] = 1;
+    }
+    for (var s2 = 0; s2 < st.stk.length; s2++){ used[st.stk[s2]] = 1; }
+    p.push('<g stroke="#9aa0a6" stroke-width="1.4">');
+    for (var e2 = 0; e2 < st.edges.length; e2++){
+      var a = VT2[st.edges[e2][0]], b = VT2[st.edges[e2][1]];
+      p.push('<line x1="' + a[0] + '" y1="' + (a[1]+16) + '" x2="' + b[0] + '" y2="' + (b[1]-16) + '"/>');
+    }
+    p.push('</g>');
+    var ids = [1,2,7,9,10,12];
+    for (var j = 0; j < ids.length; j++){
+      if (!used[ids[j]]) continue;
+      var u = ids[j], c = VT2[u];
+      var isK = !!KEY[u];
+      p.push('<circle cx="' + c[0] + '" cy="' + c[1] + '" r="16" fill="' + (isK ? '#ffedd5' : '#dbeafe') + '" stroke="' + (isK ? '#ea580c' : '#2563eb') + '" stroke-width="1.5"/>');
+      p.push('<text x="' + c[0] + '" y="' + (c[1]+4) + '" font-size="11" fill="#1f2328" text-anchor="middle">' + u + '</text>');
+    }
+    if (st.edges.length === 0){
+      p.push('<text x="395" y="180" font-size="11" fill="#9aa0a6" text-anchor="middle">还没有连边</text>');
+    }
+    p.push('<text x="30" y="318" font-size="10" fill="#6b7280">弹栈条件 dfn[stk[top-1]] ≥ dfn[lca]：栈顶这条分支走完了，就在弹出的同时连边</text>');
+    svg2.innerHTML = p.join('');
+    info2.innerHTML = '<div><strong>' + st.t + '</strong></div><div>' + st.s + '</div>';
+    prev2.disabled = at2 === 0;
+    next2.disabled = at2 === STEPS2.length - 1;
+  }
+
+  var svg2 = document.getElementById('vtSvg2');
+  var info2 = document.getElementById('vtInfo2');
+  var prev2 = document.getElementById('vtPrev2');
+  var next2 = document.getElementById('vtNext2');
+  var reset2 = document.getElementById('vtReset2');
+  var at2 = 0;
+  prev2.addEventListener('click', function(){ if (at2 > 0){ at2--; render2(); } });
+  next2.addEventListener('click', function(){ if (at2 < STEPS2.length - 1){ at2++; render2(); } });
+  reset2.addEventListener('click', function(){ at2 = 0; render2(); });
+  render2();
+})();
+</script>
+</body>
+</html>

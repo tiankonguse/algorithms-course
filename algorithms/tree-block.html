@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>树上分块（一）：重链序列分块与随机撒点 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.tbrow{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:8px;}
+.tbtag{font-size:13px;color:var(--text-dim);}
+.chainlist{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+.chain{
+  font-size:13px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);
+  background:var(--bg-soft);font-variant-numeric:tabular-nums;
+}
+.chain b{color:var(--accent);font-weight:600;}
+.btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;align-items:center;}
+.viz button,.viz select{
+  font:inherit;font-size:14px;padding:6px 14px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--border);background:var(--bg);color:var(--text);
+}
+.viz select{padding:6px 8px;}
+.viz button:hover{border-color:var(--accent);color:var(--accent);}
+.viz button.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+.viz button:disabled{opacity:.4;cursor:default;}
+.stepnote{margin-top:12px;font-size:14px;color:var(--text-dim);min-height:52px;line-height:1.7;}
+.stepnote b{color:var(--accent);}
+.bits{margin-top:10px;font-size:14px;}
+.bits span{
+  display:inline-block;min-width:26px;padding:2px 6px;margin-right:6px;text-align:center;
+  border-radius:6px;background:var(--full-bg);color:var(--full);font-weight:600;
+  font-variant-numeric:tabular-nums;
+}
+@media(max-width:760px){
+  .stepnote{min-height:64px;}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>树上分块（一）：重链序列分块与随机撒点</h1>
+    <p class="intro">序列分块能用，是因为下标连续。树上没有这个前提，所以树上分块的第一步永远是「想办法造出连续下标」，或者「干脆不造，用别的东西代替块」。</p>
+
+    <h2>零、背景</h2>
+    <p>前面几道题，分块切的都是数组：下标连续，[l, r] 天然能分成「左散块 + 中间整块 + 右散块」。</p>
+    <p>树上的路径没有这种结构，两个端点之间的点既不连续、也不成块。所以要先解决「树的哪个维度是可以切的」。</p>
+    <p>这一节给两种做法：一种是重链剖分之后对 dfn 序号分块，另一种是随机撒关键点。两种都用在下面这道题上。</p>
+
+    <h2>一、问题：树上分块模版题</h2>
+    <p>一棵 n 个节点的树，每个节点有点权。m 条操作，每条操作给 k 个点对，每个点对 (x, y) 在树上有一条路径，k 个点对就是 k 条路径。</p>
+    <p>每条操作打印两个答案：k 条路径上不同点权的数量，以及这些点权集合里没出现的最小非负数（mex）。</p>
+    <p>1 ≤ n、点对总数 ≤ 10⁵，点权 ≤ 30000。题目强制在线，测试链接：<a href="https://www.luogu.com.cn/problem/P3603" target="_blank" rel="noopener">洛谷 P3603</a>。</p>
+    <p>强制在线的意思是每条操作的 x、y 要和上一次的答案异或才能得到，必须回答完上一条才能读下一条。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>每条操作开一个 set，把 k 条路径上的点权全塞进去，最后输出 set.size() 和从 0 开始第一个没出现的数。</p>
+    <p>代价是路径总长度。题目只保证点对总数是 10⁵，单条操作里可以只给一个点对、且这个点对横跨整棵树，一次就是 O(n)，m 次下来是 O(n²)。</p>
+    <p>可以发现瓶颈在「逐个把点权加进集合」。只要能把路径上的点整段整段地并进去，就能快下来。</p>
+    <p>点权 ≤ 30000 这个范围提示了做法：用一个 30001 位的位图表示「哪些点权出现过」，不同点权数就是位图里 1 的个数，mex 就是从低位开始第一个 0。合并两条路径的信息，就是一次位图或。</p>
+
+    <h2>三、重链剖分给出连续下标</h2>
+    <p>重链剖分之后，每个节点拿到一个 dfn 序号，并且有两条性质：一棵子树内的 dfn 是连续的一段，同一条重链上的 dfn 也是连续的一段。</p>
+    <p>第二条性质是关键。树上任意一条路径，按重链剖分的标准跳法拆开，会变成 O(log n) 段，每一段都是「某条重链上的一段」，也就是 dfn 上连续的一段。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>重链剖分之后，同一条重链上的节点 dfn 连续，于是树上的一条路径拆成了若干段连续 dfn</figcaption>
+    </figure>
+
+    <p>这样问题就变了：原来是「把树上一条路径的点并进位图」，现在是「把 dfn 数组上若干个区间并进位图」。</p>
+
+    <h2>四、dfn 序列分块 + 位图</h2>
+    <p>对 dfn 数组分块，块长取 √(20n) 左右。每个块维护一个位图 bitSet[b]，表示这个块里出现过哪些点权，预处理时把块内每个点的点权置进去。</p>
+    <p>一次区间查询 [l, r] 就完全是序列分块的套路了：两端不完整的块逐个点置位 ans[val[i]] = 1，中间完整的块直接 ans |= bitSet[b]。</p>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>一次 dfn 区间查询 = 左散块逐个置位 + 中间整块位图或 + 右散块逐个置位</figcaption>
+    </figure>
+
+    <p>于是单点信息（散块）和整块信息走的是两条不同的路：散块靠 val 数组一个一个来，整块靠预处理好的位图一次并进去。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　一条路径怎么拆成 dfn 上的连续段</div>
+      <p style="margin:0 0 10px;font-size:14px;color:var(--text-dim)">12 个节点，点权写在 dfn 格子里。演示里块长取 2，真实题目取 √(20n)，取小是为了让散块和整块在同一次查询里都出现。</p>
+      <div id="viz1"></div>
+      <div class="bits" id="bits1"></div>
+      <div class="btnrow">
+        <button class="primary" id="btnNext">下一步</button>
+        <button id="btnPrev">上一步</button>
+        <button id="btnReset">重置</button>
+        <select id="selPair">
+          <option value="0">查询：9 和 12</option>
+          <option value="1">查询：11 和 5</option>
+          <option value="2">查询：7 和 12</option>
+          <option value="3">查询：10 和 9</option>
+        </select>
+      </div>
+      <div class="stepnote" id="note1"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>已经并进位图</span>
+        <span><span class="dot partial"></span>当前这一段</span>
+      </div>
+    </div>
+
+    <h2>五、代码：重链序列分块</h2>
+    <p>两遍 dfs 做重链剖分，第二遍 dfs 顺便把 val[dfn] 填好。之后就是标准的 dfn 分块。</p>
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXB = 401;
+    <span class="kw">const</span> <span class="kw">int</span> MAXV = 30001;
+    <span class="kw">int</span> n, m, f, k;
+    <span class="kw">int</span> arr[MAXN];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> dep[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">int</span> son[MAXN];
+    <span class="kw">int</span> top[MAXN];
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> val[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> blen, bnum;
+    <span class="kw">int</span> bi[MAXN];
+    <span class="kw">int</span> bl[MAXB];
+    <span class="kw">int</span> br[MAXB];
+    bitset&lt;MAXV&gt; bitSet[MAXB];
+
+    bitset&lt;MAXV&gt; ans;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs1</span>(<span class="kw">int</span> u, <span class="kw">int</span> f) {
+        fa[u] = f;
+        dep[u] = dep[f] + 1;
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != f) {
+                dfs1(v, u);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != f) {
+                siz[u] += siz[v];
+                <span class="kw">if</span> (!son[u] || siz[son[u]] &lt; siz[v]) {
+                    son[u] = v;
+                }
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs2</span>(<span class="kw">int</span> u, <span class="kw">int</span> t) {
+        top[u] = t;
+        dfn[u] = ++cntd;
+        val[cntd] = arr[u];
+        <span class="kw">if</span> (!son[u]) {
+            <span class="kw">return</span>;
+        }
+        dfs2(son[u], t);
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != fa[u] &amp;&amp; v != son[u]) {
+                dfs2(v, v);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (bi[l] == bi[r]) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+                ans[val[i]] = 1;
+            }
+        } <span class="kw">else</span> {
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= br[bi[l]]; i++) {
+                ans[val[i]] = 1;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = bl[bi[r]]; i &lt;= r; i++) {
+                ans[val[i]] = 1;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = bi[l] + 1; i &lt;= bi[r] - 1; i++) {
+                ans |= bitSet[i];
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">updateAns</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">while</span> (top[x] != top[y]) {
+            <span class="kw">if</span> (dep[top[x]] &lt; dep[top[y]]) {
+                swap(x, y);
+            }
+            query(dfn[top[x]], dfn[x]);
+            x = fa[top[x]];
+        }
+        query(min(dfn[x], dfn[y]), max(dfn[x], dfn[y]));
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        dfs1(1, 0);
+        dfs2(1, 1);
+        blen = (<span class="kw">int</span>)sqrt(n * 20);
+        bnum = (n + blen - 1) / blen;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= bnum; i++) {
+            bl[i] = (i - 1) * blen + 1;
+            br[i] = min(i * blen, n);
+            <span class="kw">for</span> (<span class="kw">int</span> j = bl[i]; j &lt;= br[i]; j++) {
+                bitSet[i][val[j]] = 1;
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; f;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        prepare();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, lastAns = 0; i &lt;= m; i++) {
+            ans.reset(); 
+            cin &gt;&gt; k;
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1, x, y; j &lt;= k; j++) {
+                cin &gt;&gt; x &gt;&gt; y;
+                <span class="kw">if</span> (f) {
+                    x ^= lastAns;
+                    y ^= lastAns;
+                }
+                updateAns(x, y);
+            }
+            <span class="kw">int</span> ans1 = ans.count();
+            <span class="kw">int</span> ans2 = MAXV;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; MAXV; i++) {
+                <span class="kw">if</span> (ans[i] == 0) {
+                    ans2 = i;
+                    <span class="kw">break</span>;
+                }
+            }
+            cout &lt;&lt; ans1 &lt;&lt; ' ' &lt;&lt; ans2 &lt;&lt; '\n';
+            lastAns = ans1 + ans2;
+        }
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+    <p>updateAns 里的 while 就是重链剖分跳 lca 的那套：谁的 top 深就先把谁这条链处理掉，最后两条链合到一起，再处理剩下的同一条链上的一段。</p>
+    <p>注意这里的 dfn 分块没有维护修改，只维护查询，因为题目里点权从头到尾不变。</p>
+
+    <h2>六、另一种思路：随机撒点</h2>
+    <p>重链剖分那套需要两遍 dfs、还要维护重儿子。换一个更省事的办法：在树上随机选大约 √n 个节点当关键点，剩下的是非关键点。</p>
+    <p>随机撒点之后有两条期望性质：一个非关键点往上走到最近的关键点，期望距离是 O(√n)；两个相邻关键点之间，期望距离也是 O(√n)。</p>
+    <p>这两条性质正好对应分块里的散块和整块。非关键点到最近关键点之间，就是散块，暴力走；两个相邻关键点之间，就是整块，得能一步拿到。</p>
+    <p>具体实现是给每个关键点 b 维护两个东西：up[b]，从这个关键点往上遇到的下一个关键点；downSet[b]，从这个关键点往上直到下一个关键点之前，这一段上所有点的点权位图。</p>
+
+    <figure class="fig">
+      <div id="fig3"></div>
+      <figcaption>撒点之后，x 到 lca 的路径被切成三段：散段暴力、整段一次位图或、散段暴力</figcaption>
+    </figure>
+
+    <h2>七、一次查询的三段</h2>
+    <p>先求 lca，然后从 x 往上一路处理到 lca，y 同理，最后把 lca 自己的点权也置进去。单边的过程分三步。</p>
+    <p>第一步：x 不是关键点、也还没到 lca，就一路往上走，边走边置位，直到踩到一个关键点或者走到 lca 为止。这一段是散块，代价是期望 O(√n)。</p>
+    <p>第二步：x 现在是关键点，只要它上面那个关键点 up[x] 还比 lca 深，就整段跳：ans |= downSet[kthMark[x]]，然后 x = up[x]。一次跳一整段，一次位图或。</p>
+    <p>第三步：整段跳不动了，说明剩下的距离不到一个整段，从 x 暴力走到 lca 就行。</p>
+    <p>整段跳的次数是 O(√n) 级别，每次一个位图或；两段散块各是 O(√n) 个点。整体是 O(√n) 乘上位图的字数，常数比重链那版大不少。</p>
+
+    <h2>八、代码：随机撒点</h2>
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXB = 401;
+    <span class="kw">const</span> <span class="kw">int</span> MAXV = 30001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 17;
+    <span class="kw">int</span> n, m, f, k;
+    <span class="kw">int</span> arr[MAXN];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dep[MAXN];
+    <span class="kw">int</span> stjump[MAXN][MAXP];
+
+    <span class="kw">int</span> markNum;
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> markNode[MAXN];
+    <span class="kw">int</span> kthMark[MAXN];
+    <span class="kw">int</span> up[MAXN];
+    bitset&lt;MAXV&gt; downSet[MAXB];
+
+    bitset&lt;MAXV&gt; ans;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        dep[u] = dep[fa] + 1;
+        stjump[u][0] = fa;
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt; MAXP; p++) {
+            stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">if</span> (to[e] != fa) {
+                dfs(to[e], u);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">lca</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">if</span> (dep[a] &lt; dep[b]) {
+            swap(a, b);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (dep[stjump[a][p]] &gt;= dep[b]) {
+                a = stjump[a][p];
+            }
+        }
+        <span class="kw">if</span> (a == b) {
+            <span class="kw">return</span> a;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (stjump[a][p] != stjump[b][p]) {
+                a = stjump[a][p];
+                b = stjump[b][p];
+            }
+        }
+        <span class="kw">return</span> stjump[a][0];
+    }
+
+    <span class="kw">void</span> <span class="fn">query</span>(<span class="kw">int</span> x, <span class="kw">int</span> xylca) {
+        <span class="kw">while</span> (kthMark[x] == 0 &amp;&amp; x != xylca) {
+            ans[arr[x]] = 1;
+            x = stjump[x][0];
+        }
+        <span class="kw">while</span> (up[x] &amp;&amp; dep[up[x]] &gt; dep[xylca]) {
+            ans |= downSet[kthMark[x]];
+            x = up[x];
+        }
+        <span class="kw">while</span> (x != xylca) {
+            ans[arr[x]] = 1;
+            x = stjump[x][0];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">updateAns</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">int</span> xylca = lca(x, y);
+        query(x, xylca);
+        query(y, xylca);
+        ans[arr[xylca]] = 1;
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        dfs(1, 0);
+        <span class="kw">int</span> len = (<span class="kw">int</span>)sqrt(n * 10);
+        markNum = (n + len - 1) / len;
+        <span class="kw">for</span> (<span class="kw">int</span> b = 1, pick; b &lt;= markNum; b++) {
+            <span class="kw">do</span> {
+                pick = rand() % n + 1;
+            } <span class="kw">while</span> (vis[pick]);
+            vis[pick] = <span class="kw">true</span>;
+            markNode[b] = pick;
+            kthMark[pick] = b;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> b = 1, cur; b &lt;= markNum; b++) {
+            downSet[b][arr[markNode[b]]] = 1;
+            cur = stjump[markNode[b]][0];
+            <span class="kw">while</span> (cur != 0) {
+                <span class="kw">if</span> (kthMark[cur] &gt; 0) {
+                    up[markNode[b]] = cur;
+                    <span class="kw">break</span>;
+                } <span class="kw">else</span> {
+                    downSet[b][arr[cur]] = 1;
+                    cur = stjump[cur][0];
+                }
+            }
+        }	
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        srand(time(0));
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; f;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        prepare();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, lastAns = 0; i &lt;= m; i++) {
+            ans.reset();
+            cin &gt;&gt; k;
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1, x, y; j &lt;= k; j++) {
+                cin &gt;&gt; x &gt;&gt; y;
+                <span class="kw">if</span> (f) {
+                    x ^= lastAns;
+                    y ^= lastAns;
+                }
+                updateAns(x, y);
+            }
+            <span class="kw">int</span> ans1 = ans.count();
+            <span class="kw">int</span> ans2 = MAXV;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; MAXV; i++) {
+                <span class="kw">if</span> (ans[i] == 0) {
+                    ans2 = i;
+                    <span class="kw">break</span>;
+                }
+            }
+            cout &lt;&lt; ans1 &lt;&lt; ' ' &lt;&lt; ans2 &lt;&lt; '\n';
+            lastAns = ans1 + ans2;
+        }
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+    <p>prepare 里随机挑 markNum 个不重复的节点当关键点，然后对每个关键点往上走到下一个关键点，路上把点权并进 downSet，顺便记下 up。</p>
+    <p>这里的 downSet 是「关键点自己 + 它上面到下一个关键点之前」的点权集合，是按照 fa 方向往上走的，名字里的 down 只是沿用课程代码的叫法。</p>
+
+    <h2>九、复杂度分析</h2>
+    <p>设 n 为节点数，B 为 dfn 分块的块长，V = 30001 为点权范围，位图一次或是 V / 64 个字。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>重链剖分（两遍 dfs）</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>dfn 分块预处理每个块的位图</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>重链版：一条路径拆段</td><td><code class="inline">O(log n)</code> 段</td></tr>
+        <tr><td>重链版：一段 dfn 区间查询</td><td><code class="inline">O(B + (n/B)·V/64)</code></td></tr>
+        <tr><td>重链版：单次操作</td><td><code class="inline">O(k·log n·(B + (n/B)·V/64))</code>，B = √(20n) 时约 <code class="inline">O(k·log n·√n)</code></td></tr>
+        <tr><td>随机撒点：预处理</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>随机撒点：单次查询一条路径</td><td><code class="inline">O(√n + √n·V/64)</code>，期望</td></tr>
+        <tr><td>mex 的扫描</td><td><code class="inline">O(V)</code>，每条操作一次</td></tr>
+      </tbody>
+    </table>
+    <p>空间上，重链版要 bnum = n/B 个位图，每个 V 位，B = √(20n) 时是 O((n/B)·V) 位；随机撒点版要 markNum ≈ √n 个位图，量级更小。</p>
+    <p>重链版的块长取 √(20n) 而不是 √n，是因为块间操作（位图或）的常数比块内操作（逐个置位）大得多，把块长放大一点，块数就少一点。这就是前面说的调块长卡常。</p>
+
+    <h2>十、最后</h2>
+    <p>重链序列分块的路子是：先造出连续下标（dfn），再回到熟悉的序列分块。随机撒点的路子是：不造下标，直接靠撒点把树切成散段和整段。</p>
+    <p>两种做法都能过这道题，前者确定性好写，后者更短但常数大。再往后还有节点个数分块，那是另一种切法，用在下一节的两道题上。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  /* ========== 共用的那棵树 ========== */
+  const EDGES = [[1,2],[1,3],[2,4],[2,5],[4,6],[4,7],[6,9],[6,10],[3,8],[8,11],[8,12]];
+  const HEAVY = {'1-2':1,'2-4':1,'4-6':1,'6-9':1,'3-8':1,'8-11':1};
+  const POS = {1:[170,28],2:[95,75],3:[255,75],4:[55,122],5:[135,122],8:[250,122],
+               6:[35,169],7:[88,169],11:[218,169],12:[285,169],9:[20,216],10:[58,216]};
+  const ARR = {1:0,2:1,3:2,4:0,5:3,6:1,7:5,8:2,9:4,10:1,11:3,12:2};
+  const N = 12;
+
+  const g = {};
+  EDGES.forEach(function(e){
+    (g[e[0]] = g[e[0]] || []).push(e[1]);
+    (g[e[1]] = g[e[1]] || []).push(e[0]);
+  });
+  const fa = {}, dep = {0:0}, siz = {}, son = {}, top = {}, dfn = {}, at = {};
+  (function dfs1(u, f){
+    fa[u] = f; dep[u] = dep[f] + 1; siz[u] = 1;
+    g[u].forEach(function(v){ if (v !== f) dfs1(v, u); });
+    g[u].forEach(function(v){
+      if (v === f) return;
+      siz[u] += siz[v];
+      if (!son[u] || siz[son[u]] < siz[v]) son[u] = v;
+    });
+  })(1, 0);
+  let cntd = 0;
+  (function dfs2(u, t){
+    top[u] = t; dfn[u] = ++cntd; at[cntd] = u;
+    if (!son[u]) return;
+    dfs2(son[u], t);
+    g[u].forEach(function(v){ if (v !== fa[u] && v !== son[u]) dfs2(v, v); });
+  })(1, 1);
+  const VAL = [];
+  for (let i = 1; i <= N; i++) VAL[i] = ARR[at[i]];
+
+  function esc(s){ return String(s); }
+
+  function drawTree(s, x, y, nodeFill){
+    EDGES.forEach(function(e){
+      const a = POS[e[0]], b = POS[e[1]];
+      const key = Math.min(e[0], e[1]) + '-' + Math.max(e[0], e[1]);
+      const heavy = !!HEAVY[key];
+      s += '<line x1="' + (a[0]+x) + '" y1="' + (a[1]+y) + '" x2="' + (b[0]+x) + '" y2="' + (b[1]+y) +
+           '" stroke="' + (heavy ? '#2563eb' : '#c9ced6') + '" stroke-width="' + (heavy ? 2.4 : 1.2) + '"/>';
+    });
+    for (let u = 1; u <= N; u++){
+      const p = POS[u], f = nodeFill(u);
+      s += '<circle cx="' + (p[0]+x) + '" cy="' + (p[1]+y) + '" r="14" fill="' + f.bg + '" stroke="' + f.bd +
+           '" stroke-width="' + (f.w || 1.4) + '"/>';
+      s += '<text x="' + (p[0]+x) + '" y="' + (p[1]+y+4) + '" text-anchor="middle" font-size="13" font-weight="600" fill="' + f.t + '">' + u + '</text>';
+    }
+    return s;
+  }
+
+  const NEU = {bg:'#ffffff', bd:'#c9ced6', t:'#1f2328'};
+
+  /* ============ 图 1：重链剖分与 dfn ============ */
+  (function(){
+    let s = '<svg viewBox="0 0 660 344" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    s = drawTree(s, 0, 0, function(){ return NEU; });
+    // dfn 条
+    const X0 = 20, P = 50, CW = 48, CY = 254, CH = 44;
+    for (let i = 1; i <= N; i++){
+      const x = X0 + (i - 1) * P;
+      s += '<rect x="' + x + '" y="' + CY + '" width="' + CW + '" height="' + CH + '" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>';
+      s += '<text x="' + (x + CW/2) + '" y="' + (CY - 6) + '" text-anchor="middle" font-size="10" fill="#9aa0a6">dfn ' + i + '</text>';
+      s += '<text x="' + (x + CW/2) + '" y="' + (CY + 18) + '" text-anchor="middle" font-size="11" fill="#9aa0a6">节点 ' + at[i] + '</text>';
+      s += '<text x="' + (x + CW/2) + '" y="' + (CY + 36) + '" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">' + VAL[i] + '</text>';
+    }
+    // 两条重链的括号
+    function bracket(i1, i2, color, label){
+      const x1 = X0 + (i1 - 1) * P, x2 = X0 + (i2 - 1) * P + CW, yy = 312;
+      s += '<path d="M' + x1 + ' ' + (yy+8) + ' L' + x1 + ' ' + yy + ' L' + x2 + ' ' + yy + ' L' + x2 + ' ' + (yy+8) +
+           '" fill="none" stroke="' + color + '" stroke-width="1.4"/>';
+      s += '<text x="' + ((x1+x2)/2) + '" y="' + (yy + 22) + '" text-anchor="middle" font-size="11" fill="' + color + '">' + label + '</text>';
+    }
+    bracket(1, 5, '#2563eb', '重链 1→2→4→6→9 ：dfn 1..5');
+    bracket(9, 11, '#2563eb', '重链 3→8→11 ：dfn 9..11');
+    s += '</svg>';
+    document.getElementById('fig1').innerHTML = s;
+  })();
+
+  /* ============ 图 2：dfn 区间的一次查询 ============ */
+  (function(){
+    const B = 4, M = 12, L = 3, R = 11;
+    const X0 = 40, P = 46, CW = 44, CY = 70, CH = 40;
+    const bi = function(i){ return Math.floor((i - 1) / B) + 1; };
+    let s = '<svg viewBox="0 0 660 250" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    // 查询区间的大括号
+    const qx1 = X0 + (L - 1) * P, qx2 = X0 + (R - 1) * P + CW;
+    s += '<path d="M' + qx1 + ' 60 L' + qx1 + ' 50 L' + qx2 + ' 50 L' + qx2 + ' 60" fill="none" stroke="#6b7280" stroke-width="1.4"/>';
+    s += '<text x="' + ((qx1+qx2)/2) + '" y="42" text-anchor="middle" font-size="12" fill="#6b7280">一次查询 [dfn ' + L + ', dfn ' + R + ']</text>';
+    for (let i = 1; i <= M; i++){
+      const x = X0 + (i - 1) * P;
+      const inR = (i >= L && i <= R);
+      const whole = inR && bi(i) !== bi(L) && bi(i) !== bi(R);
+      const bg = !inR ? '#f6f7f9' : (whole ? '#dbeafe' : '#ffedd5');
+      const bd = !inR ? '#e6e8eb' : (whole ? '#2563eb' : '#ea580c');
+      s += '<rect x="' + x + '" y="' + CY + '" width="' + CW + '" height="' + CH + '" rx="6" fill="' + bg + '" stroke="' + bd + '" stroke-width="1.2"/>';
+      s += '<text x="' + (x + CW/2) + '" y="' + (CY - 8) + '" text-anchor="middle" font-size="10" fill="#9aa0a6">' + i + '</text>';
+      s += '<text x="' + (x + CW/2) + '" y="' + (CY + 26) + '" text-anchor="middle" font-size="14" fill="#1f2328">·</text>';
+    }
+    // 三种记号
+    function mark(i1, i2, color, yy){
+      const x1 = X0 + (i1 - 1) * P, x2 = X0 + (i2 - 1) * P + CW;
+      s += '<rect x="' + x1 + '" y="' + yy + '" width="' + (x2 - x1) + '" height="5" rx="2.5" fill="' + color + '"/>';
+    }
+    mark(3, 4, '#ea580c', 118);
+    mark(5, 8, '#2563eb', 118);
+    mark(9, 11, '#ea580c', 118);
+    // 块号
+    for (let b = 1; b <= 3; b++){
+      const x1 = X0 + (b - 1) * B * P, x2 = X0 + (b * B - 1) * P + CW;
+      s += '<path d="M' + x1 + ' 142 L' + x1 + ' 150 L' + x2 + ' 150 L' + x2 + ' 142" fill="none" stroke="#c9ced6" stroke-width="1.2"/>';
+      s += '<text x="' + ((x1+x2)/2) + '" y="164" text-anchor="middle" font-size="11" fill="#9aa0a6">第 ' + b + ' 块</text>';
+    }
+    const rows = [
+      ['#ea580c', '左散块 dfn 3..4：逐个点 ans[val[i]] = 1，代价 O(B)'],
+      ['#2563eb', '中间整块 dfn 5..8：ans |= bitSet[2]，一次位图或'],
+      ['#ea580c', '右散块 dfn 9..11：逐个点 ans[val[i]] = 1，代价 O(B)']
+    ];
+    rows.forEach(function(r, k){
+      s += '<rect x="40" y="' + (186 + k * 24) + '" width="12" height="12" rx="3" fill="' + r[0] + '"/>';
+      s += '<text x="60" y="' + (196 + k * 24) + '" font-size="12.5" fill="#1f2328">' + r[1] + '</text>';
+    });
+    s += '</svg>';
+    document.getElementById('fig2').innerHTML = s;
+  })();
+
+  /* ============ 图 3：随机撒点 ============ */
+  (function(){
+    const YS = [40,56,72,88,104,120,136,152,168,184,200,216,232];
+    const KEYS = {40:1, 104:1, 168:1, 232:1};
+    const CX = 110, R = 8;
+    let s = '<svg viewBox="0 0 660 280" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    s += '<line x1="' + CX + '" y1="34" x2="' + CX + '" y2="238" stroke="#c9ced6" stroke-width="1.2"/>';
+    // downSet 括号：关键点往上 4 个
+    [232, 168, 104].forEach(function(y){
+      s += '<path d="M' + (CX+16) + ' ' + y + ' L' + (CX+24) + ' ' + y + ' L' + (CX+24) + ' ' + (y-48) + ' L' + (CX+16) + ' ' + (y-48) +
+           '" fill="none" stroke="#2563eb" stroke-width="1.3"/>';
+      s += '<text x="' + (CX+30) + '" y="' + (y-20) + '" font-size="11" fill="#2563eb">downSet</text>';
+    });
+    // up 指针
+    [[232,168],[168,104],[104,40]].forEach(function(p){
+      s += '<path d="M' + (CX-14) + ' ' + p[0] + ' Q' + (CX-40) + ' ' + ((p[0]+p[1])/2) + ' ' + (CX-14) + ' ' + p[1] +
+           '" fill="none" stroke="#ea580c" stroke-width="1.3" marker-end="url(#arrowUp)"/>';
+      s += '<text x="' + (CX-46) + '" y="' + ((p[0]+p[1])/2 + 4) + '" text-anchor="end" font-size="11" fill="#ea580c">up</text>';
+    });
+    s += '<defs><marker id="arrowUp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">' +
+         '<path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/></marker></defs>';
+    // 节点
+    const colorOf = function(y){
+      if (y === 216 || y === 200 || y === 184 || y === 104) return {bg:'#ffedd5', bd:'#ea580c', t:'#ea580c'};
+      if (y === 168 || y === 152 || y === 136 || y === 120) return {bg:'#dbeafe', bd:'#2563eb', t:'#2563eb'};
+      if (y === 88) return {bg:'#f1f3f5', bd:'#6b7280', t:'#6b7280'};
+      return {bg:'#ffffff', bd:'#c9ced6', t:'#1f2328'};
+    };
+    YS.forEach(function(y){
+      const c = colorOf(y), key = !!KEYS[y];
+      s += '<circle cx="' + CX + '" cy="' + y + '" r="' + (key ? R + 1 : R) + '" fill="' + (key ? '#2563eb' : c.bg) +
+           '" stroke="' + (key ? '#2563eb' : c.bd) + '" stroke-width="1.5"/>';
+      if (key) s += '<circle cx="' + CX + '" cy="' + y + '" r="' + (R - 3) + '" fill="#ffffff"/>';
+    });
+    s += '<text x="' + (CX + 20) + '" y="220" font-size="12" font-weight="600" fill="#ea580c">x</text>';
+    s += '<text x="' + (CX + 20) + '" y="92" font-size="12" font-weight="600" fill="#6b7280">lca</text>';
+    s += '<circle cx="' + CX + '" cy="88" r="12" fill="none" stroke="#6b7280" stroke-width="1.6"/>';
+    // 右侧三步
+    const steps = [
+      ['#ea580c', '① 散段：x 不是关键点', '往上边走边置位，踩到关键点或 lca 停'],
+      ['#2563eb', '② 整段：up[x] 还比 lca 深', 'ans |= downSet，一次位图或'],
+      ['#ea580c', '③ 散段：整段跳不动了', '剩下的不到一整段，暴力走到 lca']
+    ];
+    steps.forEach(function(p, k){
+      s += '<rect x="286" y="' + (54 + k * 58) + '" width="14" height="14" rx="3" fill="' + p[0] + '"/>';
+      s += '<text x="310" y="' + (66 + k * 58) + '" font-size="12.5" fill="#1f2328">' + p[1] + '</text>';
+      s += '<text x="310" y="' + (85 + k * 58) + '" font-size="12.5" fill="#9aa0a6">' + p[2] + '</text>';
+    });
+    s += '<text x="286" y="238" font-size="12" fill="#9aa0a6">散段与整段的期望长度都是 O(√n)</text>';
+    s += '<text x="286" y="256" font-size="12" fill="#9aa0a6">整段只跳 O(√n) 次，每次一个位图或</text>';
+    s += '<text x="286" y="274" font-size="12" fill="#9aa0a6">■ 关键点　○ 非关键点</text>';
+    s += '</svg>';
+    document.getElementById('fig3').innerHTML = s;
+  })();
+
+  /* ============ 演示：路径拆段 ============ */
+  const PAIRS = [[9,12],[11,5],[7,12],[10,9]];
+  const BLEN = 2;
+  const biOf = function(i){ return Math.floor((i - 1) / BLEN) + 1; };
+
+  function partsOf(l, r){
+    const res = [];
+    if (biOf(l) === biOf(r)){ res.push({a:l, b:r, kind:'san'}); return res; }
+    const lb = biOf(l), rb = biOf(r);
+    res.push({a:l, b:Math.min(lb * BLEN, N), kind:'san'});
+    for (let b = lb + 1; b <= rb - 1; b++) res.push({a:(b-1)*BLEN+1, b:Math.min(b*BLEN, N), kind:'zheng'});
+    res.push({a:(rb-1)*BLEN+1, b:r, kind:'san'});
+    return res;
+  }
+  function segments(x, y){
+    const segs = [];
+    while (top[x] !== top[y]){
+      if (dep[top[x]] < dep[top[y]]){ const t = x; x = y; y = t; }
+      segs.push([dfn[top[x]], dfn[x]]);
+      x = fa[top[x]];
+    }
+    segs.push([Math.min(dfn[x], dfn[y]), Math.max(dfn[x], dfn[y])]);
+    return segs;
+  }
+
+  let curPair = 0, step = 0, segs = [], doneSet = {};
+
+  function curSegs(){ return segs.slice(0, Math.max(0, step - 1)); }
+  function activeSeg(){ return (step >= 1 && step <= segs.length) ? segs[step - 1] : null; }
+
+  function collectNodes(upto){
+    const set = {};
+    for (let t = 0; t < upto; t++){
+      for (let i = segs[t][0]; i <= segs[t][1]; i++) set[VAL[i]] = 1;
+    }
+    return Object.keys(set).map(Number).sort(function(a,b){ return a-b; });
+  }
+  function mexOf(list){
+    const set = {}; list.forEach(function(v){ set[v] = 1; });
+    let m = 0; while (set[m]) m++;
+    return m;
+  }
+
+  function render(){
+    const pair = PAIRS[curPair], x = pair[0], y = pair[1];
+    const done = curSegs(), act = activeSeg();
+    const inDone = {}, inAct = {};
+    done.forEach(function(sg){ for (let i = sg[0]; i <= sg[1]; i++) inDone[i] = 1; });
+    if (act) for (let i = act[0]; i <= act[1]; i++) if (!inDone[i]) inAct[i] = 1;
+    const nodeDone = {}, nodeAct = {};
+    Object.keys(inDone).forEach(function(i){ nodeDone[at[i]] = 1; });
+    Object.keys(inAct).forEach(function(i){ nodeAct[at[i]] = 1; });
+
+    const X0 = 20, P = 50, CW = 48, CY = 254, CH = 44;
+    let s = '<svg viewBox="0 0 660 356" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    s = drawTree(s, 0, 0, function(u){
+      if (nodeAct[u]) return {bg:'#ffedd5', bd:'#ea580c', t:'#ea580c', w:2};
+      if (nodeDone[u]) return {bg:'#dbeafe', bd:'#2563eb', t:'#2563eb', w:2};
+      if (u === x || u === y) return {bg:'#ffffff', bd:'#6b7280', t:'#1f2328', w:2.6};
+      return NEU;
+    });
+    s += '<text x="300" y="24" font-size="12.5" fill="#6b7280">x = ' + x + '　y = ' + y + '</text>';
+    for (let i = 1; i <= N; i++){
+      const cx2 = X0 + (i - 1) * P;
+      const c = inAct[i] ? {bg:'#ffedd5', bd:'#ea580c', t:'#ea580c'} :
+                (inDone[i] ? {bg:'#dbeafe', bd:'#2563eb', t:'#2563eb'} :
+                {bg:'#f6f7f9', bd:'#e6e8eb', t:'#1f2328'});
+      s += '<rect x="' + cx2 + '" y="' + CY + '" width="' + CW + '" height="' + CH + '" rx="6" fill="' + c.bg +
+           '" stroke="' + c.bd + '" stroke-width="' + (c.bd === '#e6e8eb' ? 1 : 1.6) + '"/>';
+      s += '<text x="' + (cx2 + CW/2) + '" y="' + (CY - 6) + '" text-anchor="middle" font-size="10" fill="#9aa0a6">dfn ' + i + '</text>';
+      s += '<text x="' + (cx2 + CW/2) + '" y="' + (CY + 18) + '" text-anchor="middle" font-size="11" fill="#9aa0a6">节点 ' + at[i] + '</text>';
+      s += '<text x="' + (cx2 + CW/2) + '" y="' + (CY + 36) + '" text-anchor="middle" font-size="13" font-weight="600" fill="' + c.t + '">' + VAL[i] + '</text>';
+    }
+    const bnum = Math.ceil(N / BLEN);
+    for (let b = 1; b <= bnum; b++){
+      const x1 = X0 + (b - 1) * BLEN * P, x2 = X0 + (b * BLEN - 1) * P + CW;
+      s += '<path d="M' + x1 + ' 324 L' + x1 + ' 332 L' + x2 + ' 332 L' + x2 + ' 324" fill="none" stroke="#c9ced6" stroke-width="1.2"/>';
+      s += '<text x="' + ((x1+x2)/2) + '" y="348" text-anchor="middle" font-size="11" fill="#9aa0a6">块' + b + '</text>';
+    }
+    s += '</svg>';
+    document.getElementById('viz1').innerHTML = s;
+
+    // 位图
+    const vals = collectNodes(Math.max(0, step - 1));
+    const bitsEl = document.getElementById('bits1');
+    if (step === 0){
+      bitsEl.innerHTML = '<span style="background:var(--bg-soft);color:var(--text-dim)">位图还是空的</span>';
+    } else {
+      bitsEl.innerHTML = '位图：' + vals.map(function(v){ return '<span>' + v + '</span>'; }).join('') +
+        '　不同点权 <b style="color:var(--accent)">' + vals.length + '</b> 种';
+    }
+
+    // 说明
+    const note = document.getElementById('note1');
+    if (step === 0){
+      note.innerHTML = '查询 <b>' + x + '</b> 和 <b>' + y + '</b>。重链剖分之后按 top 指针一段一段取：谁的 top 更深，就先把 top 到它自己这一段处理掉。';
+    } else if (step <= segs.length){
+      const sg = segs[step - 1];
+      const ps = partsOf(sg[0], sg[1]);
+      let txt = '第 ' + step + ' 段：dfn <b>' + sg[0] + '..' + sg[1] + '</b>';
+      if (ps.length === 1 && ps[0].kind === 'san'){
+        txt += '，整段都落在块 ' + biOf(sg[0]) + ' 里，没有整块，' + (sg[1] - sg[0] + 1) + ' 个点逐个置位。';
+      } else {
+        const desc = ps.map(function(p){
+          return (p.kind === 'san' ? '散块 dfn ' + p.a + '..' + p.b + ' 逐个置位' : '整块 dfn ' + p.a + '..' + p.b + ' 一次位图或');
+        }).join('、');
+        txt += '，切成 ' + desc + '。';
+      }
+      note.innerHTML = txt;
+    } else {
+      const v = collectNodes(segs.length);
+      note.innerHTML = '全部处理完。位图里有 <b>' + v.length + '</b> 种点权，从 0 开始找第一个没出现的数是 <b>' + mexOf(v) + '</b>，' +
+        '所以这条操作打印 ' + v.length + ' 和 ' + mexOf(v) + '。';
+    }
+    document.getElementById('btnPrev').disabled = (step === 0);
+    document.getElementById('btnNext').disabled = (step > segs.length);
+  }
+
+  function reset(){
+    segs = segments(PAIRS[curPair][0], PAIRS[curPair][1]);
+    step = 0; render();
+  }
+
+  document.getElementById('btnNext').addEventListener('click', function(){
+    if (step > segs.length) return;
+    step++; render();
+  });
+  document.getElementById('btnPrev').addEventListener('click', function(){
+    if (step === 0) return;
+    step--; render();
+  });
+  document.getElementById('btnReset').addEventListener('click', reset);
+  document.getElementById('selPair').addEventListener('change', function(e){
+    curPair = Number(e.target.value); reset();
+  });
+  reset();
+})();
+</script>
+</body>
+</html>

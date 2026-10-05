@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CDQ 分治与三维偏序 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .co-cell{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
+    width:64px;height:46px;border:1px solid var(--border);border-radius:6px;background:var(--bg);
+    font-size:12px;line-height:1.35;margin:2px;vertical-align:top;}
+  .co-cell .co-idx{font-size:10px;color:#9aa0a6;}
+  .co-cell.on{border-color:#2563eb;background:#dbeafe;}
+  .co-cell.cur{border-color:#ea580c;background:#ffedd5;}
+  .co-cell.dim{opacity:.35;}
+  .co-lab{display:inline-block;min-width:96px;font-size:12px;color:#6b7280;vertical-align:top;margin-top:14px;}
+  .co-bitrow{margin:10px 0 4px;font-size:13px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+  .co-tag{display:inline-block;border:1px solid #2563eb;color:#2563eb;border-radius:4px;
+    padding:1px 8px;background:#eef4ff;font-size:12px;}
+  .co-res{margin-top:6px;font-size:13px;}
+  .co-res b{color:#ea580c;font-weight:600;}
+  .co-cells{display:inline-block;}
+  .co-arrow{font-size:12px;color:#ea580c;margin:0 4px;}
+  @media(max-width:640px){.co-cell{width:52px;height:44px;font-size:11px;}.co-lab{min-width:74px;}}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>CDQ 分治与三维偏序</h1>
+    <p class="intro">归并分治统计的是「左区间跨右区间」的贡献。CDQ 分治在这套框架上再配一个树状数组，就能多处理一整个维度的约束。本页先讲总论，再用三维偏序和动态逆序对两道题把框架落地。</p>
+
+    <h2>零、背景</h2>
+    <p>归并分治在前面出现过多次：归并排序、逆序对、达标子数组都靠它。做法都是在排序的过程中完成统计：当前区间二分成左右两半，问题的答案 = 左半内部产生的答案 + 右半内部产生的答案 + 左半跨到右半的答案。</p>
+    <p>前两项交给递归，关键永远是第三项。左右两半各自有序，这个便利性能把跨区间的统计加速到线性。</p>
+    <p>CDQ 分治就是归并分治，再把「跨区间统计」这一步交给高级数据结构（树状数组、线段树）。如果数据结构单次调用是 O(log n)，那么整体满足 T(n) = 2·T(n/2) + O(n·log n)，解出来是 O(n·log²n)。</p>
+    <p>既然整体已经是 n·log²n 这个量级，每层内部直接用排序替代归并也不影响复杂度。归并需要的辅助空间省掉了，代码也更好写，代价只是常数时间。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CDQ 分治递归树" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="13" fill="#1f2328" text-anchor="middle">
+          <rect x="285" y="16" width="90" height="28" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="330" y="35">cdq(1,8)</text>
+          <rect x="135" y="78" width="90" height="28" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="180" y="97">cdq(1,4)</text>
+          <rect x="435" y="78" width="90" height="28" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="480" y="97">cdq(5,8)</text>
+          <rect x="60" y="150" width="90" height="28" rx="6" fill="#eef4ff" stroke="#2563eb"/>
+          <text x="105" y="169">cdq(1,2)</text>
+          <rect x="200" y="150" width="90" height="28" rx="6" fill="#eef4ff" stroke="#2563eb"/>
+          <text x="245" y="169">cdq(3,4)</text>
+          <rect x="370" y="150" width="90" height="28" rx="6" fill="#eef4ff" stroke="#2563eb"/>
+          <text x="415" y="169">cdq(5,6)</text>
+          <rect x="510" y="150" width="90" height="28" rx="6" fill="#eef4ff" stroke="#2563eb"/>
+          <text x="555" y="169">cdq(7,8)</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.4" fill="none">
+          <path d="M330 44 L180 78"/>
+          <path d="M330 44 L480 78"/>
+          <path d="M180 106 L105 150"/>
+          <path d="M180 106 L245 150"/>
+          <path d="M480 106 L415 150"/>
+          <path d="M480 106 L555 150"/>
+        </g>
+        <g>
+          <defs>
+            <marker id="coArr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0 0 L8 4 L0 8 z" fill="#ea580c"/>
+            </marker>
+          </defs>
+          <line x1="232" y1="100" x2="428" y2="100" stroke="#ea580c" stroke-width="2" marker-end="url(#coArr)"/>
+          <text x="330" y="90" font-size="11" fill="#ea580c" text-anchor="middle">只统计 左半 → 右半 的贡献</text>
+        </g>
+        <g font-size="11.5" fill="#6b7280">
+          <text x="30" y="212">同一半里的对，交给下一层递归；跨半的对，只在这一层被统计一次。</text>
+          <text x="30" y="232">所以任何一对元素恰好被算一次，不重不漏。</text>
+        </g>
+      </svg>
+      <figcaption>CDQ 分治的统计口径：每一层只算「j 在左半、i 在右半」的跨区间贡献。</figcaption>
+    </figure>
+
+    <h2>一、题目1：三维偏序</h2>
+    <p>一共有 n 个对象，每个对象有 a、b、c 三个属性，属性值范围都是 [1, k]。f(i) 表示满足 aⱼ ≤ aᵢ 且 bⱼ ≤ bᵢ 且 cⱼ ≤ cᵢ 且 j ≠ i 的 j 的数量。ans(d) 表示 f(i) == d 的 i 的数量，要求打印所有的 ans[d]，d 的范围是 [0, n)。1 ≤ n ≤ 10⁵，1 ≤ k ≤ 2×10⁵。测试链接：<a href="https://www.luogu.com.cn/problem/P3810" target="_blank" rel="noopener">洛谷 P3810</a>。</p>
+    <p>朴素做法是每个 i 枚举所有 j，三个条件逐个判断，O(n²)。n 到 10⁵，这个代价是 10¹⁰ 量级，超时。</p>
+    <p>可以发现约束恰好是三维，而 CDQ 分治擅长的就是「一维排序、一维分治、一维数据结构」。具体分工：先按 (a, b, c) 字典序排序，a 这一维就定下了大顺序；CDQ 在数组上二分，跨半统计时 aⱼ ≤ aᵢ 由字典序自动保证；merge 里两半各自按 b 有序，用双指针推进；c 这一维交给树状数组做前缀计数。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="三个维度的分工" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="12" fill="#1f2328">
+          <text x="16" y="34">① a 维：排序定大序</text>
+          <g text-anchor="middle">
+            <rect x="150" y="18" width="34" height="24" fill="#dbeafe" stroke="#2563eb"/><text x="167" y="34">1</text>
+            <rect x="184" y="18" width="34" height="24" fill="#dbeafe" stroke="#2563eb"/><text x="201" y="34">1</text>
+            <rect x="218" y="18" width="34" height="24" fill="#dbeafe" stroke="#2563eb"/><text x="235" y="34">2</text>
+            <rect x="252" y="18" width="34" height="24" fill="#dbeafe" stroke="#2563eb"/><text x="269" y="34">2</text>
+            <rect x="286" y="18" width="34" height="24" fill="#ffedd5" stroke="#ea580c"/><text x="303" y="34">2</text>
+            <rect x="320" y="18" width="34" height="24" fill="#ffedd5" stroke="#ea580c"/><text x="337" y="34">3</text>
+            <rect x="354" y="18" width="34" height="24" fill="#ffedd5" stroke="#ea580c"/><text x="371" y="34">3</text>
+            <rect x="388" y="18" width="34" height="24" fill="#ffedd5" stroke="#ea580c"/><text x="405" y="34">4</text>
+          </g>
+          <line x1="285" y1="12" x2="285" y2="48" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="4 3"/>
+          <text x="150" y="56" font-size="10.5" fill="#6b7280" text-anchor="middle">左半</text>
+          <text x="372" y="56" font-size="10.5" fill="#6b7280" text-anchor="middle">右半</text>
+          <text x="450" y="34" font-size="11" fill="#6b7280">字典序保证跨半时 aⱼ ≤ aᵢ</text>
+
+          <text x="16" y="104">② b 维：双指针</text>
+          <g text-anchor="middle">
+            <rect x="150" y="86" width="34" height="24" fill="#dbeafe" stroke="#2563eb"/><text x="167" y="102">1</text>
+            <rect x="184" y="86" width="34" height="24" fill="#dbeafe" stroke="#2563eb"/><text x="201" y="102">3</text>
+            <rect x="218" y="86" width="34" height="24" fill="#dbeafe" stroke="#2563eb"/><text x="235" y="102">3</text>
+            <rect x="252" y="86" width="34" height="24" fill="#dbeafe" stroke="#2563eb"/><text x="269" y="102">4</text>
+            <rect x="330" y="86" width="34" height="24" fill="#ffedd5" stroke="#ea580c"/><text x="347" y="102">1</text>
+            <rect x="364" y="86" width="34" height="24" fill="#ffedd5" stroke="#ea580c"/><text x="381" y="102">2</text>
+            <rect x="398" y="86" width="34" height="24" fill="#ffedd5" stroke="#ea580c"/><text x="415" y="102">3</text>
+            <rect x="432" y="86" width="34" height="24" fill="#ffedd5" stroke="#ea580c"/><text x="449" y="102">4</text>
+          </g>
+          <text x="219" y="122" font-size="10.5" fill="#2563eb" text-anchor="middle">左半按 b 有序</text>
+          <text x="397" y="122" font-size="10.5" fill="#ea580c" text-anchor="middle">右半按 b 有序</text>
+          <text x="490" y="102" font-size="11" fill="#6b7280">p1 随 p2 的 b 值前进</text>
+
+          <text x="16" y="176">③ c 维：树状数组</text>
+          <g text-anchor="middle">
+            <rect x="150" y="158" width="30" height="24" fill="#eef4ff" stroke="#2563eb"/><text x="165" y="174">c=3</text>
+            <rect x="182" y="158" width="30" height="24" fill="#eef4ff" stroke="#2563eb"/><text x="197" y="174">c=2</text>
+            <rect x="214" y="158" width="30" height="24" fill="#eef4ff" stroke="#2563eb"/><text x="229" y="174">c=3</text>
+            <rect x="246" y="158" width="30" height="24" fill="#eef4ff" stroke="#2563eb"/><text x="261" y="174">c=1</text>
+          </g>
+          <path d="M150 196 L276 196" stroke="#9aa0a6" stroke-width="1.2"/>
+          <path d="M150 196 L150 190 M213 196 L213 190 M276 196 L276 190" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="213" y="212" font-size="10.5" fill="#6b7280" text-anchor="middle">query(cᵢ)：左半里 c 值不超过 cᵢ 的个数</text>
+          <text x="330" y="174" font-size="11" fill="#6b7280">左半元素 add(c, 1)</text>
+          <text x="330" y="192" font-size="11" fill="#6b7280">右半元素 query(c) 拿贡献</text>
+        </g>
+      </svg>
+      <figcaption>三个维度各司其职：a 靠排序、b 靠双指针、c 靠树状数组，每层的额外代价是 O(n·log k)。</figcaption>
+    </figure>
+
+    <p>merge 的具体形状：p2 从左往右扫右半，p1 不断把 b 不超过 arr[p2].b 的左半元素 add(c, 1) 进树状数组，然后 f[arr[p2].i] += query(arr[p2].c)，也就是问「左半里 b、c 都不超过我的有几个」。统计完把 add 过的元素全部减回去，再把 [l, r] 整段按 b 排序，交给上一层。</p>
+    <p>这里有个细节：a、b、c 全相等的对象组不能漏算。排序后这样的组是连续段，设组内区间 [l, r]，prepare 阶段给每个 i 预置 f = r − i，即排在它后面的相等对象个数。排在它前面的相等对象由分治负责：任意两个位置不同的元素，一定在某一层被分进左右两半，左边的 j 会带着 b、c 都满足 ≤ 的条件被算给右边的 i。一边预置、一边分治，相等组不重不漏。</p>
+
+    <div class="viz" id="coMerge">
+      <p class="viz-title">三维偏序：顶层 merge(1, 4, 8) 的双指针与树状数组</p>
+      <div class="co-bitrow">树状数组里的 c 词频：<span id="coBit"></span></div>
+      <div><span class="co-lab">左半（按 b 排序）</span><span class="co-cells" id="coLeft"></span></div>
+      <div><span class="co-lab">右半（按 b 排序）</span><span class="co-cells" id="coRight"></span></div>
+      <div class="co-res" id="coRes"></div>
+      <div class="viz-controls">
+        <button id="coPrev" type="button">上一步</button>
+        <button id="coNext" type="button">下一步</button>
+        <button id="coReset" type="button">重置</button>
+      </div>
+      <p class="note" id="coInfo"></p>
+    </div>
+
+    <p>8 个对象按 (a, b, c) 排序后对半分，演示里能看到右半每个对象在本层拿到的贡献依次是 1、0、1、2。更深的层还会继续补贡献，比如 idx7 在下一层已经先拿到过 1，本层又拿到 1，最终 f = 2。全部统计完 ans[f[i]]++，打印 ans[0..n−1]。</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> i, a, b, c;
+    };
+
+    <span class="kw">bool</span> <span class="fn">CmpAbc</span>(Node x, Node y) {
+        <span class="kw">if</span> (x.a != y.a) {
+            <span class="kw">return</span> x.a &lt; y.a;
+        }
+        <span class="kw">if</span> (x.b != y.b) {
+            <span class="kw">return</span> x.b &lt; y.b;
+        }
+        <span class="kw">return</span> x.c &lt; y.c;
+    }
+
+    <span class="kw">bool</span> <span class="fn">CmpB</span>(Node x, Node y) {
+        <span class="kw">return</span> x.b &lt; y.b;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXK = 200001;
+    <span class="kw">int</span> n, k;
+
+    Node arr[MAXN];
+    <span class="kw">int</span> tree[MAXK];
+    <span class="kw">int</span> f[MAXN];
+    <span class="kw">int</span> ans[MAXN];
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &amp; -i;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        <span class="kw">while</span> (i &lt;= k) {
+            tree[i] += v;
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> ret = 0;
+        <span class="kw">while</span> (i &gt; 0) {
+            ret += tree[i];
+            i -= lowbit(i);
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+        <span class="kw">int</span> p1, p2;
+        <span class="kw">for</span> (p1 = l - 1, p2 = m + 1; p2 &lt;= r; p2++) {
+            <span class="kw">while</span> (p1 + 1 &lt;= m &amp;&amp; arr[p1 + 1].b &lt;= arr[p2].b) {
+                p1++;
+                add(arr[p1].c, 1);
+            }
+            f[arr[p2].i] += query(arr[p2].c);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= p1; i++) {
+            add(arr[i].c, -1);
+        }
+        sort(arr + l, arr + r + 1, CmpB);
+    }
+
+    <span class="kw">void</span> <span class="fn">cdq</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">int</span> mid = (l + r) / 2;
+        cdq(l, mid);
+        cdq(mid + 1, r);
+        merge(l, mid, r);
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        sort(arr + 1, arr + n + 1, CmpAbc);
+        <span class="kw">for</span> (<span class="kw">int</span> l = 1, r = 1; l &lt;= n; l = ++r) {
+            <span class="kw">while</span> (r + 1 &lt;= n &amp;&amp; arr[l].a == arr[r + 1].a &amp;&amp; arr[l].b == arr[r + 1].b &amp;&amp; arr[l].c == arr[r + 1].c) {
+                r++;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+                f[arr[i].i] = r - i;
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; k;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            arr[i].i = i;
+            cin &gt;&gt; arr[i].a &gt;&gt; arr[i].b &gt;&gt; arr[i].c;
+        }
+        prepare();
+        cdq(1, n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            ans[f[i]]++;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>二、题目2：动态逆序对</h2>
+    <p>给定一个长度为 n 的排列，1 到 n 每个数字都出现一次。前面的数大于后面的数就组成一个逆序对。再给定一个长度为 m 的数组，表示依次删除的数字。要求每次删除数字前打印排列中逆序对的总数，共 m 条。1 ≤ n ≤ 10⁵，1 ≤ m ≤ 5×10⁴。测试链接：<a href="https://www.luogu.com.cn/problem/P3157" target="_blank" rel="noopener">洛谷 P3157</a>。</p>
+    <p>删除只会减少逆序对。每次删除前后的差值，就是与被删数还组成逆序对的、活着的数的个数：位置在它左边且值比它大的，加上位置在它右边且值比它小的。于是答案可以写成「初始逆序对数 + 每一步增量的前缀和」。</p>
+    <p>把整个过程事件化：n 个原始事件（影响 +1，带原始下标）加上 m 个删除事件（影响 −1，带删除时刻 q），全部放进一个数组。事件在数组里的先后就是时序，这正好当 CDQ 的大顺序；merge 里按下标排序，双指针配合树状数组按值统计。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="动态逆序对的事件化" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="coArr2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0 0 L8 4 L0 8 z" fill="#2563eb"/>
+          </marker>
+          <marker id="coArr3" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0 0 L8 4 L0 8 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <text x="30" y="24" font-size="12" fill="#6b7280">时序（大顺序）→</text>
+        <g text-anchor="middle" font-size="11">
+          <rect x="40" y="40" width="58" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="69" y="53" fill="#1f2328">原始 +1</text>
+          <text x="69" y="66" fill="#6b7280" font-size="9.5">下标 i</text>
+          <rect x="104" y="40" width="58" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="133" y="53" fill="#1f2328">原始 +1</text>
+          <text x="133" y="66" fill="#6b7280" font-size="9.5">下标 i</text>
+          <rect x="168" y="40" width="58" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="197" y="53" fill="#1f2328">原始 +1</text>
+          <text x="197" y="66" fill="#6b7280" font-size="9.5">下标 i</text>
+          <rect x="232" y="40" width="58" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="261" y="53" fill="#1f2328">原始 +1</text>
+          <text x="261" y="66" fill="#6b7280" font-size="9.5">下标 i</text>
+          <rect x="340" y="40" width="58" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="369" y="53" fill="#1f2328">删除 −1</text>
+          <text x="369" y="66" fill="#6b7280" font-size="9.5">时刻 1</text>
+          <rect x="404" y="40" width="58" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="433" y="53" fill="#1f2328">删除 −1</text>
+          <text x="433" y="66" fill="#6b7280" font-size="9.5">时刻 2</text>
+          <rect x="468" y="40" width="58" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="497" y="53" fill="#1f2328">删除 −1</text>
+          <text x="497" y="66" fill="#6b7280" font-size="9.5">时刻 3</text>
+        </g>
+        <path d="M69 40 C 120 6, 300 6, 369 40" stroke="#2563eb" stroke-width="1.6" fill="none" marker-end="url(#coArr2)"/>
+        <text x="215" y="16" font-size="11" fill="#2563eb" text-anchor="middle">原始 j → 删除 e：贡献 −1 × [j 与 e 是逆序对]</text>
+        <path d="M369 76 C 385 96, 415 96, 433 76" stroke="#ea580c" stroke-width="1.6" fill="none" marker-end="url(#coArr3)"/>
+        <text x="401" y="106" font-size="11" fill="#ea580c" text-anchor="middle">先删过的 j：+1 抵消</text>
+        <g font-size="11.5" fill="#6b7280">
+          <text x="30" y="150">原始 × 原始的逆序对全部进 ans[0]，正好是初始答案。</text>
+          <text x="30" y="172">删除事件 e 的 ans[q] 收到 dₑ 乘上左侧逆序搭档的 d 之和：活着的搭档贡献 +1，</text>
+          <text x="30" y="192">已被删过的搭档一负一正抵消。所以 ans[q] 是「这一步减少的逆序对数」的相反数，</text>
+          <text x="30" y="212">最后做一遍前缀和，就得到每次删除前的答案。</text>
+        </g>
+      </svg>
+      <figcaption>事件化之后，每对逆序搭档的存活状态由 +1 与 −1 的加减自动表达。</figcaption>
+    </figure>
+
+    <p>跨区间的统计要跑两遍双指针。从左往右扫：对右半事件 p2，把左半里下标更小的元素 add 进树状数组，ans[q] += d × (query(n) − query(v))，统计左侧值大的对。从右往左扫：把左半里下标更大的元素 add 进去，ans[q] += d × query(v − 1)，统计左侧值小的对。两遍合起来恰好覆盖「j 在左、e 在右」的所有逆序搭档。</p>
+
+    <div class="viz" id="coDel">
+      <p class="viz-title">动态逆序对：每次删除前统计（排列 4 2 3 1，依次删 4、1、2）</p>
+      <div class="co-bitrow" id="coCells"></div>
+      <div class="co-res" id="coDelRes"></div>
+      <div class="viz-controls">
+        <button id="coDelPrev" type="button">上一步</button>
+        <button id="coDelNext" type="button">下一步</button>
+        <button id="coDelReset" type="button">重置</button>
+      </div>
+      <p class="note" id="coDelInfo"></p>
+    </div>
+
+    <p>演示里的三条输出是 5、2、0。删除 4 时消失的对是 (4,2)、(4,3)、(4,1) 共 3 个，删除 1 时消失的是 (2,1)、(3,1) 共 2 个，删除 2 时已经没有对消失。前缀和的口径和代码完全一致。</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> v, i, d, q;
+    };
+
+    <span class="kw">bool</span> <span class="fn">NodeCmp</span>(Node x, Node y) {
+        <span class="kw">return</span> x.i &lt; y.i;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 50001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> num[MAXN];
+    <span class="kw">int</span> pos[MAXN];
+    <span class="kw">int</span> del[MAXM];
+
+    Node arr[MAXN + MAXM];
+    <span class="kw">int</span> cnt = 0;
+
+    <span class="kw">int</span> tree[MAXN];
+
+    <span class="kw">long</span> <span class="kw">long</span> ans[MAXM];
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &amp; -i;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        <span class="kw">while</span> (i &lt;= n) {
+            tree[i] += v;
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> ret = 0;
+        <span class="kw">while</span> (i &gt; 0) {
+            ret += tree[i];
+            i -= lowbit(i);
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+        <span class="kw">int</span> p1, p2;
+        <span class="kw">for</span> (p1 = l - 1, p2 = m + 1; p2 &lt;= r; p2++) {
+            <span class="kw">while</span> (p1 + 1 &lt;= m &amp;&amp; arr[p1 + 1].i &lt; arr[p2].i) {
+                p1++;
+                add(arr[p1].v, arr[p1].d);
+            }
+            ans[arr[p2].q] += arr[p2].d * (query(n) - query(arr[p2].v));
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= p1; i++) {
+            add(arr[i].v, -arr[i].d);
+        }
+        <span class="kw">for</span> (p1 = m + 1, p2 = r; p2 &gt; m; p2--) {
+            <span class="kw">while</span> (p1 - 1 &gt;= l &amp;&amp; arr[p1 - 1].i &gt; arr[p2].i) {
+                p1--;
+                add(arr[p1].v, arr[p1].d);
+            }
+            ans[arr[p2].q] += arr[p2].d * query(arr[p2].v - 1);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = m; i &gt;= p1; i--) {
+            add(arr[i].v, -arr[i].d);
+        }
+        sort(arr + l, arr + r + 1, NodeCmp);
+    }
+
+    <span class="kw">void</span> <span class="fn">cdq</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">int</span> mid = (l + r) / 2;
+        cdq(l, mid);
+        cdq(mid + 1, r);
+        merge(l, mid, r);
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            arr[++cnt].v = num[i];
+            arr[cnt].i = i;
+            arr[cnt].d = 1;
+            arr[cnt].q = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            arr[++cnt].v = del[i];
+            arr[cnt].i = pos[del[i]];
+            arr[cnt].d = -1;
+            arr[cnt].q = i;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; num[i];
+            pos[num[i]] = i;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; del[i];
+        }
+        prepare();
+        cdq(1, cnt);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; m; i++) {
+            ans[i] += ans[i - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; m; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>三、复杂度分析</h2>
+    <p>两道题的框架一样，代价都由「层数 × 每层代价」决定。每层的排序或双指针是线性的，树状数组的每次 add、query 是一个 log，所以每层是 O(E·log 值域)，一共 O(log E) 层。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>题目</th><th>事件规模</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>三维偏序</td><td>n 个对象</td><td><code class="inline">O(n·log n·log k)</code></td><td><code class="inline">O(n + k)</code></td></tr>
+        <tr><td>动态逆序对</td><td>E = n + m 个事件</td><td><code class="inline">O((n+m)·log(n+m)·log n)</code></td><td><code class="inline">O(n + m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>n = 10⁵ 时三维偏序约 10⁵ × 17 × 18 ≈ 3×10⁷ 次基本操作。动态逆序对的答案最多约 n²/2 = 5×10⁹，超过 int，所以 ans 用 long long。</p>
+    <p>空间上两题都是静态数组：对象或事件一份、树状数组一份，没有递归栈以外的动态分配。</p>
+
+    <h2>四、最后</h2>
+    <p>CDQ 分治的框架到这里已经完整：一维交给排序，一维交给分治，一维交给数据结构。分治内部用排序替代归并，代码短一个量级。</p>
+    <p>后面两页把同一套框架搬到二维平面上。先是两个不带修改的数点模版，再是带操作时序的进阶题。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  // ===== 演示1：三维偏序顶层 merge =====
+  var left = [{i:3,b:1,c:3},{i:1,b:3,c:2},{i:4,b:3,c:3},{i:2,b:4,c:1}];
+  var right = [{i:8,b:1,c:4},{i:6,b:2,c:1},{i:7,b:3,c:2},{i:5,b:4,c:2}];
+  var steps = [];
+  var bit = [], p1 = -1, contrib = {};
+  steps.push({p1:-1, p2:-1, bit:[], contrib:{}, t:'初始：p1 停在左半之前，树状数组为空。p2 即将从右半第一个元素开始。'});
+  for (var p2 = 0; p2 < right.length; p2++) {
+    var added = [];
+    while (p1 + 1 < left.length && left[p1+1].b <= right[p2].b) {
+      p1++; bit.push(left[p1].c); added.push(left[p1].i);
+    }
+    var q = 0;
+    for (var t = 0; t < bit.length; t++) if (bit[t] <= right[p2].c) q++;
+    contrib[right[p2].i] = q;
+    var why = added.length ? '新加入左半元素 ' + added.join('、') + '（b 不超过 ' + right[p2].b + '）' : '没有新的左半元素满足 b 条件';
+    steps.push({p1:p1, p2:p2, bit:bit.slice(), contrib:JSON.parse(JSON.stringify(contrib)),
+      t:'处理 idx' + right[p2].i + '（b=' + right[p2].b + ', c=' + right[p2].c + '）：' + why +
+        '；query(' + right[p2].c + ') = ' + q + '，本层贡献 ' + q + '。'});
+  }
+  steps.push({p1:left.length-1, p2:right.length-1, bit:[], contrib:JSON.parse(JSON.stringify(contrib)),
+    t:'统计结束：把 add 过的元素全部减回去，树状数组清空，[1,8] 整段按 b 排序后交给上一层。'});
+  var cur = 0;
+  var $ = function(id){ return document.getElementById(id); };
+  function cellHtml(e, kind, active){
+    var cls = 'co-cell' + (kind === 'l' ? (active === 2 ? ' on' : (active === 0 ? ' dim' : '')) : (active === 2 ? ' cur' : ''));
+    return '<span class="' + cls + '"><span class="co-idx">idx' + e.i + '</span>b=' + e.b + ' c=' + e.c + '</span>';
+  }
+  function render(){
+    var s = steps[cur];
+    var lh = '', rh = '';
+    for (var i = 0; i < left.length; i++) lh += cellHtml(left[i], 'l', i <= s.p1 ? 2 : (s.p1 >= 0 ? 1 : 1));
+    for (var j = 0; j < right.length; j++) rh += cellHtml(right[j], 'r', j === s.p2 ? 2 : 1);
+    $('coLeft').innerHTML = lh;
+    $('coRight').innerHTML = rh;
+    $('coBit').innerHTML = s.bit.length ? s.bit.map(function(c){ return '<span class="co-tag">c=' + c + '</span>'; }).join('') : '<span style="color:#9aa0a6">空</span>';
+    var res = '右半本层贡献：';
+    right.forEach(function(e){
+      var v = (s.contrib[e.i] !== undefined) ? s.contrib[e.i] : '·';
+      res += ' <span class="co-tag">idx' + e.i + ' ← ' + v + '</span>';
+    });
+    $('coRes').innerHTML = res;
+    $('coInfo').textContent = '第 ' + (cur + 1) + ' / ' + steps.length + ' 步：' + s.t;
+    $('coPrev').disabled = (cur === 0);
+    $('coNext').disabled = (cur === steps.length - 1);
+  }
+  $('coPrev').addEventListener('click', function(){ if (cur > 0) { cur--; render(); } });
+  $('coNext').addEventListener('click', function(){ if (cur < steps.length - 1) { cur++; render(); } });
+  $('coReset').addEventListener('click', function(){ cur = 0; render(); });
+  render();
+
+  // ===== 演示2：动态逆序对删除模拟 =====
+  var perm = [4, 2, 3, 1], dels = [4, 1, 2];
+  var dsteps = [];
+  var alive = [true, true, true, true];
+  function pairsNow(){
+    var ps = [];
+    for (var i = 0; i < 4; i++) for (var j = i + 1; j < 4; j++)
+      if (alive[i] && alive[j] && perm[i] > perm[j]) ps.push([i, j]);
+    return ps;
+  }
+  var base = pairsNow();
+  dsteps.push({alive:alive.slice(), count:base.length, hi:-1, nextDel:0,
+    t:'初始排列 4 2 3 1，逆序对 ' + base.length + ' 个：(4,2)、(4,3)、(4,1)、(2,1)、(3,1)。第一条输出就是 ' + base.length + '。'});
+  for (var d = 0; d < dels.length; d++) {
+    var idx = perm.indexOf(dels[d]);
+    var gone = pairsNow().filter(function(p){ return p[0] === idx || p[1] === idx; });
+    var cnt = pairsNow().length;
+    alive[idx] = false;
+    dsteps.push({alive:alive.slice(), count:cnt, hi:idx, nextDel:d + 1,
+      t:'删除 ' + dels[d] + '：消失的逆序对 ' + gone.length + ' 个' + (gone.length ? '（' + gone.map(function(p){
+        return '(' + Math.max(perm[p[0]], perm[p[1]]) + ',' + Math.min(perm[p[0]], perm[p[1]]) + ')';
+      }).join('、') + '）' : '') + '。这一步之前的答案是 ' + cnt + '。'});
+    var after = pairsNow();
+    if (d + 1 < dels.length) {
+      var ni = perm.indexOf(dels[d + 1]);
+      var ng = after.filter(function(p){ return p[0] === ni || p[1] === ni; });
+      dsteps.push({alive:alive.slice(), count:after.length, hi:-1, nextDel:d + 1, next:ni,
+        t:'当前排列剩 ' + after.length + ' 个逆序对，下一条输出 ' + after.length + '。接下来删 ' + dels[d + 1] + '，将消失 ' + ng.length + ' 个对。'});
+    } else {
+      dsteps.push({alive:alive.slice(), count:0, hi:-1, nextDel:-1,
+        t:'全部删完。三条输出依次是 5、2、0，与代码的前缀和口径一致。'});
+    }
+  }
+  var dcur = 0;
+  function drender(){
+    var s = dsteps[dcur];
+    var html = '';
+    for (var i = 0; i < 4; i++) {
+      var cls = 'co-cell' + (s.alive[i] ? '' : ' dim') + (i === s.hi || i === s.next ? ' cur' : '');
+      html += '<span class="' + cls + '" style="width:56px">' + perm[i] + '</span>';
+    }
+    $('coCells').innerHTML = html;
+    $('coDelRes').innerHTML = '当前逆序对：<b>' + s.count + '</b>' +
+      (s.nextDel >= 0 && s.nextDel < dels.length ? '　下一个删除：<b>' + dels[s.nextDel] + '</b>' : '');
+    $('coDelInfo').textContent = '第 ' + (dcur + 1) + ' / ' + dsteps.length + ' 步：' + s.t;
+    $('coDelPrev').disabled = (dcur === 0);
+    $('coDelNext').disabled = (dcur === dsteps.length - 1);
+  }
+  $('coDelPrev').addEventListener('click', function(){ if (dcur > 0) { dcur--; drender(); } });
+  $('coDelNext').addEventListener('click', function(){ if (dcur < dsteps.length - 1) { dcur++; drender(); } });
+  $('coDelReset').addEventListener('click', function(){ dcur = 0; drender(); });
+  drender();
+})();
+</script>
+</body>
+</html>

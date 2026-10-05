@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K-D 树优化建图 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .kg-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .kg-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .kg-btn:disabled{opacity:.4;cursor:default;}
+  .kg-btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;}
+  .kg-svg{display:block;width:100%;height:auto;margin:0 auto;}
+  @media(max-width:760px){
+    .kg-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>K-D 树优化建图</h1>
+    <p class="intro">一条边要连向「一片区域里的所有点」，边数就会炸。K-D 树的每个节点本来就代表一个矩形区域，给每个区域加一个虚点，让边连到虚点而不是连到每个点，边数就从 O(n·m) 降到 O(m√n)。</p>
+
+    <h2>零、背景</h2>
+    <p>图论题里有一类边不是「点到点」，而是「点到一片」：从某个点出发，可以花固定的代价到达某个范围内的任意一个点。这类边如果老实建出来，数量是范围大小乘以边的条数，很快就爆掉。</p>
+    <p>处理它的办法和优化建图的思路一脉相承：不直接连到终点，而是造一批中间节点，让边通过这些中间节点间接到达终点。线段树优化建图是这么做的，K-D 树优化建图也是，只不过把「区间」换成了「平面上的矩形」。</p>
+
+    <h2>一、问题</h2>
+    <p>弹跳。一共有 n 个点，编号 1 到 n，给定每个点的坐标 (x, y)。一共有 m 个弹跳装置，装置的参数是 p、t、l、r、d、u：表示在 p 号点花 t 的时间，可以跳到 x 在 <code class="inline">[l, r]</code>、y 在 <code class="inline">[d, u]</code> 这个矩形里的任意一个点。从 1 号点出发，求到 2、3 … n 号点各自的最短用时。点可以重复经过，装置也可以重复使用。</p>
+    <p>例子用 6 个点和 3 个装置：</p>
+
+    <table class="complexity">
+      <thead><tr><th>点</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th></tr></thead>
+      <tbody>
+        <tr><td>坐标</td><td>(2, 8)</td><td>(5, 9)</td><td>(8, 7)</td><td>(3, 4)</td><td>(6, 5)</td><td>(9, 2)</td></tr>
+      </tbody>
+    </table>
+
+    <table class="complexity">
+      <thead><tr><th>装置</th><th>所在点</th><th>花费 t</th><th>能跳到的矩形</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>1 号</td><td>3</td><td><code class="inline">[1, 7] × [3, 9]</code></td></tr>
+        <tr><td>2</td><td>1 号</td><td>5</td><td><code class="inline">[6, 10] × [1, 6]</code></td></tr>
+        <tr><td>3</td><td>5 号</td><td>2</td><td><code class="inline">[7, 10] × [6, 10]</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>二、朴素做法</h2>
+    <p>把每个装置能到达的点都连一条边。装置 1 的矩形里有 4 个点，就连 4 条；装置 2 里有 2 个；装置 3 里有 1 个。看着不多，可 n 到 7 × 10⁴、m 到 1.5 × 10⁵ 时，一个装置覆盖的范围可能是 O(n) 个点，总边数就是 O(n·m)，一亿条边往上，存不下也跑不动。</p>
+    <p>换个想法：这些边权重都一样（都是这个装置的 t），而且覆盖的是一整个矩形。矩形正好是 K-D 树最擅长描述的东西。</p>
+
+    <h2>三、给每个区域建一个虚点</h2>
+    <p>先对 n 个点的坐标建一棵静态 K-D 树。这棵树的每个节点不只是代表一个点，它同时代表一个矩形区域，就是它子树里所有点的包围盒。</p>
+    <p>接下来给每个节点配一个虚点，编号记作 n + 节点编号。虚点连三条边出去：</p>
+    <ol>
+      <li>连向它自己代表的那个真实点（也就是这个节点上存的中位点）。</li>
+      <li>左儿子不为空，就连向左儿子的虚点。</li>
+      <li>右儿子不为空，就连向右儿子的虚点。</li>
+    </ol>
+    <p>这三条边都是零代价的。于是从某个虚点出发，顺着树往下走，就能到达它那片区域里的每一个真实点，而且走的总边数只有 O(深度)。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 296" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="区域虚点与它的三条出边" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="g1g" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#0f6e56"/>
+          </marker>
+          <marker id="g1b" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+          </marker>
+        </defs>
+        <rect x="40" y="60" width="170" height="170" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <line x1="125" y1="60" x2="125" y2="230" stroke="#2563eb" stroke-width="1.8"/>
+        <line x1="40" y1="145" x2="125" y2="145" stroke="#ea580c" stroke-width="1.8"/>
+        <line x1="125" y1="155" x2="210" y2="155" stroke="#ea580c" stroke-width="1.8"/>
+        <g font-size="13" fill="#6b7280">
+          <text x="82" y="200" text-anchor="middle">L 区域</text>
+          <text x="167" y="120" text-anchor="middle">R2 区域</text>
+        </g>
+        <text x="125" y="252" font-size="13" fill="#1f2328" text-anchor="middle">整块是区域 R，被竖线和横线切成两块</text>
+
+        <g font-size="13" text-anchor="middle">
+          <rect x="255" y="60" width="90" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="300" y="81" fill="#2563eb" font-weight="600">虚点 R</text>
+          <rect x="105" y="130" width="90" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="150" y="151" fill="#2563eb" font-weight="600">虚点 L</text>
+          <rect x="425" y="130" width="90" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="470" y="151" fill="#2563eb" font-weight="600">虚点 R2</text>
+          <rect x="255" y="170" width="90" height="34" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="300" y="191" fill="#1f2328" font-weight="600">点 R</text>
+          <rect x="105" y="230" width="90" height="34" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="150" y="251" fill="#1f2328" font-weight="600">点 L</text>
+          <rect x="425" y="230" width="90" height="34" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="470" y="251" fill="#1f2328" font-weight="600">点 R2</text>
+        </g>
+        <g stroke="#2563eb" stroke-width="1.6" fill="none" marker-end="url(#g1b)">
+          <line x1="255" y1="77" x2="197" y2="77"/>
+          <line x1="345" y1="77" x2="423" y2="77"/>
+        </g>
+        <g stroke="#0f6e56" stroke-width="1.6" fill="none" marker-end="url(#g1g)">
+          <line x1="300" y1="94" x2="300" y2="168"/>
+          <line x1="150" y1="164" x2="150" y2="228"/>
+          <line x1="470" y1="164" x2="470" y2="228"/>
+        </g>
+        <g font-size="13" fill="#0f6e56">
+          <text x="310" y="140">区域虚点 → 它代表的真实点</text>
+        </g>
+        <g font-size="13" fill="#2563eb">
+          <text x="200" y="68" text-anchor="middle">虚点 → 下级虚点</text>
+        </g>
+      </svg>
+      <figcaption>蓝色是区域之间的边，绿色是区域到它代表的那个点的边；两套边合起来，虚点就能覆盖整片区域</figcaption>
+    </figure>
+
+    <p>建完之后图里有两种点：真实点只挂着若干弹跳装置，没有出边；虚点没有装置，只有出边。分得这么清楚，dijkstra 的时候就很好处理，出堆的是哪种点，该干什么就确定了。</p>
+
+    <h2>四、装置只连几个区域</h2>
+    <p>现在看弹跳装置。装置给的也是一个矩形，让这个矩形去和 K-D 树求交，用的是和矩形查询完全一样的过程：</p>
+    <ol>
+      <li>包围盒和矩形没有交集，整棵剪掉。</li>
+      <li>包围盒被矩形完全包住，这个区域里所有点都能到，于是把距离送给这个区域的虚点，直接返回。</li>
+      <li>有交集但包不住，看这个节点代表的真实点在不在矩形里（在就更新它的距离），然后往两个儿子递归。</li>
+    </ol>
+    <p>一次展开访问到的节点数是 O(√n) 量级，和矩形查询一样。于是 m 个装置总共产生 O(m√n) 条「虚边」，而不是 O(n·m) 条实边。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="装置矩形在 K-D 树上展开的三类节点" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="g2a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+        <text x="30" y="26" font-size="13" fill="#1f2328">矩形 [1, 7] × [3, 9] 在树上展开，6 个节点里只访问到 4 个</text>
+        <g stroke="#9aa0a6" stroke-width="1.4" fill="none" marker-end="url(#g2a)">
+          <line x1="272" y1="86" x2="172" y2="122"/>
+          <line x1="328" y1="86" x2="428" y2="122"/>
+          <line x1="146" y1="176" x2="176" y2="212"/>
+          <line x1="452" y1="176" x2="482" y2="212"/>
+        </g>
+        <g font-size="12" text-anchor="middle">
+          <rect x="235" y="34" width="130" height="52" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+          <text x="300" y="50" fill="#ea580c" font-weight="600">根：点 2 (5, 9)</text>
+          <text x="300" y="65" font-size="11" fill="#ea580c">盒 [2, 9] × [2, 9]</text>
+          <text x="300" y="79" font-size="11" fill="#ea580c">相交，点 2 命中</text>
+
+          <rect x="85" y="124" width="130" height="52" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+          <text x="150" y="140" fill="#2563eb" font-weight="600">点 4 (3, 4)</text>
+          <text x="150" y="155" font-size="11" fill="#2563eb">盒 [2, 3] × [4, 8]</text>
+          <text x="150" y="169" font-size="11" fill="#2563eb">整棵包住，送虚点</text>
+
+          <rect x="385" y="124" width="130" height="52" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+          <text x="450" y="140" fill="#ea580c" font-weight="600">点 5 (6, 5)</text>
+          <text x="450" y="155" font-size="11" fill="#ea580c">盒 [6, 9] × [2, 7]</text>
+          <text x="450" y="169" font-size="11" fill="#ea580c">相交，点 5 命中</text>
+
+          <rect x="115" y="214" width="130" height="52" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="180" y="230" fill="#9aa0a6" font-weight="600">点 1 (2, 8)</text>
+          <text x="180" y="245" font-size="11" fill="#9aa0a6">父节点已整棵包住</text>
+          <text x="180" y="259" font-size="11" fill="#9aa0a6">不用访问</text>
+
+          <rect x="415" y="214" width="130" height="52" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="480" y="230" fill="#9aa0a6" font-weight="600">点 6、点 3</text>
+          <text x="480" y="245" font-size="11" fill="#9aa0a6">xmin = 9、8 &gt; qr = 7</text>
+          <text x="480" y="259" font-size="11" fill="#9aa0a6">一次比较剪掉</text>
+        </g>
+        <g font-size="13" fill="#1f2328">
+          <text x="30" y="292">送出 3 个距离（点 2、虚点 10、点 5），就覆盖了矩形里全部 4 个点 1、2、4、5</text>
+        </g>
+      </svg>
+      <figcaption>虚线框的节点根本没被访问：左边是被父节点顺带覆盖的，右边是包围盒一刀就剪掉的</figcaption>
+    </figure>
+
+    <h2>五、出堆的时候才展开</h2>
+    <p>还有一个常数优化很值得做：所有弹跳装置一开始都不建边，等 dijkstra 真的弹出某个真实点时，才把这个点挂着的装置当作一次矩形查询展开。</p>
+    <p>这么做的好处是能用 dist 剪枝。展开到某个节点时，如果 1 号点到这个区域虚点的距离已经不大于本次能给出的距离，那就整棵停住，下面所有点都会被虚点自己沿着建图的边更新到，没必要再送一次。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 306" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="预先连边与延迟展开的对比" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="g3a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+        <text x="30" y="24" font-size="13" fill="#1f2328">预先连边：一个装置连向矩形里每个点</text>
+        <g stroke="#9aa0a6" stroke-width="1.2" fill="none" marker-end="url(#g3a)">
+          <line x1="72" y1="120" x2="196" y2="62"/>
+          <line x1="72" y1="128" x2="196" y2="98"/>
+          <line x1="72" y1="140" x2="196" y2="134"/>
+          <line x1="72" y1="150" x2="196" y2="170"/>
+          <line x1="72" y1="158" x2="196" y2="206"/>
+        </g>
+        <circle cx="60" cy="140" r="16" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <text x="60" y="145" font-size="13" fill="#ea580c" text-anchor="middle" font-weight="600">p</text>
+        <g>
+          <circle cx="210" cy="70" r="12" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <circle cx="210" cy="106" r="12" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <circle cx="210" cy="142" r="12" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <circle cx="210" cy="178" r="12" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <circle cx="210" cy="214" r="12" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+        </g>
+        <text x="30" y="256" font-size="13" fill="#ea580c">m 个装置各连 O(n) 条 → O(n·m) 条边，存不下</text>
+
+        <text x="330" y="24" font-size="13" fill="#1f2328">延迟展开：出堆时才展开，还能用 dist 剪枝</text>
+        <g stroke="#9aa0a6" stroke-width="1.4" fill="none" marker-end="url(#g3a)">
+          <line x1="446" y1="88" x2="396" y2="128"/>
+          <line x1="454" y1="88" x2="504" y2="128"/>
+          <line x1="382" y1="166" x2="356" y2="206"/>
+          <line x1="404" y1="166" x2="420" y2="206"/>
+          <line x1="496" y1="166" x2="472" y2="206"/>
+          <line x1="518" y1="166" x2="536" y2="206"/>
+        </g>
+        <g font-size="12" text-anchor="middle">
+          <rect x="422" y="56" width="56" height="32" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="450" y="76" fill="#9aa0a6">区域</text>
+          <rect x="362" y="130" width="56" height="32" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="390" y="150" fill="#9aa0a6">区域</text>
+          <rect x="470" y="130" width="56" height="32" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="498" y="150" fill="#9aa0a6">区域</text>
+          <rect x="326" y="208" width="56" height="32" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="354" y="228" fill="#9aa0a6">区域</text>
+          <rect x="392" y="208" width="56" height="32" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="420" y="228" fill="#9aa0a6">区域</text>
+          <rect x="458" y="208" width="56" height="32" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="486" y="228" fill="#9aa0a6">区域</text>
+          <rect x="524" y="208" width="56" height="32" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="552" y="228" fill="#9aa0a6">区域</text>
+        </g>
+        <g stroke="#ea580c" stroke-width="2" fill="none">
+          <line x1="436" y1="62" x2="464" y2="82"/>
+          <line x1="464" y1="62" x2="436" y2="82"/>
+        </g>
+        <text x="474" y="70" font-size="12" fill="#ea580c">dist ≤ 本次能给的</text>
+        <text x="474" y="86" font-size="12" fill="#ea580c">整棵停住</text>
+        <text x="330" y="256" font-size="13" fill="#2563eb">装置不预先建边，出堆时才当一次矩形查询展开</text>
+        <text x="30" y="286" font-size="13" fill="#1f2328">真实点出堆：枚举它挂着的装置，做矩形展开；虚点出堆：沿建图的边把距离分给区域内的点</text>
+      </svg>
+      <figcaption>左图老实连边是 O(n·m)；右图把装置留到出堆时展开，还能靠已算出的 dist 整棵跳过</figcaption>
+    </figure>
+
+    <h2>六、演示</h2>
+    <p>点「下一步」跟着 dijkstra 走一遍：出堆一个真实点就展开它的装置，出堆一个虚点就把距离分下去。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　弹跳：从 1 号点出发的最短路</div>
+      <div id="kgSvg"></div>
+      <div class="breakdown" id="kgStatus"></div>
+      <div class="kg-btns">
+        <button class="kg-btn" id="kgStep">下一步</button>
+        <button class="kg-btn" id="kgAuto">自动播放</button>
+        <button class="kg-btn" id="kgReset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot full"></span>这一步收到距离</span>
+        <span><span class="dot partial"></span>访问到，继续往下</span>
+        <span><span class="dot"></span>被剪掉</span>
+      </div>
+    </div>
+
+    <h2>七、代码</h2>
+    <p>下面是模板题的完整实现。K-D 树在建树的时候顺手把虚点的边建好，装置只在 dijkstra 里展开。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">struct</span> Jump {
+    <span class="kw">int</span> t, l, r, d, u;
+};
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;      <span class="cm">// 真实点 n 个，虚点也是 n 个</span>
+<span class="kw">const</span> <span class="kw">int</span> INF  = 1 &lt;&lt; 30;
+<span class="kw">int</span> n, m, w, h;
+
+<span class="kw">int</span> x[MAXN], y[MAXN], arr[MAXN];
+Jump jump[MAXN];
+
+<span class="cm">// 静态 K-D 树</span>
+<span class="kw">int</span> root;
+<span class="kw">int</span> ls[MAXN], rs[MAXN];
+<span class="kw">int</span> xmin[MAXN], xmax[MAXN], ymin[MAXN], ymax[MAXN];
+
+<span class="cm">// 优化建图，链式前向星</span>
+<span class="kw">int</span> headg[MAXN], nextg[MAXN], tog[MAXN], cntg;
+
+<span class="cm">// 每个真实点拥有的弹跳装置列表</span>
+<span class="kw">int</span> headj[MAXN], nextj[MAXN], toj[MAXN], cntj;
+
+<span class="kw">int</span> dist[MAXN];
+<span class="kw">bool</span> vis[MAXN];
+
+<span class="kw">struct</span> HeapNode {
+    <span class="kw">int</span> dist;
+    <span class="kw">int</span> id;
+
+    <span class="kw">bool</span> <span class="kw">operator</span>&lt;(<span class="kw">const</span> HeapNode &amp;other) <span class="kw">const</span> {
+        <span class="kw">return</span> dist &gt; other.dist;
+    }
+};
+
+priority_queue&lt;HeapNode&gt; heap;
+
+<span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+    nextg[++cntg] = headg[u];
+    tog[cntg] = v;
+    headg[u] = cntg;
+}
+
+<span class="kw">void</span> <span class="fn">addJump</span>(<span class="kw">int</span> p, <span class="kw">int</span> j) {
+    nextj[++cntj] = headj[p];
+    toj[cntj] = j;
+    headj[p] = cntj;
+}
+
+<span class="kw">void</span> <span class="fn">maintain</span>(<span class="kw">int</span> i) {
+    xmin[i] = min(x[i], min(xmin[ls[i]], xmin[rs[i]]));
+    xmax[i] = max(x[i], max(xmax[ls[i]], xmax[rs[i]]));
+    ymin[i] = min(y[i], min(ymin[ls[i]], ymin[rs[i]]));
+    ymax[i] = max(y[i], max(ymax[ls[i]], ymax[rs[i]]));
+}
+
+<span class="kw">int</span> <span class="fn">compareNode</span>(<span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> dimension) {
+    <span class="kw">long long</span> v1 = dimension == 0 ? x[i] : y[i];
+    <span class="kw">long long</span> v2 = dimension == 0 ? x[j] : y[j];
+    <span class="kw">return</span> v1 == v2 ? 0 : v1 &lt; v2 ? -1 : 1;
+}
+
+<span class="kw">struct</span> Cmp {
+    <span class="kw">int</span> dimension;
+
+    <span class="kw">bool</span> <span class="kw">operator</span>()(<span class="kw">int</span> a, <span class="kw">int</span> b) <span class="kw">const</span> {
+        <span class="kw">return</span> compareNode(a, b, dimension) &lt; 0;
+    }
+};
+
+<span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> dimension) {
+    <span class="kw">if</span> (l &gt; r) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+    nth_element(arr + l, arr + mid, arr + r + 1, Cmp{dimension});
+    <span class="kw">int</span> rt = arr[mid];
+    ls[rt] = build(l, mid - 1, dimension ^ 1);
+    rs[rt] = build(mid + 1, r, dimension ^ 1);
+    maintain(rt);
+    <span class="cm">// 优化建图</span>
+    <span class="cm">// n + rt 是虚点，表示以 rt 为根的整棵子树</span>
+    <span class="cm">// 虚点可以到达子树中的所有真实点</span>
+    addEdge(n + rt, rt);
+    <span class="kw">if</span> (ls[rt] != 0) {
+        addEdge(n + rt, n + ls[rt]);
+    }
+    <span class="kw">if</span> (rs[rt] != 0) {
+        addEdge(n + rt, n + rs[rt]);
+    }
+    <span class="kw">return</span> rt;
+}
+
+<span class="kw">void</span> <span class="fn">heapAdd</span>(<span class="kw">int</span> d, <span class="kw">int</span> i) {
+    <span class="kw">if</span> (!vis[i] &amp;&amp; dist[i] &gt; d) {
+        dist[i] = d;
+        heap.push({d, i});
+    }
+}
+
+<span class="kw">void</span> <span class="fn">jumpToRectangle</span>(<span class="kw">int</span> jl, <span class="kw">int</span> jr, <span class="kw">int</span> jd, <span class="kw">int</span> ju, <span class="kw">int</span> jdist, <span class="kw">int</span> i) {
+    <span class="kw">if</span> (i == 0) {
+        <span class="kw">return</span>;
+    }
+    <span class="cm">// 从 1 号点到当前虚点的最短距离，已经优于 jdist，可以剪枝</span>
+    <span class="kw">if</span> (dist[n + i] &lt;= jdist) {
+        <span class="kw">return</span>;
+    }
+    <span class="cm">// 弹跳装置在当前区域之外，可以剪枝</span>
+    <span class="kw">if</span> (xmax[i] &lt; jl || jr &lt; xmin[i] || ymax[i] &lt; jd || ju &lt; ymin[i]) {
+        <span class="kw">return</span>;
+    }
+    <span class="cm">// 弹跳装置包括了当前区域，更新 1 号点到当前区域虚点的最短距离</span>
+    <span class="kw">if</span> (jl &lt;= xmin[i] &amp;&amp; xmax[i] &lt;= jr &amp;&amp; jd &lt;= ymin[i] &amp;&amp; ymax[i] &lt;= ju) {
+        heapAdd(jdist, n + i);
+        <span class="kw">return</span>;
+    }
+    <span class="cm">// 弹跳装置包括了当前点，更新 1 号点到当前点的最短距离</span>
+    <span class="kw">if</span> (jl &lt;= x[i] &amp;&amp; x[i] &lt;= jr &amp;&amp; jd &lt;= y[i] &amp;&amp; y[i] &lt;= ju) {
+        heapAdd(jdist, i);
+    }
+    jumpToRectangle(jl, jr, jd, ju, jdist, ls[i]);
+    jumpToRectangle(jl, jr, jd, ju, jdist, rs[i]);
+}
+
+<span class="kw">void</span> <span class="fn">dijkstra</span>() {
+    fill(dist + 1, dist + (n &lt;&lt; 1) + 1, INF);
+    dist[1] = 0;
+    heap.push({0, 1});
+    <span class="kw">while</span> (!heap.empty()) {
+        HeapNode cur = heap.top();
+        heap.pop();
+        <span class="kw">int</span> d = cur.dist;
+        <span class="kw">int</span> i = cur.id;
+        <span class="kw">if</span> (!vis[i]) {
+            vis[i] = <span class="kw">true</span>;
+            <span class="cm">// 真实点：可能有若干弹跳装置，但一定没有出边</span>
+            <span class="cm">// 虚点：一定没有弹跳装置，但肯定有出边</span>
+            <span class="kw">if</span> (i &lt;= n) {
+                <span class="kw">for</span> (<span class="kw">int</span> e = headj[i]; e &gt; 0; e = nextj[e]) {
+                    <span class="kw">int</span> j = toj[e];
+                    jumpToRectangle(jump[j].l, jump[j].r, jump[j].d, jump[j].u, d + jump[j].t, root);
+                }
+            } <span class="kw">else</span> {
+                <span class="kw">for</span> (<span class="kw">int</span> e = headg[i]; e &gt; 0; e = nextg[e]) {
+                    heapAdd(d, tog[e]);
+                }
+            }
+        }
+    }
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    ios::sync_with_stdio(<span class="kw">false</span>);
+    cin.tie(<span class="kw">nullptr</span>);
+    cin &gt;&gt; n &gt;&gt; m &gt;&gt; w &gt;&gt; h;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        cin &gt;&gt; x[i] &gt;&gt; y[i];
+        arr[i] = i;
+    }
+    <span class="kw">for</span> (<span class="kw">int</span> j = 1, p; j &lt;= m; j++) {
+        cin &gt;&gt; p;
+        cin &gt;&gt; jump[j].t &gt;&gt; jump[j].l &gt;&gt; jump[j].r &gt;&gt; jump[j].d &gt;&gt; jump[j].u;
+        addJump(p, j);
+    }
+    xmin[0] = ymin[0] = INF;
+    xmax[0] = ymax[0] = -INF;
+    root = build(1, n, 0);
+    dijkstra();
+    <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+        cout &lt;&lt; dist[i] &lt;&lt; <span class="cm">'\n'</span>;
+    }
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <p>几个容易忽略的地方。一是数组要开到 2n，虚点占了 n + 1 到 2n 这段编号。二是 <code class="inline">dist</code> 初始化只填 1 到 2n，填少了虚点的距离会是 0，剪枝立刻失效。三是比较坐标时用 <code class="inline">long long</code>，坐标相乘或者差值大的时候 int 会溢出。</p>
+
+    <h2>八、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>建 K-D 树（顺带建虚点的边）</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>虚点连边总数</td><td><code class="inline">O(n)</code> 条</td></tr>
+        <tr><td>一个装置的一次矩形展开</td><td><code class="inline">O(√n)</code>，配合 dist 剪枝更快</td></tr>
+        <tr><td>所有装置的展开总量</td><td><code class="inline">O(m√n)</code></td></tr>
+        <tr><td>dijkstra（优先队列）</td><td><code class="inline">O((n + m√n) log n)</code></td></tr>
+        <tr><td>朴素建图（对照）</td><td><code class="inline">O(n·m)</code> 条边</td></tr>
+        <tr><td>额外空间</td><td><code class="inline">O(n + m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>建图那一行是 O(n) 而不是 O(n log n)：每个节点最多连三条边（自己 + 两个儿子的虚点），n 个节点就是 3n 条。这也是优化建图最实在的收益，边数和点数同阶。</p>
+    <p>装置的展开是 O(√n)，和矩形查询一个道理。加上 dist 剪枝之后，很多区域连访问都不会访问，实际跑得比这个上界快不少。dijkstra 的堆操作按 O(log n) 算，总时间 O((n + m√n) log n)。</p>
+    <p>空间上有四份数组：K-D 树的坐标、包围盒与左右儿子 O(n)，建图的边 O(n)，装置列表 O(m)，距离数组 O(n)。合起来 O(n + m)。</p>
+
+    <h2>九、最后</h2>
+    <p>K-D 树优化建图做的事情，是把「连向一片区域」拆成两步：先把边连到少数几个区域虚点，再让虚点顺着树把距离分下去。代价是多了 O(n) 个点，收益是边数从 O(n·m) 降到 O(m√n)。</p>
+    <p>这个套路不局限于 K-D 树。线段树优化建图是同一件事的一维版本：区间线段树的每个节点也是虚点，连向区间就等于连向区间里每个位置。判断该用哪种，看边覆盖的是「下标区间」还是「平面矩形」。</p>
+    <p>它的边界在于维度再高就不好使了。三维以上 K-D 树的剪枝效果明显变差，那时候要么换数据结构，要么回到问题本身找别的性质。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var N = 6;
+  var PTS = {1:[2,8], 2:[5,9], 3:[8,7], 4:[3,4], 5:[6,5], 6:[9,2]};
+  var CH = {2:[4,5], 4:[0,1], 1:[0,0], 5:[6,3], 6:[0,0], 3:[0,0]};
+  var POS = {2:[450,55], 4:[370,140], 5:[540,140], 1:[390,222], 6:[490,222], 3:[575,222]};
+  var BOX = {
+    2:[2,9,2,9], 4:[2,3,4,8], 1:[2,2,8,8], 5:[6,9,2,7], 6:[9,9,2,2], 3:[8,8,7,7]
+  };
+  var JUMP = {
+    1:{p:1, t:3, l:1, r:7, d:3, u:9},
+    2:{p:1, t:5, l:6, r:10, d:1, u:6},
+    3:{p:5, t:2, l:7, r:10, d:6, u:10}
+  };
+
+  function px(v) { return 30 + v * 22; }
+  function py(v) { return 260 - v * 22; }
+  function infs() {
+    var d = {};
+    for (var i = 1; i <= N; i++) d[i] = null;
+    return d;
+  }
+
+  function build(state) {
+    var s = '<svg class="kg-svg" viewBox="0 0 620 322" xmlns="http://www.w3.org/2000/svg" ' +
+            'font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+    s += '<defs><marker id="kgar" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" ' +
+         'markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/></marker></defs>';
+
+    s += '<text x="30" y="30" font-size="12" fill="#6b7280">6 个点的位置</text>';
+    s += '<text x="290" y="30" font-size="12" fill="#6b7280">K-D 树（节点旁是它的虚点编号）</text>';
+    s += '<rect x="30" y="40" width="220" height="220" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1"/>';
+
+    if (state.jump) {
+      var q = JUMP[state.jump];
+      s += '<rect x="' + px(q.l) + '" y="' + py(q.u) + '" width="' + (px(q.r) - px(q.l)) +
+           '" height="' + (py(q.d) - py(q.u)) + '" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>';
+    }
+
+    for (var i = 1; i <= N; i++) {
+      var cx = px(PTS[i][0]), cy = py(PTS[i][1]);
+      var st = state.mark[i] || '';
+      var fill = st === 'hit' ? '#2563eb' : (st === 'visit' ? '#ea580c' : '#1f2328');
+      s += '<circle cx="' + cx + '" cy="' + cy + '" r="5" fill="' + fill + '"/>';
+      s += '<text x="' + (cx + 10) + '" y="' + (cy - 7) + '" font-size="11" fill="#1f2328" font-weight="600">' + i + '</text>';
+    }
+
+    var nodes = Object.keys(POS);
+    s += '<g stroke="#9aa0a6" stroke-width="1.4" fill="none" marker-end="url(#kgar)">';
+    nodes.forEach(function(i) {
+      var p = POS[i];
+      [CH[i][0], CH[i][1]].forEach(function(cc) {
+        if (!cc) return;
+        var q = POS[cc];
+        var dx = q[0] - p[0], dy = q[1] - p[1];
+        var len = Math.sqrt(dx * dx + dy * dy);
+        var ux = dx / len, uy = dy / len;
+        s += '<line x1="' + (p[0] + ux * 38) + '" y1="' + (p[1] + uy * 17) +
+             '" x2="' + (q[0] - ux * 40) + '" y2="' + (q[1] - uy * 19) + '"/>';
+      });
+    });
+    s += '</g>';
+
+    nodes.forEach(function(i) {
+      var p = POS[i];
+      var st = state.mark[i] || '';
+      var bg = '#fff', bd = '#e6e8eb', bw = '1.4', tc = '#1f2328', dash = '';
+      if (st === 'hit') { bg = '#dbeafe'; bd = '#2563eb'; bw = '2'; tc = '#2563eb'; }
+      else if (st === 'visit') { bg = '#ffedd5'; bd = '#ea580c'; bw = '2'; tc = '#ea580c'; }
+      else if (st === 'prune') { bg = '#f6f7f9'; bd = '#9aa0a6'; dash = ' stroke-dasharray="4 3"'; tc = '#9aa0a6'; }
+      s += '<g><rect x="' + (p[0] - 38) + '" y="' + (p[1] - 17) + '" width="76" height="34" rx="6" fill="' + bg +
+           '" stroke="' + bd + '" stroke-width="' + bw + '"' + dash + '/>';
+      s += '<text x="' + p[0] + '" y="' + (p[1] - 3) + '" font-size="12" fill="' + tc +
+           '" text-anchor="middle" font-weight="600">' + i + '　(' + PTS[i][0] + ', ' + PTS[i][1] + ')</text>';
+      s += '<text x="' + p[0] + '" y="' + (p[1] + 11) + '" font-size="11" fill="' + (st === 'prune' ? '#9aa0a6' : '#6b7280') +
+           '" text-anchor="middle">虚点 ' + (N + Number(i)) + '</text></g>';
+    });
+
+    s += '<text x="20" y="284" font-size="12" fill="#6b7280">1 号点到各点的距离</text>';
+    for (var k = 1; k <= N; k++) {
+      var bx = 20 + (k - 1) * 98;
+      var v = state.dist[k];
+      var known = v !== null && v !== undefined;
+      s += '<g><rect x="' + bx + '" y="292" width="92" height="26" rx="6" fill="' + (known ? '#dbeafe' : '#ffffff') +
+           '" stroke="' + (known ? '#2563eb' : '#e6e8eb') + '" stroke-width="1.2"/>';
+      s += '<text x="' + (bx + 46) + '" y="309" font-size="12" fill="' + (known ? '#2563eb' : '#9aa0a6') +
+           '" text-anchor="middle"' + (known ? ' font-weight="600"' : '') + '>到 ' + k + '：' +
+           (known ? v : '∞') + '</text></g>';
+    }
+    s += '</svg>';
+    return s;
+  }
+
+  var frames = [];
+  var d0 = infs();
+  d0[1] = 0;
+  frames.push({dist: d0, mark: {}, jump: null,
+    text: '6 个点建好 K-D 树：根是 2 号 (5, 9)，按 x = 5 切；左子树根是 4 号 (3, 4)，右子树根是 5 号 (6, 5)。每个节点旁边标的是它的虚点编号 n + i，也就是 7 到 12。dist[1] = 0，其余都是无穷。'});
+
+  frames.push({dist: d0, mark: {}, jump: null,
+    text: '建图：每个节点的虚点连三条边，连向它自己代表的真实点，再连向左右儿子的虚点（如果有）。一共 3n 条边。真实点没有出边，只有弹跳装置列表；虚点没有装置，只有出边。'});
+
+  var d1 = {1:0, 2:3, 3:null, 4:null, 5:3, 6:null};
+  frames.push({dist: d1, mark: {2:'hit', 4:'hit', 5:'hit', 6:'prune', 3:'prune', 1:'prune'}, jump: 1,
+    text: '弹出 1 号点（d = 0），展开装置 1：矩形 [1, 7] × [3, 9]，花费 3。根 2 号包围盒 [2, 9] × [2, 9] 相交但包不住，2 号自己 (5, 9) 在矩形里 → 距离 3。左子树 4 号包围盒 [2, 3] × [4, 8] 被矩形整个包住 → 直接把 3 送给虚点 10，不用往下。右子树 5 号相交，5 号自己 (6, 5) 在矩形里 → 距离 3；它的两个孩子包围盒 x 最小值是 9 和 8，都大于 qr = 7，一次比较就剪掉。'});
+
+  var d2 = {1:0, 2:3, 3:null, 4:null, 5:3, 6:null};
+  frames.push({dist: d2, mark: {2:'visit', 4:'prune', 5:'visit', 6:'hit', 3:'prune', 1:'prune'}, jump: 2,
+    text: '接着展开装置 2：矩形 [6, 10] × [1, 6]，花费 5。根 2 号相交，2 号 (5, 9) 不在矩形里；左子树 4 号包围盒 x 最大 3 < 6，剪掉；右子树 5 号相交，5 号 (6, 5) 在矩形里，但它已有 3，不更新；孩子 6 号包围盒 [9, 9] × [2, 2] 整个被包住 → 虚点 12 收到 5；孩子 3 号 y 最小 7 > 6，剪掉。'});
+
+  frames.push({dist: d2, mark: {2:'hit'}, jump: null,
+    text: '弹出 2 号点（d = 3）。它是真实点，没有出边，也不挂任何弹跳装置，什么都不做。'});
+
+  var d3 = {1:0, 2:3, 3:null, 4:3, 5:3, 6:null};
+  frames.push({dist: d3, mark: {4:'hit', 1:'hit'}, jump: null,
+    text: '弹出虚点 10（d = 3），也就是 4 号节点那片区域的虚点。它是虚点，沿建图的边把 3 分下去：给真实点 4（距离 3），给下级虚点 7。虚点 7 再给点 1，但点 1 已有 0，不更新。矩形里 4 号和 1 号这两个点，就是被虚点 10 这一条边覆盖掉的。'});
+
+  var d4 = {1:0, 2:3, 3:null, 4:3, 5:3, 6:null};
+  frames.push({dist: d4, mark: {2:'visit', 4:'prune', 5:'visit', 6:'prune', 3:'hit', 1:'prune'}, jump: 3,
+    text: '弹出 5 号点（d = 3），展开装置 3：矩形 [7, 10] × [6, 10]，花费 2，jdist = 5。根 2 号相交，2 号 (5, 9) 不在；左子树 4 号 x 最大 3 < 7，剪掉；右子树 5 号相交，5 号 (6, 5) 不在；孩子 6 号 y 最大 2 < 6，剪掉；孩子 3 号包围盒 [8, 8] × [7, 7] 整个被包住 → 虚点 9 收到 5。'});
+
+  frames.push({dist: d4, mark: {4:'hit'}, jump: null,
+    text: '弹出 4 号点（d = 3），没有装置，什么都不做。'});
+
+  frames.push({dist: d4, mark: {1:'hit'}, jump: null,
+    text: '弹出虚点 7（d = 3），它只连着真实点 1。点 1 已有 0，不更新。'});
+
+  var d5 = {1:0, 2:3, 3:null, 4:3, 5:3, 6:5};
+  frames.push({dist: d5, mark: {6:'hit'}, jump: null,
+    text: '弹出虚点 12（d = 5），它连着真实点 6，点 6 距离变成 5。'});
+
+  var d6 = {1:0, 2:3, 3:5, 4:3, 5:3, 6:5};
+  frames.push({dist: d6, mark: {3:'hit'}, jump: null,
+    text: '弹出虚点 9（d = 5），它连着真实点 3，点 3 距离变成 5。'});
+
+  frames.push({dist: d6, mark: {6:'hit', 3:'hit'}, jump: null,
+    text: '最后 6 号（5）和 3 号（5）依次出堆，都是真实点且没有装置。堆空，dijkstra 结束。答案是到 2 号 3、到 3 号 5、到 4 号 3、到 5 号 3、到 6 号 5。三个装置一共只做了三次矩形展开，每次进入的节点都不超过 5 个。'});
+
+  var svgEl = document.getElementById('kgSvg');
+  var statusEl = document.getElementById('kgStatus');
+  var btnStep = document.getElementById('kgStep');
+  var btnAuto = document.getElementById('kgAuto');
+  var btnReset = document.getElementById('kgReset');
+
+  var cur = 0;
+  var timer = null;
+
+  function render() {
+    var f = frames[cur];
+    svgEl.innerHTML = build(f);
+    statusEl.innerHTML = '<div class="row">第 ' + cur + ' / ' + (frames.length - 1) + ' 步</div>' +
+                         '<div class="row" style="margin-top:4px;">' + f.text + '</div>';
+    btnStep.disabled = (cur >= frames.length - 1);
+  }
+  function step() {
+    if (cur >= frames.length - 1) { render(); return; }
+    cur++;
+    render();
+  }
+  function stopAuto() {
+    if (timer) { clearInterval(timer); timer = null; }
+    btnAuto.textContent = '自动播放';
+  }
+  function toggleAuto() {
+    if (timer) { stopAuto(); return; }
+    btnAuto.textContent = '暂停';
+    timer = setInterval(function() {
+      if (cur >= frames.length - 1) { stopAuto(); return; }
+      cur++;
+      render();
+    }, 2800);
+  }
+  function reset() {
+    stopAuto();
+    cur = 0;
+    render();
+  }
+
+  btnStep.addEventListener('click', step);
+  btnAuto.addEventListener('click', toggleAuto);
+  btnReset.addEventListener('click', reset);
+  render();
+})();
+</script>
+</body>
+</html>

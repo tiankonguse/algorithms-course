@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>点分树与动态点分治（一）：重构树、容斥与开点线段树 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .pdt-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .pdt-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .pdt-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #pdtBuildSvg text,#pdtQuerySvg text{font-size:11px;}
+  .pdt-level{
+    border:1px solid var(--border);border-radius:8px;background:var(--bg);
+    padding:8px 12px;font-size:13px;color:var(--text);cursor:pointer;font-family:inherit;
+  }
+  .pdt-level:hover{border-color:var(--accent);}
+  .pdt-level.on{border-color:var(--accent);background:var(--accent-bg,#dbeafe);color:var(--accent);}
+  @media(max-width:760px){
+    .pdt-btn{font-size:13px;padding:5px 11px;}
+    .pdt-level{font-size:12px;padding:6px 9px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>点分树与动态点分治（一）：重构树、容斥与开点线段树</h1>
+    <p class="intro">静态点分治每处理一个询问，都要把树按重心重新拆一遍。一旦题目带上修改，拆出来的统计没法留住，每次都要重来。点分树把这套拆法固化成一棵高度 O(log n) 的重构树，修改和查询都沿着它走很少几步就完成。这一页用震波把容斥逻辑图解清楚，再接两道同结构的题。</p>
+
+    <h2>零、背景</h2>
+    <p>静态点分治的结构是每次选重心、删掉、递归，共 O(log n) 层。它假设树是静态的：询问来了才拆，拆完统计，拆的过程本身不留任何东西。</p>
+    <p>带修改的题就麻烦了。点权一变，之前所有层的统计都过期，重新分治一次是 O(n log n)，m 次修改就是 O(nm log n)，n、m 都是 10⁵ 时远远超时。</p>
+    <p>解法是把分治过程本身留下来。点分治每次求出一棵子树的重心时，记录这个重心的上级重心是谁。把「重心 → 上级重心」这些边收集起来，正好是一棵重构出来的树，叫点分树。</p>
+    <p>它有三条性质。一是点分树上任意一个点的子树，对应原树的一个连通块。二是点分树上两点的 LCA，一定在原树这两点的简单路径上，因此 dist(x, y) = dist(x, c) + dist(y, c)，c 是那个 LCA。三是除此之外点分树和原树的联系很少，用的时候只能依赖前两条。因为每往下一层连通块至少减半，点分树的高度是 O(log n)。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="原树与点分树的对照" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="22" font-size="12" fill="#6b7280">原树（9 个点）</text>
+        <text x="360" y="22" font-size="12" fill="#6b7280">点分树（高度 3）</text>
+        <line x1="180" y1="44" x2="100" y2="106" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="180" y1="44" x2="260" y2="106" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="100" y1="106" x2="55" y2="176" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="100" y1="106" x2="145" y2="176" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="260" y1="106" x2="215" y2="176" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="260" y1="106" x2="305" y2="176" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="55" y1="176" x2="55" y2="246" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="145" y1="176" x2="145" y2="246" stroke="#c9ced4" stroke-width="1.6"/>
+        <circle cx="180" cy="44" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <circle cx="100" cy="106" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <circle cx="260" cy="106" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <circle cx="55" cy="176" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <circle cx="145" cy="176" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <circle cx="215" cy="176" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <circle cx="305" cy="176" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <circle cx="55" cy="246" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <circle cx="145" cy="246" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="180" y="48">1</text><text x="100" y="110">2</text><text x="260" y="110">3</text>
+          <text x="55" y="180">4</text><text x="145" y="180">5</text><text x="215" y="180">6</text>
+          <text x="305" y="180">7</text><text x="55" y="250">8</text><text x="145" y="250">9</text>
+        </g>
+        <text x="30" y="284" font-size="11" fill="#6b7280">橙色点是各层分治删掉的重心：2、3、4、5</text>
+        <line x1="500" y1="60" x2="410" y2="132" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="500" y1="60" x2="500" y2="132" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="500" y1="60" x2="590" y2="132" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="410" y1="132" x2="352" y2="224" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="410" y1="132" x2="412" y2="224" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="410" y1="132" x2="472" y2="224" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="500" y1="132" x2="532" y2="224" stroke="#c9ced4" stroke-width="1.6"/>
+        <line x1="590" y1="132" x2="592" y2="224" stroke="#c9ced4" stroke-width="1.6"/>
+        <circle cx="500" cy="60" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <circle cx="410" cy="132" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <circle cx="500" cy="132" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <circle cx="590" cy="132" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <circle cx="352" cy="224" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <circle cx="412" cy="224" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <circle cx="472" cy="224" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <circle cx="532" cy="224" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <circle cx="592" cy="224" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="500" y="64">2</text><text x="410" y="136">3</text><text x="500" y="136">4</text>
+          <text x="590" y="136">5</text><text x="352" y="228">1</text><text x="412" y="228">6</text>
+          <text x="472" y="228">7</text><text x="532" y="228">8</text><text x="592" y="228">9</text>
+        </g>
+        <text x="420" y="270" font-size="11" fill="#2563eb">8 的祖先链：8 → 4 → 2，只有 O(log n) 级</text>
+      </svg>
+      <figcaption>点分树的根是整树重心 2，每个点的父亲是它所在连通块的上一级重心；叶子 8 到根只有两级</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">点分树是怎么一步步长出来的</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">还是这棵 9 个点的树。点「下一步」看每一层分治：找到当前连通块的重心，删掉它，剩下的块继续。右边点分树的边跟着一条条出现。</p>
+      <svg id="pdtBuildSvg" viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="点分树构建过程演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot" style="background:#ffedd5;border-color:#ea580c"></span>当前层找到的重心</span>
+        <span><span class="dot" style="background:#dbeafe;border-color:#2563eb"></span>还没处理的点</span>
+        <span><span class="dot" style="background:#f6f7f9;border-color:#c9ced4"></span>已删除的点</span>
+      </div>
+      <div class="breakdown" id="pdtBuildInfo"></div>
+      <div class="viz-controls">
+        <button class="pdt-btn" id="pdtBuildPrev" type="button">上一步</button>
+        <button class="pdt-btn" id="pdtBuildNext" type="button">下一步</button>
+        <button class="pdt-btn" id="pdtBuildReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>一、题目1：震波</h2>
+    <p>树上 n 个点、有点权，边权都是 1。m 条操作：操作 0 x y 打印从 x 出发距离不超过 y 的所有点的点权和；操作 1 x y 把 x 的点权改成 y。n、m 到 10⁵，点权到 10⁴。本题强制在线，x 和 y 都要用上次输出异或解出来。测试链接 P6329。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>修改是 O(1) 的，直接改数组。查询从 x 跑一遍 bfs，把距离 ≤ y 的点权加起来，单次 O(n)。</p>
+    <p>两边乘起来是 O(nm)，10¹⁰ 量级，超时。强制在线还把「把询问攒起来离线批量处理」的路堵死了，必须单次操作就快。</p>
+    <p>树哈希、树剖这类按原树结构切分的做法，遇到「以任意点为圆心统计半径」的询问都得整树扫。要快，得换一棵树。</p>
+
+    <h2>三、点分树上的容斥统计</h2>
+    <p>先看一个观察。讨论 x 与其他点的、和距离有关的答案时，把其他点按「在点分树上来自 x 的哪个祖先重心」分类。x 的祖先重心只有 O(log n) 个，所以其他点最多被分成 O(log n) 类，每一类内部到 x 的距离有一个统一的表达式。</p>
+    <p>具体来说，设 fa 是 x 的某一级祖先重心。落在 fa 的连通块、但不在 x 往 fa 方向那一侧子块里的点 y，fa 一定在 x 到 y 的路径上，于是 dist(x, y) = dist(x, fa) + dist(y, fa)。统计「到 x 距离 ≤ k」就变成「到 fa 距离 ≤ k − dist(x, fa)」，一个只跟 fa 有关的桶就能回答。</p>
+    <p>于是给每个重心 c 准备一棵按距离下标的开点线段树 addTree[c]，把 c 所在连通块的每个点挂在自己的距离上。查询 x 时：自己这棵 addTree[x] 查 [0, k]；每级祖先 fa 查 addTree[fa] 的 [0, k − dist(x, fa)]。</p>
+    <p>这里有个细节：一个点的信息会被多个祖先重复统计。x 自己就在 addTree[x] 里，也在 addTree[4] 里，还在 addTree[2] 里。所以再给每条父子边配一棵 minusTree[u]，挂 u 的连通块、按到上级重心的距离。查询每级做加 addTree[fa] 减 minusTree[cur]，把低层已经算过的抵掉。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 262" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="查询 8 半径 4 时的三级容斥统计" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="22" font-size="12" fill="#374151">查询 (x=8, k=4)，点权等于编号：三级统计加加减减，最后正好是 32</text>
+        <rect x="30" y="36" width="290" height="54" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+        <text x="44" y="56" font-size="12" fill="#2563eb">① 自己：addTree[8] = {8}</text>
+        <text x="44" y="76" font-size="11" fill="#374151">查 [0, 4] → +8</text>
+        <rect x="340" y="36" width="310" height="54" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="354" y="56" font-size="11" fill="#6b7280">最底层，没有要抵扣的部分</text>
+        <text x="354" y="76" font-size="11" fill="#6b7280">（8 自己已经被算过一次，看下一行）</text>
+        <rect x="30" y="100" width="290" height="54" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+        <text x="44" y="120" font-size="12" fill="#2563eb">② 上级重心 4（dist=1，半径剩 3）</text>
+        <text x="44" y="140" font-size="11" fill="#374151">addTree[4]：{4,8} 查 [0,3] → +12</text>
+        <rect x="340" y="100" width="310" height="54" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+        <text x="354" y="120" font-size="12" fill="#ea580c">抵掉 8 这级已算过的</text>
+        <text x="354" y="140" font-size="11" fill="#374151">minusTree[8]：{8} 查 [0,3] → −8</text>
+        <rect x="30" y="164" width="290" height="54" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+        <text x="44" y="184" font-size="12" fill="#2563eb">③ 上级重心 2（dist=2，半径剩 2）</text>
+        <text x="44" y="204" font-size="11" fill="#374151">addTree[2]：全树距离 ≤ 2 → +32</text>
+        <rect x="340" y="164" width="310" height="54" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+        <text x="354" y="184" font-size="12" fill="#ea580c">抵掉 4 这级已算过的</text>
+        <text x="354" y="204" font-size="11" fill="#374151">minusTree[4]：{4,8} 查 [0,2] → −12</text>
+        <rect x="30" y="228" width="620" height="26" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="44" y="245" font-size="12" fill="#2563eb">8 + (12 − 8) + (32 − 12) = 32</text>
+        <text x="340" y="245" font-size="11" fill="#6b7280">直接数距离 ≤ 4 的点 8,4,2,1,5,3,9，点权和 32</text>
+      </svg>
+      <figcaption>每获得上级的统计就减掉下级的统计，重复计算被容斥抵消，三级下来恰好不重不漏</figcaption>
+    </figure>
+
+    <p>修改同理。点 x 的点权变动 v 时：addTree[x] 在距离 0 处加 v；沿祖先链每级 fa 在距离 dist(x, fa) 处加 v，同时给 minusTree[cur] 在同一位置加 v。修改和查询都是沿链走 O(log n) 级，每级一次线段树操作 O(log n)。</p>
+    <p>原树距离用 LCA 算，倍增或重链都行，单次 O(log n)。下面是完整代码，LCA 用的重链剖分。</p>
+
+    <div class="viz">
+      <div class="viz-title">震波查询模拟器：链上一级级加，也一级级减</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">点权等于点的编号。点「下一步」依次做四次半径递增的查询、一次点权修改、再两次别的起点的查询。左图里橙色点是这次统计到的点，右侧是链上每一级的加减明细。</p>
+      <svg id="pdtQuerySvg" viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="震波查询过程演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="breakdown" id="pdtQueryInfo"></div>
+      <div class="viz-controls">
+        <button class="pdt-btn" id="pdtQueryPrev" type="button">上一步</button>
+        <button class="pdt-btn" id="pdtQueryNext" type="button">下一步</button>
+        <button class="pdt-btn" id="pdtQueryReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <p>完整代码：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 10000001;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> dep[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">int</span> son[MAXN];
+    <span class="kw">int</span> top[MAXN];
+
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> centfa[MAXN];
+
+    <span class="kw">int</span> addTree[MAXN];
+    <span class="kw">int</span> minusTree[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> sum[MAXT];
+    <span class="kw">int</span> cntt;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs1</span>(<span class="kw">int</span> u, <span class="kw">int</span> f) {
+        fa[u] = f;
+        dep[u] = dep[f] + 1;
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != f) {
+                dfs1(v, u);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> ei = head[u], v; ei; ei = nxt[ei]) {
+            v = to[ei];
+            <span class="kw">if</span> (v != f) {
+                siz[u] += siz[v];
+                <span class="kw">if</span> (son[u] == 0 || siz[son[u]] &lt; siz[v]) {
+                    son[u] = v;
+                }
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs2</span>(<span class="kw">int</span> u, <span class="kw">int</span> t) {
+        top[u] = t;
+        <span class="kw">if</span> (son[u] == 0) {
+            <span class="kw">return</span>;
+        }
+        dfs2(son[u], t);
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != fa[u] &amp;&amp; v != son[u]) {
+                dfs2(v, v);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getLca</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">while</span> (top[a] != top[b]) {
+            <span class="kw">if</span> (dep[top[a]] &lt;= dep[top[b]]) {
+                b = fa[top[b]];
+            } <span class="kw">else</span> {
+                a = fa[top[a]];
+            }
+        }
+        <span class="kw">return</span> dep[a] &lt;= dep[b] ? a : b;
+    }
+
+    <span class="kw">int</span> <span class="fn">getDist</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">return</span> dep[x] + dep[y] - (dep[getLca(x, y)] &lt;&lt; 1);
+    }
+
+    <span class="kw">void</span> <span class="fn">getSize</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[v]) {
+                getSize(v, u);
+                siz[u] += siz[v];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getCentroid</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        getSize(u, fa);
+        <span class="kw">int</span> half = siz[u] &gt;&gt; 1;
+        <span class="kw">bool</span> find = <span class="kw">false</span>;
+        <span class="kw">while</span> (!find) {
+            find = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                <span class="kw">if</span> (v != fa &amp;&amp; !vis[v] &amp;&amp; siz[v] &gt; half) {
+                    fa = u;
+                    u = v;
+                    find = <span class="kw">false</span>;
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+        <span class="kw">return</span> u;
+    }
+
+    <span class="kw">void</span> <span class="fn">centroidTree</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        centfa[u] = fa;
+        vis[u] = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (!vis[v]) {
+                centroidTree(getCentroid(v, u), u);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == 0) {
+            i = ++cntt;
+        }
+        <span class="kw">if</span> (l == r) {
+            sum[i] += jobv;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                ls[i] = add(jobi, jobv, l, mid, ls[i]);
+            } <span class="kw">else</span> {
+                rs[i] = add(jobi, jobv, mid + 1, r, rs[i]);
+            }
+            sum[i] = sum[ls[i]] + sum[rs[i]];
+        }
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="kw">return</span> sum[i];
+        }
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">if</span> (jobl &lt;= mid) {
+            ans += query(jobl, jobr, l, mid, ls[i]);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+            ans += query(jobl, jobr, mid + 1, r, rs[i]);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> x, <span class="kw">int</span> v) {
+        addTree[x] = add(0, v, 0, n - 1, addTree[x]);
+        <span class="kw">for</span> (<span class="kw">int</span> cur = x, fa = centfa[cur]; fa &gt; 0; cur = fa, fa = centfa[cur]) {
+            <span class="kw">int</span> dist = getDist(x, fa);
+            addTree[fa] = add(dist, v, 0, n - 1, addTree[fa]);
+            minusTree[cur] = add(dist, v, 0, n - 1, minusTree[cur]);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> x, <span class="kw">int</span> k) {
+        <span class="kw">int</span> ans = query(0, k, 0, n - 1, addTree[x]);
+        <span class="kw">for</span> (<span class="kw">int</span> cur = x, fa = centfa[cur]; fa &gt; 0; cur = fa, fa = centfa[cur]) {
+            <span class="kw">int</span> dist = getDist(x, fa);
+            <span class="kw">if</span> (k - dist &gt;= 0) {
+                ans += query(0, k - dist, 0, n - 1, addTree[fa]);
+                ans -= query(0, k - dist, 0, n - 1, minusTree[cur]);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        dfs1(1, 0);
+        dfs2(1, 1);
+        centroidTree(getCentroid(1, 0), 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            add(i, arr[i]);
+        }
+        <span class="kw">int</span> lastAns = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x, y; i &lt;= m; i++) {
+            cin &gt;&gt; op &gt;&gt; x &gt;&gt; y;
+            x ^= lastAns;
+            y ^= lastAns;
+            <span class="kw">if</span> (op == 0) {
+                lastAns = query(x, y);
+                cout &lt;&lt; lastAns &lt;&lt; '\n';
+            } <span class="kw">else</span> {
+                add(x, y - arr[x]);
+                arr[x] = y;
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>四、题目2：烁烁的游戏</h2>
+    <p>n 个点的树，初始点权全是 0，边权都是 1。m 条操作：M x k v 把从 x 出发距离不超过 k 的所有点的点权都加 v；Q x 打印 x 的点权。n、m 到 10⁵，v 在 ±10⁴。测试链接 P10603。</p>
+    <p>和震波正好是对偶的：那边是点修改、半径查询，这边是半径修改、点查询。点分树和两棵线段树的骨架原样保留，只是「往桶里写什么、从桶里读什么」对调了。</p>
+    <p>修改 M x k v 走到祖先重心 fa 时，剩余半径是 k − dist(x, fa)，把这个数当作位置往 addTree[fa] 里写；查询 Q x 时，门槛是 dist(x, fa)，从 fa 的桶里读 [dist(x, fa), n−1]，再减掉下级的同区间。</p>
+    <p>两边为什么恰好咬合：修改写在位置 k − dist(x, fa)，查询从位置 dist(y, fa) 开始读，位置 ≥ 门槛等价于 k − dist(x, fa) ≥ dist(y, fa)，移项就是 k ≥ dist(x, fa) + dist(y, fa)。fa 在 x 到 y 的路径上，右边正是 dist(x, y)。所以「读得到」恰好等价于「这次修改覆盖这个查询点」，不多不少。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 232" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="修改写剩余半径、查询按距离门槛读" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="22" font-size="12" fill="#374151">修改和查询在同一个重心 fa 的桶上碰头，位置和门槛一比较，正好还原真实距离</text>
+        <rect x="188" y="76" width="422" height="20" fill="#dbeafe" opacity="0.55"/>
+        <line x1="70" y1="86" x2="610" y2="86" stroke="#c9ced4" stroke-width="1.6"/>
+        <g font-size="11" fill="#6b7280" text-anchor="middle">
+          <text x="70" y="108">0</text><text x="188" y="108">1</text><text x="306" y="108">2</text>
+          <text x="424" y="108">3</text><text x="542" y="108">4</text>
+        </g>
+        <text x="70" y="70" font-size="11" fill="#6b7280">位置 = 到 fa 的距离</text>
+        <line x1="188" y1="42" x2="188" y2="84" stroke="#2563eb" stroke-width="1.8"/>
+        <text x="30" y="48" font-size="11" fill="#2563eb">查询门槛 dist(y,fa)</text>
+        <text x="460" y="72" font-size="11" fill="#2563eb">从门槛往右整段读</text>
+        <line x1="306" y1="46" x2="306" y2="80" stroke="#ea580c" stroke-width="1.8"/>
+        <polygon points="306,86 301,77 311,77" fill="#ea580c"/>
+        <text x="320" y="46" font-size="11" fill="#ea580c">修改写进 k − dist(x,fa)</text>
+        <text x="30" y="140" font-size="12" fill="#374151">修改位置 ≥ 查询门槛</text>
+        <text x="30" y="160" font-size="12" fill="#374151">⟺ k − dist(x,fa) ≥ dist(y,fa)</text>
+        <text x="30" y="180" font-size="12" fill="#374151">⟺ k ≥ dist(x,fa) + dist(y,fa) = dist(x,y)</text>
+        <text x="30" y="204" font-size="11" fill="#6b7280">等号右边用到了 fa 在 x 到 y 的路径上，这正是点分树 LCA 的性质</text>
+        <rect x="390" y="126" width="260" height="70" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="404" y="148" font-size="11" fill="#374151">例：M 8 4 v 走到 fa=2 时写在 4−2=2 处；</text>
+        <text x="404" y="166" font-size="11" fill="#374151">查询 y=4 在 fa=2 的门槛是 1，2 ≥ 1，</text>
+        <text x="404" y="184" font-size="11" fill="#374151">dist(8,4)=1 ≤ 4，生效，一致</text>
+      </svg>
+      <figcaption>位置存剩余半径、区间从距离门槛起读，一个不等式把两边的判断统一成真实距离的比较</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 18;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 20000001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dep[MAXN];
+    <span class="kw">int</span> stjump[MAXN][MAXP];
+
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">int</span> centfa[MAXN];
+
+    <span class="kw">int</span> addTree[MAXN];
+    <span class="kw">int</span> minusTree[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> sum[MAXT];
+    <span class="kw">int</span> cntt;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        dep[u] = dep[fa] + 1;
+        stjump[u][0] = fa;
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt; MAXP; p++) {
+            stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa) {
+                dfs(v, u);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getLca</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">if</span> (dep[a] &lt; dep[b]) {
+            swap(a, b);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (dep[stjump[a][p]] &gt;= dep[b]) {
+                a = stjump[a][p];
+            }
+        }
+        <span class="kw">if</span> (a == b) {
+            <span class="kw">return</span> a;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (stjump[a][p] != stjump[b][p]) {
+                a = stjump[a][p];
+                b = stjump[b][p];
+            }
+        }
+        <span class="kw">return</span> stjump[a][0];
+    }
+
+    <span class="kw">int</span> <span class="fn">getDist</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">return</span> dep[x] + dep[y] - (dep[getLca(x, y)] &lt;&lt; 1);
+    }
+
+    <span class="kw">void</span> <span class="fn">getSize</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[v]) {
+                getSize(v, u);
+                siz[u] += siz[v];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getCentroid</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        getSize(u, fa);
+        <span class="kw">int</span> half = siz[u] &gt;&gt; 1;
+        <span class="kw">bool</span> find = <span class="kw">false</span>;
+        <span class="kw">while</span> (!find) {
+            find = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                <span class="kw">if</span> (v != fa &amp;&amp; !vis[v] &amp;&amp; siz[v] &gt; half) {
+                    fa = u;
+                    u = v;
+                    find = <span class="kw">false</span>;
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+        <span class="kw">return</span> u;
+    }
+
+    <span class="kw">void</span> <span class="fn">centroidTree</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        centfa[u] = fa;
+        vis[u] = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (!vis[v]) {
+                centroidTree(getCentroid(v, u), u);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == 0) {
+            i = ++cntt;
+        }
+        <span class="kw">if</span> (l == r) {
+            sum[i] += jobv;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                ls[i] = add(jobi, jobv, l, mid, ls[i]);
+            } <span class="kw">else</span> {
+                rs[i] = add(jobi, jobv, mid + 1, r, rs[i]);
+            }
+            sum[i] = sum[ls[i]] + sum[rs[i]];
+        }
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="kw">return</span> sum[i];
+        }
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">if</span> (jobl &lt;= mid) {
+            ans += query(jobl, jobr, l, mid, ls[i]);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+            ans += query(jobl, jobr, mid + 1, r, rs[i]);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> x, <span class="kw">int</span> k, <span class="kw">int</span> v) {
+        addTree[x] = add(k, v, 0, n - 1, addTree[x]);
+        <span class="kw">for</span> (<span class="kw">int</span> cur = x, fa = centfa[cur]; fa &gt; 0; cur = fa, fa = centfa[cur]) {
+            <span class="kw">int</span> dist = getDist(x, fa);
+            <span class="kw">if</span> (k - dist &gt;= 0) {
+                addTree[fa] = add(k - dist, v, 0, n - 1, addTree[fa]);
+                minusTree[cur] = add(k - dist, v, 0, n - 1, minusTree[cur]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> ans = query(0, n - 1, 0, n - 1, addTree[x]);
+        <span class="kw">for</span> (<span class="kw">int</span> cur = x, fa = centfa[cur]; fa &gt; 0; cur = fa, fa = centfa[cur]) {
+            <span class="kw">int</span> dist = getDist(x, fa);
+            ans += query(dist, n - 1, 0, n - 1, addTree[fa]);
+            ans -= query(dist, n - 1, 0, n - 1, minusTree[cur]);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        dfs(1, 0);
+        centroidTree(getCentroid(1, 0), 0);
+        <span class="kw">char</span> op;
+        <span class="kw">int</span> x, k, v;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; op;
+            <span class="kw">if</span> (op == 'M') {
+                cin &gt;&gt; x &gt;&gt; k &gt;&gt; v;
+                add(x, k, v);
+            } <span class="kw">else</span> {
+                cin &gt;&gt; x;
+                cout &lt;&lt; query(x) &lt;&lt; '\n';
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>五、题目3：Atm的树</h2>
+    <p>n 个点的带边权的树，边权 1 到 10。对每个节点 x，求从 x 出发到达其他点的距离中第 k 小的那个。x 到自己的距离 0 不参与评比，给定 k，输出 n 个答案。n 到 15000，k 到 5000。测试链接 P10604。</p>
+    <p>这是纯静态的题，没有修改。把震波的维护结构原样建出来：每个点的点权当作 1 插进所有相关的桶，query(x, limit) 就是「到 x 距离 ≤ limit 的点数」。</p>
+    <p>第 k 小距离没有直接的桶可查，但它关于 limit 单调，于是二分答案：找最小的 limit 使 query(x, limit) ≥ k + 1。加一是为了抵掉 x 自己：自己永远在桶的位置 0 处贡献一个名额，而题面规定距离 0 不参与评比，名额多算了一个。</p>
+    <p>二分的上界是所有边权之和 sumw。每个点独立二分，判定一次是链长 O(log n) 级、每级一次线段树查询，总量 O(n log n log² sumw)。</p>
+    <p>完整代码：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 20001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 18;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 1000001;
+    <span class="kw">int</span> n, k, sumw;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> weight[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dep[MAXN];
+    <span class="kw">int</span> dist[MAXN];
+    <span class="kw">int</span> stjump[MAXN][MAXP];
+
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">int</span> centfa[MAXN];
+
+    <span class="kw">int</span> addTree[MAXN];
+    <span class="kw">int</span> minusTree[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> sum[MAXT];
+    <span class="kw">int</span> cntt;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        weight[cntg] = w;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">int</span> dis) {
+        dep[u] = dep[fa] + 1;
+        dist[u] = dis;
+        stjump[u][0] = fa;
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt; MAXP; p++) {
+            stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">int</span> w = weight[e];
+            <span class="kw">if</span> (v != fa) {
+                dfs(v, u, dis + w);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getLca</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">if</span> (dep[a] &lt; dep[b]) {
+            swap(a, b);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (dep[stjump[a][p]] &gt;= dep[b]) {
+                a = stjump[a][p];
+            }
+        }
+        <span class="kw">if</span> (a == b) {
+            <span class="kw">return</span> a;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (stjump[a][p] != stjump[b][p]) {
+                a = stjump[a][p];
+                b = stjump[b][p];
+            }
+        }
+        <span class="kw">return</span> stjump[a][0];
+    }
+
+    <span class="kw">int</span> <span class="fn">getDist</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">return</span> dist[x] + dist[y] - (dist[getLca(x, y)] &lt;&lt; 1);
+    }
+
+    <span class="kw">void</span> <span class="fn">getSize</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        siz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa &amp;&amp; !vis[v]) {
+                getSize(v, u);
+                siz[u] += siz[v];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getCentroid</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        getSize(u, fa);
+        <span class="kw">int</span> half = siz[u] &gt;&gt; 1;
+        <span class="kw">bool</span> find = <span class="kw">false</span>;
+        <span class="kw">while</span> (!find) {
+            find = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                <span class="kw">if</span> (v != fa &amp;&amp; !vis[v] &amp;&amp; siz[v] &gt; half) {
+                    fa = u;
+                    u = v;
+                    find = <span class="kw">false</span>;
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+        <span class="kw">return</span> u;
+    }
+
+    <span class="kw">void</span> <span class="fn">centroidTree</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        centfa[u] = fa;
+        vis[u] = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (!vis[v]) {
+                centroidTree(getCentroid(v, u), u);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == 0) {
+            i = ++cntt;
+        }
+        <span class="kw">if</span> (l == r) {
+            sum[i] += jobv;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                ls[i] = add(jobi, jobv, l, mid, ls[i]);
+            } <span class="kw">else</span> {
+                rs[i] = add(jobi, jobv, mid + 1, r, rs[i]);
+            }
+            sum[i] = sum[ls[i]] + sum[rs[i]];
+        }
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="kw">return</span> sum[i];
+        }
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">if</span> (jobl &lt;= mid) {
+            ans += query(jobl, jobr, l, mid, ls[i]);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+            ans += query(jobl, jobr, mid + 1, r, rs[i]);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> x, <span class="kw">int</span> v) {
+        addTree[x] = add(0, v, 0, sumw, addTree[x]);
+        <span class="kw">for</span> (<span class="kw">int</span> cur = x, fa = centfa[cur]; fa &gt; 0; cur = fa, fa = centfa[cur]) {
+            <span class="kw">int</span> dist = getDist(x, fa);
+            addTree[fa] = add(dist, v, 0, sumw, addTree[fa]);
+            minusTree[cur] = add(dist, v, 0, sumw, minusTree[cur]);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> x, <span class="kw">int</span> limit) {
+        <span class="kw">int</span> ans = query(0, limit, 0, sumw, addTree[x]);
+        <span class="kw">for</span> (<span class="kw">int</span> cur = x, fa = centfa[cur]; fa &gt; 0; cur = fa, fa = centfa[cur]) {
+            <span class="kw">int</span> dist = getDist(x, fa);
+            <span class="kw">if</span> (limit - dist &gt;= 0) {
+                ans += query(0, limit - dist, 0, sumw, addTree[fa]);
+                ans -= query(0, limit - dist, 0, sumw, minusTree[cur]);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">compute</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">int</span> l = 0, r = sumw, mid;
+        <span class="kw">while</span> (l &lt;= r) {
+            mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (query(x, mid) &gt;= k) {
+                ans = mid;
+                r = mid - 1;
+            } <span class="kw">else</span> {
+                l = mid + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        cin &gt;&gt; k;
+        k = k + 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v, w; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v &gt;&gt; w;
+            addEdge(u, v, w);
+            addEdge(v, u, w);
+            sumw += w;
+        }
+        dfs(1, 0, 0);
+        centroidTree(getCentroid(1, 0), 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            add(i, 1);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cout &lt;&lt; compute(i) &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>六、复杂度分析</h2>
+    <p>三道题共用点分树骨架：建树时每层 getSize 的总代价和该层连通块同阶，加起来 O(n log n)。之后的差别全在链长和线段树的乘积上。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>建点分树（每层求重心、连父指针）</td><td><code class="inline">O(n log n)</code></td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>震波：单次修改 / 查询</td><td><code class="inline">O(log² n)</code></td><td rowspan="3"><code class="inline">O(n log n)</code>（开点线段树总节点数）</td></tr>
+        <tr><td>烁烁的游戏：单次修改 / 查询</td><td><code class="inline">O(log² n)</code></td></tr>
+        <tr><td>Atm的树：单点二分（判定一次）</td><td><code class="inline">O(log n · log sumw)</code>（判定）/ <code class="inline">O(log n · log² sumw)</code>（整点二分）</td></tr>
+      </tbody>
+    </table>
+    <p>震波的总复杂度 O((n + m) log² n)。开点线段树只给真实出现过的位置开节点，一次插入 O(log n) 个新节点，全部插入共 O(n log² n) 个节点，空间是 O(n log n) 量级；题目里 MAXT 开到 10⁷ 就是按这个上界准备的。Atm的树里 sumw 是边权总和，不超过 1.5×10⁵，log sumw 约 17，和 log n 同阶。</p>
+
+    <h2>七、最后</h2>
+    <p>点分树把「每次重来」的分治变成「一次建好、长期维护」的结构，代价是统计里必须带上容斥：每读一级祖先，就减掉一级下级。震波把这个逻辑走通之后，烁烁的游戏只是把读写对调，Atm的树再叠一层二分。</p>
+    <p>185 课剩下的四道题在下一页：按重心移动的幻想乡、带年龄统计的开店、借点分治分析的成都七中，还有树上开关类的捉迷藏。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  // ---------- 公共数据：9 个点的树 ----------
+  var EDGES = [[1,2],[1,3],[2,4],[2,5],[3,6],[3,7],[4,8],[5,9]];
+  var ADJ = {};
+  EDGES.forEach(function(e){
+    (ADJ[e[0]] = ADJ[e[0]] || []).push(e[1]);
+    (ADJ[e[1]] = ADJ[e[1]] || []).push(e[0]);
+  });
+  var CENTFA = {1:3, 2:0, 3:2, 4:2, 5:2, 6:3, 7:3, 8:4, 9:5};
+  var LX = {1:180, 2:100, 3:260, 4:55, 5:145, 6:215, 7:305, 8:55, 9:145};
+  var LY = {1:44, 2:106, 3:106, 4:176, 5:176, 6:176, 7:176, 8:246, 9:246};
+
+  function dist(a, b){
+    var pre = {}, q = [a]; pre[a] = 0;
+    while (q.length) {
+      var u = q.shift();
+      if (u === b) return pre[u];
+      (ADJ[u] || []).forEach(function(v){
+        if (!(v in pre)) { pre[v] = pre[u] + 1; q.push(v); }
+      });
+    }
+    return -1;
+  }
+  function comp(c){
+    // 点分树上 c 的子树 = c 所在连通块
+    var res = [c], q = [c];
+    while (q.length) {
+      var u = q.shift();
+      for (var v = 1; v <= 9; v++) if (CENTFA[v] === u) { res.push(v); q.push(v); }
+    }
+    return res;
+  }
+  var COMP = {};
+  for (var c = 1; c <= 9; c++) COMP[c] = comp(c);
+
+  // ---------- 演示1：点分树构建 ----------
+  var bsvg = document.getElementById('pdtBuildSvg');
+  if (bsvg) {
+    var binfo = document.getElementById('pdtBuildInfo');
+    var bprev = document.getElementById('pdtBuildPrev');
+    var bnext = document.getElementById('pdtBuildNext');
+    var breset = document.getElementById('pdtBuildReset');
+    // 右侧点分树坐标
+    var RX = {2:500, 3:410, 4:500, 5:590, 1:352, 6:412, 7:472, 8:532, 9:592};
+    var RY = {2:60, 3:132, 4:132, 5:132, 1:224, 6:224, 7:224, 8:224, 9:224};
+    var FRAMES = [
+      {vis:[], pd:[], hl:[], note:'9 个点的原树，还没开始分治。'},
+      {vis:[2], pd:[], hl:[2], note:'整树的重心是 2：删掉它后最大的块 {1,3,6,7} 只有 4 个点，不超过 9 的一半。'},
+      {vis:[2], pd:[], hl:[], blocks:true, note:'删掉 2，剩下三个连通块：{1,3,6,7}（4 个点）、{4,8}、{5,9}。'},
+      {vis:[2,3,4,5], pd:[[2,3],[2,4],[2,5]], hl:[3,4,5], note:'每个块再找重心：3、4、5，作为 2 的儿子挂进点分树。'},
+      {vis:[2,3,4,5], pd:[[2,3],[2,4],[2,5]], hl:[], blocks:true, note:'再删掉 3、4、5，剩下的五个块都只有单个点，单个点自己就是重心。'},
+      {vis:[2,3,4,5,1,6,7,8,9], pd:[[2,3],[2,4],[2,5],[3,1],[3,6],[3,7],[4,8],[5,9]], hl:[], note:'全部挂好。点分树高度 3，每个点的祖先重心不超过 3 个。'}
+    ];
+    var at = 0;
+
+    function blocksOf(vis){
+      var visSet = {}, res = [], seen = {};
+      vis.forEach(function(v){ visSet[v] = 1; });
+      for (var s = 1; s <= 9; s++) {
+        if (visSet[s] || seen[s]) continue;
+        var blk = [s], q = [s]; seen[s] = 1;
+        while (q.length) {
+          var u = q.shift();
+          (ADJ[u] || []).forEach(function(v){
+            if (!visSet[v] && !seen[v]) { seen[v] = 1; blk.push(v); q.push(v); }
+          });
+        }
+        res.push(blk);
+      }
+      return res;
+    }
+    var BCOL = ['#dbeafe', '#f0fdf4', '#fef9c3'];
+
+    function render(){
+      var f = FRAMES[at], p = [];
+      p.push('<rect x="14" y="10" width="316" height="280" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+      p.push('<rect x="336" y="10" width="330" height="280" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+      p.push('<text x="30" y="34" font-size="12" fill="#6b7280">原树</text>');
+      p.push('<text x="352" y="34" font-size="12" fill="#6b7280">点分树</text>');
+
+      var blkColor = {};
+      if (f.blocks) {
+        blocksOf(f.vis).forEach(function(blk, i){
+          blk.forEach(function(v){ blkColor[v] = BCOL[i % 3]; });
+        });
+      }
+      var visSet = {}; f.vis.forEach(function(v){ visSet[v] = 1; });
+      var hlSet = {}; f.hl.forEach(function(v){ hlSet[v] = 1; });
+
+      EDGES.forEach(function(e){
+        var live = !visSet[e[0]] && !visSet[e[1]];
+        p.push('<line x1="'+LX[e[0]]+'" y1="'+LY[e[0]]+'" x2="'+LX[e[1]]+'" y2="'+LY[e[1]]+'" stroke="'+(live ? '#c9ced4' : '#eceef1')+'" stroke-width="1.6"/>');
+      });
+      for (var v = 1; v <= 9; v++) {
+        var fill, stroke;
+        if (hlSet[v]) { fill = '#ffedd5'; stroke = '#ea580c'; }
+        else if (blkColor[v]) { fill = blkColor[v]; stroke = '#2563eb'; }
+        else if (visSet[v]) { fill = '#f6f7f9'; stroke = '#c9ced4'; }
+        else { fill = '#dbeafe'; stroke = '#2563eb'; }
+        p.push('<circle cx="'+LX[v]+'" cy="'+LY[v]+'" r="15" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+(hlSet[v]?1.8:1.5)+'"/>');
+        p.push('<text x="'+LX[v]+'" y="'+(LY[v]+4)+'" font-size="12" fill="'+(visSet[v]&&!hlSet[v]?'#9aa0a6':'#1f2328')+'" text-anchor="middle">'+v+'</text>');
+      }
+
+      f.pd.forEach(function(e){
+        p.push('<line x1="'+RX[e[0]]+'" y1="'+RY[e[0]]+'" x2="'+RX[e[1]]+'" y2="'+RY[e[1]]+'" stroke="#c9ced4" stroke-width="1.6"/>');
+      });
+      var drawn = {};
+      f.pd.forEach(function(e){ drawn[e[0]] = 1; drawn[e[1]] = 1; });
+      if (f.hl.length) f.hl.forEach(function(v){ drawn[v] = 1; });
+      if (at === 0) drawn = {};
+      for (var w = 1; w <= 9; w++) {
+        if (!drawn[w]) continue;
+        var isHl = hlSet[w];
+        p.push('<circle cx="'+RX[w]+'" cy="'+RY[w]+'" r="15" fill="'+(isHl?'#ffedd5':'#dbeafe')+'" stroke="'+(isHl?'#ea580c':'#2563eb')+'" stroke-width="'+(isHl?1.8:1.5)+'"/>');
+        p.push('<text x="'+RX[w]+'" y="'+(RY[w]+4)+'" font-size="12" fill="#1f2328" text-anchor="middle">'+w+'</text>');
+      }
+      bsvg.innerHTML = p.join('');
+      binfo.innerHTML = '<div>'+f.note+'</div>';
+      bprev.disabled = at === 0;
+      bnext.disabled = at === FRAMES.length - 1;
+    }
+    bprev.addEventListener('click', function(){ if (at > 0) { at--; render(); } });
+    bnext.addEventListener('click', function(){ if (at < FRAMES.length - 1) { at++; render(); } });
+    breset.addEventListener('click', function(){ at = 0; render(); });
+    render();
+  }
+
+  // ---------- 演示2：震波查询模拟器 ----------
+  var qsvg = document.getElementById('pdtQuerySvg');
+  if (qsvg) {
+    var qinfo = document.getElementById('pdtQueryInfo');
+    var qprev = document.getElementById('pdtQueryPrev');
+    var qnext = document.getElementById('pdtQueryNext');
+    var qreset = document.getElementById('pdtQueryReset');
+
+    var w = {};
+    for (var i = 1; i <= 9; i++) w[i] = i;
+    var STEP = [
+      {t:'q', x:8, k:2},
+      {t:'q', x:8, k:3},
+      {t:'q', x:8, k:4},
+      {t:'q', x:8, k:5},
+      {t:'m', x:5, v:100},
+      {t:'q', x:8, k:4},
+      {t:'q', x:5, k:3},
+      {t:'q', x:3, k:4}
+    ];
+    var at = 0;
+
+    function bucket(c, base){
+      // comp(c) 的点，按到 base 的距离放，返回 [{d, v}]
+      return COMP[c].map(function(v){ return {d: dist(v, base), v: w[v], node: v}; });
+    }
+    function rangeSum(list, bound){
+      var s = 0, nodes = [];
+      list.forEach(function(it){ if (it.d <= bound) { s += it.v; nodes.push(it.node); } });
+      return {s: s, nodes: nodes};
+    }
+
+    function runQuery(x, k){
+      var lines = [], ans = 0;
+      var own = rangeSum(bucket(x, x), k);
+      ans += own.s;
+      lines.push({label:'① 自己 addTree['+x+']，查 [0, '+k+']', short:'自己 +'+own.s, plus: own.s, minus: 0, nodes: own.nodes});
+      var cur = x, fa = CENTFA[x];
+      var step = 2;
+      while (fa > 0) {
+        var d = dist(x, fa);
+        if (k - d >= 0) {
+          var p = rangeSum(bucket(fa, fa), k - d);
+          var m = rangeSum(bucket(cur, fa), k - d);
+          ans += p.s - m.s;
+          lines.push({label:''+String.fromCharCode(0x2460 + step - 1)+' 上级重心 '+fa+'（dist='+d+'，半径剩 '+(k-d)+'）：addTree['+fa+'] +'+p.s+'，minusTree['+cur+'] −'+m.s, short:'fa='+fa+' +'+p.s+' −'+m.s, plus: p.s, minus: m.s, nodes: p.nodes});
+        } else {
+          lines.push({label:'上级重心 '+fa+'（dist='+d+'）：半径 '+k+' 不够走这么远，跳过', short:'fa='+fa+' 跳过', plus: 0, minus: 0, nodes: []});
+        }
+        cur = fa; fa = CENTFA[cur]; step++;
+      }
+      return {ans: ans, lines: lines};
+    }
+
+    function render(){
+      var f = STEP[at], p = [];
+      p.push('<rect x="14" y="10" width="316" height="280" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+      p.push('<rect x="336" y="10" width="330" height="280" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+      p.push('<text x="30" y="34" font-size="12" fill="#6b7280">原树（点权=编号）</text>');
+      p.push('<text x="352" y="34" font-size="12" fill="#6b7280">统计明细</text>');
+
+      var hit = {}, res = null, mline = '';
+      if (f.t === 'q') {
+        res = runQuery(f.x, f.k);
+        res.lines.forEach(function(l){ l.nodes.forEach(function(v){ hit[v] = 1; }); });
+        mline = '查询 ('+f.x+', '+f.k+') = ' + res.ans;
+      } else {
+        hit[f.x] = 1;
+        mline = '修改：w['+f.x+'] 从 '+w[f.x]+' 变成 '+f.v;
+      }
+      EDGES.forEach(function(e){
+        var live = hit[e[0]] && hit[e[1]];
+        p.push('<line x1="'+LX[e[0]]+'" y1="'+LY[e[0]]+'" x2="'+LX[e[1]]+'" y2="'+LY[e[1]]+'" stroke="'+(live?'#ea580c':'#c9ced4')+'" stroke-width="'+(live?2.4:1.6)+'"/>');
+      });
+      for (var v = 1; v <= 9; v++) {
+        var isX = (v === f.x);
+        var fill = isX ? '#2563eb' : (hit[v] ? '#ffedd5' : '#dbeafe');
+        var stroke = isX ? '#2563eb' : (hit[v] ? '#ea580c' : '#2563eb');
+        p.push('<circle cx="'+LX[v]+'" cy="'+LY[v]+'" r="15" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.5"/>');
+        var tcol = isX ? '#ffffff' : '#1f2328';
+        p.push('<text x="'+LX[v]+'" y="'+(LY[v]-2)+'" font-size="12" fill="'+tcol+'" text-anchor="middle">'+v+'</text>');
+        p.push('<text x="'+LX[v]+'" y="'+(LY[v]+10)+'" font-size="9" fill="'+(isX?'#dbeafe':'#6b7280')+'" text-anchor="middle">'+w[v]+'</text>');
+      }
+      if (f.t === 'm') {
+        p.push('<text x="180" y="276" font-size="11" fill="#ea580c" text-anchor="middle">w['+f.x+']：'+f.tprev+' → '+f.v+'，差额 '+(f.v - f.tprev)+' 要写进链上的桶</text>');
+      }
+
+      var ty = 60;
+      if (f.t === 'q') {
+        res.lines.forEach(function(l){
+          p.push('<text x="352" y="'+ty+'" font-size="11" fill="#374151">'+l.short+'</text>');
+          ty += 20;
+        });
+        p.push('<text x="352" y="'+(ty+6)+'" font-size="13" fill="#2563eb" font-weight="600">答案 = '+res.ans+'</text>');
+      } else {
+        var delta = f.v - f.tprev;
+        var html = [];
+        p.push('<text x="352" y="60" font-size="11" fill="#374151">addTree['+f.x+'] 在距离 0 处 +'+delta+'</text>');
+        var cur = f.x, fa = CENTFA[f.x], yy = 80;
+        while (fa > 0) {
+          var d = dist(f.x, fa);
+          p.push('<text x="352" y="'+yy+'" font-size="11" fill="#374151">addTree['+fa+']、minusTree['+cur+'] 在距离 '+d+' 处各 +'+delta+'</text>');
+          cur = fa; fa = CENTFA[cur]; yy += 20;
+        }
+        p.push('<text x="352" y="'+(yy+6)+'" font-size="13" fill="#2563eb" font-weight="600">修改完成</text>');
+      }
+      qsvg.innerHTML = p.join('');
+
+      var html = '<div><span>'+mline+'</span></div>';
+      if (f.t === 'q') {
+        res.lines.forEach(function(l){
+          html += '<div class="row">'+l.label+'，净 <span class="num">'+(l.plus - l.minus)+'</span></div>';
+        });
+        html += '<div class="total">答案 = '+res.ans+'（直接数一遍同样得到这个数）</div>';
+      } else {
+        var delta = f.v - f.tprev;
+        html += '<div class="row">自己：addTree['+f.x+'] @0 +<span class="num">'+delta+'</span></div>';
+        var cur = f.x, fa = CENTFA[f.x];
+        while (fa > 0) {
+          html += '<div class="row">上级 '+fa+'：addTree['+fa+']、minusTree['+cur+'] @'+dist(f.x, fa)+' 各 +<span class="num">'+delta+'</span></div>';
+          cur = fa; fa = CENTFA[cur];
+        }
+        w[f.x] = f.v;
+      }
+      qinfo.innerHTML = html;
+      qprev.disabled = at === 0;
+      qnext.disabled = at === STEP.length - 1;
+    }
+    qprev.addEventListener('click', function(){ if (at > 0) { at--; restore(); } });
+    qnext.addEventListener('click', function(){ if (at < STEP.length - 1) { at++; render(); } });
+    qreset.addEventListener('click', function(){ at = 0; restore(); });
+    function restore(){
+      for (var i = 1; i <= 9; i++) w[i] = i;
+      for (var s = 0; s < at; s++) if (STEP[s].t === 'm') w[STEP[s].x] = STEP[s].v;
+      render();
+    }
+    // 预填修改帧的前值
+    STEP.forEach(function(f, i){
+      if (f.t === 'm') {
+        var v = f.x;
+        for (var s = 0; s < i; s++) if (STEP[s].t === 'm' && STEP[s].x === f.x) v = STEP[s].v;
+        f.tprev = v;
+      }
+    });
+    render();
+  }
+})();
+</script>
+</body>
+</html>

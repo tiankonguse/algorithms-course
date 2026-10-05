@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线段树分治 + LCT · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .sg-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .sg-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .sg-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  @media(max-width:760px){
+    .sg-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>线段树分治 + LCT</h1>
+    <p class="intro">上一节的边一进来就不走了。这一节的边会走：某条道路只在第 l 天到第 r 天存在，或者某条边的权值从某一天起换成了另一个数。按天重新算一遍太慢，于是换一个角度，不是按天维护结构，而是把结构维护成「时间上的一段段」，在里面走一遍 DFS，出来顺手回退。</p>
+
+    <h2>零、背景</h2>
+    <p>前面五道题里，边的存在与否、权值是多少，从头到尾都是固定的。LCT 只要跟着加边、删边就能维持住最小生成树。</p>
+    <p>有些题目不是这样：一条边只在某段时间里存在，出了这段时间就没了；或者一条边的权值在第 3 天是 7，第 4 天变成 2。</p>
+    <p>这类「区间上生效」的东西，LCT 自己没有表达能力。它的结构里只有点、边、父子关系，没有时间。</p>
+    <p>所以得在外面再套一层，专门管时间。这层是线段树分治。</p>
+
+    <h2>一、问题</h2>
+    <p>先看一道具体的。n 个点，n-1 条无向道路把所有点连成一棵树，这些道路从头到尾都在。另外有 m 条变化的道路，每条只在第 l 天到第 r 天存在，道路有权值代表费用。</p>
+    <p>每天从 1 号点出发，游览所有点。同一天里，一条道路第一次经过时收一次费，之后再经过免费。要求游览结束后剩余钱数大于 0，求每天出发时至少要带多少钱，也就是当天的总费用加 1。</p>
+    <p>n 到 5×10⁴，m 到 10⁵，天数固定为 32766，输出也是 32766 行。</p>
+    <p>先把「游览所有点要花多少钱」翻译成图论语言。从 1 号出发走遍所有点，走过的道路必须把所有点连起来，所以至少是一棵生成树的规模。反过来，随便取一棵生成树，从 1 号点沿着树走：进每棵子树之前收一次费，出来之后这条边就免费了，所以每条树边恰好被收费一次，总费用正好是这棵生成树的边权和。</p>
+    <p>于是当天的费用就是当天这张图的最小生成树边权和。题目变成：每天求一次当前图的最小生成树，再加 1。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 224" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="固定边覆盖整段时间，变化边只覆盖一段区间" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="24" y="62" font-size="11" fill="#374151">固定道路</text>
+        <text x="24" y="102" font-size="11" fill="#374151">变化道路 e₁</text>
+        <text x="24" y="142" font-size="11" fill="#374151">变化道路 e₂</text>
+        <rect x="110" y="48" width="460" height="16" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+        <rect x="202" y="88" width="138" height="16" rx="3" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+        <rect x="340" y="128" width="138" height="16" rx="3" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+        <text x="112" y="92" font-size="10" fill="#6b7280">l</text>
+        <text x="336" y="92" font-size="10" fill="#6b7280">r</text>
+        <text x="112" y="132" font-size="10" fill="#6b7280">l</text>
+        <text x="474" y="132" font-size="10" fill="#6b7280">r</text>
+        <line x1="110" y1="176" x2="570" y2="176" stroke="#9aa0a6" stroke-width="1.6"/>
+        <line x1="110" y1="170" x2="110" y2="182" stroke="#9aa0a6" stroke-width="1.4"/>
+        <line x1="570" y1="170" x2="570" y2="182" stroke="#9aa0a6" stroke-width="1.4"/>
+        <text x="110" y="198" font-size="11" fill="#6b7280" text-anchor="middle">第 1 天</text>
+        <text x="570" y="198" font-size="11" fill="#6b7280" text-anchor="middle">第 D 天</text>
+        <text x="310" y="198" font-size="11" fill="#6b7280" text-anchor="middle">时间</text>
+        <text x="24" y="220" font-size="11" fill="#6b7280">每一天的图 = 固定道路 + 覆盖这一天的那些变化道路</text>
+      </svg>
+      <figcaption>每条变化道路都带着一个时间区间，不在这段时间里就不算存在</figcaption>
+    </figure>
+
+    <h2>二、朴素做法</h2>
+    <p>最直接的想法是按天模拟。第 d 天，把固定道路和所有覆盖第 d 天的变化道路收集起来，跑一遍 Kruskal 求最小生成树边权和，输出加 1。</p>
+    <p>复杂度是 O(D · m log m)。D 是 3×10⁴，m 是 10⁵，乘起来是十亿量级，过不去。</p>
+    <p>但相邻两天之间变的东西其实很少。第 d 天和第 d+1 天，差别只在于「今天结束的那些边」和「明天开始的那些边」。如果能让这两天的计算共用大部分结果，就有戏了。</p>
+    <p>问题是，LCT 只支持删除一条具体的边，不支持「回到两天前的那个状态」。我们需要的是批量撤销，不是单点删除。</p>
+
+    <h2>三、线段树分治</h2>
+    <p>换个角度想：与其按天去维护结构，不如按「时间区间」去维护结构。</p>
+    <p>把时间轴 1 到 D 建成一棵线段树。一条只在 [l, r] 存在的边，把它挂到线段树上能完整覆盖 [l, r] 的那些节点上。任何一个区间都会被拆成不超过 O(log D) 个节点。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="区间拆到线段树的若干节点上" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="20" y="22" font-size="12" fill="#374151">时间 [1, D] 建成线段树，区间 [3, 6] 被拆成两个节点</text>
+
+        <g stroke="#c9ced4" stroke-width="1.4" fill="none">
+          <line x1="302" y1="71" x2="158" y2="115"/>
+          <line x1="302" y1="71" x2="446" y2="115"/>
+          <line x1="158" y1="141" x2="86" y2="185"/>
+          <line x1="158" y1="141" x2="230" y2="185"/>
+          <line x1="446" y1="141" x2="374" y2="185"/>
+          <line x1="446" y1="141" x2="518" y2="185"/>
+          <line x1="86" y1="211" x2="46" y2="255"/>
+          <line x1="86" y1="211" x2="126" y2="255"/>
+          <line x1="230" y1="211" x2="190" y2="255"/>
+          <line x1="230" y1="211" x2="270" y2="255"/>
+          <line x1="374" y1="211" x2="334" y2="255"/>
+          <line x1="374" y1="211" x2="414" y2="255"/>
+          <line x1="518" y1="211" x2="478" y2="255"/>
+          <line x1="518" y1="211" x2="558" y2="255"/>
+        </g>
+
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <rect x="274" y="45" width="56" height="26" rx="5" fill="#ffffff" stroke="#c9ced4"/>
+          <text x="302" y="63">[1,8]</text>
+          <rect x="130" y="115" width="56" height="26" rx="5" fill="#ffffff" stroke="#c9ced4"/>
+          <text x="158" y="133">[1,4]</text>
+          <rect x="418" y="115" width="56" height="26" rx="5" fill="#ffffff" stroke="#c9ced4"/>
+          <text x="446" y="133">[5,8]</text>
+          <rect x="58" y="185" width="56" height="26" rx="5" fill="#ffffff" stroke="#c9ced4"/>
+          <text x="86" y="203">[1,2]</text>
+          <rect x="202" y="185" width="56" height="26" rx="5" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+          <text x="230" y="203" fill="#ea580c">[3,4]</text>
+          <rect x="346" y="185" width="56" height="26" rx="5" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+          <text x="374" y="203" fill="#ea580c">[5,6]</text>
+          <rect x="490" y="185" width="56" height="26" rx="5" fill="#ffffff" stroke="#c9ced4"/>
+          <text x="518" y="203">[7,8]</text>
+
+          <rect x="20" y="255" width="52" height="26" rx="5" fill="#ffffff" stroke="#c9ced4" stroke-width="0.8"/>
+          <text x="46" y="273" font-size="11">1</text>
+          <rect x="100" y="255" width="52" height="26" rx="5" fill="#ffffff" stroke="#c9ced4" stroke-width="0.8"/>
+          <text x="126" y="273" font-size="11">2</text>
+          <rect x="164" y="255" width="52" height="26" rx="5" fill="#ffffff" stroke="#c9ced4" stroke-width="0.8"/>
+          <text x="190" y="273" font-size="11">3</text>
+          <rect x="244" y="255" width="52" height="26" rx="5" fill="#ffffff" stroke="#c9ced4" stroke-width="0.8"/>
+          <text x="270" y="273" font-size="11">4</text>
+          <rect x="308" y="255" width="52" height="26" rx="5" fill="#ffffff" stroke="#c9ced4" stroke-width="0.8"/>
+          <text x="334" y="273" font-size="11">5</text>
+          <rect x="388" y="255" width="52" height="26" rx="5" fill="#ffffff" stroke="#c9ced4" stroke-width="0.8"/>
+          <text x="414" y="273" font-size="11">6</text>
+          <rect x="452" y="255" width="52" height="26" rx="5" fill="#ffffff" stroke="#c9ced4" stroke-width="0.8"/>
+          <text x="478" y="273" font-size="11">7</text>
+          <rect x="532" y="255" width="52" height="26" rx="5" fill="#ffffff" stroke="#c9ced4" stroke-width="0.8"/>
+          <text x="558" y="273" font-size="11">8</text>
+        </g>
+        <text x="20" y="306" font-size="11" fill="#6b7280">橙色的两个节点并起来正好是 [3, 6]，其余部分都浪费在「只交一半」的节点上，那些不进候选</text>
+      </svg>
+      <figcaption>一条区间被拆成 O(log D) 段，挂到对应节点上，每个节点代表一段时间</figcaption>
+    </figure>
+
+    <p>挂好之后，从根开始 DFS 这棵线段树。上面的节点代表的时间段包含下面的，所以走一条从根到叶子的路径时，路径上每个节点挂的边加起来，正好就是「这一天存在的所有边」。</p>
+    <p>走到叶子，把答案记下来。要走兄弟子树之前，得先把这一路加进来的边全都退回去。</p>
+    <p>一句话概括这套做法：不求一次算对，而是把「按天算」改成「按时间区间算」，让每条边只被处理 O(log D) 次。</p>
+
+    <h2>四、撤销怎么撤销</h2>
+    <p>这里不需要「删掉指定的某条边」这种能力，只需要「把刚才做过的事反过来做一遍」。</p>
+    <p>开一个栈，每次 LCT 的结构被改动，就把这次改动记一条：</p>
+
+        <pre class="code"><span class="kw">int</span> rollbackEdge[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> rollbackType[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> opsize;</pre>
+
+    <p>记录里带一个类型。类型 1 表示「加了一条边」，撤销时要把这条边 cut 掉；类型 2 表示「换边时被挤掉了一条边」，撤销时要把那条边 link 回来。</p>
+
+        <pre class="code"><span class="kw">void</span> <span class="fn">backup</span>(<span class="kw">int</span> edge, <span class="kw">int</span> type) {
+        rollbackEdge[++opsize] = edge;
+        rollbackType[opsize] = type;
+    }
+
+    <span class="kw">void</span> <span class="fn">undo</span>() {
+        <span class="kw">int</span> e = rollbackEdge[opsize];
+        <span class="kw">int</span> t = rollbackType[opsize--];
+        <span class="kw">if</span> (t == 1) {
+            cut(ex[e], n + e);
+            cut(ey[e], n + e);
+            mstSum -= ew[e];
+        } <span class="kw">else</span> {
+            link(ex[e], n + e);
+            link(ey[e], n + e);
+            mstSum += ew[e];
+        }
+    }</pre>
+
+    <p>顺序必须是后进先出。上面这段加边逻辑里，换边的时候先记「挤掉了 pre」，再记「加进来了 e」，那么撤销时先碰到的就是 e，正好把它删掉，然后再把 pre 接回去。顺序反了就成了一条不存在的边，LCT 会算错。</p>
+    <p>还有一点可以放心：splay 的那些旋转不改变任何连通关系，转来转去只是把辅助树的形状换了。撤销的时候完全不用管它们，只要把 link 和 cut 反过来做，森林就回到了进入节点之前的样子。</p>
+    <p>DFS 的骨架非常统一：</p>
+
+        <pre class="code"><span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> tmp = opsize;
+        <span class="kw">for</span> (<span class="kw">int</span> k = head[i]; k != 0; k = nxt[k]) {
+            addEdge(to[k]);
+        }
+        <span class="kw">if</span> (l == r) {
+            ans[l] = mstSum;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            dfs(l, mid, i &lt;&lt; 1);
+            dfs(mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        <span class="kw">while</span> (opsize &gt; tmp) {
+            undo();
+        }
+    }</pre>
+
+    <p>进节点前记一下栈的大小 <code class="inline">tmp</code>，出节点后一路 undo 到栈里只剩 <code class="inline">tmp</code> 条记录。为什么要一路退回去？因为进入这个节点之前，栈里可能已经有祖先节点留下的记录了，那些不属于本次改动，不该动。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="撤销栈按后进先出顺序回退" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="60" y="150" width="200" height="34" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="76" y="172" font-size="12" fill="#374151">①  加了边 e₃</text>
+        <rect x="60" y="110" width="200" height="34" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="76" y="132" font-size="12" fill="#374151">②  删了边 e₇</text>
+        <rect x="60" y="70" width="200" height="34" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="76" y="92" font-size="12" fill="#374151">③  加了边 e₉</text>
+        <rect x="60" y="30" width="200" height="34" rx="5" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <text x="76" y="52" font-size="12" fill="#ea580c">④  删了边 e₂</text>
+        <text x="270" y="52" font-size="11" fill="#ea580c">栈顶</text>
+        <text x="270" y="180" font-size="11" fill="#6b7280">栈底</text>
+
+        <rect x="330" y="30" width="274" height="170" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="346" y="58" font-size="12" fill="#374151">退出节点时，从栈顶往回做</text>
+        <text x="346" y="90" font-size="12" fill="#374151">④ → 把 e₂ 加回来</text>
+        <text x="346" y="118" font-size="12" fill="#374151">③ → 把 e₉ 删掉</text>
+        <text x="346" y="146" font-size="12" fill="#374151">② → 把 e₇ 加回来</text>
+        <text x="346" y="174" font-size="12" fill="#374151">① → 把 e₃ 删掉</text>
+
+        <text x="60" y="222" font-size="11" fill="#6b7280">每条记录的「撤销动作」正好是它记的那件事的逆操作</text>
+        <text x="60" y="240" font-size="11" fill="#6b7280">顺序反着来，森林才会回到进入节点之前的样子</text>
+      </svg>
+      <figcaption>用栈记下每一次结构改动，回退时就按相反顺序做逆操作</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">线段树分治走一遍</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">时间只有 4 天，三条边：e₁ 一直在，e₂ 只在第 1、2 天，e₃ 只在第 3、4 天。点「下一步」看 DFS 怎么进出节点、怎么撤销。</p>
+      <svg id="sgSvg" viewBox="0 0 620 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="线段树分治 DFS 演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot partial"></span>当前所在的节点</span>
+        <span><span class="dot full"></span>已经走过的节点</span>
+        <span><span class="dot skip"></span>还没走到</span>
+      </div>
+      <div class="breakdown" id="sgInfo"></div>
+      <div class="viz-controls">
+        <button class="sg-btn" id="sgPrev" type="button">上一步</button>
+        <button class="sg-btn" id="sgNext" type="button">下一步</button>
+        <button class="sg-btn" id="sgReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>五、题目6：变化的道路</h2>
+    <p>回到上面那道题。固定道路的区间是 [1, D]，变化道路的区间是 [l, r]，按前面第三节的办法挂上去就行。</p>
+    <p>加边的逻辑和题目1 是同一套：先 <code class="inline">makeroot</code>、<code class="inline">findroot</code> 判断连通性，不连通就接上，连通就 <code class="inline">split</code> 出路径，看环上最大边是不是比新边大，大才换。加边顺序是 DFS 决定的，不按权值排，所以这个「比它大才换」的判断不能省。</p>
+    <p>另外两个小地方：<code class="inline">mstSum</code> 的初值设成 1，省得每次输出再加；<code class="inline">dfs</code> 走到叶子时直接 <code class="inline">ans[l] = mstSum</code>，因为固定道路本身就是一棵树，图随时连通，不存在无解的情况。</p>
+    <p>完整代码：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">using</span> <span class="kw">ll</span> = <span class="kw">long</span> <span class="kw">long</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXD = 32767;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 4000001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> ex[MAXN];
+    <span class="kw">int</span> ey[MAXN];
+    <span class="kw">int</span> ew[MAXN];
+    <span class="kw">int</span> cnte;
+
+    <span class="kw">int</span> head[MAXD &lt;&lt; 2];
+    <span class="kw">int</span> nxt[MAXT];
+    <span class="kw">int</span> to[MAXT];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">bool</span> rev[MAXN];
+    <span class="kw">int</span> sta[MAXN];
+
+    <span class="kw">int</span> maxEdge[MAXN];
+
+    <span class="kw">int</span> rollbackEdge[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> rollbackType[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> opsize;
+
+    <span class="kw">ll</span> mstSum = 1;
+    <span class="kw">ll</span> ans[MAXD];
+
+    <span class="kw">void</span> <span class="fn">rangeAddEdge</span>(<span class="kw">int</span> i, <span class="kw">int</span> e) {
+        nxt[++cntg] = head[i];
+        to[cntg] = e;
+        head[i] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> jobe, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            rangeAddEdge(i, jobe);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                add(jobl, jobr, jobe, l, mid, i &lt;&lt; 1);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                add(jobl, jobr, jobe, mid + 1, r, i &lt;&lt; 1 | 1);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> x) {
+        maxEdge[x] = x &lt;= n ? 0 : x - n;
+        <span class="kw">if</span> (ew[maxEdge[ls[x]]] &gt; ew[maxEdge[x]]) {
+            maxEdge[x] = maxEdge[ls[x]];
+        }
+        <span class="kw">if</span> (ew[maxEdge[rs[x]]] &gt; ew[maxEdge[x]]) {
+            maxEdge[x] = maxEdge[rs[x]];
+        }
+    }
+
+    <span class="kw">bool</span> <span class="fn">isroot</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> ls[fa[x]] != x &amp;&amp; rs[fa[x]] != x;
+    }
+
+    <span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> ls[fa[x]] == x ? 0 : 1;
+    }
+
+    <span class="kw">void</span> <span class="fn">reverse</span>(<span class="kw">int</span> x) {
+        <span class="kw">if</span> (x != 0) {
+            swap(ls[x], rs[x]);
+            rev[x] = !rev[x];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> x) {
+        <span class="kw">if</span> (rev[x]) {
+            reverse(ls[x]);
+            reverse(rs[x]);
+            rev[x] = <span class="kw">false</span>;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> f = fa[x], g = fa[f];
+        <span class="kw">if</span> (lr(x) == 0) {
+            ls[f] = rs[x];
+            <span class="kw">if</span> (ls[f] != 0) {
+                fa[ls[f]] = f;
+            }
+            rs[x] = f;
+        } <span class="kw">else</span> {
+            rs[f] = ls[x];
+            <span class="kw">if</span> (rs[f] != 0) {
+                fa[rs[f]] = f;
+            }
+            ls[x] = f;
+        }
+        <span class="kw">if</span> (!isroot(f)) {
+            <span class="kw">if</span> (lr(f) == 0) {
+                ls[g] = x;
+            } <span class="kw">else</span> {
+                rs[g] = x;
+            }
+        }
+        fa[f] = x;
+        fa[x] = g;
+        up(f);
+        up(x);
+    }
+
+    <span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> siz = 0;
+        sta[++siz] = x;
+        <span class="kw">for</span> (<span class="kw">int</span> y = x; !isroot(y); y = fa[y]) {
+            sta[++siz] = fa[y];
+        }
+        <span class="kw">while</span> (siz != 0) {
+            down(sta[siz--]);
+        }
+        <span class="kw">while</span> (!isroot(x)) {
+            <span class="kw">int</span> f = fa[x];
+            <span class="kw">if</span> (!isroot(f)) {
+                <span class="kw">if</span> (lr(x) == lr(f)) {
+                    rotate(f);
+                } <span class="kw">else</span> {
+                    rotate(x);
+                }
+            }
+            rotate(x);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">access</span>(<span class="kw">int</span> x) {
+        <span class="kw">for</span> (<span class="kw">int</span> y = 0; x != 0; y = x, x = fa[x]) {
+            splay(x);
+            rs[x] = y;
+            up(x);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">makeroot</span>(<span class="kw">int</span> x) {
+        access(x);
+        splay(x);
+        reverse(x);
+    }
+
+    <span class="kw">int</span> <span class="fn">findroot</span>(<span class="kw">int</span> x) {
+        access(x);
+        splay(x);
+        down(x);
+        <span class="kw">while</span> (ls[x] != 0) {
+            x = ls[x];
+            down(x);
+        }
+        splay(x);
+        <span class="kw">return</span> x;
+    }
+
+    <span class="kw">void</span> <span class="fn">split</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        makeroot(x);
+        access(y);
+        splay(y);
+    }
+
+    <span class="kw">void</span> <span class="fn">link</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        makeroot(x);
+        <span class="kw">if</span> (findroot(y) != x) {
+            fa[x] = y;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">cut</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        makeroot(x);
+        <span class="kw">if</span> (findroot(y) == x &amp;&amp; fa[y] == x &amp;&amp; ls[y] == 0 &amp;&amp; rs[x] == y) {
+            fa[y] = rs[x] = 0;
+            up(x);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">backup</span>(<span class="kw">int</span> edge, <span class="kw">int</span> type) {
+        rollbackEdge[++opsize] = edge;
+        rollbackType[opsize] = type;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> e) {
+        <span class="kw">int</span> x = ex[e];
+        <span class="kw">int</span> y = ey[e];
+        makeroot(x);
+        <span class="kw">if</span> (findroot(y) != x) {
+            link(x, n + e);
+            link(y, n + e);
+            backup(e, 1);
+            mstSum += ew[e];
+        } <span class="kw">else</span> {
+            split(x, y);
+            <span class="kw">int</span> pre = maxEdge[y];
+            <span class="kw">if</span> (ew[pre] &gt; ew[e]) {
+                cut(ex[pre], n + pre);
+                cut(ey[pre], n + pre);
+                backup(pre, 2);
+                mstSum -= ew[pre];
+                link(x, n + e);
+                link(y, n + e);
+                backup(e, 1);
+                mstSum += ew[e];
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">undo</span>() {
+        <span class="kw">int</span> e = rollbackEdge[opsize];
+        <span class="kw">int</span> t = rollbackType[opsize--];
+        <span class="kw">if</span> (t == 1) {
+            cut(ex[e], n + e);
+            cut(ey[e], n + e);
+            mstSum -= ew[e];
+        } <span class="kw">else</span> {
+            link(ex[e], n + e);
+            link(ey[e], n + e);
+            mstSum += ew[e];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> tmp = opsize;
+        <span class="kw">for</span> (<span class="kw">int</span> k = head[i]; k != 0; k = nxt[k]) {
+            addEdge(to[k]);
+        }
+        <span class="kw">if</span> (l == r) {
+            ans[l] = mstSum;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            dfs(l, mid, i &lt;&lt; 1);
+            dfs(mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        <span class="kw">while</span> (opsize &gt; tmp) {
+            undo();
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">int</span> day = MAXD - 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            cin &gt;&gt; ex[++cnte];
+            cin &gt;&gt; ey[cnte];
+            cin &gt;&gt; ew[cnte];
+            add(1, day, cnte, 1, day, 1);
+        }
+        cin &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, l, r; i &lt;= m; i++) {
+            cin &gt;&gt; ex[++cnte];
+            cin &gt;&gt; ey[cnte];
+            cin &gt;&gt; ew[cnte];
+            cin &gt;&gt; l;
+            cin &gt;&gt; r;
+            add(l, r, cnte, 1, day, 1);
+        }
+        dfs(1, day, 1);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= day; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>六、题目7：城市建设</h2>
+    <p>n 个点 m 条无向边，边有边权，编号 1 到 m，图保证连通。接下来 q 次修改，每次给出 <code class="inline">e w</code>，把第 e 条边的边权改成 w。每次修改之后，输出当前图的最小生成树边权和。</p>
+    <p>题目里没有「边存在一段时间」这种说法，只有「权值被改」。但这两件事可以缝合到一起。</p>
+    <p>把一条边的每个权值看成一条独立的边。第 e 条边的初始权值是 w₀，在第 t₁ 次修改后变成 w₁，在第 t₂ 次修改后变成 w₂……那么：</p>
+    <ul>
+      <li>权值 w₀ 对应的那条边，存在于 [1, t₁ − 1]。</li>
+      <li>权值 w₁ 对应的那条边，存在于 [t₁, t₂ − 1]。</li>
+      <li>依此类推。</li>
+    </ul>
+    <p>于是每次修改都追加一条「新边」，端点和被改的那条边一样，权值是新的值，区间从这次修改开始。老版本在同一个时刻结束。图里边的条数不超过 m + q，而每条边都有了自己的区间，问题就回到了题目6。</p>
+    <p>代码里这段区间是倒着扫出来的。先用 <code class="inline">endTime[e]</code> 表示「e 这个权值下一次被改掉的时刻」，初值是 q + 1；然后从 q 往前扫，遇到第 i 次修改改的是 e，就把新版本挂在 [i, endTime[e] − 1] 上，再把 <code class="inline">endTime[e]</code> 改成 i。倒着扫的原因很直接：先碰到的总是后面那次修改，它给出的正是这个版本的结束时刻。</p>
+    <p>扫完之后，<code class="inline">endTime[e]</code> 停在这条边第一次被改的时刻，如果它大于 1，说明原始权值在 [1, endTime[e] − 1] 这段里有效，也要挂上去。</p>
+    <p>叶子 i 记的是「第 i 次修改之后」的答案，因为区间起点是 i，第 i 天当然包含在内。</p>
+    <p>完整代码：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">using</span> <span class="kw">ll</span> = <span class="kw">long</span> <span class="kw">long</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXQ = 50001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 4000001;
+    <span class="kw">int</span> n, m, q;
+
+    <span class="kw">int</span> ex[MAXN];
+    <span class="kw">int</span> ey[MAXN];
+    <span class="kw">int</span> ew[MAXN];
+    <span class="kw">int</span> cnte;
+
+    <span class="kw">int</span> changeEdge[MAXQ];
+    <span class="kw">int</span> endTime[MAXN];
+
+    <span class="kw">int</span> head[MAXQ &lt;&lt; 2];
+    <span class="kw">int</span> nxt[MAXT];
+    <span class="kw">int</span> to[MAXT];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">bool</span> rev[MAXN];
+    <span class="kw">int</span> sta[MAXN];
+
+    <span class="kw">int</span> maxEdge[MAXN];
+
+    <span class="kw">int</span> rollbackEdge[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> rollbackType[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> opsize;
+
+    <span class="kw">ll</span> mstSum;
+    <span class="kw">ll</span> ans[MAXQ];
+
+    <span class="kw">void</span> <span class="fn">rangeAddEdge</span>(<span class="kw">int</span> i, <span class="kw">int</span> e) {
+        nxt[++cntg] = head[i];
+        to[cntg] = e;
+        head[i] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> jobe, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            rangeAddEdge(i, jobe);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                add(jobl, jobr, jobe, l, mid, i &lt;&lt; 1);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                add(jobl, jobr, jobe, mid + 1, r, i &lt;&lt; 1 | 1);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> x) {
+        maxEdge[x] = x &lt;= n ? 0 : x - n;
+        <span class="kw">if</span> (ew[maxEdge[ls[x]]] &gt; ew[maxEdge[x]]) {
+            maxEdge[x] = maxEdge[ls[x]];
+        }
+        <span class="kw">if</span> (ew[maxEdge[rs[x]]] &gt; ew[maxEdge[x]]) {
+            maxEdge[x] = maxEdge[rs[x]];
+        }
+    }
+
+    <span class="kw">bool</span> <span class="fn">isroot</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> ls[fa[x]] != x &amp;&amp; rs[fa[x]] != x;
+    }
+
+    <span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> ls[fa[x]] == x ? 0 : 1;
+    }
+
+    <span class="kw">void</span> <span class="fn">reverse</span>(<span class="kw">int</span> x) {
+        <span class="kw">if</span> (x != 0) {
+            swap(ls[x], rs[x]);
+            rev[x] = !rev[x];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> x) {
+        <span class="kw">if</span> (rev[x]) {
+            reverse(ls[x]);
+            reverse(rs[x]);
+            rev[x] = <span class="kw">false</span>;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> f = fa[x], g = fa[f];
+        <span class="kw">if</span> (lr(x) == 0) {
+            ls[f] = rs[x];
+            <span class="kw">if</span> (ls[f] != 0) {
+                fa[ls[f]] = f;
+            }
+            rs[x] = f;
+        } <span class="kw">else</span> {
+            rs[f] = ls[x];
+            <span class="kw">if</span> (rs[f] != 0) {
+                fa[rs[f]] = f;
+            }
+            ls[x] = f;
+        }
+        <span class="kw">if</span> (!isroot(f)) {
+            <span class="kw">if</span> (lr(f) == 0) {
+                ls[g] = x;
+            } <span class="kw">else</span> {
+                rs[g] = x;
+            }
+        }
+        fa[f] = x;
+        fa[x] = g;
+        up(f);
+        up(x);
+    }
+
+    <span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> siz = 0;
+        sta[++siz] = x;
+        <span class="kw">for</span> (<span class="kw">int</span> y = x; !isroot(y); y = fa[y]) {
+            sta[++siz] = fa[y];
+        }
+        <span class="kw">while</span> (siz != 0) {
+            down(sta[siz--]);
+        }
+        <span class="kw">while</span> (!isroot(x)) {
+            <span class="kw">int</span> f = fa[x];
+            <span class="kw">if</span> (!isroot(f)) {
+                <span class="kw">if</span> (lr(x) == lr(f)) {
+                    rotate(f);
+                } <span class="kw">else</span> {
+                    rotate(x);
+                }
+            }
+            rotate(x);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">access</span>(<span class="kw">int</span> x) {
+        <span class="kw">for</span> (<span class="kw">int</span> y = 0; x != 0; y = x, x = fa[x]) {
+            splay(x);
+            rs[x] = y;
+            up(x);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">makeroot</span>(<span class="kw">int</span> x) {
+        access(x);
+        splay(x);
+        reverse(x);
+    }
+
+    <span class="kw">int</span> <span class="fn">findroot</span>(<span class="kw">int</span> x) {
+        access(x);
+        splay(x);
+        down(x);
+        <span class="kw">while</span> (ls[x] != 0) {
+            x = ls[x];
+            down(x);
+        }
+        splay(x);
+        <span class="kw">return</span> x;
+    }
+
+    <span class="kw">void</span> <span class="fn">split</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        makeroot(x);
+        access(y);
+        splay(y);
+    }
+
+    <span class="kw">void</span> <span class="fn">link</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        makeroot(x);
+        <span class="kw">if</span> (findroot(y) != x) {
+            fa[x] = y;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">cut</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        makeroot(x);
+        <span class="kw">if</span> (findroot(y) == x &amp;&amp; fa[y] == x &amp;&amp; ls[y] == 0 &amp;&amp; rs[x] == y) {
+            fa[y] = rs[x] = 0;
+            up(x);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">backup</span>(<span class="kw">int</span> edge, <span class="kw">int</span> type) {
+        rollbackEdge[++opsize] = edge;
+        rollbackType[opsize] = type;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> e) {
+        <span class="kw">int</span> x = ex[e];
+        <span class="kw">int</span> y = ey[e];
+        makeroot(x);
+        <span class="kw">if</span> (findroot(y) != x) {
+            link(x, n + e);
+            link(y, n + e);
+            backup(e, 1);
+            mstSum += ew[e];
+        } <span class="kw">else</span> {
+            split(x, y);
+            <span class="kw">int</span> pre = maxEdge[y];
+            <span class="kw">if</span> (ew[pre] &gt; ew[e]) {
+                cut(ex[pre], n + pre);
+                cut(ey[pre], n + pre);
+                backup(pre, 2);
+                mstSum -= ew[pre];
+                link(x, n + e);
+                link(y, n + e);
+                backup(e, 1);
+                mstSum += ew[e];
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">undo</span>() {
+        <span class="kw">int</span> e = rollbackEdge[opsize];
+        <span class="kw">int</span> t = rollbackType[opsize--];
+        <span class="kw">if</span> (t == 1) {
+            cut(ex[e], n + e);
+            cut(ey[e], n + e);
+            mstSum -= ew[e];
+        } <span class="kw">else</span> {
+            link(ex[e], n + e);
+            link(ey[e], n + e);
+            mstSum += ew[e];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> tmp = opsize;
+        <span class="kw">for</span> (<span class="kw">int</span> k = head[i]; k != 0; k = nxt[k]) {
+            addEdge(to[k]);
+        }
+        <span class="kw">if</span> (l == r) {
+            ans[l] = mstSum;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            dfs(l, mid, i &lt;&lt; 1);
+            dfs(mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        <span class="kw">while</span> (opsize &gt; tmp) {
+            undo();
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            endTime[i] = q + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = q; i &gt;= 1; i--) {
+            <span class="kw">int</span> e = changeEdge[i];
+            add(i, endTime[e] - 1, m + i, 1, q, 1);
+            endTime[e] = i;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">if</span> (endTime[i] &gt; 1) {
+                add(1, endTime[i] - 1, i, 1, q, 1);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; q;
+        cnte = m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; ex[i] &gt;&gt; ey[i] &gt;&gt; ew[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, e, w; i &lt;= q; i++) {
+            cin &gt;&gt; e &gt;&gt; w;
+            changeEdge[i] = e;
+            ex[++cnte] = ex[e];
+            ey[cnte] = ey[e];
+            ew[cnte] = w;
+        }
+        prepare();
+        dfs(1, q, 1);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>七、复杂度分析</h2>
+    <p>设边数是 M（题目7 里 M = m + q），天数是 D，LCT 里的点数是 n + M。</p>
+    <p>每条边被拆到 O(log D) 个线段树节点上，所以线段树上挂着的边条目总数是 O(M log D)。DFS 会访问到每一个节点，在节点上对每条挂着的边做一次 LCT 加边。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>步骤</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>把一条边挂到线段树上</td><td><code class="inline">O(log D)</code></td></tr>
+        <tr><td>所有边挂完（线段树上的条目总数）</td><td><code class="inline">O(M log D)</code></td></tr>
+        <tr><td>一次 LCT 加边（含可能的换边）</td><td><code class="inline">O(log(n + M))</code> 均摊</td></tr>
+        <tr><td>总时间</td><td><code class="inline">O(M log D log(n + M))</code></td></tr>
+        <tr><td>一次撤销</td><td><code class="inline">O(log(n + M))</code> 均摊</td></tr>
+      </tbody>
+    </table>
+    <p>题目6 里 M 到 10⁵，D 到 3.3×10⁴，<code class="inline">log D</code> 约 15，LCT 那边的 log 约 19，乘起来大概 3×10⁷ 次基本操作，能过。</p>
+    <p>空间上，线段树每个节点挂一条链表，存的是「这个节点上有哪些边」，总条目 O(M log D)。撤销栈要跟着记下所有改动，每次加边最多产生两条记录，所以栈也是 O(M log D) 条。实现里把这两个数组都开成了 400 万。</p>
+
+    <h2>八、最后</h2>
+    <p>线段树分治解决的不是某一类具体的图论问题，而是一类很通用的困境：某个东西只在一段时间内有效，而维护它的数据结构不支持删除。</p>
+    <p>办法就是绕开删除，把「按时间点维护」换成「按时间区间维护」，让结构沿着 DFS 一路只增不减，退回去的时候再用栈把改动原路撤回。</p>
+    <p>这套骨架和 LCT 之间几乎不耦合：只要那个数据结构支持撤销，换成并查集、换成别的都行。题目7 的坑也在这里，同一道题用 LCT 和用并查集，代码结构几乎一样，区别只在换边的时候 LCT 能比较环上的边，并查集做不到。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var NODES = [
+    {k:'r',  label:'[1,4]', x:150, y:46,  hung:'e₁'},
+    {k:'l',  label:'[1,2]', x:85,  y:122, hung:'e₂'},
+    {k:'r2', label:'[3,4]', x:215, y:122, hung:'e₃'},
+    {k:'a',  label:'1',     x:50,  y:198, hung:''},
+    {k:'b',  label:'2',     x:120, y:198, hung:''},
+    {k:'c',  label:'3',     x:180, y:198, hung:''},
+    {k:'d',  label:'4',     x:250, y:198, hung:''}
+  ];
+  var LINKS = [
+    ['r','l'], ['r','r2'], ['l','a'], ['l','b'], ['r2','c'], ['r2','d']
+  ];
+  var EDGES = {
+    'e₁': {range:'[1,4]', w:4},
+    'e₂': {range:'[1,2]', w:1},
+    'e₃': {range:'[3,4]', w:7}
+  };
+
+  var STEPS = [
+    {cur:null,  vis:[],                      active:[],             sum:0,  ans:['—','—','—','—'], stack:[],
+     info:'还在根的外面。栈是空的，LCT 里什么都没有。'},
+    {cur:'r',   vis:['r'],                   active:['e₁'],         sum:4,  ans:['—','—','—','—'], stack:['加 e₁'],
+     info:'进入 <b>[1,4]</b>。挂在这个节点上的是 e₁，把它加进 LCT。'},
+    {cur:'l',   vis:['r','l'],               active:['e₁','e₂'],    sum:5,  ans:['—','—','—','—'], stack:['加 e₁','加 e₂'],
+     info:'进入左儿子 <b>[1,2]</b>。它上面挂着 e₂，加进来。'},
+    {cur:'a',   vis:['r','l','a'],           active:['e₁','e₂'],    sum:5,  ans:['5','—','—','—'], stack:['加 e₁','加 e₂'],
+     info:'走到叶子 <b>1</b>。此时 LCT 里的边正好是第 1 天存在的全部边，把边权和 5 记下来。'},
+    {cur:'b',   vis:['r','l','a','b'],       active:['e₁','e₂'],    sum:5,  ans:['5','5','—','—'], stack:['加 e₁','加 e₂'],
+     info:'走到叶子 <b>2</b>。边集和第 1 天一样，答案也是 5。'},
+    {cur:'l',   vis:['r','l','a','b'],       active:['e₁'],         sum:4,  ans:['5','5','—','—'], stack:['加 e₁'],
+     info:'离开 <b>[1,2]</b>。先看一眼进这个节点时栈有多大，再把多出来的记录一条条撤销，这里就是把 e₂ 删掉。'},
+    {cur:'r2',  vis:['r','l','a','b','r2'],  active:['e₁','e₃'],    sum:11, ans:['5','5','—','—'], stack:['加 e₁','加 e₃'],
+     info:'进入右儿子 <b>[3,4]</b>。它上面挂着 e₃，加进来。'},
+    {cur:'c',   vis:['r','l','a','b','r2','c'], active:['e₁','e₃'], sum:11, ans:['5','5','11','—'], stack:['加 e₁','加 e₃'],
+     info:'走到叶子 <b>3</b>。e₂ 已经撤掉了，现在图里是 e₁ 和 e₃，边权和 11。'},
+    {cur:'d',   vis:['r','l','a','b','r2','c','d'], active:['e₁','e₃'], sum:11, ans:['5','5','11','11'], stack:['加 e₁','加 e₃'],
+     info:'走到叶子 <b>4</b>，答案同样是 11。'},
+    {cur:null,  vis:['r','l','a','b','r2','c','d'], active:[], sum:0, ans:['5','5','11','11'], stack:[],
+     info:'离开 <b>[3,4]</b> 撤销 e₃，回到 <b>[1,4]</b> 再撤销 e₁。栈空，LCT 回到最初的样子。'},
+    {cur:null,  vis:['r','l','a','b','r2','c','d'], active:[], sum:0, ans:['5','5','11','11'], stack:[],
+     info:'四天的答案都拿到了，全程只加过 4 次边、撤过 4 次边，每条边只在自己区间被拆出的那几个节点上出现过。'}
+  ];
+
+  var svg = document.getElementById('sgSvg');
+  var info = document.getElementById('sgInfo');
+  var prev = document.getElementById('sgPrev');
+  var next = document.getElementById('sgNext');
+  var reset = document.getElementById('sgReset');
+  var at = 0;
+
+  function node(k){ for(var i=0;i<NODES.length;i++) if(NODES[i].k===k) return NODES[i]; return null; }
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+
+    LINKS.forEach(function(lk){
+      var a = node(lk[0]), b = node(lk[1]);
+      var active = (st.cur === lk[0] || st.cur === lk[1]);
+      p.push('<line x1="'+a.x+'" y1="'+(a.y+14)+'" x2="'+b.x+'" y2="'+(b.y-14)+'" stroke="'+(active?'#2563eb':'#c9ced4')+'" stroke-width="'+(active?2:1.4)+'"/>');
+    });
+
+    NODES.forEach(function(n){
+      var isCur = st.cur === n.k;
+      var isVis = st.vis.indexOf(n.k) >= 0;
+      var fill = '#ffffff', stroke = '#c9ced4', tc = '#1f2328';
+      if (isVis) { fill = '#dbeafe'; stroke = '#2563eb'; }
+      if (isCur) { fill = '#ffedd5'; stroke = '#ea580c'; tc = '#ea580c'; }
+      p.push('<rect x="'+(n.x-28)+'" y="'+(n.y-14)+'" width="56" height="28" rx="5" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+(isCur?2:1.2)+'"/>');
+      p.push('<text x="'+n.x+'" y="'+(n.y+5)+'" font-size="12" fill="'+tc+'" text-anchor="middle">'+n.label+'</text>');
+      if (n.hung) {
+        p.push('<text x="'+(n.x+33)+'" y="'+(n.y+5)+'" font-size="11" fill="'+(isCur?'#ea580c':'#6b7280')+'">'+n.hung+'</text>');
+      }
+    });
+
+    // 右侧状态区
+    p.push('<rect x="322" y="24" width="282" height="192" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>');
+    var lines = ['当前节点：' + (st.cur ? node(st.cur).label : '（树外）')];
+    ['e₁','e₂','e₃'].forEach(function(id){
+      var on = st.active.indexOf(id) >= 0;
+      lines.push(id + ' ' + EDGES[id].range + ' 权 ' + EDGES[id].w + '   ' + (on ? '在 LCT 里' : '不在'));
+    });
+    lines.push('边权和：' + st.sum);
+    lines.push('栈：' + (st.stack.length ? st.stack.join('、') : '空'));
+    lines.forEach(function(t, i){
+      var y = 54 + i * 30;
+      var hot = (i === 0) || (t.indexOf('在 LCT 里') >= 0) || (i === lines.length - 1);
+      p.push('<text x="338" y="'+y+'" font-size="11" fill="'+(hot?'#2563eb':'#6b7280')+'">'+t+'</text>');
+    });
+
+    // 答案
+    p.push('<text x="20" y="232" font-size="11" fill="#6b7280">已记录：第1天 '+st.ans[0]+'　第2天 '+st.ans[1]+'　第3天 '+st.ans[2]+'　第4天 '+st.ans[3]+'</text>');
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div>' + st.info + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if(at>0){ at--; render(); } });
+  next.addEventListener('click', function(){ if(at<STEPS.length-1){ at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

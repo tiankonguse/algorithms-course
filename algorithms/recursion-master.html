@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>递归与 Master 公式 - algorithms-course</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;margin:16px 0}
+.viz-controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.viz-controls button{padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;font-size:13px}
+.viz-controls button:hover{border-color:#2563eb;color:#2563eb}
+.viz-controls select{padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px}
+.viz-controls .ctl{display:flex;align-items:center;gap:6px;font-size:13px;color:#555}
+.call-stack{display:flex;flex-direction:column-reverse;align-items:center;gap:2px;min-height:200px;padding:8px}
+.stack-frame{width:180px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:monospace;background:#fff;position:relative}
+.stack-frame.active{border-color:#2563eb;background:#dbeafe}
+.stack-frame.done{border-color:#9aa0a6;background:#f6f7f9;color:#9aa0a6}
+.stack-frame .ret{position:absolute;right:8px;top:6px;color:#ea580c;font-weight:bold}
+.call-tree-wrap{overflow-x:auto;padding:8px}
+.tree-node{display:inline-block;text-align:center;vertical-align:top;margin:0 4px}
+.tree-node .box{padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;font-family:monospace;background:#fff;display:inline-block}
+.tree-node .box.active{border-color:#2563eb;background:#dbeafe}
+.tree-node .box.done{border-color:#9aa0a6;background:#f6f7f9;color:#9aa0a6}
+.tree-children{display:flex;justify-content:center;margin-top:16px;position:relative}
+.tree-children::before{content:'';position:absolute;top:-12px;left:25%;right:25%;height:12px;border-top:1px solid var(--border)}
+.tree-child{position:relative}
+.tree-child::before{content:'';position:absolute;top:-16px;left:50%;width:1px;height:16px;background:var(--border)}
+.master-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+.master-table th,.master-table td{border:1px solid var(--border);padding:8px 10px;text-align:left}
+.master-table th{background:#f6f7f9;font-weight:600}
+.master-out{font-family:monospace;font-size:14px;padding:10px;background:#f6f7f9;border-radius:6px;margin-top:8px}
+.bar-chart{display:flex;align-items:flex-end;gap:24px;height:180px;padding:16px 8px 0;border-bottom:2px solid var(--border)}
+.bar-group{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1}
+.bar{width:40px;background:#2563eb;border-radius:4px 4px 0 0;position:relative;transition:height .3s}
+.bar.orange{background:#ea580c}
+.bar.gray{background:#9aa0a6}
+.bar .val{position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:11px;font-family:monospace;white-space:nowrap}
+.bar-label{font-size:11px;color:#555;text-align:center}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>递归与 Master 公式</h1>
+      <p class="intro">递归的执行过程可以完全拆开看。函数调用自己，底层就是系统栈在帮你压栈、弹栈。把调用图画出来、把栈帧拆开看，递归就变成了一件可以精确分析的事。这一讲从一个求最大值的例子出发，看清楚递归怎么执行、栈怎么涨、怎么改成非递归，最后用 Master 公式一把算出复杂度。</p>
+
+      <h2>零、背景</h2>
+      <p>写递归的人常犯两个毛病。一是觉得递归「自己调自己」很神秘，跑起来全靠脑补，出了 bug 不知道从哪查。二是写完递归就不管了，数据量一大直接段错误，还以为是编译器的问题。</p>
+      <p>这两个毛病的根源是同一个：没把递归的执行过程看清楚。递归函数的每一次调用，系统都会在栈上压一帧，里面存着参数、局部变量、返回地址。调用到最深的地方开始返回，一帧一帧弹回来。把这个过程画成图，递归就和循环一样直白。</p>
+
+      <h2>一、一个最简单的递归</h2>
+      <p>求一个数组的最大值。最直接的写法是扫一遍，但这里故意用递归写：把数组从中间切成两半，分别求左半和右半的最大值，再取两者较大的那个。</p>
+
+          <pre class="code"><span class="kw">int</span> <span class="fn">f</span>(<span class="kw">int</span>* arr, <span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span> arr[l];
+        }
+        <span class="kw">int</span> m = (l + r) / 2;
+        <span class="kw">int</span> lmax = f(arr, l, m);
+        <span class="kw">int</span> rmax = f(arr, m + 1, r);
+        <span class="kw">return</span> max(lmax, rmax);
+    }
+
+    <span class="kw">int</span> <span class="fn">maxValue</span>(<span class="kw">int</span>* arr, <span class="kw">int</span> n) {
+        <span class="kw">return</span> f(arr, 0, n - 1);
+    }</pre>
+
+      <p>这段代码的关键在 <code>f(arr, l, r)</code> 这个函数。它的含义是「arr[l..r] 范围上的最大值」。终止条件是 <code>l == r</code>，范围里只剩一个数，它自己就是最大值。否则切成左右两半，各递归一次，最后 <code>max</code> 一下。</p>
+      <p>作为对照，遍历写法长这样：</p>
+
+          <pre class="code"><span class="kw">int</span> <span class="fn">maxValue</span>(<span class="kw">int</span>* arr, <span class="kw">int</span> n) {
+        <span class="kw">int</span> ans = arr[0];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            <span class="kw">if</span> (arr[i] &gt; ans) {
+                ans = arr[i];
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <p>两种写法的结果完全一样，但代价差很多。n=100 万时，递归版要 2.7ms，遍历版只要 0.087ms，差了约 30 倍。递归慢在函数调用上，每切一次就要压栈、弹栈，n 个元素要调用 2n-1 次函数。遍历版只有一个循环，硬件分支预测器还能帮上忙。</p>
+      <p>那为什么还要写递归？因为有些问题用递归写出来只有三行，用循环写要自己维护一堆状态。后面的归并排序、快速排序、二叉树遍历、线段树，全都是递归写起来最自然。</p>
+
+      <h2>二、调用图：画出来就不玄了</h2>
+      <p>拿数组 <code>[3, 8, 7, 6, 4, 5, 1, 2]</code> 举例。<code>f(0,7)</code> 切成 <code>f(0,3)</code> 和 <code>f(4,7)</code>，每个再切，直到范围只剩一个元素。完整的调用树长这样：</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#9aa0a6"/></marker>
+          </defs>
+          <!-- level 0 -->
+          <rect x="320" y="10" width="120" height="32" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+          <text x="380" y="30" text-anchor="middle" font-size="12" font-family="monospace">f(0,7) → 8</text>
+          <!-- level 1 -->
+          <line x1="360" y1="42" x2="200" y2="78" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <line x1="400" y1="42" x2="560" y2="78" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <rect x="140" y="80" width="120" height="32" rx="4" fill="#fff" stroke="#2563eb"/>
+          <text x="200" y="100" text-anchor="middle" font-size="12" font-family="monospace">f(0,3) → 8</text>
+          <rect x="500" y="80" width="120" height="32" rx="4" fill="#fff" stroke="#2563eb"/>
+          <text x="560" y="100" text-anchor="middle" font-size="12" font-family="monospace">f(4,7) → 5</text>
+          <!-- level 2 -->
+          <line x1="180" y1="112" x2="100" y2="148" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <line x1="220" y1="112" x2="300" y2="148" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <line x1="540" y1="112" x2="460" y2="148" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <line x1="580" y1="112" x2="660" y2="148" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <rect x="40" y="150" width="120" height="32" rx="4" fill="#fff" stroke="#2563eb"/>
+          <text x="100" y="170" text-anchor="middle" font-size="12" font-family="monospace">f(0,1) → 8</text>
+          <rect x="240" y="150" width="120" height="32" rx="4" fill="#fff" stroke="#2563eb"/>
+          <text x="300" y="170" text-anchor="middle" font-size="12" font-family="monospace">f(2,3) → 7</text>
+          <rect x="400" y="150" width="120" height="32" rx="4" fill="#fff" stroke="#2563eb"/>
+          <text x="460" y="170" text-anchor="middle" font-size="12" font-family="monospace">f(4,5) → 5</text>
+          <rect x="600" y="150" width="120" height="32" rx="4" fill="#fff" stroke="#2563eb"/>
+          <text x="660" y="170" text-anchor="middle" font-size="12" font-family="monospace">f(6,7) → 2</text>
+          <!-- level 3 (leaves) -->
+          <line x1="70" y1="182" x2="40" y2="218" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <line x1="130" y1="182" x2="160" y2="218" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <line x1="270" y1="182" x2="240" y2="218" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <line x1="330" y1="182" x2="360" y2="218" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <line x1="430" y1="182" x2="400" y2="218" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <line x1="490" y1="182" x2="520" y2="218" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <line x1="630" y1="182" x2="600" y2="218" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <line x1="690" y1="182" x2="720" y2="218" stroke="#9aa0a6" stroke-width="1" marker-end="url(#arr)"/>
+          <!-- 8 leaves -->
+          <rect x="10" y="220" width="60" height="28" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="40" y="238" text-anchor="middle" font-size="11" font-family="monospace">f(0,0)=3</text>
+          <rect x="130" y="220" width="60" height="28" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="160" y="238" text-anchor="middle" font-size="11" font-family="monospace">f(1,1)=8</text>
+          <rect x="210" y="220" width="60" height="28" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="240" y="238" text-anchor="middle" font-size="11" font-family="monospace">f(2,2)=7</text>
+          <rect x="330" y="220" width="60" height="28" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="360" y="238" text-anchor="middle" font-size="11" font-family="monospace">f(3,3)=6</text>
+          <rect x="370" y="220" width="60" height="28" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="400" y="238" text-anchor="middle" font-size="11" font-family="monospace">f(4,4)=4</text>
+          <rect x="490" y="220" width="60" height="28" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="520" y="238" text-anchor="middle" font-size="11" font-family="monospace">f(5,5)=5</text>
+          <rect x="570" y="220" width="60" height="28" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="600" y="238" text-anchor="middle" font-size="11" font-family="monospace">f(6,6)=1</text>
+          <rect x="690" y="220" width="60" height="28" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="720" y="238" text-anchor="middle" font-size="11" font-family="monospace">f(7,7)=2</text>
+          <!-- annotation -->
+          <text x="380" y="280" text-anchor="middle" font-size="12" fill="#555">叶子节点（l==r）直接返回元素值，橙色框</text>
+          <text x="380" y="300" text-anchor="middle" font-size="12" fill="#555">内部节点等左右都返回后，取 max 再往上抛</text>
+          <text x="380" y="325" text-anchor="middle" font-size="11" fill="#9aa0a6">8 个元素 → 15 次调用（2n-1），树高 ⌈log₂n⌉ = 3</text>
+        </svg>
+        <figcaption>递归求最大值的完整调用树。8 个元素产生 15 次函数调用，最深 3 层。</figcaption>
+      </figure>
+
+      <p>这棵树有几个可以直接读出来的事实。调用总数是 2n-1：n 个叶子 + n-1 个内部节点。树高是 ⌈log₂n⌉，因为每次范围减半。这两个数后面算复杂度时会用到。</p>
+
+      <h2>三、底层是系统栈</h2>
+      <p>调用树是从「全局」看递归。从「局部」看，每一次函数调用都会在系统栈上压一帧。帧里存着参数（arr、l、r）、局部变量（m、lmax、rmax）、还有返回地址，等子调用回来后从哪条指令继续执行。</p>
+      <p>以 <code>f(0,3)</code> 为例，执行顺序是这样的：</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg">
+          <!-- 4 stack snapshots -->
+          <g transform="translate(0,0)">
+            <text x="80" y="16" text-anchor="middle" font-size="12" font-weight="bold">① 进入 f(0,3)</text>
+            <rect x="30" y="24" width="100" height="36" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+            <text x="80" y="46" text-anchor="middle" font-size="11" font-family="monospace">f(0,3)</text>
+            <text x="80" y="260" text-anchor="middle" font-size="11" fill="#555">压入第一帧</text>
+          </g>
+          <g transform="translate(180,0)">
+            <text x="80" y="16" text-anchor="middle" font-size="12" font-weight="bold">② 调用 f(0,1)</text>
+            <rect x="30" y="64" width="100" height="36" rx="4" fill="#fff" stroke="#2563eb"/>
+            <text x="80" y="86" text-anchor="middle" font-size="11" font-family="monospace">f(0,3)</text>
+            <rect x="30" y="24" width="100" height="36" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+            <text x="80" y="46" text-anchor="middle" font-size="11" font-family="monospace">f(0,1)</text>
+            <text x="80" y="260" text-anchor="middle" font-size="11" fill="#555">再压一帧</text>
+          </g>
+          <g transform="translate(360,0)">
+            <text x="80" y="16" text-anchor="middle" font-size="12" font-weight="bold">③ 最深 f(0,0)</text>
+            <rect x="30" y="104" width="100" height="36" rx="4" fill="#fff" stroke="#9aa0a6"/>
+            <text x="80" y="126" text-anchor="middle" font-size="11" font-family="monospace">f(0,3)</text>
+            <rect x="30" y="64" width="100" height="36" rx="4" fill="#fff" stroke="#2563eb"/>
+            <text x="80" y="86" text-anchor="middle" font-size="11" font-family="monospace">f(0,1)</text>
+            <rect x="30" y="24" width="100" height="36" rx="4" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+            <text x="80" y="46" text-anchor="middle" font-size="11" font-family="monospace">f(0,0)=3</text>
+            <text x="80" y="260" text-anchor="middle" font-size="11" fill="#555">l==r，开始返回</text>
+          </g>
+          <g transform="translate(540,0)">
+            <text x="80" y="16" text-anchor="middle" font-size="12" font-weight="bold">④ 弹栈回 f(0,1)</text>
+            <rect x="30" y="64" width="100" height="36" rx="4" fill="#fff" stroke="#9aa0a6"/>
+            <text x="80" y="86" text-anchor="middle" font-size="11" font-family="monospace">f(0,3)</text>
+            <rect x="30" y="24" width="100" height="36" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+            <text x="80" y="46" text-anchor="middle" font-size="11" font-family="monospace">f(0,1) lmax=3</text>
+            <text x="80" y="260" text-anchor="middle" font-size="11" fill="#555">返回值存进 lmax</text>
+          </g>
+          <!-- arrow -->
+          <text x="360" y="175" text-anchor="middle" font-size="13" fill="#ea580c">栈从下往上长，返回时从上往下弹</text>
+          <text x="360" y="200" text-anchor="middle" font-size="12" fill="#555">每一帧带着自己的 l、r、lmax、rmax，互不干扰</text>
+        </svg>
+        <figcaption>系统栈的四帧快照。蓝色是当前正在执行的帧，橙色是叶子节点（终止条件），灰色是已返回的帧。</figcaption>
+      </figure>
+
+      <p>系统栈的空间不是无限的。macOS 默认给主线程的栈是 8176 KB，递归帧大约 32 字节一个（参数 + 局部变量 + 返回地址 + 对齐），算下来约 26 万层就会把栈撑爆，触发段错误。前面二叉树递归那讲实测过：260937 层能过，261000 层直接段错误。</p>
+      <p>链状递归最容易踩这个坑。比如求链表长度、沿一条路径往下走，递归深度就是数据规模本身。n=10 万的链表用递归写，在评测机上大概率段错误。这时候要么改成循环，要么自己在堆上开一个栈来模拟。</p>
+
+      
+      <p>下面这个演示把数组 <code>[3, 8, 7, 6]</code> 的递归求最大值全过程拆成 14 步，每一步显示当前系统栈里有哪些帧、每帧执行到哪了。点「下一步」一步步看。</p>
+
+      <div class="viz" id="recViz">
+        <div class="viz-controls">
+          <button id="recNext">下一步</button>
+          <button id="recReset">重置</button>
+          <span style="font-size:12px;color:#555;margin-left:8px">步骤 <span id="recStep">0</span> / <span id="recTotal">0</span></span>
+        </div>
+        <div style="display:flex;gap:24px;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:12px;color:#555;margin-bottom:6px">系统栈（栈顶在上）</div>
+            <div class="call-stack" id="recStack" style="min-height:280px;border:1px solid var(--border);border-radius:6px;background:#fff"></div>
+          </div>
+          <div style="flex:1">
+            <div style="font-size:12px;color:#555;margin-bottom:6px">当前操作</div>
+            <div id="recMsg" style="font-size:13px;padding:10px;background:#f6f7f9;border-radius:6px;min-height:60px;line-height:1.6">点「下一步」开始执行 f(0,3)</div>
+            <div style="font-size:12px;color:#555;margin:12px 0 6px">数组</div>
+            <div id="recArr" style="display:flex;gap:4px"></div>
+            <div style="font-size:12px;color:#555;margin:12px 0 6px">图例</div>
+            <div style="font-size:11px;line-height:1.8">
+              <span style="display:inline-block;width:12px;height:12px;background:#dbeafe;border:1px solid #2563eb;border-radius:2px;vertical-align:middle"></span> 当前执行帧
+              &nbsp;&nbsp;
+              <span style="display:inline-block;width:12px;height:12px;background:#ffedd5;border:1px solid #ea580c;border-radius:2px;vertical-align:middle"></span> 叶子节点（返回）
+              &nbsp;&nbsp;
+              <span style="display:inline-block;width:12px;height:12px;background:#f6f7f9;border:1px solid #9aa0a6;border-radius:2px;vertical-align:middle"></span> 等待子调用
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h2>四、递归改非递归：自己压栈</h2>
+      <p>任何递归都能改成非递归。做法是把系统栈做的事，自己用一个数据结构（通常是 <code>vector</code> 或 <code>std::stack</code>）模拟出来。每个栈帧存当前执行到哪一步了（state）、以及中间结果。</p>
+      <p>以求最大值为例，手动栈版本长这样：</p>
+
+          <pre class="code"><span class="kw">struct</span> Frame {
+        <span class="kw">int</span> l, r, state;
+        <span class="kw">int</span> lmax;
+    };
+
+    <span class="kw">int</span> <span class="fn">maxValueManual</span>(<span class="kw">int</span>* arr, <span class="kw">int</span> n) {
+        vector&lt;Frame&gt; stk;
+        stk.push_back({0, n - 1, 0, 0});
+        <span class="kw">int</span> retval = 0;
+        <span class="kw">while</span> (!stk.empty()) {
+            Frame&amp; top = stk.back();
+            <span class="kw">if</span> (top.state == 0) {
+                <span class="kw">if</span> (top.l == top.r) {
+                    retval = arr[top.l];
+                    stk.pop_back();
+                } <span class="kw">else</span> {
+                    top.state = 1;
+                    <span class="kw">int</span> m = (top.l + top.r) / 2;
+                    stk.push_back({top.l, m, 0, 0});
+                }
+            } <span class="kw">else</span> <span class="kw">if</span> (top.state == 1) {
+                top.lmax = retval;
+                top.state = 2;
+                <span class="kw">int</span> m = (top.l + top.r) / 2;
+                stk.push_back({m + 1, top.r, 0, 0});
+            } <span class="kw">else</span> {
+                retval = max(top.lmax, retval);
+                stk.pop_back();
+            }
+        }
+        <span class="kw">return</span> retval;
+    }</pre>
+
+      <p>核心是 <code>state</code> 这个字段。state=0 表示刚进入这个范围，要先算左半；state=1 表示左半算完了，返回值存在 <code>retval</code> 里，存进 <code>lmax</code>，接着算右半；state=2 表示右半也算完了，合并 <code>max(lmax, retval)</code> 再往上抛。</p>
+      <p>三种实现的速度对比（n=100 万，求最大值）：</p>
+
+      <div class="bar-chart">
+        <div class="bar-group">
+          <div class="bar" style="height:60px"><span class="val">2.3ms</span></div>
+          <div class="bar-label">系统栈递归</div>
+        </div>
+        <div class="bar-group">
+          <div class="bar orange" style="height:90px"><span class="val">3.4ms</span></div>
+          <div class="bar-label">vector 手动栈</div>
+        </div>
+        <div class="bar-group">
+          <div class="bar gray" style="height:180px"><span class="val">9.9ms</span></div>
+          <div class="bar-label">std::stack</div>
+        </div>
+      </div>
+
+      <p>手动栈比系统栈慢一点，因为每一步都要自己判断 state、压栈弹栈，编译器没法像优化递归调用那样做内联和寄存器分配。<code>std::stack</code> 更慢，因为它默认基于 <code>deque</code>，每次 push/pop 都有额外的内存分配开销。用 <code>vector</code> 当栈是最划算的。</p>
+      <p>工程上几乎一定要把递归改成非递归，除非你确定数据量再大递归也不会深。归并排序、快速排序、线段树、平衡树，这些数据结构的递归深度都是 O(log n)，n 到 10⁹ 也才 30 层，递归没问题。但链状递归、图的 DFS（最坏一条链走到底），就必须改。算法比赛里能过就不改，工程代码里能改就改。</p>
+
+      <h2>五、Master 公式</h2>
+      <p>递归的复杂度怎么算？如果所有子问题的规模都相同，就可以用 Master 公式一把算出来。公式长这样：</p>
+      <p style="font-family:monospace;font-size:16px;text-align:center;padding:12px;background:#f6f7f9;border-radius:6px">T(n) = a · T(n/b) + O(n<sup>c</sup>)</p>
+      <p>其中 a 是子问题个数，b 是每个子问题相对原问题的缩小比例，n<sup>c</sup> 是当前层除了递归之外要做的工作量。a、b、c 都是常数。</p>
+      <p>比较 <code>log<sub>b</sub>a</code> 和 <code>c</code> 的大小，分三种情况：</p>
+
+      <table class="master-table">
+        <tr><th>条件</th><th>复杂度</th><th>典型例子</th></tr>
+        <tr><td>log<sub>b</sub>a &lt; c</td><td>O(n<sup>c</sup>)</td><td>二分搜索：T(n)=T(n/2)+O(1)，a=1,b=2,c=0，log₂1=0 &lt; 0？等于，看下一行</td></tr>
+        <tr><td>log<sub>b</sub>a &gt; c</td><td>O(n<sup>log<sub>b</sub>a</sup>)</td><td>递归求最大值：T(n)=2T(n/2)+O(1)，a=2,b=2,c=0，log₂2=1 &gt; 0 → O(n)</td></tr>
+        <tr><td>log<sub>b</sub>a == c</td><td>O(n<sup>c</sup> · log n)</td><td>归并排序：T(n)=2T(n/2)+O(n)，a=2,b=2,c=1，log₂2=1 == 1 → O(n log n)</td></tr>
+      </table>
+
+      <p>记忆方法很简单：谁大听谁的。子问题那边的总工作量是 n<sup>log_b a</sup>（每层 a 个子问题、共 log_b n 层，叶子总数 a<sup>log_b n</sup> = n<sup>log_b a</sup>），当前层的工作量是 n<sup>c</sup>。哪边大，复杂度就是哪边；一样大，就再乘一个 log n（每一层工作量相同，共 log n 层）。</p>
+
+      <p>下面这个计算器可以输入 a、b、c，直接给出复杂度：</p>
+
+      <div class="viz" id="masterCalc">
+        <div class="viz-controls">
+          <div class="ctl">a = <select id="ma"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>8</option></select></div>
+          <div class="ctl">b = <select id="mb"><option>2</option><option selected>2</option><option>3</option><option>4</option></select></div>
+          <div class="ctl">c = <select id="mc"><option>0</option><option selected>1</option><option>2</option></select></div>
+        </div>
+        <div class="master-out" id="masterOut"></div>
+      </div>
+
+      <p>常见递归的 Master 公式套用：</p>
+      <table class="master-table">
+        <tr><th>算法</th><th>递推式</th><th>a,b,c</th><th>log_b a vs c</th><th>复杂度</th></tr>
+        <tr><td>二分搜索</td><td>T(n)=T(n/2)+O(1)</td><td>1,2,0</td><td>0 == 0</td><td>O(log n)</td></tr>
+        <tr><td>递归求最大值</td><td>T(n)=2T(n/2)+O(1)</td><td>2,2,0</td><td>1 &gt; 0</td><td>O(n)</td></tr>
+        <tr><td>归并排序</td><td>T(n)=2T(n/2)+O(n)</td><td>2,2,1</td><td>1 == 1</td><td>O(n log n)</td></tr>
+        <tr><td>Strassen 矩阵乘法</td><td>T(n)=7T(n/2)+O(n²)</td><td>7,2,2</td><td>2.81 &gt; 2</td><td>O(n<sup>2.81</sup>)</td></tr>
+        <tr><td>普通矩阵乘法（分治）</td><td>T(n)=8T(n/2)+O(n²)</td><td>8,2,2</td><td>3 &gt; 2</td><td>O(n³)</td></tr>
+      </table>
+
+      <h3>一个补充情况</h3>
+      <p>Master 公式的标准形式里，额外工作量是 O(n<sup>c</sup>)。如果额外工作量带了 log n，比如：</p>
+      <p style="font-family:monospace;font-size:15px;text-align:center;padding:10px;background:#f6f7f9;border-radius:6px">T(n) = 2·T(n/2) + O(n · log n)</p>
+      <p>这时候 log_b a = 1，c = 1，但额外项多了一个 log n。结果是 O(n · (log n)<sup>2</sup>)。证明过程比较复杂，记住结论就行。直觉上：每一层工作量是 n·log(当前层规模)，共 log n 层，加起来就是 n·(log n)<sup>2</sup>。</p>
+
+      <h2>六、不能用 Master 公式的情况</h2>
+      <p>Master 公式只适用于「所有子问题规模相同」的递归。如果子问题规模不一样，就不能直接套。</p>
+      <p>最典型的是汉诺塔和斐波那契。汉诺塔 T(n) = 2T(n-1) + O(1)，两个子问题规模都是 n-1，看起来 a=2、b 呢？n 到 n-1 不是除以一个常数 b，而是减 1，所以 b 不存在。斐波那契 T(n) = T(n-1) + T(n-2)，两个子问题规模还不一样，更不能用 Master。</p>
+      <p>这两类的复杂度都是 O(2<sup>n</sup>)。汉诺塔 n=30 要移动约 10 亿次，实测 1.8 秒；斐波那契 fib(40) 要调用 3.3 亿次，实测 0.35 秒。n 每加 5，时间大约翻 3 倍，这就是指数增长的样子。</p>
+
+      <div class="bar-chart">
+        <div class="bar-group">
+          <div class="bar" style="height:20px"><span class="val">2.9ms</span></div>
+          <div class="bar-label">fib(30)</div>
+        </div>
+        <div class="bar-group">
+          <div class="bar orange" style="height:60px"><span class="val">31ms</span></div>
+          <div class="bar-label">fib(35)</div>
+        </div>
+        <div class="bar-group">
+          <div class="bar gray" style="height:180px"><span class="val">353ms</span></div>
+          <div class="bar-label">fib(40)</div>
+        </div>
+      </div>
+      <p style="font-size:12px;color:#555;text-align:center;margin-top:4px">fib(n) 的运行时间。n 从 30 到 40，时间从 3ms 涨到 353ms，约 120 倍。</p>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>递归求最大值</td><td>O(n)</td><td>O(log n)（系统栈）</td></tr>
+        <tr><td>遍历求最大值</td><td>O(n)</td><td>O(1)</td></tr>
+        <tr><td>手动栈模拟递归</td><td>O(n)</td><td>O(log n)（堆上的栈）</td></tr>
+        <tr><td>归并排序（递归）</td><td>O(n log n)</td><td>O(n + log n)</td></tr>
+        <tr><td>二分搜索</td><td>O(log n)</td><td>O(1) 迭代 / O(log n) 递归</td></tr>
+      </table>
+      <p>递归的空间复杂度容易被忽略。系统栈上的帧数就是递归深度，求最大值是 O(log n)，链状递归是 O(n)。写递归时除了算时间，还要算栈深会不会爆。</p>
+
+      <h2>总结</h2>
+      <p>递归的执行过程可以完全拆开看：每调用一次压一帧，每返回一次弹一帧，帧里存着参数、局部变量和返回地址。把调用树画出来、把栈帧列出来，递归就和循环一样可分析。</p>
+      <p>几个要点：第一，递归深度等于系统栈帧数，macOS 默认 8MB 栈约撑 26 万层，链状递归要警惕段错误。第二，任何递归都能改成非递归，自己用 vector 当栈模拟 state 机，工程上能改就改，比赛里能过就不改。第三，子问题规模相同时用 Master 公式算复杂度，比较 log_b a 和 c，谁大听谁的，相等乘 log n；子问题规模不同时（汉诺塔、斐波那契）不能用 Master，通常是指数级。</p>
+      <p>后面讲归并排序、快速排序、二叉树遍历、线段树时，递归会反复出现。到时候再遇到递归函数，先画调用图、再套 Master 公式，复杂度和执行过程就都清楚了。</p>
+
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+
+  // 递归调用逐帧演示
+  (function(){
+    var arr = [3,8,7,6];
+    // 预计算 14 步，每步是 {stack: [{l,r,state,lmax,ret}], msg, highlight}
+    // state: 0=刚进入, 1=左半算完等右半, 2=右半算完等合并
+    var steps = [];
+    var stk = [];
+    function snap(msg){
+      steps.push({stack: JSON.parse(JSON.stringify(stk)), msg: msg});
+    }
+    function rec(l, r){
+      stk.push({l:l, r:r, state:0, lmax:null, ret:null});
+      snap('压入 f('+l+','+r+')，范围长度 '+(r-l+1));
+      if(l === r){
+        stk[stk.length-1].ret = arr[l];
+        stk[stk.length-1].state = 3; // leaf returning
+        snap('f('+l+','+r+') 是叶子，返回 '+arr[l]);
+        stk.pop();
+        return arr[l];
+      }
+      var m = (l+r)>>1;
+      stk[stk.length-1].state = 1;
+      snap('f('+l+','+r+') 切成 f('+l+','+m+') 和 f('+(m+1)+','+r+')，先算左半');
+      var lmax = rec(l, m);
+      // 回来后，栈顶应该是自己
+      var idx = -1;
+      for(var i=stk.length-1;i>=0;i--){ if(stk[i].l===l && stk[i].r===r){idx=i;break;} }
+      if(idx>=0){ stk[idx].lmax = lmax; stk[idx].state = 2; }
+      snap('左半 f('+l+','+m+') 返回 '+lmax+'，存进 lmax，接着算右半 f('+(m+1)+','+r+')');
+      var rmax = rec(m+1, r);
+      var ans = Math.max(lmax, rmax);
+      idx = -1;
+      for(var i=stk.length-1;i>=0;i--){ if(stk[i].l===l && stk[i].r===r){idx=i;break;} }
+      if(idx>=0){ stk[idx].ret = ans; stk[idx].state = 4; }
+      snap('右半返回 '+rmax+'，max('+lmax+','+rmax+')='+ans+'，f('+l+','+r+') 返回 '+ans);
+      if(idx>=0) stk.splice(idx,1);
+      return ans;
+    }
+    snap('初始状态，栈为空');
+    var finalAns = rec(0, 3);
+    snap('全部完成，最终答案 = '+finalAns);
+
+    var cur = 0;
+    var stackEl = document.getElementById('recStack');
+    var msgEl = document.getElementById('recMsg');
+    var stepEl = document.getElementById('recStep');
+    var arrEl = document.getElementById('recArr');
+
+    // 渲染数组
+    arrEl.innerHTML = '';
+    for(var i=0;i<arr.length;i++){
+      var d = document.createElement('div');
+      d.style.cssText = 'width:36px;height:36px;border:1px solid var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center;font-family:monospace;font-size:14px;background:#fff';
+      d.textContent = arr[i];
+      arrEl.appendChild(d);
+    }
+
+    function render(){
+      var st = steps[cur];
+      stepEl.textContent = cur;
+      document.getElementById('recTotal').textContent = steps.length - 1;
+      msgEl.innerHTML = st.msg;
+      stackEl.innerHTML = '';
+      // 栈顶在上，所以倒序渲染
+      for(var i=st.stack.length-1;i>=0;i--){
+        var fr = st.stack[i];
+        var div = document.createElement('div');
+        var cls = 'stack-frame';
+        if(fr.state === 0 || fr.state === 1) cls += ' active';
+        else if(fr.state === 3 || fr.state === 4) cls += ' done';
+        div.className = cls;
+        var label = 'f('+fr.l+','+fr.r+')';
+        if(fr.state === 1) label += fr.lmax !== null ? ' lmax='+fr.lmax : ' →左半';
+        if(fr.state === 2) label += ' lmax='+fr.lmax+' →右半';
+        if(fr.state === 3 || fr.state === 4) label += ' ='+fr.ret;
+        div.textContent = label;
+        stackEl.appendChild(div);
+      }
+      if(st.stack.length === 0){
+        var empty = document.createElement('div');
+        empty.style.cssText = 'color:#9aa0a6;font-size:12px;padding:20px';
+        empty.textContent = '（栈空）';
+        stackEl.appendChild(empty);
+      }
+    }
+
+    document.getElementById('recNext').addEventListener('click', function(){
+      if(cur < steps.length-1){ cur++; render(); }
+    });
+    document.getElementById('recReset').addEventListener('click', function(){
+      cur = 0; render();
+    });
+    render();
+  })();
+
+  // Master 公式计算器
+  function updateMaster() {
+    var a = parseInt(document.getElementById('ma').value);
+    var b = parseInt(document.getElementById('mb').value);
+    var c = parseInt(document.getElementById('mc').value);
+    var logba = Math.log(a) / Math.log(b);
+    var cmp;
+    if (Math.abs(logba - c) < 1e-9) {
+      cmp = '==';
+    } else if (logba < c) {
+      cmp = '<';
+    } else {
+      cmp = '>';
+    }
+    var complexity;
+    if (cmp === '<') {
+      complexity = 'O(n^' + c + ')';
+    } else if (cmp === '>') {
+      var exp = logba.toFixed(2);
+      complexity = 'O(n^' + exp.replace(/\.?0+$/,'') + ')';
+    } else {
+      complexity = 'O(n^' + c + ' · log n)';
+    }
+    var out = document.getElementById('masterOut');
+    out.innerHTML = 'T(n) = ' + a + '·T(n/' + b + ') + O(n^' + c + ')'
+      + '<br>log<sub>' + b + '</sub>' + a + ' = ' + logba.toFixed(3)
+      + '  ' + cmp + '  c = ' + c
+      + '<br><strong style="color:#2563eb">复杂度：' + complexity + '</strong>';
+  }
+  ['ma','mb','mc'].forEach(function(id){
+    document.getElementById(id).addEventListener('change', updateMaster);
+  });
+  updateMaster();
+})();
+</script>
+</body>
+</html>

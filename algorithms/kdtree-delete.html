@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>动态 K-D 树（带删除）· 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .kd-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .kd-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .kd-btn:disabled{opacity:.4;cursor:default;}
+  .kd-btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;}
+  .kd-svg{display:block;width:100%;height:auto;margin:0 auto;}
+  @media(max-width:760px){
+    .kd-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>动态 K-D 树（带删除）</h1>
+    <p class="intro">K-D 树能一次剪掉一整片区域，可它天生是静态的：建好之后只查不改。要往里插点、删点，就得借替罪羊树的办法，删除只打标记，攒到失衡了再把整棵子树重建一遍。</p>
+
+    <h2>零、背景</h2>
+    <p>前面说过的数据结构，大多只管一维：树状数组管前缀和，线段树管区间，平衡树管大小顺序。换成平面上的点，问「矩形里有哪些点」，一维的套路就都用不上了。</p>
+    <p>K-D 树是给二维（以及更高维）准备的一棵二叉搜索树。它每一层换一个维度来切，节点上记着整棵子树的包围盒，查询时能用包围盒一次剪掉一大片。<a href="kdtree.html">K-D 树</a>那一节讲的是它的静态版本：点一次性给定，之后只查。</p>
+    <p>这一节要解决的是动起来的情况：点会插进来，也会被删掉。典型场景是下面这道题。</p>
+
+    <h2>一、问题</h2>
+    <p>射击场。空间里有 n 个靶子，每个靶子是 x 轴范围 <code class="inline">[l, r]</code>、y 轴范围 <code class="inline">[d, u]</code> 的一个矩形，另外有一个 z 轴的数值。接下来有 m 发子弹，每发给定出发时的 x 和 y，子弹沿 z 轴往前飞，会击中路上遇到的第一个还没消失的靶子，之后靶子和这发子弹一起消失。问每发子弹击中的是哪个靶子，没击中记 0。</p>
+    <p>例子用 6 发子弹、3 个靶子。子弹的坐标：</p>
+
+    <table class="complexity">
+      <thead><tr><th>子弹编号</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th></tr></thead>
+      <tbody>
+        <tr><td>坐标 (x, y)</td><td>(3, 7)</td><td>(8, 2)</td><td>(5, 5)</td><td>(1, 9)</td><td>(9, 6)</td><td>(6, 1)</td></tr>
+      </tbody>
+    </table>
+
+    <p>三个靶子分别是 A：<code class="inline">[0, 2] × [8, 10]</code>，z = 1；B：<code class="inline">[4, 9] × [3, 7]</code>，z = 2；C：<code class="inline">[0, 4] × [6, 10]</code>，z = 3。</p>
+    <p>按 z 从小到大看：A 最靠前，它先被子弹打到。它覆盖的矩形里只有 4 号子弹，于是 4 号打中 A，两个一起消失。剩下的靶子再往下算。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>最直接的是每来一个靶子，把 m 发子弹全扫一遍，找出落在矩形里、编号最小的那发。n 个靶子就是 O(n·m)，10⁵ 的量级下是 10¹⁰，过不去。</p>
+    <p>换个角度想：子弹被击中就消失，靶子被击中也就没用了。整个过程其实是「矩形里找一个还在的点，然后把它删掉」。查和删交替进行，正好是一棵需要支持删除的二维搜索树的活。</p>
+
+    <h2>三、K-D 树长什么样</h2>
+    <p>建树的时候，先按 x 排序取中位数，用这个点的 x 坐标把平面竖着切成两半；左右两半再按 y 排序取中位数，横着切；再下一层又回到 x。每一层换一个维度，这就是 K-D 树名字里那个 K。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="K-D 树的切分方式与节点维护的信息" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="40" y="48" font-size="14" font-weight="500" fill="#1f2328">平面按维度轮转切分</text>
+        <text x="300" y="48" font-size="14" font-weight="500" fill="#1f2328">每个节点维护</text>
+        <rect x="40" y="60" width="220" height="220" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <line x1="150" y1="60" x2="150" y2="280" stroke="#2563eb" stroke-width="2"/>
+        <line x1="40" y1="126" x2="150" y2="126" stroke="#ea580c" stroke-width="2"/>
+        <line x1="150" y1="236" x2="260" y2="236" stroke="#ea580c" stroke-width="2"/>
+        <g fill="#9aa0a6">
+          <circle cx="106" cy="126" r="4"/>
+          <circle cx="216" cy="236" r="4"/>
+          <circle cx="62" cy="82" r="4"/>
+          <circle cx="238" cy="148" r="4"/>
+          <circle cx="172" cy="258" r="4"/>
+        </g>
+        <circle cx="106" cy="126" r="5.5" fill="#ea580c"/>
+        <circle cx="216" cy="236" r="5.5" fill="#ea580c"/>
+        <circle cx="150" cy="170" r="5.5" fill="#2563eb"/>
+        <g font-size="11" fill="#6b7280">
+          <text x="114" y="118">1</text>
+          <text x="224" y="228">2</text>
+          <text x="158" y="162">3</text>
+          <text x="70" y="74">4</text>
+          <text x="226" y="140" text-anchor="end">5</text>
+          <text x="180" y="250">6</text>
+        </g>
+        <g font-size="11">
+          <text x="156" y="74" fill="#2563eb">x = 5</text>
+          <text x="44" y="120" fill="#ea580c">y = 7</text>
+          <text x="154" y="230" fill="#ea580c">y = 2</text>
+        </g>
+        <rect x="300" y="68" width="300" height="44" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1"/>
+        <text x="450" y="90" font-size="13" fill="#2563eb" text-anchor="middle" dominant-baseline="central">自身坐标与切分维度</text>
+        <rect x="300" y="120" width="300" height="44" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1"/>
+        <text x="450" y="142" font-size="13" fill="#2563eb" text-anchor="middle" dominant-baseline="central">子树包围盒 xmin xmax ymin ymax</text>
+        <rect x="300" y="172" width="300" height="44" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1"/>
+        <text x="450" y="194" font-size="13" fill="#2563eb" text-anchor="middle" dominant-baseline="central">子树存活数 aliveSiz</text>
+        <rect x="300" y="224" width="300" height="44" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1"/>
+        <text x="450" y="246" font-size="13" fill="#2563eb" text-anchor="middle" dominant-baseline="central">聚合值：本题是 idmin</text>
+      </svg>
+      <figcaption>竖线按 x 切、横线按 y 切，逐层轮转；每个节点额外揽下整棵子树的包围盒、存活数与聚合值</figcaption>
+    </figure>
+
+    <p>包围盒是这棵树的关键。一个节点记着它子树里所有点的 x、y 最小值和最大值，也就是能把这棵子树整个框住的那个矩形。查询矩形跟这个框没交集，整棵子树就都不用看了。</p>
+    <p>本题要的是「矩形里编号最小的子弹」，所以聚合值记 idmin：子树内存活子弹的最小编号。换道题它可能变成点数、最大值、权值和，看问题要什么。</p>
+    <p>上面那 6 发子弹建出来的树是这样：根是 3 号 (5, 5)，按 x = 5 切；左子树根是 1 号 (3, 7)，按 y = 7 切，它的右孩子是 4 号 (1, 9)；右子树根是 2 号 (8, 2)，按 y = 2 切，两个孩子是 6 号 (6, 1) 和 5 号 (9, 6)。</p>
+
+    <h2>四、一次矩形查询怎么剪</h2>
+    <p>从根往下走，每到一个节点有四种情况，按顺序判断：</p>
+    <ol>
+      <li>这棵子树一个存活点都没有，或者它的 idmin 已经不比当前答案更优，直接返回。</li>
+      <li>包围盒和查询矩形没有交集，整棵剪掉。</li>
+      <li>包围盒被查询矩形完全包住，这一整棵都在里面，直接取它的 idmin，不用往下走。</li>
+      <li>有交集但包不住，那就看当前这个点自己有没有落在矩形里，然后往两个儿子递归。</li>
+    </ol>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 275" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="矩形查询的三种剪枝情况" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="15" y="30" width="180" height="180" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <rect x="87" y="84" width="90" height="72" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <rect x="33" y="48" width="36" height="36" fill="none" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+        <text x="105" y="230" font-size="12" fill="#1f2328" text-anchor="middle">包围盒与矩形不交</text>
+        <text x="105" y="248" font-size="12" fill="#ea580c" text-anchor="middle">xmax = 3 &lt; ql = 4，剪掉</text>
+
+        <rect x="205" y="30" width="180" height="180" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <rect x="277" y="66" width="108" height="108" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <rect x="313" y="102" width="54" height="54" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="295" y="230" font-size="12" fill="#1f2328" text-anchor="middle">包围盒被完全包含</text>
+        <text x="295" y="248" font-size="12" fill="#2563eb" text-anchor="middle">直接取 idmin，不再往下</text>
+
+        <rect x="395" y="30" width="180" height="180" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <rect x="467" y="84" width="90" height="72" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <rect x="413" y="48" width="144" height="144" fill="none" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+        <circle cx="485" cy="120" r="5.5" fill="#2563eb"/>
+        <text x="485" y="230" font-size="12" fill="#1f2328" text-anchor="middle">相交但包不住</text>
+        <text x="485" y="248" font-size="12" fill="#6b7280" text-anchor="middle">查当前点，再递归两个儿子</text>
+      </svg>
+      <figcaption>橙色是查询矩形，蓝框是被完全包住的子树，虚线框是还要继续往下走的</figcaption>
+    </figure>
+
+    <p>这里有个小优化值得记一下：两个儿子先递归 idmin 更小的那个。答案越早变小，后面那个「idmin 不比当前答案更优」的剪枝就越好使。</p>
+
+    <h2>五、删除：只打标记</h2>
+    <p>平衡二叉搜索树删点的时候，可以找左子树的最大值或者右子树的最小值来顶替。K-D 树不行，每一层的维度都在换，「后继」这个词在这里没有定义。</p>
+    <p>所以换个思路：删点的时候不摘掉节点，只把它标成「死了」。节点留在树上继续当路由，只是不再参与答案。这就是懒删除。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 290" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="删除只打标记后包围盒与存活数的变化" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="k3a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+        <g stroke="#9aa0a6" stroke-width="1.4" fill="none" marker-end="url(#k3a)">
+          <line x1="140" y1="62" x2="107" y2="120"/>
+          <line x1="160" y1="62" x2="205" y2="120"/>
+          <line x1="110" y1="154" x2="100" y2="195"/>
+          <line x1="210" y1="154" x2="200" y2="195"/>
+          <line x1="230" y1="154" x2="245" y2="195"/>
+        </g>
+        <g font-size="12" text-anchor="middle">
+          <rect x="119" y="28" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="150" y="42" fill="#1f2328">3</text>
+          <text x="150" y="55" font-size="11" fill="#6b7280">(5, 5)</text>
+          <rect x="64" y="103" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="95" y="117" fill="#1f2328">1</text>
+          <text x="95" y="130" font-size="11" fill="#6b7280">(3, 7)</text>
+          <rect x="184" y="103" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="215" y="117" fill="#1f2328">2</text>
+          <text x="215" y="130" font-size="11" fill="#6b7280">(8, 2)</text>
+          <rect x="69" y="178" width="62" height="34" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="100" y="192" fill="#9aa0a6">4</text>
+          <text x="100" y="205" font-size="11" fill="#9aa0a6">(1, 9)</text>
+          <rect x="154" y="178" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="185" y="192" fill="#1f2328">6</text>
+          <text x="185" y="205" font-size="11" fill="#6b7280">(6, 1)</text>
+          <rect x="224" y="178" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="255" y="192" fill="#1f2328">5</text>
+          <text x="255" y="205" font-size="11" fill="#6b7280">(9, 6)</text>
+        </g>
+        <text x="100" y="230" font-size="11" fill="#9aa0a6" text-anchor="middle">alive = false</text>
+
+        <rect x="400" y="40" width="210" height="60" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1"/>
+        <text x="416" y="62" font-size="12" fill="#6b7280">1 号的包围盒</text>
+        <text x="416" y="84" font-size="13" fill="#2563eb">[1, 3] × [7, 9] → [3, 3] × [7, 7]</text>
+        <rect x="400" y="118" width="210" height="60" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1"/>
+        <text x="416" y="140" font-size="12" fill="#6b7280">根的包围盒</text>
+        <text x="416" y="162" font-size="13" fill="#2563eb">[1, 9] × [1, 9] → [3, 9] × [1, 7]</text>
+        <rect x="400" y="196" width="210" height="60" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1"/>
+        <text x="416" y="218" font-size="12" fill="#6b7280">存活数 aliveSiz</text>
+        <text x="416" y="240" font-size="13" fill="#ea580c">6 → 5，idmin 还是 1</text>
+      </svg>
+      <figcaption>4 号被标成墓碑（灰虚线框），它父亲和祖先的包围盒随之收窄，聚合值重新算</figcaption>
+    </figure>
+
+    <p>配套的规则是：维护信息的时候，死掉的节点自身不贡献坐标、不贡献编号，只把两个孩子的信息并上来。代码里就是 <code class="inline">alive[i]</code> 为假时，先把包围盒设成「空」（xmin 取正无穷、xmax 取负无穷），再去并孩子。</p>
+    <p>墓碑攒多了树会歪，但这不影响正确性，只影响速度，包围盒变大、查询剪不掉。所以下一步要解决的是什么时候把它扶正。</p>
+
+    <h2>六、什么时候重构</h2>
+    <p>判断平衡只看存活数。设 α = 0.7，只要某个节点满足 <code class="inline">0.7 × 存活数 ≥ 大儿子的存活数</code>，就算平衡。不满足，说明这棵子树歪得太厉害。</p>
+    <p>插入和删除都沿路从下往上更新信息，一旦遇到不平衡的节点就把它记下来（记的是最靠上的那一个）。一次操作结束后，只对这个节点做一次重构：把它子树里还活着的点全部收集出来，重新切分建树，再把新根挂回它父亲身上。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 290" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="失衡判定与重构" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="k4a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="k4o" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <g stroke="#9aa0a6" stroke-width="1.4" fill="none" marker-end="url(#k4a)">
+          <line x1="140" y1="59" x2="105" y2="103"/>
+          <line x1="160" y1="59" x2="212" y2="103"/>
+          <line x1="95" y1="137" x2="100" y2="178"/>
+          <line x1="206" y1="137" x2="185" y2="178"/>
+          <line x1="230" y1="137" x2="255" y2="178"/>
+        </g>
+        <g font-size="12" text-anchor="middle">
+          <rect x="119" y="25" width="62" height="34" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="150" y="39" fill="#9aa0a6">3</text>
+          <text x="150" y="52" font-size="11" fill="#9aa0a6">(5, 5)</text>
+          <rect x="64" y="86" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="95" y="100" fill="#1f2328">1</text>
+          <text x="95" y="113" font-size="11" fill="#6b7280">(3, 7)</text>
+          <rect x="184" y="86" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="215" y="100" fill="#1f2328">2</text>
+          <text x="215" y="113" font-size="11" fill="#6b7280">(8, 2)</text>
+          <rect x="69" y="161" width="62" height="34" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="100" y="175" fill="#9aa0a6">4</text>
+          <text x="100" y="188" font-size="11" fill="#9aa0a6">(1, 9)</text>
+          <rect x="154" y="161" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="185" y="175" fill="#1f2328">6</text>
+          <text x="185" y="188" font-size="11" fill="#6b7280">(6, 1)</text>
+          <rect x="224" y="161" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="255" y="175" fill="#1f2328">5</text>
+          <text x="255" y="188" font-size="11" fill="#6b7280">(9, 6)</text>
+        </g>
+        <text x="150" y="232" font-size="13" fill="#ea580c" text-anchor="middle">删掉 3 号之后</text>
+        <text x="150" y="252" font-size="13" fill="#ea580c" text-anchor="middle">0.7 × 4 = 2.8 &lt; 3，失衡</text>
+
+        <line x1="300" y1="120" x2="348" y2="120" stroke="#ea580c" stroke-width="2" fill="none" marker-end="url(#k4o)"/>
+        <text x="324" y="106" font-size="12" fill="#ea580c" text-anchor="middle">重建</text>
+
+        <g stroke="#2563eb" stroke-width="1.4" fill="none" marker-end="url(#k4a)">
+          <line x1="440" y1="59" x2="400" y2="103"/>
+          <line x1="460" y1="59" x2="512" y2="103"/>
+          <line x1="530" y1="137" x2="545" y2="178"/>
+        </g>
+        <g font-size="12" text-anchor="middle">
+          <rect x="419" y="25" width="62" height="34" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+          <text x="450" y="39" fill="#2563eb" font-weight="600">6</text>
+          <text x="450" y="52" font-size="11" fill="#2563eb">(6, 1)</text>
+          <rect x="369" y="86" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="400" y="100" fill="#1f2328">1</text>
+          <text x="400" y="113" font-size="11" fill="#6b7280">(3, 7)</text>
+          <rect x="479" y="86" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="510" y="100" fill="#1f2328">2</text>
+          <text x="510" y="113" font-size="11" fill="#6b7280">(8, 2)</text>
+          <rect x="509" y="161" width="62" height="34" rx="6" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="540" y="175" fill="#1f2328">5</text>
+          <text x="540" y="188" font-size="11" fill="#6b7280">(9, 6)</text>
+        </g>
+        <text x="470" y="232" font-size="13" fill="#2563eb" text-anchor="middle">4 个存活点重新切分</text>
+        <text x="470" y="252" font-size="13" fill="#2563eb" text-anchor="middle">新根是 6 号，重新平衡</text>
+      </svg>
+      <figcaption>左图 3 号和 4 号都是墓碑，存活数 4 却有一边挂了 3 个；收集出 4 个活点重建，得到右图</figcaption>
+    </figure>
+
+    <p>重建是摊还的。一棵子树要被重建，说明它刚被改动过、且失衡严重；下一次再被重建，中间至少得攒进这么多倍的改动。摊到每一次插入删除上，代价是 O(log n)。</p>
+
+    <h2>七、比较规则要带上编号</h2>
+    <p>这里有个不做就会出错的细节。不带词频压缩的实现里，坐标完全相同的点可能有好几个；而一旦发生过重建，树的结构和最初不一样了。这时候要删某个点，从根往下走该往左还是往右？</p>
+    <p>答案是让节点编号一起参与比较：先比当前维度的坐标，坐标一样再比节点编号。建树、插入、删除三处用同一个规则，于是无论重构多少次，任意一个点在树上的位置都被这个规则唯一确定，删除时一路比下去就能走到它。</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">compareNode</span>(<span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> dimension) {
+    <span class="kw">int</span> v1 = dimension == 0 ? x[i] : y[i];
+    <span class="kw">int</span> v2 = dimension == 0 ? x[j] : y[j];
+    <span class="kw">return</span> v1 != v2 ? (v1 &lt; v2 ? -1 : 1) : (i - j);
+}</pre>
+    <p>有了这个规则，删除就不用像平衡树那样先求 rank 再按 rank 找，直接拿节点编号往下比即可。代价是坐标相同的点之间有一个固定的先后，不过这对答案没影响。</p>
+
+    <h2>八、演示</h2>
+    <p>点「下一步」走一遍整个流程：建树、按 z 处理三个靶子、每次查到就删掉那发子弹，中间还会触发一次重构。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　射击场：查一个靶子，删一发子弹</div>
+      <div id="kdSvg"></div>
+      <div class="breakdown" id="kdStatus"></div>
+      <div class="kd-btns">
+        <button class="kd-btn" id="kdStep">下一步</button>
+        <button class="kd-btn" id="kdAuto">自动播放</button>
+        <button class="kd-btn" id="kdReset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot partial"></span>正在访问</span>
+        <span><span class="dot full"></span>整棵取用 / 命中</span>
+        <span><span class="dot"></span>被剪掉</span>
+      </div>
+    </div>
+
+    <h2>九、代码</h2>
+    <p>下面是模板题的完整实现。子弹建 K-D 树，靶子按 z 排序后依次查询，查到就删。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">struct</span> Target {
+    <span class="kw">int</span> l, r, d, u, z, id;
+};
+
+<span class="kw">bool</span> <span class="fn">ZCmp</span>(Target x, Target y) {
+    <span class="kw">return</span> x.z &lt; y.z;
+}
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+<span class="kw">const</span> <span class="kw">int</span> INF  = 1 &lt;&lt; 30;
+<span class="kw">int</span> n, m;
+
+Target target[MAXN];
+
+<span class="cm">// 子弹的 K-D 树</span>
+<span class="kw">int</span> x[MAXN], y[MAXN], cntkdt, root;
+<span class="kw">int</span> ls[MAXN], rs[MAXN];
+
+<span class="kw">bool</span> alive[MAXN];      <span class="cm">// 节点是否存活</span>
+<span class="kw">int</span> aliveSiz[MAXN];    <span class="cm">// 子树的存活节点数量，平衡性只用它判断</span>
+
+<span class="kw">int</span> xmin[MAXN], xmax[MAXN], ymin[MAXN], ymax[MAXN];
+
+<span class="kw">int</span> idmin[MAXN];       <span class="cm">// 区域内的子弹最小编号</span>
+
+<span class="cm">// 替罪羊树的重构</span>
+<span class="kw">double</span> ALPHA = 0.7;
+<span class="kw">int</span> top, topFather, topSide, topDimension;
+<span class="kw">int</span> arr[MAXN], treeSiz;
+
+<span class="kw">int</span> bullet;            <span class="cm">// 当前查到的最优子弹</span>
+<span class="kw">int</span> ans[MAXN];
+
+<span class="kw">int</span> <span class="fn">init</span>(<span class="kw">int</span> qx, <span class="kw">int</span> qy) {
+    cntkdt++;
+    x[cntkdt] = qx;
+    y[cntkdt] = qy;
+    ls[cntkdt] = rs[cntkdt] = 0;
+    alive[cntkdt] = <span class="kw">true</span>;
+    aliveSiz[cntkdt] = 1;
+    xmin[cntkdt] = xmax[cntkdt] = qx;
+    ymin[cntkdt] = ymax[cntkdt] = qy;
+    idmin[cntkdt] = cntkdt;
+    <span class="kw">return</span> cntkdt;
+}
+
+<span class="kw">void</span> <span class="fn">maintain</span>(<span class="kw">int</span> i) {
+    <span class="kw">int</span> l = ls[i], r = rs[i];
+    <span class="kw">if</span> (alive[i]) {
+        aliveSiz[i] = 1 + aliveSiz[l] + aliveSiz[r];
+        xmin[i] = xmax[i] = x[i];
+        ymin[i] = ymax[i] = y[i];
+        idmin[i] = i;
+    } <span class="kw">else</span> {
+        aliveSiz[i] = aliveSiz[l] + aliveSiz[r];
+        xmin[i] = ymin[i] = INF;
+        xmax[i] = ymax[i] = -INF;
+        idmin[i] = INF;
+    }
+    <span class="kw">if</span> (aliveSiz[l] != 0) {
+        xmin[i] = min(xmin[i], xmin[l]);
+        xmax[i] = max(xmax[i], xmax[l]);
+        ymin[i] = min(ymin[i], ymin[l]);
+        ymax[i] = max(ymax[i], ymax[l]);
+        idmin[i] = min(idmin[i], idmin[l]);
+    }
+    <span class="kw">if</span> (aliveSiz[r] != 0) {
+        xmin[i] = min(xmin[i], xmin[r]);
+        xmax[i] = max(xmax[i], xmax[r]);
+        ymin[i] = min(ymin[i], ymin[r]);
+        ymax[i] = max(ymax[i], ymax[r]);
+        idmin[i] = min(idmin[i], idmin[r]);
+    }
+}
+
+<span class="cm">// 先按维度坐标比较，坐标相同时按 kdt 节点编号比较</span>
+<span class="cm">// 建树、插入、删除使用相同的比较规则</span>
+<span class="cm">// 即便发生重构，删除时也能确定唯一的方向</span>
+<span class="kw">int</span> <span class="fn">compareNode</span>(<span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> dimension) {
+    <span class="kw">int</span> v1 = dimension == 0 ? x[i] : y[i];
+    <span class="kw">int</span> v2 = dimension == 0 ? x[j] : y[j];
+    <span class="kw">return</span> v1 != v2 ? (v1 &lt; v2 ? -1 : 1) : (i - j);
+}
+
+<span class="kw">struct</span> Cmp {
+    <span class="kw">int</span> dimension;
+
+    <span class="kw">bool</span> <span class="kw">operator</span>()(<span class="kw">int</span> a, <span class="kw">int</span> b) <span class="kw">const</span> {
+        <span class="kw">return</span> compareNode(a, b, dimension) &lt; 0;
+    }
+};
+
+<span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> dimension) {
+    <span class="kw">if</span> (l &gt; r) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+    nth_element(arr + l, arr + mid, arr + r + 1, Cmp{dimension});
+    <span class="kw">int</span> rt = arr[mid];
+    ls[rt] = build(l, mid - 1, dimension ^ 1);
+    rs[rt] = build(mid + 1, r, dimension ^ 1);
+    maintain(rt);
+    <span class="kw">return</span> rt;
+}
+
+<span class="kw">bool</span> <span class="fn">balance</span>(<span class="kw">int</span> i) {
+    <span class="kw">return</span> ALPHA * aliveSiz[i] &gt;= max(aliveSiz[ls[i]], aliveSiz[rs[i]]);
+}
+
+<span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> i) {
+    <span class="kw">if</span> (i != 0 &amp;&amp; aliveSiz[i] != 0) {
+        <span class="kw">if</span> (alive[i]) {
+            arr[++treeSiz] = i;
+        }
+        dfs(ls[i]);
+        dfs(rs[i]);
+    }
+}
+
+<span class="kw">void</span> <span class="fn">rebuild</span>() {
+    <span class="kw">if</span> (top != 0) {
+        treeSiz = 0;
+        dfs(top);
+        <span class="kw">int</span> newRoot = build(1, treeSiz, topDimension);
+        <span class="kw">if</span> (topFather == 0) {
+            root = newRoot;
+        } <span class="kw">else</span> <span class="kw">if</span> (topSide == 1) {
+            ls[topFather] = newRoot;
+        } <span class="kw">else</span> {
+            rs[topFather] = newRoot;
+        }
+    }
+}
+
+<span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> insertNode, <span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">int</span> side, <span class="kw">int</span> dimension) {
+    <span class="kw">if</span> (u == 0 || aliveSiz[u] == 0) {
+        <span class="kw">return</span> insertNode;
+    }
+    <span class="kw">if</span> (compareNode(insertNode, u, dimension) &lt;= 0) {
+        ls[u] = add(insertNode, ls[u], u, 1, dimension ^ 1);
+    } <span class="kw">else</span> {
+        rs[u] = add(insertNode, rs[u], u, 2, dimension ^ 1);
+    }
+    maintain(u);
+    <span class="kw">if</span> (!balance(u)) {
+        top = u;
+        topFather = fa;
+        topSide = side;
+        topDimension = dimension;
+    }
+    <span class="kw">return</span> u;
+}
+
+<span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> qx, <span class="kw">int</span> qy) {
+    top = topFather = topSide = topDimension = 0;
+    <span class="kw">int</span> insertNode = init(qx, qy);
+    root = add(insertNode, root, 0, 0, 0);
+    rebuild();
+}
+
+<span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> removeNode, <span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">int</span> side, <span class="kw">int</span> dimension) {
+    <span class="kw">if</span> (u == removeNode) {
+        alive[u] = <span class="kw">false</span>;
+    } <span class="kw">else</span> <span class="kw">if</span> (compareNode(removeNode, u, dimension) &lt;= 0) {
+        remove(removeNode, ls[u], u, 1, dimension ^ 1);
+    } <span class="kw">else</span> {
+        remove(removeNode, rs[u], u, 2, dimension ^ 1);
+    }
+    maintain(u);
+    <span class="kw">if</span> (!balance(u)) {
+        top = u;
+        topFather = fa;
+        topSide = side;
+        topDimension = dimension;
+    }
+}
+
+<span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> removeNode) {
+    top = topFather = topSide = topDimension = 0;
+    remove(removeNode, root, 0, 0, 0);
+    rebuild();
+}
+
+<span class="kw">void</span> <span class="fn">query</span>(<span class="kw">int</span> ql, <span class="kw">int</span> qr, <span class="kw">int</span> qd, <span class="kw">int</span> qu, <span class="kw">int</span> i) {
+    <span class="kw">if</span> (i == 0 || aliveSiz[i] == 0 || idmin[i] &gt;= bullet) {
+        <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (xmax[i] &lt; ql || qr &lt; xmin[i] || ymax[i] &lt; qd || qu &lt; ymin[i]) {
+        <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (ql &lt;= xmin[i] &amp;&amp; xmax[i] &lt;= qr &amp;&amp; qd &lt;= ymin[i] &amp;&amp; ymax[i] &lt;= qu) {
+        bullet = min(bullet, idmin[i]);
+        <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (alive[i] &amp;&amp; ql &lt;= x[i] &amp;&amp; x[i] &lt;= qr &amp;&amp; qd &lt;= y[i] &amp;&amp; y[i] &lt;= qu) {
+        bullet = min(bullet, i);
+    }
+    <span class="kw">int</span> l = ls[i], r = rs[i];
+    <span class="kw">if</span> (idmin[l] &lt; idmin[r]) {
+        query(ql, qr, qd, qu, l);
+        query(ql, qr, qd, qu, r);
+    } <span class="kw">else</span> {
+        query(ql, qr, qd, qu, r);
+        query(ql, qr, qd, qu, l);
+    }
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    ios::sync_with_stdio(<span class="kw">false</span>);
+    cin.tie(<span class="kw">nullptr</span>);
+    cin &gt;&gt; n;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        cin &gt;&gt; target[i].l &gt;&gt; target[i].r &gt;&gt; target[i].d &gt;&gt; target[i].u &gt;&gt; target[i].z;
+        target[i].id = i;
+    }
+    xmin[0] = ymin[0] = INF;
+    xmax[0] = ymax[0] = -INF;
+    idmin[0] = INF;
+    cin &gt;&gt; m;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1, qx, qy; i &lt;= m; i++) {
+        cin &gt;&gt; qx &gt;&gt; qy;
+        add(qx, qy);
+    }
+    sort(target + 1, target + n + 1, ZCmp);
+    <span class="kw">for</span> (<span class="kw">int</span> k = 1; k &lt;= n; k++) {
+        bullet = INF;
+        query(target[k].l, target[k].r, target[k].d, target[k].u, root);
+        <span class="kw">if</span> (bullet != INF) {
+            ans[bullet] = target[k].id;
+            remove(bullet);
+        }
+    }
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+        cout &lt;&lt; ans[i] &lt;&lt; <span class="cm">'\n'</span>;
+    }
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <p>两处容易写错。一是 0 号节点是哨兵，它的 xmin、ymin 要设成正无穷、xmax、ymax 设成负无穷、idmin 设成无穷，否则空子树会把查询带偏。二是 <code class="inline">add</code> 里的 <code class="inline">aliveSiz[u] == 0</code> 这一句：走到一棵全是墓碑的子树时，直接把新点挂在它的位置上，省得往下钻。</p>
+
+    <h2>十、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>建树（n 个点，每层 nth_element）</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>插入一个点（含摊还的重构）</td><td><code class="inline">O(log n)</code> 摊还</td></tr>
+        <tr><td>删除一个点（懒删除 + 摊还的重构）</td><td><code class="inline">O(log n)</code> 摊还</td></tr>
+        <tr><td>一次矩形查询（随机数据）</td><td><code class="inline">O(√n)</code>，最坏 <code class="inline">O(n)</code></td></tr>
+        <tr><td>射击场整体（n 个靶子、m 发子弹）</td><td><code class="inline">O(n√m)</code></td></tr>
+        <tr><td>朴素做法（对照）</td><td><code class="inline">O(n·m)</code></td></tr>
+        <tr><td>额外空间</td><td><code class="inline">O(m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>建树那一行的由来：每一层对整段做一次 nth_element 是 O(n)，一共 log n 层。别写成排序，否则变成 O(n log² n)。</p>
+    <p>查询的 O(√n) 是 K-D 树在二维、随机分布数据下的期望量级，严格来说最坏能退化到 O(n)。做题时按 √n 估算就够用，这也是 K-D 树能过 10⁵ 的原因。</p>
+    <p>空间上按「插入次数」开数组，不是按存活数：墓碑节点一直占位置。本题 m 发子弹开 MAXN = m + 1 就够；如果题目是「先删后插」的修改操作，就要按总操作次数开。</p>
+
+    <h2>十一、最后</h2>
+    <p>动态 K-D 树的全部技巧其实就两条：删除只打标记让它继续当路由，攒到失衡了整棵重建。前者换来「不用找后继」的简洁，后者把维护复杂度的活一次性摊平。</p>
+    <p>换成三维也一样，只是维度轮转从 <code class="inline">dimension ^ 1</code> 变成 <code class="inline">(dimension + 1) % 3</code>，包围盒多一组 zmin、zmax。有一道题是这样的：三维空间里 n 个摄像头，支持改位置和「给定球心和半径，找出球面上恰好有一个摄像头」的查询。改位置就是删旧节点加新节点，查询则用球心到包围盒的最近距离、最远距离来判断「整个盒子都在球面之外」和「整个盒子都在球内」两种情况，各自剪掉。</p>
+    <p>它的边界也清楚：K-D 树擅长的是矩形（盒子）范围查询，问「最近的点是谁」也能做，但一旦要精确的前 k 个或者带修改的复杂统计，就得换别的工具了。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var PTS = {1:[3,7], 2:[8,2], 3:[5,5], 4:[1,9], 5:[9,6], 6:[6,1]};
+  var INF = 1 << 30;
+
+  var SHAPE_A = {
+    root: 3,
+    ch: {3:[1,2], 1:[0,4], 2:[6,5], 4:[0,0], 5:[0,0], 6:[0,0]},
+    pos: {3:[450,55], 1:[370,140], 2:[535,140], 4:[390,222], 6:[495,222], 5:[575,222]}
+  };
+  var SHAPE_B = {
+    root: 6,
+    ch: {6:[1,2], 1:[0,0], 2:[0,5], 5:[0,0]},
+    pos: {6:[450,55], 1:[380,140], 2:[535,140], 5:[575,222]}
+  };
+
+  var RECT = {
+    A: [0, 2, 8, 10],
+    B: [4, 9, 3, 7],
+    C: [0, 4, 6, 10]
+  };
+
+  function compute(shape, dead) {
+    var M = {};
+    function rec(i) {
+      var l = shape.ch[i][0], r = shape.ch[i][1];
+      var x0 = PTS[i][0], x1 = PTS[i][0], y0 = PTS[i][1], y1 = PTS[i][1], idm = i, siz = 1;
+      if (dead[i]) { x0 = INF; x1 = -INF; y0 = INF; y1 = -INF; idm = INF; siz = 0; }
+      [l, r].forEach(function(c) {
+        if (!c) return;
+        var m = rec(c);
+        if (m.siz > 0) {
+          x0 = Math.min(x0, m.x0); x1 = Math.max(x1, m.x1);
+          y0 = Math.min(y0, m.y0); y1 = Math.max(y1, m.y1);
+          idm = Math.min(idm, m.idm);
+        }
+        siz += m.siz;
+      });
+      M[i] = {x0:x0, x1:x1, y0:y0, y1:y1, idm:idm, siz:siz};
+      return M[i];
+    }
+    rec(shape.root);
+    return M;
+  }
+
+  function px(v) { return 30 + v * 22; }
+  function py(v) { return 260 - v * 22; }
+
+  function build(state) {
+    var shape = state.shape;
+    var M = compute(shape, state.dead);
+    var s = '<svg class="kd-svg" viewBox="0 0 620 285" xmlns="http://www.w3.org/2000/svg" ' +
+            'font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+    s += '<defs><marker id="kdar" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" ' +
+         'markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/></marker></defs>';
+
+    s += '<text x="30" y="30" font-size="12" fill="#6b7280">子弹的位置</text>';
+    s += '<text x="290" y="30" font-size="12" fill="#6b7280">K-D 树</text>';
+    s += '<rect x="30" y="40" width="220" height="220" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1"/>';
+
+    if (state.rect) {
+      var q = RECT[state.rect];
+      s += '<rect x="' + px(q[0]) + '" y="' + py(q[3]) + '" width="' + (px(q[1]) - px(q[0])) +
+           '" height="' + (py(q[2]) - py(q[3])) + '" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>';
+    }
+
+    var ids = [1, 2, 3, 4, 5, 6];
+    ids.forEach(function(i) {
+      var dead = !!state.dead[i];
+      var cx = px(PTS[i][0]), cy = py(PTS[i][1]);
+      var fill = dead ? '#f6f7f9' : '#1f2328';
+      var stroke = dead ? '#9aa0a6' : '#1f2328';
+      s += '<circle cx="' + cx + '" cy="' + cy + '" r="5" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.2"/>';
+      s += '<text x="' + (cx + 10) + '" y="' + (cy - 7) + '" font-size="11" fill="' + (dead ? '#9aa0a6' : '#1f2328') +
+           '" font-weight="600">' + i + '</text>';
+    });
+
+    var nodes = Object.keys(shape.pos);
+    s += '<g stroke="#9aa0a6" stroke-width="1.4" fill="none" marker-end="url(#kdar)">';
+    nodes.forEach(function(i) {
+      var l = shape.ch[i][0], r = shape.ch[i][1];
+      var p = shape.pos[i];
+      [l, r].forEach(function(c) {
+        if (!c) return;
+        var q = shape.pos[c];
+        var dx = q[0] - p[0], dy = q[1] - p[1];
+        var len = Math.sqrt(dx * dx + dy * dy);
+        var ux = dx / len, uy = dy / len;
+        s += '<line x1="' + (p[0] + ux * 38) + '" y1="' + (p[1] + uy * 17) +
+             '" x2="' + (q[0] - ux * 40) + '" y2="' + (q[1] - uy * 19) + '"/>';
+      });
+    });
+    s += '</g>';
+
+    nodes.forEach(function(i) {
+      var p = shape.pos[i];
+      var m = M[i];
+      var st = state.mark[i] || '';
+      var dead = !!state.dead[i];
+      var bg = '#fff', bd = '#e6e8eb', bd2 = '1.4', tc = '#1f2328', dash = '';
+      if (st === 'visit') { bg = '#ffedd5'; bd = '#ea580c'; bd2 = '2'; tc = '#ea580c'; }
+      else if (st === 'hit') { bg = '#dbeafe'; bd = '#2563eb'; bd2 = '2'; tc = '#2563eb'; }
+      else if (st === 'prune') { bg = '#f6f7f9'; bd = '#9aa0a6'; dash = ' stroke-dasharray="4 3"'; tc = '#9aa0a6'; }
+      if (dead && st !== 'visit' && st !== 'hit') { bg = '#f6f7f9'; bd = '#9aa0a6'; dash = ' stroke-dasharray="4 3"'; tc = '#9aa0a6'; }
+      s += '<g><rect x="' + (p[0] - 38) + '" y="' + (p[1] - 17) + '" width="76" height="34" rx="6" fill="' + bg +
+           '" stroke="' + bd + '" stroke-width="' + bd2 + '"' + dash + '/>';
+      s += '<text x="' + p[0] + '" y="' + (p[1] - 3) + '" font-size="12" fill="' + tc +
+           '" text-anchor="middle" font-weight="600">' + i + '　(' + PTS[i][0] + ', ' + PTS[i][1] + ')</text>';
+      var sub = dead ? '墓碑' : 'idmin ' + m.idm;
+      s += '<text x="' + p[0] + '" y="' + (p[1] + 11) + '" font-size="11" fill="' + (dead ? '#9aa0a6' : '#6b7280') +
+           '" text-anchor="middle">' + sub + '</text></g>';
+    });
+
+    s += '</svg>';
+    return s;
+  }
+
+  function D(o) {
+    var d = {};
+    for (var k in o) if (o[k]) d[k] = true;
+    return d;
+  }
+
+  var frames = [];
+  frames.push({
+    shape: SHAPE_A, dead: D({}), mark: {}, rect: null,
+    text: '6 发子弹按 (x, y) 建好 K-D 树。根是 3 号 (5, 5)，按 x 切；第二层换成按 y 切。每个节点下面那行是它子树的 idmin，也就是这一片里编号最小的子弹。'
+  });
+  frames.push({
+    shape: SHAPE_A, dead: D({}), mark: {}, rect: null,
+    text: '三个靶子按 z 从小到大排队：A [0, 2] × [8, 10]，z = 1；B [4, 9] × [3, 7]，z = 2；C [0, 4] × [6, 10]，z = 3。先处理 A。'
+  });
+  frames.push({
+    shape: SHAPE_A, dead: D({}), mark: {3:'visit'}, rect: 'A',
+    text: '查 A：从根 3 号开始，它的包围盒 [1, 9] × [1, 9] 和矩形有交集，包不住，于是看 3 号自己 (5, 5)，不在矩形里，继续往两个儿子走。'
+  });
+  frames.push({
+    shape: SHAPE_A, dead: D({}), mark: {1:'visit', 4:'hit', 2:'prune'}, rect: 'A',
+    text: '左子树：1 号包围盒 [1, 3] × [7, 9] 与矩形相交，1 号自己 (3, 7) 不在；它的右孩子 4 号包围盒 [1, 1] × [9, 9] 被矩形完全包住，直接取 idmin = 4。右子树：2 号包围盒 [6, 9] × [1, 6]，xmin = 6 > qr = 2，整棵剪掉。答案是 4 号子弹。'
+  });
+  frames.push({
+    shape: SHAPE_A, dead: D({4:true}), mark: {4:'prune'}, rect: null,
+    text: '4 号子弹打中靶子 A，两个一起消失。树上只把 4 号标成墓碑（灰虚线框），节点留着当路由。它父亲 1 号的包围盒从 [1, 3] × [7, 9] 收成 [3, 3] × [7, 7]，根的包围盒也从 [1, 9] × [1, 9] 收成 [3, 9] × [1, 7]。'
+  });
+  frames.push({
+    shape: SHAPE_A, dead: D({4:true}), mark: {3:'hit', 1:'prune'}, rect: 'B',
+    text: '查 B [4, 9] × [3, 7]：根 3 号 (5, 5) 落在矩形里，先记下候选 3。左子树 1 号的包围盒现在是 [3, 3] × [7, 7]，xmax = 3 < ql = 4，整棵剪掉，注意这一步正因为上一步删了 4 号才剪得掉。'
+  });
+  frames.push({
+    shape: SHAPE_A, dead: D({4:true}), mark: {2:'visit', 6:'prune', 5:'hit'}, rect: 'B',
+    text: '右子树：2 号包围盒 [6, 9] × [1, 6] 相交，2 号自己 (8, 2) 不在矩形。它的左孩子 6 号包围盒 [6, 6] × [1, 1]，ymax = 1 < qd = 3，剪掉；右孩子 5 号包围盒 [9, 9] × [6, 6] 被完全包住，取 idmin = 5。候选是 min(3, 5) = 3，答案还是 3 号。'
+  });
+  frames.push({
+    shape: SHAPE_A, dead: D({4:true, 3:true}), mark: {3:'prune'}, rect: null,
+    text: '删掉 3 号。根变成了墓碑，存活数从 5 掉到 4。这时候查平衡：0.7 × 4 = 2.8，而大儿子那边的存活数是 3，2.8 < 3，失衡了。'
+  });
+  frames.push({
+    shape: SHAPE_B, dead: D({4:true, 3:true}), mark: {}, rect: null,
+    text: '重构：把还活着的 4 个点 1、2、5、6 收集出来重新切分。按 x 取中位数得到 6 号 (6, 1) 当新根，它的左子树是 1 号，右子树是 2 号，2 号右边挂着 5 号。重建完两边是 1 和 2，0.7 × 4 = 2.8 ≥ 2，平衡了。'
+  });
+  frames.push({
+    shape: SHAPE_B, dead: D({4:true, 3:true}), mark: {6:'visit', 1:'hit', 2:'prune'}, rect: 'C',
+    text: '查 C [0, 4] × [6, 10]：新根 6 号 (6, 1) 不在矩形里。左子树 1 号包围盒 [3, 3] × [7, 7] 被矩形完全包住，取 idmin = 1。右子树 2 号包围盒 [8, 9] × [2, 6]，xmin = 8 > qr = 4，剪掉。答案是 1 号子弹。'
+  });
+  frames.push({
+    shape: SHAPE_B, dead: D({4:true, 3:true, 1:true}), mark: {1:'prune'}, rect: null,
+    text: '删掉 1 号，它打中靶子 C。汇总一下：4 号打中 A、3 号打中 B、1 号打中 C，2、5、6 三发子弹没击中任何靶子，输出 0。六次查询里一共剪掉了四棵子树，全靠包围盒。'
+  });
+
+  var svgEl = document.getElementById('kdSvg');
+  var statusEl = document.getElementById('kdStatus');
+  var btnStep = document.getElementById('kdStep');
+  var btnAuto = document.getElementById('kdAuto');
+  var btnReset = document.getElementById('kdReset');
+
+  var cur = 0;
+  var timer = null;
+
+  function render() {
+    var f = frames[cur];
+    svgEl.innerHTML = build(f);
+    statusEl.innerHTML = '<div class="row">第 ' + cur + ' / ' + (frames.length - 1) + ' 步</div>' +
+                         '<div class="row" style="margin-top:4px;">' + f.text + '</div>';
+    btnStep.disabled = (cur >= frames.length - 1);
+  }
+
+  function step() {
+    if (cur >= frames.length - 1) { render(); return; }
+    cur++;
+    render();
+  }
+  function stopAuto() {
+    if (timer) { clearInterval(timer); timer = null; }
+    btnAuto.textContent = '自动播放';
+  }
+  function toggleAuto() {
+    if (timer) { stopAuto(); return; }
+    btnAuto.textContent = '暂停';
+    timer = setInterval(function() {
+      if (cur >= frames.length - 1) { stopAuto(); return; }
+      cur++;
+      render();
+    }, 2600);
+  }
+  function reset() {
+    stopAuto();
+    cur = 0;
+    render();
+  }
+
+  btnStep.addEventListener('click', step);
+  btnAuto.addEventListener('click', toggleAuto);
+  btnReset.addEventListener('click', reset);
+  render();
+})();
+</script>
+</body>
+</html>

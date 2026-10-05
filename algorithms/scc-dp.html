@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>缩点后 DAG 上的 dp 与性质分析 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .sd-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .sd-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .sd-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #sdSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .sd-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>缩点后 DAG 上的 dp 与性质分析</h1>
+    <p class="intro">上一节把缩点后的路径类 dp 走了一遍，这一节换五种收口方式：数方案、跑最短路、套树上背包、做差分约束、还有只看入度出度的纯性质题。共同点还是先缩点，差别在于缩点图上究竟再跑什么算法，以及为什么缩点这一步非做不可。</p>
+
+    <h2>零、背景</h2>
+    <p>缩点的结论还是那几句：每个强连通分量压成一个点，缩点图是 DAG，分量内部的信息按题目需要预处理好再带进新图。</p>
+    <p>这一节的五道题里，有三道必须处理重边，有一道必须在缩点后换用最短路而不是 dp，还有一道的答案完全由入度和出度决定，连 dp 都不需要。先把每道题在缩点图上做什么想清楚，代码都是拼接。</p>
+
+    <h2>一、题目5：最大半连通子图</h2>
+    <p>题目：两点之间只要有一个能到达另一个，就叫半连通。一个点集，如果其中任意两点都半连通，就是半连通图。求原图的最大半连通子图的大小，以及这样的子图有多少个，数量对给定数字取余。</p>
+    <p>先想半连通的点集长什么样。同一个强连通分量里的点两两可达，肯定可以整块拿进去。两个分量之间，如果互相都到不了，那这两个分量不能同时出现在一个半连通点集里。</p>
+    <p>于是把分量当成带权点（权是分量大小），问题变成：在缩点 DAG 上找一条链，让链上权值和最大，并且数出这样的链有多少条。这就是最长路加计数。</p>
+    <p>dp 要同时维护两个量：<code class="inline">dpSum[u]</code> 是以 u 结尾的最长链权值和，<code class="inline">dpCnt[u]</code> 是达到这个和的方案数。转移时如果能把对方推得更长，方案数直接覆盖过来；如果正好相等，方案数相加取模。</p>
+    <p>剩下的坑是重边。同一对分量之间在原图里可能有很多条边，如果不去重，<code class="inline">dpCnt</code> 会被同一条链重复累加。做法是把所有跨分量边压成一个 64 位整数 <code class="inline">(scc1 &lt;&lt; 32) | scc2</code>，排序之后相同的必然相邻，扫一遍只保留第一次出现的，顺便把入度也算对。</p>
+    <p>这里用 64 位整数当键，是因为分量编号不超过 10⁵，压在同一个数里既能排序又能还原两个端点，比开 vector 省得多。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="最大半连通子图就是缩点 DAG 上的最长链" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="sdAr" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#2563eb"/>
+          </marker>
+        </defs>
+        <g stroke="#2563eb" stroke-width="1.6" fill="none" marker-end="url(#sdAr)">
+          <line x1="92" y1="96" x2="178" y2="68"/>
+          <line x1="92" y1="124" x2="178" y2="156"/>
+          <line x1="222" y1="68" x2="300" y2="96"/>
+          <line x1="222" y1="156" x2="300" y2="124"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+          <circle cx="70" cy="110" r="22"/>
+          <circle cx="200" cy="55" r="22"/>
+          <circle cx="200" cy="170" r="22"/>
+          <circle cx="330" cy="110" r="22"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="70" y="108">P</text>
+          <text x="70" y="122">2</text>
+          <text x="200" y="53">Q</text>
+          <text x="200" y="67">3</text>
+          <text x="200" y="168">R</text>
+          <text x="200" y="182">3</text>
+          <text x="330" y="108">S</text>
+          <text x="330" y="122">1</text>
+        </g>
+        <text x="386" y="60" font-size="11" fill="#374151">最大半连通子图 = 缩点 DAG 上的一条链</text>
+        <text x="386" y="86" font-size="11" fill="#2563eb">链 P→Q→S：2 + 3 + 1 = 6</text>
+        <text x="386" y="110" font-size="11" fill="#2563eb">链 P→R→S：2 + 3 + 1 = 6</text>
+        <text x="386" y="134" font-size="11" fill="#ea580c">最长链长 6，等长的链有 2 条</text>
+        <text x="386" y="160" font-size="11" fill="#6b7280">方案数就是对最长链计数</text>
+        <text x="24" y="212" font-size="11" fill="#374151">分量对之间的重边必须先去重，否则同一条链会被数两遍；用 (scc1 &lt;&lt; 32) | scc2 排序去重最省空间</text>
+      </svg>
+      <figcaption>半连通点集对应缩点 DAG 上的链，权值是分量大小，答案是最长链的长度与条数</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">using</span> <span class="kw">ll</span> = <span class="kw">long</span> <span class="kw">long</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 1000001;
+    <span class="kw">int</span> n, m, x;
+    <span class="kw">int</span> a[MAXM];
+    <span class="kw">int</span> b[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sccSiz[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">ll</span> edgeArr[MAXM];
+    <span class="kw">int</span> cnte;
+
+    <span class="kw">int</span> indegree[MAXN];
+    <span class="kw">int</span> dpSum[MAXN];
+    <span class="kw">int</span> dpCnt[MAXN];
+
+    <span class="kw">int</span> ans1, ans2;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            sccSiz[sccCnt] = 0;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+                sccSiz[sccCnt]++;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> scc1 = belong[a[i]];
+            <span class="kw">int</span> scc2 = belong[b[i]];
+            <span class="kw">if</span> (scc1 != scc2) {
+                edgeArr[++cnte] = ((1LL * scc1) &lt;&lt; 32) | scc2;
+            }
+        }
+        sort(edgeArr + 1, edgeArr + cnte + 1);
+        <span class="kw">ll</span> pre = 0, cur;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnte; i++) {
+            cur = edgeArr[i];
+            <span class="kw">if</span> (cur != pre) {
+                <span class="kw">int</span> scc1 = (<span class="kw">int</span>)(cur &gt;&gt; 32);
+                <span class="kw">int</span> scc2 = (<span class="kw">int</span>)(cur &amp; 0xffffffffLL);
+                indegree[scc2]++;
+                addEdge(scc1, scc2);
+                pre = cur;
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dpOnDAG</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> u = sccCnt; u &gt; 0; u--) {
+            <span class="kw">if</span> (indegree[u] == 0) {
+                dpSum[u] = sccSiz[u];
+                dpCnt[u] = 1;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                <span class="kw">if</span> (dpSum[v] &lt; dpSum[u] + sccSiz[v]) {
+                    dpSum[v] = dpSum[u] + sccSiz[v];
+                    dpCnt[v] = dpCnt[u];
+                } <span class="kw">else</span> <span class="kw">if</span> (dpSum[v] == dpSum[u] + sccSiz[v]) {
+                    dpCnt[v] = (dpCnt[v] + dpCnt[u]) % x;
+                }
+            }
+        }
+        ans1 = ans2 = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            <span class="kw">if</span> (dpSum[i] &gt; ans1) {
+                ans1 = dpSum[i];
+                ans2 = dpCnt[i];
+            } <span class="kw">else</span> <span class="kw">if</span> (dpSum[i] == ans1) {
+                ans2 = (ans2 + dpCnt[i]) % x;
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; x;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; a[i] &gt;&gt; b[i];
+            addEdge(a[i], b[i]);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        condense();
+        dpOnDAG();
+        cout &lt;&lt; ans1 &lt;&lt; "\n";
+        cout &lt;&lt; ans2 &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>二、题目6：缩点最短路</h2>
+    <p>题目：有向图，每条边有非负权，并且规定如果两个点属于同一个强连通分量，那么互相到达的代价是 0。求 1 到 n 的最小边权和，到不了输出 −1。</p>
+    <p>「同分量之间代价为 0」这句话本身就在提示缩点：分量内部随便走都不要钱，那么一条从 1 到 n 的路径只需要关心它依次经过哪些分量，以及跨分量的那些边花多少。</p>
+    <p>所以先缩点，分量内部的边全部丢弃（代价 0，走了也不花一分），跨分量的边原样保留权值。缩点图是 DAG，理论上可以拓扑排序加 dp，但这里复用现成的最短路就行：源点设为 <code class="inline">belong[1]</code>，在缩点图上跑一遍 Dijkstra，答案取 <code class="inline">dist[belong[n]]</code>。</p>
+    <p>边权非负，Dijkstra 正好合适；点数是分量个数，比原来的 n 还小，跑起来只会更快。代价为 0 的那部分不需要显式建边，缩点的时候直接跳过就是。</p>
+    <p>如果 <code class="inline">belong[n]</code> 还是 0，说明 n 根本不在 1 能到达的分量里，直接输出 −1。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="缩点最短路：分量内部代价为 0" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="sdAr2" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <rect x="52" y="42" width="184" height="105" rx="10" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="5 4"/>
+        <text x="60" y="36" font-size="10" fill="#2563eb">分量 A：内部代价 0</text>
+        <rect x="310" y="42" width="184" height="105" rx="10" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2" stroke-dasharray="5 4"/>
+        <text x="318" y="36" font-size="10" fill="#ea580c">分量 B：内部代价 0</text>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="105" cy="94" r="16"/>
+          <circle cx="185" cy="94" r="16"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.4">
+          <circle cx="363" cy="94" r="16"/>
+          <circle cx="443" cy="94" r="16"/>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.2" fill="none">
+          <line x1="121" y1="88" x2="169" y2="88"/>
+          <line x1="169" y1="100" x2="121" y2="100"/>
+          <line x1="379" y1="88" x2="427" y2="88"/>
+          <line x1="427" y1="100" x2="379" y2="100"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="105" y="98">1</text>
+          <text x="185" y="98">2</text>
+          <text x="363" y="98">3</text>
+          <text x="443" y="98">4</text>
+        </g>
+        <line x1="246" y1="94" x2="298" y2="94" stroke="#ea580c" stroke-width="1.8" marker-end="url(#sdAr2)"/>
+        <text x="272" y="86" font-size="11" fill="#ea580c" text-anchor="middle">7</text>
+        <text x="24" y="176" font-size="11" fill="#374151">1 到 4 的最小代价 = 0（走完 A）+ 7（跨到 B）+ 0（走完 B）= 7</text>
+        <text x="24" y="194" font-size="11" fill="#6b7280">跨分量的边保留原权，分量内部的边直接丢弃，因为它们等价于代价 0</text>
+      </svg>
+      <figcaption>同分量之间代价为 0，等于把分量内部的边全部当成权值 0，缩点之后跑一遍最短路即可</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> x, cost;
+        <span class="kw">bool</span> <span class="kw">operator</span>&lt;(<span class="kw">const</span> Node &amp;other) <span class="kw">const</span> {
+            <span class="kw">return</span> cost &gt; other.cost;
+        }
+    };
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 1000001;
+    <span class="kw">const</span> <span class="kw">int</span> INF = 1000000001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> a[MAXM];
+    <span class="kw">int</span> b[MAXM];
+    <span class="kw">int</span> val[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> weight[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">int</span> dist[MAXN];
+    <span class="kw">bool</span> vis[MAXN];
+    priority_queue&lt;Node&gt; heap;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        weight[cntg] = w;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> scc1 = belong[a[i]];
+            <span class="kw">int</span> scc2 = belong[b[i]];
+            <span class="kw">if</span> (scc1 &gt; 0 &amp;&amp; scc2 &gt; 0 &amp;&amp; scc1 != scc2) {
+                addEdge(scc1, scc2, val[i]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">dijkstra</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            dist[i] = INF;
+            vis[i] = <span class="kw">false</span>;
+        }
+        dist[belong[1]] = 0;
+        heap.push(Node{belong[1], 0});
+        <span class="kw">while</span> (!heap.empty()) {
+            Node cur = heap.top();
+            heap.pop();
+            <span class="kw">int</span> u = cur.x;
+            <span class="kw">int</span> d = cur.cost;
+            <span class="kw">if</span> (!vis[u]) {
+                vis[u] = <span class="kw">true</span>;
+                <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+                    <span class="kw">int</span> v = to[e];
+                    <span class="kw">int</span> w = weight[e];
+                    <span class="kw">if</span> (!vis[v] &amp;&amp; dist[v] &gt; d + w) {
+                        dist[v] = d + w;
+                        heap.push(Node{v, dist[v]});
+                    }
+                }
+            }
+        }
+        <span class="kw">return</span> dist[belong[n]];
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; a[i] &gt;&gt; b[i] &gt;&gt; val[i];
+            addEdge(a[i], b[i], val[i]);
+        }
+        tarjan(1);
+        <span class="kw">if</span> (belong[n] == 0) {
+            cout &lt;&lt; -1 &lt;&lt; "\n";
+        } <span class="kw">else</span> {
+            condense();
+            <span class="kw">int</span> ans = dijkstra();
+            cout &lt;&lt; ans &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>三、题目7：软件安装</h2>
+    <p>题目：n 个物品，背包容量 m。每个物品有重量 w 和价值 v，并且最多有一个依赖物品；不拿依赖物品就不能拿当前物品。如果一批物品循环依赖，要拿就只能全拿。求最大收益。</p>
+    <p>「循环依赖要拿就全拿」这句话就是缩点信号。把依赖关系建图，i 依赖 <code class="inline">depend[i]</code>，那就在 <code class="inline">depend[i]</code> 和 i 之间连边，环里的物品合成一个大物品，重量和价值分别相加。</p>
+    <p>缩点之后每个物品的依赖关系只剩一条，不再有环，于是依赖关系变成一片森林：每个分量要么没有依赖，要么依赖另一个分量。加一个虚拟根 0，让所有没有依赖的分量都指向它，森林就补成一棵树。</p>
+    <p>接下来是树上背包。这里用 dfn 序的写法：对树做一次 dfs，给每个点分配 dfn 编号，同时算出子树大小 <code class="inline">siz[i]</code>。有了 dfn 序，一个点的子树就是一段连续的区间，<code class="inline">dp[i][j]</code> 表示「在 dfn 序 i 到末尾这段里做容量 j 的背包」的最大收益。</p>
+    <p>转移只有两步：不选当前物品，直接继承 <code class="inline">dp[i + siz[i]][j]</code>（跳过整棵子树）；选当前物品，用 <code class="inline">value[i] + dp[i + 1][j − weight[i]]</code>。倒着按 dfn 序扫一遍就完成了。</p>
+    <p>注意下标：虚拟根不占容量也不产生收益，所以答案取 <code class="inline">dp[2][m]</code>，从根的 dfs 编号的后一位开始。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="缩点后加虚拟根把依赖变成树" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="sdAr3" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+        <g stroke="#9aa0a6" stroke-width="1.3" fill="none" marker-end="url(#sdAr3)">
+          <line x1="316" y1="64" x2="186" y2="116"/>
+          <line x1="324" y1="64" x2="446" y2="116"/>
+          <line x1="452" y1="138" x2="512" y2="170"/>
+        </g>
+        <g stroke="#ea580c" stroke-width="1.8" fill="none">
+          <line x1="170" y1="142" x2="120" y2="172"/>
+        </g>
+        <circle cx="320" cy="44" r="20" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+        <text x="320" y="48" font-size="11" fill="#1f2328" text-anchor="middle">0</text>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="170" cy="128" r="18"/>
+          <circle cx="458" cy="128" r="18"/>
+          <circle cx="104" cy="188" r="18"/>
+          <circle cx="530" cy="188" r="18"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="170" y="132">1</text>
+          <text x="458" y="132">2</text>
+          <text x="104" y="192">3</text>
+          <text x="530" y="192">5,6</text>
+        </g>
+        <text x="320" y="24" font-size="10" fill="#ea580c" text-anchor="middle">虚拟根</text>
+        <text x="596" y="176" font-size="10" fill="#ea580c" text-anchor="end">环先缩成一个物品</text>
+        <text x="24" y="212" font-size="11" fill="#374151">原依赖里的环合并成一个大物品（重量、价值相加），再加虚拟根 0，依赖森林补成一棵树</text>
+      </svg>
+      <figcaption>循环依赖缩成一个物品，补上虚拟根之后整张图变成一棵树，接着套树上背包</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 301;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 601;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> w[MAXN];
+    <span class="kw">int</span> v[MAXN];
+    <span class="kw">int</span> depend[MAXN];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN];
+    <span class="kw">int</span> to[MAXN];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> wsum[MAXN];
+    <span class="kw">int</span> vsum[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">int</span> indegree[MAXN];
+
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">int</span> weight[MAXN];
+    <span class="kw">int</span> value[MAXN];
+    <span class="kw">int</span> dfnCnt;
+    <span class="kw">int</span> dp[MAXN][MAXM];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        nxt[++cntg] = head[a];
+        to[cntg] = b;
+        head[a] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+                wsum[sccCnt] += w[pop];
+                vsum[sccCnt] += v[pop];
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt;= sccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (depend[i] &gt; 0) {
+                <span class="kw">int</span> scc1 = belong[depend[i]];
+                <span class="kw">int</span> scc2 = belong[i];
+                <span class="kw">if</span> (scc1 != scc2) {
+                    indegree[scc2]++;
+                    addEdge(scc1, scc2);
+                }
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            <span class="kw">if</span> (indegree[i] == 0) {
+                addEdge(0, i);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">dfs</span>(<span class="kw">int</span> u) {
+        <span class="kw">int</span> i = ++dfnCnt;
+        siz[i] = 1;
+        weight[i] = wsum[u];
+        value[i] = vsum[u];
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            siz[i] += dfs(v);
+        }
+        <span class="kw">return</span> siz[i];
+    }
+
+    <span class="kw">int</span> <span class="fn">knapsackOnTree</span>() {
+        dfs(0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = dfnCnt; i &gt;= 2; i--) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= m; j++) {
+                dp[i][j] = dp[i + siz[i]][j];
+                <span class="kw">if</span> (j - weight[i] &gt;= 0) {
+                    dp[i][j] = max(dp[i][j], value[i] + dp[i + 1][j - weight[i]]);
+                }
+            }
+        }
+        <span class="kw">return</span> dp[2][m];
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; w[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; v[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; depend[i];
+            <span class="kw">if</span> (depend[i] &gt; 0) {
+                addEdge(depend[i], i);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        condense();
+        <span class="kw">int</span> ans = knapsackOnTree();
+        cout &lt;&lt; ans &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>四、题目8：糖果</h2>
+    <p>题目：n 个人每人至少一颗糖，k 条要求，形如相等、大于、大于等于、小于、小于等于。求满足全部要求的最少糖果数，无解输出 −1。</p>
+    <p>五条要求拆成差分约束的边。设边 x→y 的权值是 w，含义是 <code class="inline">y ≥ x + w</code>，那么五种操作分别对应：相等建两条权 0 的边，u 小于 v 就是 u→v 权 1，u 大于等于 v 就是 v→u 权 0，u 大于 v 就是 v→u 权 1，u 小于等于 v 就是 u→v 权 0。</p>
+    <p>建完图跑最长路，<code class="inline">dp[v] = max(dp[u] + w)</code>，源点初值为 1（每人至少一颗）。这和一般的差分约束不太一样，一般跑最短路判负环，这里跑最长路判正环。</p>
+    <p>判无解就落在缩点上：如果某条正权边居然落在分量内部，意思是 <code class="inline">x ≥ x + 1</code>，自相矛盾，直接输出 −1。权为 0 的内部边是「相等」，没有矛盾，可以忽略。所以缩点那一步顺便做完这个检查，返回值用 bool 表示，失败就提前结束。</p>
+    <p>最后答案不是某个点，而是所有人糖果数之和。有了每个分量的最长路值，分量里的每个人取值相同，乘上分量大小再累加即可。</p>
+    <p>这里还有个容易看反的地方：分量之间的重边全部保留，不需要去重。因为 dp 转移取的是最大值，权值小的那条边永远推不动 dp，去重反而多写一段代码。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="糖果的五种要求对应的建边" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="30" y="18" width="600" height="164" rx="8" fill="#fbfbfc" stroke="#e6e8eb"/>
+        <line x1="30" y1="42" x2="630" y2="42" stroke="#e6e8eb"/>
+        <g font-size="11" fill="#6b7280">
+          <text x="46" y="36">操作</text>
+          <text x="150" y="36">含义</text>
+          <text x="330" y="36">建的边（x→y 权 w 表示 y ≥ x + w）</text>
+        </g>
+        <g font-size="11" fill="#374151">
+          <text x="46" y="66">1 u v</text>
+          <text x="150" y="66">x_u == x_v</text>
+          <text x="330" y="66">u→v 权 0，v→u 权 0</text>
+          <text x="46" y="94">2 u v</text>
+          <text x="150" y="94">x_u &lt; x_v</text>
+          <text x="330" y="94">u→v 权 1</text>
+          <text x="46" y="122">3 u v</text>
+          <text x="150" y="122">x_u ≥ x_v</text>
+          <text x="330" y="122">v→u 权 0</text>
+          <text x="46" y="150">4 u v</text>
+          <text x="150" y="150">x_u &gt; x_v</text>
+          <text x="330" y="150">v→u 权 1</text>
+          <text x="46" y="174">5 u v</text>
+          <text x="150" y="174">x_u ≤ x_v</text>
+          <text x="330" y="174">u→v 权 0</text>
+        </g>
+        <text x="30" y="206" font-size="11" fill="#374151">正权边落在分量内部就矛盾（x ≥ x + 1），输出 −1；权 0 的内部边是「相等」，可以忽略</text>
+        <text x="30" y="223" font-size="11" fill="#6b7280">分量之间的重边不用去重，最长路的 max 会自动挑走权值最大的那条</text>
+      </svg>
+      <figcaption>五种要求各有固定的建边方向与权值；只有正权边落进分量内部才判无解</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">using</span> <span class="kw">ll</span> = <span class="kw">long</span> <span class="kw">long</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 200001;
+    <span class="kw">int</span> n, k, m;
+    <span class="kw">int</span> a[MAXM];
+    <span class="kw">int</span> b[MAXM];
+    <span class="kw">int</span> c[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> weight[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sccSiz[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">int</span> indegree[MAXN];
+    <span class="kw">ll</span> dp[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        weight[cntg] = w;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            sccSiz[sccCnt] = 0;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+                sccSiz[sccCnt]++;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">bool</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> scc1 = belong[a[i]];
+            <span class="kw">int</span> scc2 = belong[b[i]];
+            <span class="kw">int</span> w = c[i];
+            <span class="kw">if</span> (scc1 == scc2 &amp;&amp; w &gt; 0) {
+                <span class="kw">return</span> <span class="kw">false</span>;
+            }
+            <span class="kw">if</span> (scc1 != scc2) {
+                indegree[scc2]++;
+                addEdge(scc1, scc2, w);
+            }
+        }
+        <span class="kw">return</span> <span class="kw">true</span>;
+    }
+
+    <span class="kw">ll</span> <span class="fn">dpOnDAG</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> u = sccCnt; u &gt; 0; u--) {
+            <span class="kw">if</span> (indegree[u] == 0) {
+                dp[u] = 1;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                <span class="kw">int</span> w = weight[e];
+                dp[v] = max(dp[v], dp[u] + w);
+            }
+        }
+        <span class="kw">ll</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            ans += dp[i] * sccSiz[i];
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; k;
+        m = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, u, v; i &lt;= k; i++) {
+        	cin &gt;&gt; op &gt;&gt; u &gt;&gt; v;
+            <span class="kw">if</span> (op == 1) {
+                a[++m] = u; b[m] = v; c[m] = 0;
+                a[++m] = v; b[m] = u; c[m] = 0;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 2) {
+                a[++m] = u; b[m] = v; c[m] = 1;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 3) {
+                a[++m] = v; b[m] = u; c[m] = 0;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 4) {
+                a[++m] = v; b[m] = u; c[m] = 1;
+            } <span class="kw">else</span> {
+                a[++m] = u; b[m] = v; c[m] = 0;
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            addEdge(a[i], b[i], c[i]);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        <span class="kw">bool</span> check = condense();
+        <span class="kw">if</span> (!check) {
+            cout &lt;&lt; -1 &lt;&lt; "\n";
+        } <span class="kw">else</span> {
+            <span class="kw">ll</span> ans = dpOnDAG();
+            cout &lt;&lt; ans &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <div class="viz">
+      <div class="viz-title">糖果：从要求到建图，再缩点求最少糖数</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">三个人的例子：x1 = x2、x2 &lt; x3、x3 ≥ x1。点「下一步」，看要求怎么变成边、分量怎么合、最长路怎么推。</p>
+      <svg id="sdSvg" viewBox="0 0 660 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="糖果差分约束演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>已确定取值的分量</span>
+        <span><span class="dot partial"></span>当前处理的分量</span>
+        <span><span class="dot skip"></span>尚未计算</span>
+      </div>
+      <div class="breakdown" id="sdInfo"></div>
+      <div class="viz-controls">
+        <button class="sd-btn" id="sdPrev" type="button">上一步</button>
+        <button class="sd-btn" id="sdNext" type="button">下一步</button>
+        <button class="sd-btn" id="sdReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>五、题目9：杀人游戏</h2>
+    <p>题目：n 个人里只有一个杀手，每个人是杀手的概率均等。给定单向且可传递的知晓关系：如果 x 知晓 y，那么 y 是不是杀手，x 就知道。可以盘问任何人，盘问之后对方知晓的所有情况都能拿到；但盘问到杀手本人，所有人都会被炸死。要多确定所有人的身份，求最优策略下杀手不爆炸还能被揪出来的概率。</p>
+    <p>先看知晓关系的形状。x 知晓 y 就是一条 x 到 y 的边，而且知晓关系可传递，说明一个分量里的人互相知晓，缩点之后 DAG 上的边仍然表示「知道」。盘问一个人，等于获取他能到达的所有点的身份。</p>
+    <p>所以真正要盘问的是入度为 0 的分量：入度为 0 表示没有任何人可以间接告诉你这个分量的信息，想确定里面谁是谁，只能亲自去问。反过来，入度不为 0 的分量一定被某个源分量覆盖，问过源分量之后就顺带知道了。</p>
+    <p>于是需要盘问的次数一开始就是入度为 0 的分量个数 <code class="inline">cnt</code>。只有杀手的身份会暴露失败，而杀手在 n 个人里等概率出现，所以概率是 <code class="inline">1 − cnt / n</code>。</p>
+    <p>还要考虑一个可以省一次的例外：如果某个入度为 0 的分量只有一个点，并且它所有出边指向的分量都还有别的入边（也就是入度不恰好等于 1），那么最后轮到它时可以靠排除法确定，不必真的去盘问。此时 <code class="inline">cnt</code> 减一。</p>
+    <p>实现上还是先缩点，顺手用 <code class="inline">(scc1 &lt;&lt; 32) | scc2</code> 去重算准每个分量的入度；然后找有没有满足例外的分量，找到就减一；最后输出 <code class="inline">1 − cnt / n</code>，保留六位小数。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="杀人游戏的入度分析与可省一次的例外" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="sdAr4" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+        <g stroke="#9aa0a6" stroke-width="1.3" fill="none" marker-end="url(#sdAr4)">
+          <line x1="90" y1="78" x2="222" y2="116"/>
+          <line x1="90" y1="182" x2="222" y2="142"/>
+          <line x1="258" y1="122" x2="356" y2="96"/>
+          <line x1="470" y1="76" x2="562" y2="114"/>
+          <line x1="470" y1="180" x2="562" y2="140"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.5">
+          <circle cx="70" cy="70" r="18"/>
+          <circle cx="70" cy="190" r="18"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+          <circle cx="240" cy="130" r="18"/>
+          <circle cx="376" cy="86" r="18"/>
+          <circle cx="450" cy="70" r="18"/>
+          <circle cx="450" cy="190" r="18"/>
+          <circle cx="584" cy="130" r="18"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="70" y="74">p</text>
+          <text x="70" y="194">q</text>
+          <text x="240" y="134">r</text>
+          <text x="376" y="90">s</text>
+          <text x="450" y="74">u</text>
+          <text x="450" y="194">v</text>
+          <text x="584" y="134">w</text>
+        </g>
+        <g font-size="10" fill="#ea580c" text-anchor="middle">
+          <text x="70" y="44">入度 0</text>
+          <text x="70" y="216">入度 0</text>
+        </g>
+        <text x="410" y="34" font-size="10" fill="#6b7280">右边这一段：u 可以被推理出来</text>
+        <text x="24" y="228" font-size="11" fill="#374151">入度为 0 的分量必须盘问；例外是单点源分量 u，它的出边都指向「还有别的入边」的分量，可省一次</text>
+      </svg>
+      <figcaption>需要盘问的是入度为 0 的分量；单点源分量若出边指向的分量都有别的入边，可以靠排除法少问一次</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">using</span> <span class="kw">ll</span> = <span class="kw">long</span> <span class="kw">long</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 300001;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> a[MAXM];
+    <span class="kw">int</span> b[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sccSiz[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">ll</span> edgeArr[MAXM];
+    <span class="kw">int</span> cnte;
+
+    <span class="kw">int</span> indegree[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            sccSiz[sccCnt] = 0;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+                sccSiz[sccCnt]++;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            head[i] = 0;
+        }
+        cnte = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> scc1 = belong[a[i]];
+            <span class="kw">int</span> scc2 = belong[b[i]];
+            <span class="kw">if</span> (scc1 != scc2) {
+                edgeArr[++cnte] = ((1LL * scc1) &lt;&lt; 32) | scc2;
+            }
+        }
+        sort(edgeArr + 1, edgeArr + cnte + 1);
+        <span class="kw">ll</span> pre = 0, cur;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnte; i++) {
+            cur = edgeArr[i];
+            <span class="kw">if</span> (cur != pre) {
+                <span class="kw">int</span> scc1 = (<span class="kw">int</span>)(cur &gt;&gt; 32);
+                <span class="kw">int</span> scc2 = (<span class="kw">int</span>)(cur &amp; 0xffffffffLL);
+                indegree[scc2]++;
+                addEdge(scc1, scc2);
+                pre = cur;
+            }
+        }
+    }
+
+    <span class="kw">bool</span> <span class="fn">isolated</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (indegree[i] &gt; 0 || sccSiz[i] &gt; 1) {
+            <span class="kw">return</span> <span class="kw">false</span>;
+        }
+        <span class="kw">if</span> (head[i] == 0) {
+            <span class="kw">return</span> <span class="kw">true</span>;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[i]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (indegree[v] == 1) {
+                <span class="kw">return</span> <span class="kw">false</span>;
+            }
+        }
+        <span class="kw">return</span> <span class="kw">true</span>;
+    }
+
+    <span class="kw">double</span> <span class="fn">compute</span>() {
+        <span class="kw">int</span> inZero = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            <span class="kw">if</span> (indegree[i] == 0) {
+                inZero++;
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            <span class="kw">if</span> (isolated(i)) {
+                inZero--;
+                <span class="kw">break</span>;
+            }
+        }
+        <span class="kw">return</span> 1.0 - (<span class="kw">double</span>)inZero / (<span class="kw">double</span>)n;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        scanf("%d%d", &amp;n, &amp;m);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            scanf("%d%d", &amp;a[i], &amp;b[i]);
+            addEdge(a[i], b[i]);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        condense();
+        <span class="kw">double</span> ans = compute();
+        printf("%.6lf", ans);
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>六、复杂度分析</h2>
+    <p>五道题的骨架都是「Tarjan 缩点 + 在缩点图上跑一遍」，真正决定复杂度的只有缩点图上的那一步。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>步骤</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Tarjan 求强连通分量</td><td><code class="inline">O(n + m)</code></td><td rowspan="3"><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>题目5、9：重边排序去重</td><td><code class="inline">O(m log m)</code></td></tr>
+        <tr><td>题目5 计数 / 题目6 建图 / 题目9 出入度统计</td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>题目6：缩点图上一遍 Dijkstra</td><td><code class="inline">O(n log n + m)</code></td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>题目8：建图 + 缩点 + 最长路</td><td><code class="inline">O(n + m)</code></td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>题目7：树上背包</td><td><code class="inline">O(n m)</code></td><td><code class="inline">O(n m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>重边去重是唯一带 log 的预处理，而且只有题目5 和题目9 需要。题目6 的 Dijkstra 复杂度里 n 是分量个数，比原图点数小；边权为 0 的分量内部边根本不进队。题目7 是这里唯一一个二维 dp，容量只有 500，n 也只有 100，<code class="inline">O(n m)</code> 完全够用。</p>
+    <p>其余几道题的数组都是「点数或边数那么多」，没有额外结构，空间就是 O(n + m)。</p>
+
+    <h2>七、最后</h2>
+    <p>这五道题恰好把缩点这张牌的五种用法摊开了：数方案时它是把环折成带权点，跑最短路时它是把环内代价抹成 0，做背包时它是把环合成一个大物品，判矛盾时它是把环内正权边挑出来，做性质分析时它是把「必须问谁」翻译成入度为 0。</p>
+    <p>写的时候有两件事值得记住。一是重边只在需要计数或统计度数时才要处理，取最值的 dp 直接忽略。二是同一份缩点模板几乎可以原样复制，真正要变的是分量内部要预处理什么信息、以及缩点图上接下来跑哪个算法。</p>
+    <p>下一讲换割边和边双连通分量，从「有向图的环」转向「无向图的桥」，缩点这件事会在无向图上再出现一次。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var svg = document.getElementById('sdSvg');
+  if (!svg) return;
+  var info = document.getElementById('sdInfo');
+  var prev = document.getElementById('sdPrev');
+  var next = document.getElementById('sdNext');
+  var reset = document.getElementById('sdReset');
+
+  var LN = {1:[90,105],2:[90,245],3:[270,175]};
+  var LE = [[1,2],[2,1],[2,3],[1,3]];
+  var LAB = {'1-2':'0','2-1':'0','2-3':'1','1-3':'0'};
+  var RN = {A:[455,110],B:[580,245]};
+  var RE = [['A','B']];
+  var RSIZ = {A:2,B:1};
+  var RDP  = {A:1,B:2};
+
+  var STEPS = [
+    {t:'要求', s:'三个人：x1 = x2、x2 < x3、x3 ≥ x1，并且每人至少一颗糖。'},
+    {t:'建图', s:'按表转边：1→2 权 0，2→1 权 0（相等）；2→3 权 1（小于）；1→3 权 0（x3 ≥ x1 变成 1→3）。'},
+    {t:'缩点', s:'1 和 2 互相可达，合成分量 A；3 单独是分量 B。A→B 留下两条边，权 1 和权 0。'},
+    {t:'判无解', s:'检查分量内部有没有正权边。两条 0 权边在 A 内部，表示 x1 = x2，不矛盾，所以有解。'},
+    {t:'最长路', s:'源分量 A 初值 1；B 从 A 经权 1 得到 2，经权 0 得到 1，取最大是 2。重边不用去重，max 自动挑走权大的那条。'},
+    {t:'答案', s:'A 里每个人 1 颗（共 2 颗），B 里 2 颗，总数 1×2 + 2×1 = 4。'}
+  ];
+  var at = 0;
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+    p.push('<rect x="10" y="8" width="640" height="314" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+    p.push('<text x="24" y="28" font-size="11" fill="#6b7280">建出来的图</text>');
+    p.push('<text x="372" y="28" font-size="11" fill="#6b7280">缩点图</text>');
+
+    LE.forEach(function(e){
+      var a = LN[e[0]], b = LN[e[1]];
+      var show = (at >= 1);
+      if (!show) return;
+      var col = (at >= 2 && e[0] <= 2 && e[1] <= 2) ? '#ea580c' : '#9aa0a6';
+      if (at >= 2 && !(e[0] <= 2 && e[1] <= 2)) col = '#2563eb';
+      p.push('<line x1="'+a[0]+'" y1="'+a[1]+'" x2="'+b[0]+'" y2="'+b[1]+'" stroke="'+col+'" stroke-width="1.3"/>');
+      var mx = (a[0]+b[0])/2, my = (a[1]+b[1])/2;
+      var lab = LAB[e[0]+'-'+e[1]];
+      if (e[0] === 1 && e[1] === 2){ mx -= 26; my -= 4; }
+      if (e[0] === 2 && e[1] === 1){ mx -= 26; my += 14; }
+      if (at >= 3 && e[0] <= 2 && e[1] <= 2) lab = lab + ' 内部';
+      p.push('<text x="'+mx+'" y="'+my+'" font-size="10" fill="#6b7280" text-anchor="middle">'+lab+'</text>');
+    });
+    Object.keys(LN).forEach(function(k){
+      var c = LN[k];
+      var fill = '#f6f7f9', stroke = '#9aa0a6';
+      if (at >= 1){
+        if (k === '1' || k === '2'){ fill = '#ffedd5'; stroke = '#ea580c'; }
+        else { fill = '#dbeafe'; stroke = '#2563eb'; }
+      }
+      p.push('<circle cx="'+c[0]+'" cy="'+c[1]+'" r="18" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.5"/>');
+      p.push('<text x="'+c[0]+'" y="'+(c[1]+4)+'" font-size="12" fill="#1f2328" text-anchor="middle">'+k+'</text>');
+    });
+    if (at === 0){
+      p.push('<text x="182" y="82" font-size="11" fill="#374151">x1 = x2</text>');
+      p.push('<text x="182" y="110" font-size="11" fill="#374151">x2 &lt; x3</text>');
+      p.push('<text x="182" y="138" font-size="11" fill="#374151">x3 ≥ x1</text>');
+    }
+    if (at >= 1){
+      p.push('<text x="184" y="272" font-size="11" fill="#374151">边权 1 表示 y ≥ x + 1，边权 0 表示 y ≥ x</text>');
+    }
+
+    if (at >= 2){
+      RE.forEach(function(e){
+        var a = RN[e[0]], b = RN[e[1]];
+        p.push('<line x1="'+a[0]+'" y1="'+a[1]+'" x2="'+b[0]+'" y2="'+b[1]+'" stroke="#2563eb" stroke-width="1.6"/>');
+      });
+      p.push('<text x="300" y="140" font-size="11" fill="#374151">缩点</text>');
+      p.push('<line x1="296" y1="152" x2="356" y2="152" stroke="#2563eb" stroke-width="1.8"/>');
+      Object.keys(RN).forEach(function(k){
+        var c = RN[k];
+        var hot = (at >= 4);
+        var fill = hot ? '#dbeafe' : '#f6f7f9';
+        var stroke = hot ? '#2563eb' : '#9aa0a6';
+        p.push('<circle cx="'+c[0]+'" cy="'+c[1]+'" r="24" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.5"/>');
+        var name = (k === 'A') ? '1,2' : '3';
+        p.push('<text x="'+c[0]+'" y="'+(c[1]+5)+'" font-size="11" fill="#1f2328" text-anchor="middle">'+name+'</text>');
+        p.push('<text x="'+(c[0]+34)+'" y="'+(c[1]+2)+'" font-size="10" fill="#6b7280">大小 '+RSIZ[k]+'</text>');
+        if (at >= 4){
+          p.push('<text x="'+(c[0]+34)+'" y="'+(c[1]+20)+'" font-size="11" fill="#ea580c">dp '+RDP[k]+'</text>');
+        }
+      });
+      p.push('<text x="466" y="176" font-size="10" fill="#6b7280">两条重边：权 1 与权 0</text>');
+      if (at >= 5){
+        p.push('<text x="620" y="300" font-size="12" fill="#ea580c" text-anchor="end">答案 1×2 + 2×1 = 4</text>');
+      }
+    }
+    if (at === 3){
+      p.push('<text x="184" y="300" font-size="11" fill="#2563eb">分量内部两条 0 权边 → 不矛盾</text>');
+    }
+    p.push('<text x="24" y="306" font-size="11" fill="#6b7280">缩点后做最长路，每个分量里的人取同一个值</text>');
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div><strong>' + st.t + '</strong></div><div>' + st.s + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if (at > 0){ at--; render(); } });
+  next.addEventListener('click', function(){ if (at < STEPS.length - 1){ at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

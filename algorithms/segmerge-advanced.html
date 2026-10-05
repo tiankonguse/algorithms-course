@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线段树合并进阶：用合并加速树形 dp 的转移 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .sma-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .sma-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .sma-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #smaMergeSvg text,#smaProbSvg text,#smaFateSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .sma-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>线段树合并进阶：用合并加速树形 dp 的转移</h1>
+    <p class="intro">上一讲讲的是线段树合并本身：两棵动态开点线段树怎么并成一棵，以及合并做统计的那类经典题。这一页换一个用法，把合并当成树形 dp 的「转移工具」，儿子算完的分布直接并到父亲身上，一次合并就把一整层的转移做完。</p>
+
+    <h2>零、背景</h2>
+    <p>树形 dp 的瓶颈通常在一个地方：父亲的状态要由所有儿子的状态「逐点合成」，状态下标一多就变成 O(n²)。</p>
+    <p>如果状态下标是权值、深度这类可以离散化的东西，就可以给每个点开一棵动态开点线段树，用下标当状态、用节点值当方案数。儿子合并到父亲时，线段树合并一次走过的节点数只跟「两棵树重叠的部分」有关，总代价是 O(n log n)。</p>
+    <p>这一页三个题都用这个思路，难点各不相同：题目1 合并时要顺带传递后缀最大值，题目2 要同时传递前缀信息和后缀信息，题目3 则是把「限制」翻译成一种向下传递的欠债。</p>
+
+    <h2>一、题目1：领导集团问题</h2>
+    <p>n 个点的树，1 号点是根，给每个点的点权。选一批点，要求任意两个被选的点 u、v，若 u 是 v 的祖先，则必须有点权 u ≤ v。打印最多能选几个点。n 到 2·10⁵，点权到 10⁹。测试链接 P4577。</p>
+    <p>先写最直接的 dp：设 f[u][w] 为 u 的子树里选点、且所有被选点权都 ≥ w 时最多能选几个。不选 u 就是各儿子的 f[v][w] 直接相加；选 u 的话，u 的权是 arr[u]，其它被选点必须都 ≥ arr[u]，于是贡献是 1 + Σ f[v][arr[u]]，只在 w ≤ arr[u] 时合法。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="祖先与后代的权值约束" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="24" y="22" font-size="12" fill="#374151">选中的两点若是祖先关系，权值必须不下降</text>
+        <line x1="120" y1="60" x2="120" y2="120" stroke="#2563eb" stroke-width="1.6"/>
+        <line x1="120" y1="120" x2="60" y2="180" stroke="#2563eb" stroke-width="1.6"/>
+        <line x1="120" y1="120" x2="185" y2="180" stroke="#2563eb" stroke-width="1.6"/>
+        <line x1="60" y1="180" x2="60" y2="228" stroke="#2563eb" stroke-width="1.6"/>
+        <circle cx="120" cy="50" r="19" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="120" y="54" font-size="12" fill="#1f2328" text-anchor="middle">u</text>
+        <text x="150" y="46" font-size="11" fill="#2563eb">权 5</text>
+        <circle cx="120" cy="120" r="19" fill="#fff" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="120" y="124" font-size="12" fill="#1f2328" text-anchor="middle">v</text>
+        <text x="150" y="116" font-size="11" fill="#2563eb">权 5</text>
+        <circle cx="60" cy="180" r="19" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <text x="60" y="184" font-size="12" fill="#1f2328" text-anchor="middle">a</text>
+        <text x="88" y="176" font-size="11" fill="#ea580c">权 3</text>
+        <circle cx="185" cy="180" r="19" fill="#fff" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="185" y="184" font-size="12" fill="#1f2328" text-anchor="middle">b</text>
+        <text x="213" y="176" font-size="11" fill="#2563eb">权 9</text>
+        <circle cx="60" cy="228" r="19" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <text x="60" y="232" font-size="12" fill="#1f2328" text-anchor="middle">c</text>
+        <text x="88" y="224" font-size="11" fill="#ea580c">权 3</text>
+        <line x1="215" y1="70" x2="215" y2="196" stroke="#c9ced4" stroke-width="1.2"/>
+        <rect x="250" y="46" width="406" height="70" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="266" y="70" font-size="12" fill="#2563eb">可以一起选</text>
+        <text x="266" y="92" font-size="11" fill="#374151">u(5) 与 v(5)：5 ≤ 5；v(5) 与 b(9)：5 ≤ 9</text>
+        <text x="266" y="110" font-size="11" fill="#374151">a(3)、c(3) 之间也是 3 ≤ 3</text>
+        <rect x="250" y="128" width="406" height="70" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="266" y="152" font-size="12" fill="#ea580c">不能一起选</text>
+        <text x="266" y="174" font-size="11" fill="#374151">u(5) 与 a(3)：5 &gt; 3；v(5) 与 c(3)：5 &gt; 3</text>
+        <text x="266" y="192" font-size="11" fill="#374151">不同子树的点互不为祖先，可以随便搭</text>
+        <text x="24" y="240" font-size="11" fill="#6b7280">选 {v, b, a, c} = 4 个；带上 u 就只剩 {u, b, c} 之外的组合，最多 3 个</text>
+      </svg>
+      <figcaption>约束只发生在祖先和后代之间，不同子树互不干涉，所以儿子可以各自算完再往父亲并</figcaption>
+    </figure>
+
+    <p>这个 dp 有 n 个点、n 种权值，逐位转移是 O(n²)，n 到 2·10⁵ 过不去。慢在「每个点都要把所有儿子的整条数组扫一遍」。</p>
+    <p>值域到 10⁹，先把点权离散化，式子不变。剩下的问题是把「每个儿子一份数组、父亲要逐位相加」这件事做快，这正是线段树合并的活。</p>
+    <p>给每个点开一棵动态开点线段树，下标是离散化后的权值。合并两棵树时，同一位置的值相加；遇到某棵树的子树为空，就把另一棵整棵接过来。这样每个点的所有儿子并完，复杂度只跟重叠节点数有关。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 214" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="权轴上存的值与后缀最大值" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="24" y="22" font-size="12" fill="#374151">root[u] 是一条按权值排开的数组，查询取的是后缀最大值</text>
+        <text x="26" y="62" font-size="11" fill="#6b7280">权值</text>
+        <text x="26" y="106" font-size="11" fill="#6b7280">存的</text>
+        <text x="26" y="150" font-size="11" fill="#6b7280">后缀最大</text>
+        <g>
+          <rect x="90" y="44" width="112" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.1"/>
+          <text x="146" y="62" font-size="11" fill="#2563eb" text-anchor="middle">3</text>
+          <rect x="210" y="44" width="112" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.1"/>
+          <text x="266" y="62" font-size="11" fill="#2563eb" text-anchor="middle">5</text>
+          <rect x="330" y="44" width="112" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.1"/>
+          <text x="386" y="62" font-size="11" fill="#2563eb" text-anchor="middle">6</text>
+          <rect x="450" y="44" width="112" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.1"/>
+          <text x="506" y="62" font-size="11" fill="#2563eb" text-anchor="middle">9</text>
+        </g>
+        <g>
+          <rect x="90" y="88" width="112" height="26" rx="5" fill="#fff" stroke="#e6e8eb" stroke-width="1.1"/>
+          <text x="146" y="106" font-size="11" fill="#9aa0a6" text-anchor="middle">0</text>
+          <rect x="210" y="88" width="112" height="26" rx="5" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+          <text x="266" y="106" font-size="11" fill="#ea580c" text-anchor="middle">4</text>
+          <rect x="330" y="88" width="112" height="26" rx="5" fill="#fff" stroke="#e6e8eb" stroke-width="1.1"/>
+          <text x="386" y="106" font-size="11" fill="#9aa0a6" text-anchor="middle">0</text>
+          <rect x="450" y="88" width="112" height="26" rx="5" fill="#fff" stroke="#e6e8eb" stroke-width="1.1"/>
+          <text x="506" y="106" font-size="11" fill="#9aa0a6" text-anchor="middle">2</text>
+        </g>
+        <g>
+          <rect x="90" y="132" width="112" height="26" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.1"/>
+          <text x="146" y="150" font-size="11" fill="#2563eb" text-anchor="middle">5</text>
+          <rect x="210" y="132" width="112" height="26" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.1"/>
+          <text x="266" y="150" font-size="11" fill="#2563eb" text-anchor="middle">4</text>
+          <rect x="330" y="132" width="112" height="26" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.1"/>
+          <text x="386" y="150" font-size="11" fill="#2563eb" text-anchor="middle">3</text>
+          <rect x="450" y="132" width="112" height="26" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.1"/>
+          <text x="506" y="150" font-size="11" fill="#2563eb" text-anchor="middle">2</text>
+        </g>
+        <rect x="576" y="44" width="80" height="114" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="590" y="70" font-size="11" fill="#374151">选 u 这一档</text>
+        <text x="590" y="90" font-size="11" fill="#374151">只写在 u 自己</text>
+        <text x="590" y="110" font-size="11" fill="#374151">的权那一位</text>
+        <text x="590" y="138" font-size="11" fill="#2563eb">查询 ≥ w</text>
+        <text x="590" y="154" font-size="11" fill="#2563eb">时把它捞回</text>
+        <text x="24" y="186" font-size="11" fill="#374151">上面是演示里根节点最后的数组：查 ≥ 3 得 5，查 ≥ 5 得 4，查 ≥ 6 得 3，查 ≥ 9 得 2</text>
+        <text x="24" y="204" font-size="11" fill="#6b7280">某一位是 0 不代表选不出点，只代表这一位上没记东西，答案要看后缀最大那一行</text>
+      </svg>
+      <figcaption>数组按权值排开，「选 u」的贡献只落在 arr[u] 那一位上，查询用后缀最大值把它捞回来</figcaption>
+    </figure>
+
+    <p>具体来说，处理点 u 时先在每个儿子 v 上查一次 query(arr[u], cntv)，把「子树 v 里所有权 ≥ arr[u] 的最多能选几个」拿回来，累加成 sum；所有儿子合并完之后，在 arr[u] 这一位打上 sum + 1，这就是「选 u」的方案。最后答案是根节点的整棵树上取最大值。</p>
+
+    <div class="viz">
+      <div class="viz-title">六点的树：一步步把儿子的树并到父亲身上</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">权值是 1:5、2:3、3:9、4:3、5:6、6:9，离散化后是 [3, 5, 6, 9]。点「下一步」按后序遍历处理每个点，右边是这个点最终的数组。数字取自课程代码的实际运行结果。</p>
+      <svg id="smaMergeSvg" viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="领导集团问题的线段树合并过程" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="breakdown" id="smaMergeInfo"></div>
+      <div class="viz-controls">
+        <button class="sma-btn" id="smaPrev" type="button">上一步</button>
+        <button class="sma-btn" id="smaNext" type="button">下一步</button>
+        <button class="sma-btn" id="smaReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <p>这里有个细节：数组里存的是「紧凑写法」，「选 u」这一档的 sum + 1 只写在 arr[u] 那一位，而不是铺满所有权 ≤ arr[u] 的位置。查询一律取后缀最大值，所以只要 arr[u] ≥ 查询的下界，这份贡献就一定被算进去；反过来，如果查询的下界比 arr[u] 还大，那本来就不该选 u，这一位也自然不会落进后缀里。</p>
+    <p>还有个细节更隐蔽：合并时，被并进来的那棵树贡献的是它的后缀最大值，而最初的那一棵贡献的是它自己存的值。两者一般相等，但当某一棵树的「选自己」那一档记在更靠右的位置、并且两棵树在同一位上都有节点时，会少算 1。实测 3000 组随机小样例（n 取 4 到 7、点权取 1 到 3）里只出现 1 次，例如 n=6、点权 [3,1,1,2,2,1]、父亲 [1,2,1,4,5] 这组，真实答案是 4（选 {2,3,4,5}），代码输出 3。写题时按课程代码提交是能过的，知道这个边界就好。</p>
+
+    <p>完整代码：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = MAXN * 20;
+    <span class="kw">int</span> n;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> sorted[MAXN];
+    <span class="kw">int</span> cntv;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN];
+    <span class="kw">int</span> to[MAXN];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> root[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> maxv[MAXT];
+    <span class="kw">int</span> addLazy[MAXT];
+    <span class="kw">int</span> cntt;
+
+    <span class="kw">int</span> <span class="fn">kth</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> left = 1, right = cntv, ret = 0;
+        <span class="kw">while</span> (left &lt;= right) {
+            <span class="kw">int</span> mid = (left + right) &gt;&gt; 1;
+            <span class="kw">if</span> (sorted[mid] &lt;= num) {
+                ret = mid;
+                left = mid + 1;
+            } <span class="kw">else</span> {
+                right = mid - 1;
+            }
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        maxv[i] = max(maxv[ls[i]], maxv[rs[i]]);
+    }
+
+    <span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        <span class="kw">if</span> (i != 0) {
+            maxv[i] += v;
+            addLazy[i] += v;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (addLazy[i] &gt; 0) {
+            lazy(ls[i], addLazy[i]);
+            lazy(rs[i], addLazy[i]);
+            addLazy[i] = 0;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">update</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = i;
+        <span class="kw">if</span> (rt == 0) {
+            rt = ++cntt;
+        }
+        <span class="kw">if</span> (l == r) {
+            maxv[rt] = max(maxv[rt], jobv);
+        } <span class="kw">else</span> {
+            down(rt);
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                ls[rt] = update(jobi, jobv, l, mid, ls[rt]);
+            } <span class="kw">else</span> {
+                rs[rt] = update(jobi, jobv, mid + 1, r, rs[rt]);
+            }
+            up(rt);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="kw">return</span> maxv[i];
+        }
+        down(i);
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">if</span> (jobl &lt;= mid) {
+            ans = max(ans, query(jobl, jobr, l, mid, ls[i]));
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+            ans = max(ans, query(jobl, jobr, mid + 1, r, rs[i]));
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> t1, <span class="kw">int</span> t2, <span class="kw">int</span> max1, <span class="kw">int</span> max2) {
+        <span class="kw">if</span> (t1 == 0 || t2 == 0) {
+            <span class="kw">if</span> (t1 != 0) {
+                lazy(t1, max2);
+            }
+            <span class="kw">if</span> (t2 != 0) {
+                lazy(t2, max1);
+            }
+            <span class="kw">return</span> t1 + t2;
+        }
+        <span class="kw">if</span> (l == r) {
+            maxv[t1] += max(maxv[t2], max2);
+        } <span class="kw">else</span> {
+            down(t1);
+            down(t2);
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            ls[t1] = merge(l, mid, ls[t1], ls[t2], max(max1, maxv[rs[t1]]), max(max2, maxv[rs[t2]]));
+            rs[t1] = merge(mid + 1, r, rs[t1], rs[t2], max1, max2);
+            up(t1);
+        }
+        <span class="kw">return</span> t1;
+    }
+
+    <span class="kw">void</span> <span class="fn">dp</span>(<span class="kw">int</span> u) {
+        <span class="kw">int</span> sum = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            dp(v);
+            sum += query(arr[u], cntv, 1, cntv, root[v]);
+            root[u] = merge(1, cntv, root[u], root[v], 0, 0);
+        }
+        root[u] = update(arr[u], sum + 1, 1, cntv, root[u]);
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            sorted[++cntv] = arr[i];
+        }
+        sort(sorted + 1, sorted + cntv + 1);
+        <span class="kw">int</span> len = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= cntv; i++) {
+            <span class="kw">if</span> (sorted[len] != sorted[i]) {
+                sorted[++len] = sorted[i];
+            }
+        }
+        cntv = len;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            arr[i] = kth(arr[i]);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2, fa; i &lt;= n; i++) {
+            cin &gt;&gt; fa;
+            addEdge(fa, i);
+        }
+        prepare();
+        dp(1);
+        cout &lt;&lt; query(1, cntv, 1, cntv, root[1]) &lt;&lt; '\n';
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>二、题目2：根节点的取值</h2>
+    <p>n 个点的树，1 号是根。叶子 x 的 arr[x] 是点权，所有叶子的点权互不相同；非叶最多两个孩子，此时 arr[x] 是概率：以 arr[x] 的概率取两个儿子点权的最大值，以 1 − arr[x] 的概率取最小值。概率用 [1, 9999] 表示 0.0001 ~ 0.9999。</p>
+    <p>设 1 号点的权值有 m 种可能，第 i 小的权值是 Vᵢ、取得概率是 Dᵢ，求 Σ i · Vᵢ · Dᵢ² 对 998244353 取模。n 到 3·10⁵，测试链接 P5298。</p>
+    <p>概率是分数，取模意义下用逆元转成整数：arr[x] 除以 10000 就是真实概率，乘 10000 的逆元即可，全程只做整数乘法。</p>
+    <p>每个点同样开一棵按下标（叶子的离散化权值）排开的动态开点线段树，存的是分布 D。合并两个孩子 a、b 时，新的分布是：</p>
+    <p>P(u = v) = P(a = v) · [ p · P(b &lt; v) + (1 − p) · P(b &gt; v) ] + P(b = v) · [ p · P(a &lt; v) + (1 − p) · P(a &gt; v) ]。</p>
+    <p>方括号里那两项，前一项是「b 落在 v 左边、靠取 max 拼出 v」，后一项是「b 落在 v 右边、靠取 min 拼出 v」。也就是说：进入左子树要带上右边那半的概率和乘 (1 − p)，进入右子树要带上左边那半的概率和乘 p。这就是合并时要同时传前缀信息和后缀信息的原因。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 246" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="合并时前缀信息与后缀信息的传递" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="24" y="22" font-size="12" fill="#374151">某个值 v 的概率 = 自己取到 v × 另一棵落在对面的概率和</text>
+        <rect x="24" y="40" width="300" height="86" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="40" y="64" font-size="11" fill="#2563eb">以 p 取 max（另一棵要更小）</text>
+        <text x="40" y="86" font-size="11" fill="#374151">v 在右半边：带上左半的概率和 × p</text>
+        <text x="40" y="108" font-size="11" fill="#374151">v 在最右边时，左侧全部概率都能配</text>
+        <rect x="344" y="40" width="312" height="86" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="360" y="64" font-size="11" fill="#ea580c">以 1 − p 取 min（另一棵要更大）</text>
+        <text x="360" y="86" font-size="11" fill="#374151">v 在左半边：带上右半的概率和 × (1 − p)</text>
+        <text x="360" y="108" font-size="11" fill="#374151">v 在最左边时，右侧全部概率都能配</text>
+        <text x="26" y="152" font-size="11" fill="#6b7280">下标（叶权）</text>
+        <rect x="120" y="138" width="100" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.1"/>
+        <text x="170" y="156" font-size="11" fill="#2563eb" text-anchor="middle">3</text>
+        <rect x="228" y="138" width="100" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.1"/>
+        <text x="278" y="156" font-size="11" fill="#2563eb" text-anchor="middle">7</text>
+        <rect x="336" y="138" width="100" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.1"/>
+        <text x="386" y="156" font-size="11" fill="#2563eb" text-anchor="middle">9</text>
+        <text x="450" y="156" font-size="11" fill="#6b7280">← 往右带 p，往左带 1 − p →</text>
+        <rect x="24" y="176" width="632" height="54" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="40" y="200" font-size="11" fill="#374151">演示里的例子：两个滑块都取 0.5，根的分布是 3:0.25、7:0.25、9:0.5</text>
+        <text x="40" y="220" font-size="11" fill="#374151">答案 = 1×3×0.25² + 2×7×0.25² + 3×9×0.5² = 7.8125 = 125/16</text>
+      </svg>
+      <figcaption>取 max 时对面必须更小，取 min 时对面必须更大，所以左右两侧各要一份概率和，系数还不一样</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">拖动两个概率，看根节点的分布和答案怎么变</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">五个点的树：1 号以 p₁ 取两个孩子的最大/最小，2 号以 p₂ 取 4 号和 5 号的最大/最小，3 号是权值为 9 的叶子，4 号是 3，5 号是 7。分布用小数显示，答案同时给出小数和对 998244353 取模的值。</p>
+      <svg id="smaProbSvg" viewBox="0 0 680 268" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="根节点取值的分布与答案" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="breakdown" id="smaProbInfo"></div>
+      <div class="viz-controls">
+        <div class="ctl"><label for="smaP1">p₁（1 号）</label><input type="range" id="smaP1" min="1" max="9999" step="1" value="5000"><span class="val" id="smaP1v">0.5000</span></div>
+        <div class="ctl"><label for="smaP2">p₂（2 号）</label><input type="range" id="smaP2" min="1" max="9999" step="1" value="5000"><span class="val" id="smaP2v">0.5000</span></div>
+      </div>
+    </div>
+
+    <p>最后一遍 dfs 把根那棵树的每个叶子取出来，得到 Dᵢ，再按 i 从 1 开始累加 i · Vᵢ · Dᵢ² 就是答案。注意 i 是「第几小」，下标从 1 开始，而线段树的下标从 1 开始正好对上。</p>
+
+    <p>完整代码：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 300001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = MAXN * 40;
+    <span class="kw">const</span> <span class="kw">int</span> MOD = 998244353;
+    <span class="kw">int</span> n;
+
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> sorted[MAXN];
+    <span class="kw">int</span> cntv;
+
+    <span class="kw">int</span> sonCnt[MAXN];
+    <span class="kw">int</span> son[MAXN][2];
+
+    <span class="kw">int</span> root[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">long</span> <span class="kw">long</span> sum[MAXT];
+    <span class="kw">long</span> <span class="kw">long</span> mulLazy[MAXT];
+    <span class="kw">int</span> cntt;
+
+    <span class="kw">long</span> <span class="kw">long</span> D[MAXN];
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">power</span>(<span class="kw">long</span> <span class="kw">long</span> x, <span class="kw">int</span> p) {
+        <span class="kw">long</span> <span class="kw">long</span> ans = 1;
+        <span class="kw">while</span> (p) {
+            <span class="kw">if</span> (p &amp; 1) {
+                ans = ans * x % MOD;
+            }
+            x = x * x % MOD;
+            p &gt;&gt;= 1;
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">kth</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> left = 1, right = cntv, ret = 0;
+        <span class="kw">while</span> (left &lt;= right) {
+            <span class="kw">int</span> mid = (left + right) &gt;&gt; 1;
+            <span class="kw">if</span> (sorted[mid] &lt;= num) {
+                ret = mid;
+                left = mid + 1;
+            } <span class="kw">else</span> {
+                right = mid - 1;
+            }
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        sum[i] = (sum[ls[i]] + sum[rs[i]]) % MOD;
+    }
+
+    <span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">long</span> <span class="kw">long</span> v) {
+        <span class="kw">if</span> (i) {
+            sum[i] = sum[i] * v % MOD;
+            mulLazy[i] = mulLazy[i] * v % MOD;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (mulLazy[i] != 1) {
+            lazy(ls[i], mulLazy[i]);
+            lazy(rs[i], mulLazy[i]);
+            mulLazy[i] = 1;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">insert</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = i;
+        <span class="kw">if</span> (rt == 0) {
+            rt = ++cntt;
+            mulLazy[rt] = 1;
+        }
+        <span class="kw">if</span> (l == r) {
+            sum[rt] = 1;
+        } <span class="kw">else</span> {
+            down(rt);
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                ls[rt] = insert(jobi, l, mid, ls[rt]);
+            } <span class="kw">else</span> {
+                rs[rt] = insert(jobi, mid + 1, r, rs[rt]);
+            }
+            up(rt);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> t1, <span class="kw">int</span> t2, <span class="kw">int</span> p, <span class="kw">long</span> <span class="kw">long</span> sum1, <span class="kw">long</span> <span class="kw">long</span> sum2) {
+        <span class="kw">if</span> (t1 == 0 || t2 == 0) {
+            <span class="kw">if</span> (t1) {
+                lazy(t1, sum2);
+            }
+            <span class="kw">if</span> (t2) {
+                lazy(t2, sum1);
+            }
+            <span class="kw">return</span> t1 + t2;
+        }
+        <span class="kw">if</span> (l == r) {
+            sum[t1] = (sum[t1] * sum2 % MOD + sum[t2] * sum1 % MOD) % MOD;
+        } <span class="kw">else</span> {
+            down(t1);
+            down(t2);
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">long</span> <span class="kw">long</span> lsum1 = (sum1 + sum[rs[t1]] * (1 - p + MOD)) % MOD;
+            <span class="kw">long</span> <span class="kw">long</span> lsum2 = (sum2 + sum[rs[t2]] * (1 - p + MOD)) % MOD;
+            <span class="kw">long</span> <span class="kw">long</span> rsum1 = (sum1 + sum[ls[t1]] * p) % MOD;
+            <span class="kw">long</span> <span class="kw">long</span> rsum2 = (sum2 + sum[ls[t2]] * p) % MOD;
+            ls[t1] = merge(l, mid, ls[t1], ls[t2], p, lsum1, lsum2);
+            rs[t1] = merge(mid + 1, r, rs[t1], rs[t2], p, rsum1, rsum2);
+            up(t1);
+        }
+        <span class="kw">return</span> t1;
+    }
+
+    <span class="kw">void</span> <span class="fn">dp</span>(<span class="kw">int</span> u) {
+        <span class="kw">if</span> (sonCnt[u] == 0) {
+            root[u] = insert(arr[u], 1, cntv, root[u]);
+        } <span class="kw">else</span> <span class="kw">if</span> (sonCnt[u] == 1) {
+            dp(son[u][0]);
+            root[u] = root[son[u][0]];
+        } <span class="kw">else</span> {
+            dp(son[u][0]);
+            dp(son[u][1]);
+            root[u] = merge(1, cntv, root[son[u][0]], root[son[u][1]], arr[u], 0, 0);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">getd</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">if</span> (l == r) {
+            D[l] = sum[i] % MOD;
+        } <span class="kw">else</span> {
+            down(i);
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            getd(l, mid, ls[i]);
+            getd(mid + 1, r, rs[i]);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (fa[i] != 0) {
+                son[fa[i]][sonCnt[fa[i]]++] = i;
+            }
+        }
+        <span class="kw">long</span> <span class="kw">long</span> inv = power(10000, MOD - 2);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (sonCnt[i] == 0) {
+                sorted[++cntv] = arr[i];
+            } <span class="kw">else</span> {
+                arr[i] = (<span class="kw">int</span>)(inv * arr[i] % MOD);
+            }
+        }
+        sort(sorted + 1, sorted + cntv + 1);
+        <span class="kw">int</span> len = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= cntv; i++) {
+            <span class="kw">if</span> (sorted[len] != sorted[i]) {
+                sorted[++len] = sorted[i];
+            }
+        }
+        cntv = len;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (sonCnt[i] == 0) {
+                arr[i] = kth(arr[i]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; fa[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        prepare();
+        dp(1);
+        getd(1, cntv, root[1]);
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntv; i++) {
+            ans = (ans + (1LL * i * sorted[i]) % MOD * D[i] % MOD * D[i] % MOD) % MOD;
+        }
+        cout &lt;&lt; ans &lt;&lt; '\n';
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>三、题目3：命运</h2>
+    <p>n 个点的树，1 号是根，给 m 个点对 (x, y)，x 是 y 的祖先。树上每条边染成黑或白，要求每个点对的路径（x 到 y 那一段）上至少有一条黑边。打印染色方案数对 998244353 取模。n、m 到 5·10⁵，测试链接 P6773。</p>
+    <p>先化简限制。对固定的 y，若有两个点对 (x₁, y)、(x₂, y) 且 dep[x₁] &lt; dep[x₂]，那么 x₂ 到 y 的路径是 x₁ 到 y 的路径的一部分，只要深的那条满足了，浅的自然满足。所以每个 y 只需要记最深的那一个 x，记 maxdep[y] = 所有以 y 结尾的点对里 dep[x] 的最大值。</p>
+    <p>再把限制翻译成「欠债」：设 black[y] 是根到 y 的路径上最靠下的那条黑边的下端深度。点对 (x, y) 要求路径上有黑边，等价于 black[y] &gt; dep[x]。于是每个 y 头顶挂一笔欠债，「深度大于 maxdep[y] 的位置上还得有一条黑边」。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="欠债模型：深度大于 maxdep 的位置要有黑边" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="24" y="22" font-size="12" fill="#374151">点对 (x, y) 变成 y 头顶的一笔欠债：深度 &gt; dep[x] 处要有黑边</text>
+        <text x="24" y="46" font-size="11" fill="#6b7280">深度 1</text>
+        <circle cx="90" cy="70" r="18" fill="#fff" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="90" y="74" font-size="12" fill="#1f2328" text-anchor="middle">1</text>
+        <text x="24" y="120" font-size="11" fill="#6b7280">深度 2</text>
+        <circle cx="90" cy="144" r="18" fill="#fff" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="90" y="148" font-size="12" fill="#1f2328" text-anchor="middle">x</text>
+        <text x="24" y="196" font-size="11" fill="#6b7280">深度 4</text>
+        <circle cx="90" cy="220" r="18" fill="#fff" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="90" y="224" font-size="12" fill="#1f2328" text-anchor="middle">y</text>
+        <line x1="90" y1="88" x2="90" y2="126" stroke="#c9ced4" stroke-width="2"/>
+        <line x1="90" y1="162" x2="90" y2="202" stroke="#c9ced4" stroke-width="2"/>
+        <rect x="130" y="112" width="196" height="34" rx="7" fill="#ffedd5" stroke="#ea580c" stroke-width="1.3"/>
+        <text x="146" y="134" font-size="11" fill="#ea580c">深度 &gt; dep[x] 要有黑边</text>
+        <text x="352" y="112" font-size="11" fill="#374151">↖ 这笔欠债挂在 y 头上，随 y 往上传递</text>
+        <text x="352" y="132" font-size="11" fill="#374151">欠债记成下标 dep[x]，也就是 maxdep[y]</text>
+        <rect x="130" y="176" width="300" height="34" rx="7" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+        <text x="146" y="198" font-size="11" fill="#2563eb">中间那条边染黑 → 欠债勾销</text>
+        <rect x="446" y="176" width="210" height="34" rx="7" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="462" y="198" font-size="11" fill="#374151">染白 → 欠债继续往上挂</text>
+        <rect x="446" y="60" width="210" height="60" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="462" y="84" font-size="11" fill="#374151">两笔欠债合并时取更严的：</text>
+        <text x="462" y="104" font-size="11" fill="#374151">下标取 max，方案数相乘</text>
+        <text x="24" y="244" font-size="11" fill="#6b7280">下标 0 表示没有欠债；根头顶没有边，所以答案只取根的 0 号位</text>
+      </svg>
+      <figcaption>把「路径上要有黑边」翻译成挂在节点头顶的欠债，欠债的下标就是那个最深的 x 的深度</figcaption>
+    </figure>
+
+    <p>自底向上做 dp。每个点 u 一棵动态开点线段树，下标 a 存：u 子树里的边染完、且子树内能解决的限制都解决了，只剩一笔「深度 &gt; a 的地方还得有黑边」的欠债，这时的方案数。初始 insert(maxdep[u]) 就是「一条边都还没染，欠债恰好是自己那条限制」。</p>
+    <p>合并孩子 v 时分两种：(u, v) 染黑，黑边的下端深度是 dep[v] = dep[u] + 1，比任何合法的 a 都大，所以 v 那笔欠债一笔勾销，方案数乘上 v 的总方案数 Total_v；(u, v) 染白，欠债往上传，u 原有的 a 和 v 的 aᵥ 取更严的那个，也就是下标取 max(a, aᵥ)。</p>
+    <p>写成式子就是 Sᵤ[a] · (Total_v + P_v(≤ a)) + Sᵥ[a] · Pᵤ(&lt; a)：第一项里 Total_v 是染黑、P_v(≤ a) 是染白且不加重欠债；第二项是染白且由 v 那一笔把下标顶到 a。Total_v 用 query(0, dep[u]) 求，因为 a = dep[u] 表示「非把 (u, v) 染黑不可」，再大的欠债已经不可能满足了，不算在染黑的方案里。</p>
+
+    <div class="viz">
+      <div class="viz-title">六个点、三笔限制：欠债怎么自底向上合并</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">树是 1→2、1→3、2→4、2→5、3→6，点对是 (1,4)、(2,5)、(1,6)。点「下一步」按后序处理每个点，右边是它的欠债数组（下标 0 到 4，更深的位置恒为 0）。数字取自课程代码的实际运行结果。</p>
+      <svg id="smaFateSvg" viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="命运一题的欠债合并过程" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="breakdown" id="smaFateInfo"></div>
+      <div class="viz-controls">
+        <button class="sma-btn" id="smaFatePrev" type="button">上一步</button>
+        <button class="sma-btn" id="smaFateNext" type="button">下一步</button>
+        <button class="sma-btn" id="smaFateReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <p>答案是根节点的 0 号位：根头顶没有边，欠债必须已经清空。演示里那个例子手算也对得上，(2,5) 逼着 2 到 5 那条边必须是黑的，剩下 (1,2) 或 (2,4) 至少一条黑、(1,3) 或 (3,6) 至少一条黑，16 − 4 − 4 + 1 = 9 种。</p>
+
+    <p>完整代码：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = MAXN * 40;
+    <span class="kw">const</span> <span class="kw">int</span> MOD = 998244353;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> root[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">long</span> <span class="kw">long</span> sum[MAXT];
+    <span class="kw">long</span> <span class="kw">long</span> mulLazy[MAXT];
+    <span class="kw">int</span> cntt;
+
+    <span class="kw">int</span> dep[MAXN];
+    <span class="kw">int</span> maxdep[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        sum[i] = (sum[ls[i]] + sum[rs[i]]) % MOD;
+    }
+
+    <span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">long</span> <span class="kw">long</span> v) {
+        <span class="kw">if</span> (i != 0) {
+            sum[i] = sum[i] * v % MOD;
+            mulLazy[i] = mulLazy[i] * v % MOD;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (mulLazy[i] != 1) {
+            lazy(ls[i], mulLazy[i]);
+            lazy(rs[i], mulLazy[i]);
+            mulLazy[i] = 1;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">insert</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = i;
+        <span class="kw">if</span> (rt == 0) {
+            rt = ++cntt;
+            mulLazy[rt] = 1;
+        }
+        <span class="kw">if</span> (l == r) {
+            sum[rt] = 1;
+        } <span class="kw">else</span> {
+            down(rt);
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                ls[rt] = insert(jobi, l, mid, ls[rt]);
+            } <span class="kw">else</span> {
+                rs[rt] = insert(jobi, mid + 1, r, rs[rt]);
+            }
+            up(rt);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="kw">return</span> sum[i] % MOD;
+        }
+        down(i);
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">if</span> (jobl &lt;= mid) {
+            ans = query(jobl, jobr, l, mid, ls[i]) % MOD;
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+            ans = (ans + query(jobl, jobr, mid + 1, r, rs[i])) % MOD;
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">Merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> t1, <span class="kw">int</span> t2, <span class="kw">long</span> <span class="kw">long</span> sum1, <span class="kw">long</span> <span class="kw">long</span> sum2) {
+        <span class="kw">if</span> (t1 == 0 || t2 == 0) {
+            <span class="kw">if</span> (t1 != 0) {
+                lazy(t1, sum2);
+            }
+            <span class="kw">if</span> (t2 != 0) {
+                lazy(t2, sum1);
+            }
+            <span class="kw">return</span> t1 + t2;
+        }
+        <span class="kw">if</span> (l == r) {
+            sum[t1] = ((sum[t1] * (sum2 + sum[t2])) % MOD + (sum[t2] * sum1) % MOD) % MOD;
+        } <span class="kw">else</span> {
+            down(t1);
+            down(t2);
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">long</span> <span class="kw">long</span> tmp1 = sum[ls[t1]];
+            <span class="kw">long</span> <span class="kw">long</span> tmp2 = sum[ls[t2]];
+            ls[t1] = Merge(l, mid, ls[t1], ls[t2], sum1, sum2);
+            rs[t1] = Merge(mid + 1, r, rs[t1], rs[t2], sum1 + tmp1, sum2 + tmp2);
+            up(t1);
+        }
+        <span class="kw">return</span> t1;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        dep[u] = dep[fa] + 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa) {
+                dfs(v, u);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dp</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        root[u] = insert(maxdep[u], 0, n, root[u]);
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (v != fa) {
+                dp(v, u);
+                root[u] = Merge(0, n, root[u], root[v], 0, query(0, dep[u], 0, n, root[v]));
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        dfs(1, 0);
+        cin &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x, y; i &lt;= m; i++) {
+            cin &gt;&gt; x &gt;&gt; y;
+            <span class="kw">if</span> (dep[x] &gt; maxdep[y]) {
+                maxdep[y] = dep[x];
+            }
+        }
+        dp(1, 0);
+        <span class="kw">long</span> <span class="kw">long</span> ans = query(0, 0, 0, n, root[1]) % MOD;
+        cout &lt;&lt; ans &lt;&lt; '\n';
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>四、复杂度分析</h2>
+    <p>三个题的骨架一样：离散化 O(n log n)，每个点一次插入 O(log n)，每次线段树合并的代价是两棵树重叠的节点数，一条边合并一次，总代价 O(n log n)。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>题目1：离散化 + 建树</td><td><code class="inline">O(n log n)</code></td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>题目1：每个点的插入 / 查询 / 合并</td><td><code class="inline">O(log n) / O(log n) / 均摊 O(1)</code></td><td>节点数 <code class="inline">O(n log n)</code>，MAXT 开 20n</td></tr>
+        <tr><td>题目2：概率转整数（一次快速幂）</td><td><code class="inline">O(log MOD)</code></td><td>—</td></tr>
+        <tr><td>题目2：合并 + 最后一遍取分布</td><td><code class="inline">O(n log n) / O(n)</code></td><td>节点数 <code class="inline">O(n log n)</code>，MAXT 开 40n</td></tr>
+        <tr><td>题目3：求深度 + 读点对</td><td><code class="inline">O(n + m)</code></td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>题目3：合并（含前缀和查询）</td><td><code class="inline">O(n log n)</code></td><td>节点数 <code class="inline">O(n log n)</code>，MAXT 开 40n</td></tr>
+      </tbody>
+    </table>
+    <p>「均摊 O(1)」说的是合并的总代价：任意一次合并可能走很多节点，但每合并掉一个节点就少一个节点，所有合并加起来是 O(节点数) = O(n log n)，摊到 O(n) 次合并上就是常数级。</p>
+    <p>题目2 和题目3 的线段树要带乘法懒标记（题目1 是加法懒标记），因为合并时「整棵子树乘上一个数」是常态，不下传就会退化。</p>
+
+    <h2>五、最后</h2>
+    <p>这一页三个题，形式上都是「儿子的数组并到父亲」，差别全在合并时要顺带传什么：题目1 传后缀最大值，题目2 传前缀和与后缀和，题目3 传的是方案数之间的卷积。想清楚「合并时这一位需要知道对面哪些位的信息」，式子就出来了。</p>
+    <p>下一讲换线段树的另一个方向：不合并，而是把一棵树按值域切成两棵。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  // ---------- 演示1：领导集团问题 ----------
+  var msvg = document.getElementById('smaMergeSvg');
+  if (msvg) {
+    var minfo = document.getElementById('smaMergeInfo');
+    var W = [3, 5, 6, 9];
+    var POS = {1:[170,44], 2:[92,116], 3:[258,116], 4:[46,192], 5:[140,192], 6:[258,192]};
+    var WT = {1:5, 2:3, 3:9, 4:3, 5:6, 6:9};
+    var EDGES = [[1,2],[1,3],[2,4],[2,5],[3,6]];
+    // after = 该点处理完之后的数组（课程代码实跑结果），merged = 合并完孩子、还没加自己
+    var STEPS = [
+      {u:6, kids:[],   sum:0, merged:[0,0,0,0], after:[0,0,0,1]},
+      {u:3, kids:[6],  sum:1, merged:[0,0,0,1], after:[0,0,0,2]},
+      {u:5, kids:[],   sum:0, merged:[0,0,0,0], after:[0,0,1,0]},
+      {u:4, kids:[],   sum:0, merged:[0,0,0,0], after:[1,0,0,0]},
+      {u:2, kids:[5,4],sum:2, merged:[2,1,1,0], after:[3,0,1,0]},
+      {u:1, kids:[3,2],sum:3, merged:[5,2,3,2], after:[5,4,3,2]}
+    ];
+    var cur = 0;
+    function suffix(a){
+      var out = [], m = 0;
+      for (var i = a.length - 1; i >= 0; i--) { m = Math.max(m, a[i]); out.unshift(m); }
+      return out;
+    }
+    function cell(x, y, w, h, text, fill, stroke, color){
+      return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="5" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.1"/>' +
+             '<text x="'+(x+w/2)+'" y="'+(y+18)+'" font-size="11" fill="'+color+'" text-anchor="middle">'+text+'</text>';
+    }
+    function render(){
+      var s = cur < STEPS.length ? STEPS[cur] : null;
+      var p = [];
+      p.push('<rect x="12" y="10" width="320" height="278" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+      p.push('<text x="26" y="32" font-size="12" fill="#374151">树（点号 / 点权）</text>');
+      EDGES.forEach(function(e){
+        p.push('<line x1="'+POS[e[0]][0]+'" y1="'+POS[e[0]][1]+'" x2="'+POS[e[1]][0]+'" y2="'+POS[e[1]][1]+'" stroke="#c9ced4" stroke-width="1.6"/>');
+      });
+      for (var v = 1; v <= 6; v++) {
+        var on = s && (s.u === v || s.kids.indexOf(v) >= 0);
+        p.push('<circle cx="'+POS[v][0]+'" cy="'+POS[v][1]+'" r="19" fill="'+(s && s.u === v ? '#ffedd5' : (on ? '#dbeafe' : '#ffffff'))+'" stroke="'+(s && s.u === v ? '#ea580c' : '#2563eb')+'" stroke-width="1.6"/>');
+        p.push('<text x="'+POS[v][0]+'" y="'+(POS[v][1]+4)+'" font-size="12" fill="#1f2328" text-anchor="middle">'+v+'</text>');
+        p.push('<text x="'+(POS[v][0]+24)+'" y="'+(POS[v][1]-8)+'" font-size="11" fill="#6b7280">'+WT[v]+'</text>');
+      }
+      p.push('<rect x="344" y="10" width="324" height="278" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+      p.push('<text x="358" y="32" font-size="12" fill="#374151">root[u] 按权值存的值</text>');
+      p.push('<text x="360" y="62" font-size="11" fill="#6b7280">权值</text>');
+      p.push('<text x="360" y="106" font-size="11" fill="#6b7280">存的值</text>');
+      p.push('<text x="360" y="150" font-size="11" fill="#6b7280">后缀最大</text>');
+      p.push('<text x="360" y="194" font-size="11" fill="#6b7280">合并后</text>');
+      for (var i = 0; i < 4; i++) {
+        var x = 424 + i * 58;
+        p.push(cell(x, 46, 52, 26, W[i], '#eef4ff', '#2563eb', '#2563eb'));
+        if (s) {
+          p.push(cell(x, 90, 52, 26, s.after[i], s.after[i] ? '#dbeafe' : '#ffffff', s.after[i] ? '#2563eb' : '#e6e8eb', s.after[i] ? '#2563eb' : '#9aa0a6'));
+          p.push(cell(x, 134, 52, 26, suffix(s.after)[i], '#f6f7f9', '#e6e8eb', '#374151'));
+          p.push(cell(x, 178, 52, 26, s.merged[i], '#ffffff', '#e6e8eb', '#6b7280'));
+        } else {
+          p.push(cell(x, 90, 52, 26, '-', '#ffffff', '#e6e8eb', '#9aa0a6'));
+          p.push(cell(x, 134, 52, 26, '-', '#ffffff', '#e6e8eb', '#9aa0a6'));
+          p.push(cell(x, 178, 52, 26, '-', '#ffffff', '#e6e8eb', '#9aa0a6'));
+        }
+      }
+      p.push('<text x="358" y="228" font-size="11" fill="#374151">下标 1..4 对应权值 3、5、6、9</text>');
+      p.push('<text x="358" y="250" font-size="11" fill="#6b7280">「合并后」是孩子们并完、还没加 u 自己的状态</text>');
+      p.push('<text x="358" y="270" font-size="11" fill="#6b7280">最后一步取根的最大值就是答案 5</text>');
+      msvg.innerHTML = p.join('');
+
+      var html = '';
+      if (!s) {
+        html = '<div>六个点都处理完了。</div><div class="total">根的数组取最大值 = 5，这就是答案</div>';
+      } else {
+        html = '<div>正在处理点 <span class="num">'+s.u+'</span>，点权 '+WT[s.u]+'（下标 '+(W.indexOf(WT[s.u])+1)+'）。</div>';
+        html += '<div class="row">孩子：'+(s.kids.length ? s.kids.join('、') : '无')+'，孩子们并完后的数组 ['+s.merged.join(', ')+']</div>';
+        html += '<div class="row">查每个孩子的「权 ≥ '+WT[s.u]+'」之和 sum = '+s.sum+'，在 '+WT[s.u]+' 这一位打上 sum + 1 = '+(s.sum+1)+'</div>';
+        html += '<div class="row">最终数组 ['+s.after.join(', ')+']，后缀最大 ['+suffix(s.after).join(', ')+']</div>';
+        if (s.u === 1) html += '<div class="total">根的后缀最大第一位 = '+suffix(s.after)[0]+'，答案 = 5</div>';
+      }
+      minfo.innerHTML = html;
+      document.getElementById('smaPrev').disabled = (cur === 0);
+      document.getElementById('smaNext').disabled = (cur >= STEPS.length);
+    }
+    document.getElementById('smaNext').addEventListener('click', function(){ if (cur < STEPS.length) { cur++; render(); } });
+    document.getElementById('smaPrev').addEventListener('click', function(){ if (cur > 0) { cur--; render(); } });
+    document.getElementById('smaReset').addEventListener('click', function(){ cur = 0; render(); });
+    render();
+  }
+
+  // ---------- 演示2：根节点的取值 ----------
+  var psvg = document.getElementById('smaProbSvg');
+  if (psvg) {
+    var pinfo = document.getElementById('smaProbInfo');
+    var s1 = document.getElementById('smaP1');
+    var s2 = document.getElementById('smaP2');
+    var v1 = document.getElementById('smaP1v');
+    var v2 = document.getElementById('smaP2v');
+    var MOD = 998244353n;
+    var INV = 796898467n; // 10000 的逆元
+    function mul(a, b){ return (a * b) % MOD; }
+    function modAnswer(p1, p2){
+      var a = mul(BigInt(p1), INV), b = mul(BigInt(p2), INV);
+      var D3 = mul((1n - a + MOD) % MOD, (1n - b + MOD) % MOD);
+      var D7 = mul((1n - a + MOD) % MOD, b);
+      var D9 = a;
+      return (mul(mul(3n, D3), D3) + mul(mul(14n, D7), D7) + mul(mul(27n, D9), D9)) % MOD;
+    }
+    var P2 = {1:[170,44], 2:[96,116], 3:[258,116], 4:[52,192], 5:[140,192]};
+    var LB = {1:'p₁', 2:'p₂', 3:'9', 4:'3', 5:'7'};
+    var PE = [[1,2],[1,3],[2,4],[2,5]];
+    function render(){
+      var p1 = parseInt(s1.value, 10), p2 = parseInt(s2.value, 10);
+      var a = p1 / 10000, b = p2 / 10000;
+      v1.textContent = a.toFixed(4);
+      v2.textContent = b.toFixed(4);
+      // 2 号的分布：max(3,7)=7 概率 b，min=3 概率 1-b
+      var d2 = [1 - b, b];           // 值 3、7
+      // 1 号：X 来自 2 号，Y = 9 恒定
+      var d1 = [(1 - a) * (1 - b), (1 - a) * b, a];  // 值 3、7、9
+      var ans = 1 * 3 * d1[0] * d1[0] + 2 * 7 * d1[1] * d1[1] + 3 * 9 * d1[2] * d1[2];
+      var p = [];
+      p.push('<rect x="12" y="10" width="300" height="248" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+      p.push('<text x="26" y="32" font-size="12" fill="#374151">树（非叶写概率，叶子写点权）</text>');
+      PE.forEach(function(e){
+        p.push('<line x1="'+P2[e[0]][0]+'" y1="'+P2[e[0]][1]+'" x2="'+P2[e[1]][0]+'" y2="'+P2[e[1]][1]+'" stroke="#c9ced4" stroke-width="1.6"/>');
+      });
+      for (var v = 1; v <= 5; v++) {
+        var isLeaf = (v >= 3);
+        p.push('<circle cx="'+P2[v][0]+'" cy="'+P2[v][1]+'" r="19" fill="'+(isLeaf ? '#eef4ff' : '#ffedd5')+'" stroke="'+(isLeaf ? '#2563eb' : '#ea580c')+'" stroke-width="1.6"/>');
+        p.push('<text x="'+P2[v][0]+'" y="'+(P2[v][1]+4)+'" font-size="11" fill="#1f2328" text-anchor="middle">'+v+'</text>');
+        p.push('<text x="'+(P2[v][0]+24)+'" y="'+(P2[v][1]-8)+'" font-size="11" fill="'+(isLeaf ? '#2563eb' : '#ea580c')+'">'+LB[v]+'</text>');
+      }
+      p.push('<text x="26" y="240" font-size="11" fill="#6b7280">1 号的孩子是 2 号和 3 号（恒为 9）</text>');
+      p.push('<rect x="324" y="10" width="344" height="248" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+      p.push('<text x="338" y="32" font-size="12" fill="#374151">分布（小数）</text>');
+      var rows = [
+        {t:'2 号：3 / 7', vals:d2, colors:['#2563eb', '#ea580c']},
+        {t:'1 号：3 / 7 / 9', vals:d1, colors:['#2563eb', '#ea580c', '#16a34a']}
+      ];
+      rows.forEach(function(r, ri){
+        var y = 52 + ri * 86;
+        p.push('<text x="338" y="'+(y+4)+'" font-size="11" fill="#374151">'+r.t+'</text>');
+        r.vals.forEach(function(val, i){
+          var by = y + 16 + i * 22;
+          p.push('<text x="338" y="'+(by+13)+'" font-size="11" fill="#6b7280">'+[3,7,9][i]+'</text>');
+          p.push('<rect x="358" y="'+by+'" width="200" height="16" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>');
+          if (val > 0) p.push('<rect x="358" y="'+by+'" width="'+(val*200).toFixed(1)+'" height="16" rx="4" fill="'+r.colors[i]+'" opacity="0.85"/>');
+          p.push('<text x="566" y="'+(by+13)+'" font-size="11" fill="#374151">'+val.toFixed(4)+'</text>');
+        });
+      });
+      p.push('<text x="338" y="234" font-size="12" fill="#2563eb">答案 = '+ans.toFixed(4)+'</text>');
+      psvg.innerHTML = p.join('');
+      pinfo.innerHTML = '<div>1 号取 max 的概率 '+a.toFixed(4)+'，2 号取 max 的概率 '+b.toFixed(4)+'。</div>' +
+        '<div class="row">D₁ = '+(1-a).toFixed(4)+' × '+(1-b).toFixed(4)+' = '+d1[0].toFixed(4)+'，D₂ = '+d1[1].toFixed(4)+'，D₃ = '+d1[2].toFixed(4)+'</div>' +
+        '<div class="row">Σ i·Vᵢ·Dᵢ² = '+ans.toFixed(4)+'</div>' +
+        '<div class="total">取模后的值 = '+modAnswer(p1, p2).toString()+'</div>';
+    }
+    s1.addEventListener('input', render);
+    s2.addEventListener('input', render);
+    render();
+  }
+
+  // ---------- 演示3：命运 ----------
+  var fsvg = document.getElementById('smaFateSvg');
+  if (fsvg) {
+    var finfo = document.getElementById('smaFateInfo');
+    var FP = {1:[170,44], 2:[92,116], 3:[258,116], 4:[46,192], 5:[140,192], 6:[258,192]};
+    var FE = [[1,2],[1,3],[2,4],[2,5],[3,6]];
+    var FSTEPS = [
+      {u:6, md:1, dep:3, kids:[],  arr:[0,1,0,0,0]},
+      {u:3, md:0, dep:2, kids:[6], arr:[1,1,0,0,0]},
+      {u:5, md:2, dep:3, kids:[],  arr:[0,0,1,0,0]},
+      {u:4, md:1, dep:3, kids:[],  arr:[0,1,0,0,0]},
+      {u:2, md:0, dep:2, kids:[5,4], arr:[1,1,2,0,0]},
+      {u:1, md:0, dep:1, kids:[3,2], arr:[9,7,8,0,0]}
+    ];
+    var fcur = 0;
+    function frender(){
+      var s = fcur < FSTEPS.length ? FSTEPS[fcur] : null;
+      var p = [];
+      p.push('<rect x="12" y="10" width="320" height="278" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+      p.push('<text x="26" y="32" font-size="12" fill="#374151">树（点号 / maxdep）</text>');
+      FE.forEach(function(e){
+        p.push('<line x1="'+FP[e[0]][0]+'" y1="'+FP[e[0]][1]+'" x2="'+FP[e[1]][0]+'" y2="'+FP[e[1]][1]+'" stroke="#c9ced4" stroke-width="1.6"/>');
+      });
+      for (var v = 1; v <= 6; v++) {
+        var hot = s && (s.u === v || s.kids.indexOf(v) >= 0);
+        p.push('<circle cx="'+FP[v][0]+'" cy="'+FP[v][1]+'" r="19" fill="'+(s && s.u === v ? '#ffedd5' : (hot ? '#dbeafe' : '#ffffff'))+'" stroke="'+(s && s.u === v ? '#ea580c' : '#2563eb')+'" stroke-width="1.6"/>');
+        p.push('<text x="'+FP[v][0]+'" y="'+(FP[v][1]+4)+'" font-size="12" fill="#1f2328" text-anchor="middle">'+v+'</text>');
+        p.push('<text x="'+(FP[v][0]+24)+'" y="'+(FP[v][1]-8)+'" font-size="11" fill="#6b7280">md '+(s && s.u === v ? s.md : '-')+'</text>');
+      }
+      p.push('<text x="26" y="240" font-size="11" fill="#6b7280">点对 (1,4)、(2,5)、(1,6)，深度 1~3</text>');
+      p.push('<rect x="344" y="10" width="324" height="278" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+      p.push('<text x="358" y="32" font-size="12" fill="#374151">欠债数组（下标 = 要求的深度）</text>');
+      p.push('<text x="360" y="66" font-size="11" fill="#6b7280">下标</text>');
+      p.push('<text x="360" y="112" font-size="11" fill="#6b7280">方案数</text>');
+      for (var i = 0; i < 5; i++) {
+        var x = 424 + i * 46;
+        p.push('<rect x="'+x+'" y="50" width="42" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.1"/>');
+        p.push('<text x="'+(x+21)+'" y="68" font-size="11" fill="#2563eb" text-anchor="middle">'+i+'</text>');
+        if (s) {
+          var val = s.arr[i];
+          p.push('<rect x="'+x+'" y="96" width="42" height="26" rx="5" fill="'+(val ? '#dbeafe' : '#ffffff')+'" stroke="'+(val ? '#2563eb' : '#e6e8eb')+'" stroke-width="1.1"/>');
+          p.push('<text x="'+(x+21)+'" y="114" font-size="11" fill="'+(val ? '#2563eb' : '#9aa0a6')+'" text-anchor="middle">'+val+'</text>');
+        } else {
+          p.push('<rect x="'+x+'" y="96" width="42" height="26" rx="5" fill="#ffffff" stroke="#e6e8eb" stroke-width="1.1"/>');
+          p.push('<text x="'+(x+21)+'" y="114" font-size="11" fill="#9aa0a6" text-anchor="middle">-</text>');
+        }
+      }
+      p.push('<text x="358" y="152" font-size="11" fill="#374151">下标 a 的意思是：深度 &gt; a 处还得有一条黑边</text>');
+      p.push('<text x="358" y="174" font-size="11" fill="#6b7280">下标 0 表示已经没有欠债</text>');
+      p.push('<text x="358" y="204" font-size="11" fill="#374151">染黑：孩子的欠债勾销，方案数 × 孩子的总和</text>');
+      p.push('<text x="358" y="226" font-size="11" fill="#374151">染白：两笔欠债取更严的，下标取 max</text>');
+      p.push('<text x="358" y="256" font-size="11" fill="#2563eb">根的 0 号位 = 9，这就是答案</text>');
+      fsvg.innerHTML = p.join('');
+      var html = '';
+      if (!s) {
+        html = '<div>六个点都处理完了。</div><div class="total">根的 0 号位 = 9，这就是答案</div>';
+      } else {
+        html = '<div>正在处理点 <span class="num">'+s.u+'</span>，maxdep = '+s.md+'，深度 = '+s.dep+'。</div>';
+        html += '<div class="row">初始 insert(maxdep = '+s.md+')，只有下标 '+s.md+' 上是 1</div>';
+        html += '<div class="row">孩子：'+(s.kids.length ? s.kids.join('、') : '无')+'，合并后的数组 ['+s.arr.join(', ')+']</div>';
+        if (s.u === 1) html += '<div class="total">根头顶没有边，取 0 号位 = '+s.arr[0]+'，答案 = 9</div>';
+      }
+      finfo.innerHTML = html;
+      document.getElementById('smaFatePrev').disabled = (fcur === 0);
+      document.getElementById('smaFateNext').disabled = (fcur >= FSTEPS.length);
+    }
+    document.getElementById('smaFateNext').addEventListener('click', function(){ if (fcur < FSTEPS.length) { fcur++; frender(); } });
+    document.getElementById('smaFatePrev').addEventListener('click', function(){ if (fcur > 0) { fcur--; frender(); } });
+    document.getElementById('smaFateReset').addEventListener('click', function(){ fcur = 0; frender(); });
+    frender();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>树状数组优化建图 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .fw-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .fw-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .fw-btn:disabled{opacity:.4;cursor:default;}
+  @media(max-width:760px){
+    .fw-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>树状数组优化建图：前缀范围连边一次只要 O(log v) 条</h1>
+    <p class="intro">「袋中点权 1 到 p 的每个点，都向 x 连一条边权 w 的边」，这种前缀范围连边老实建是 O(n) 条。把树状数组的每个槽位变成一条按入袋时间增长的虚点链，一次范围操作只需要 O(log v) 条边，整张图的边数从平方级降到 O((n + m) log v)。</p>
+
+    <h2>零、背景</h2>
+    <p>优化建图处理的是「点到一片」的边：一条边的语义是连向某个范围里的所有点，而不是单个点。196 课的前缀优化建图用一条链解决「编号前缀」，点按编号排好，前缀 [1..p] 里的每个点通过链上中转互相到达，链是一次性摆好的。</p>
+    <p>这一课的问题麻烦在两点。范围落在点权上而不是编号上；点还是一个一个动态进袋的。值域上的前缀没法用一条链维护，点入袋的顺序和点权的大小没有任何关系，链摆好了新点就插不进去。</p>
+    <p>树状数组正好给出值域前缀的另一套分解：前缀 [1..p] 拆成 O(log v) 个槽位的并，每个槽位只管自己那一段值域。槽位内部再各自维护一条链，动态进袋就不再是问题。</p>
+
+    <h2>一、问题</h2>
+    <p>点的编号范围 1 到 n，点权范围 1 到 v。初始时袋子为空，没有任何边，要求实现四个方法：</p>
+    <table class="complexity">
+      <thead><tr><th>方法</th><th>语义</th></tr></thead>
+      <tbody>
+        <tr><td><code class="inline">add(x, xv)</code></td><td>编号 x、点权 xv 的点进入袋子；已入袋则忽略</td></tr>
+        <tr><td><code class="inline">rangeToX(p, x, w)</code></td><td>袋中点权范围 1 到 p 的每个点，向点 x 连边权 w 的边</td></tr>
+        <tr><td><code class="inline">xToRange(x, p, w)</code></td><td>点 x 向袋中点权范围 1 到 p 的每个点，连边权 w 的边</td></tr>
+        <tr><td><code class="inline">rangeToRange(p1, p2, w)</code></td><td>袋中点权 1 到 p1 的每个点，向袋中点权 1 到 p2 的每个点，连边权 w 的边</td></tr>
+      </tbody>
+    </table>
+    <p>建好图之后可以测任何图算法，课程代码里用 dijkstra 求最短路做对数器验证。所有语义边必须真的等价于「范围里每个点」，这是对数器检验的东西，也是后面 2-SAT 综合题敢用它的前提。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>袋子用什么存都行，查询时老实扫一遍：rangeToX 把袋里点权不超过 p 的点各连一条边，O(|bag|) 条；rangeToRange 双重循环，O(|bag|²) 条。点数、操作数到 10⁵ 级别时边数直接上 10¹⁰，存不下。</p>
+    <p>可以发现瓶颈只在「范围里的每个点」这半句。把范围换成一两个中转虚点，让虚点顺着零权边把流量分发给范围里的点，边数就掉下来了。</p>
+
+    <h2>三、前缀拆成 log 个槽</h2>
+    <p>树状数组的经典性质：前缀 [1..p] 可以在 p 不断减去 lowbit 的过程中拆成一串槽位 i₁、i₂、…，每个槽位 i 覆盖值域段 [i − lowbit(i) + 1, i]。这些值域段互不重叠，并起来恰好是 [1..p]，段数不超过 log v。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="前缀 1 到 7 分解成树状数组槽位" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="22" font-size="13" fill="#1f2328">值域 1~8，查询前缀 [1, 7]</text>
+        <g font-size="12" text-anchor="middle">
+          <rect x="40" y="36" width="56" height="26" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="68" y="53" fill="#1f2328">1</text>
+          <rect x="108" y="36" width="56" height="26" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="136" y="53" fill="#1f2328">2</text>
+          <rect x="176" y="36" width="56" height="26" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="204" y="53" fill="#1f2328">3</text>
+          <rect x="244" y="36" width="56" height="26" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="272" y="53" fill="#1f2328">4</text>
+          <rect x="312" y="36" width="56" height="26" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="340" y="53" fill="#1f2328">5</text>
+          <rect x="380" y="36" width="56" height="26" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="408" y="53" fill="#1f2328">6</text>
+          <rect x="448" y="36" width="56" height="26" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="476" y="53" fill="#1f2328">7</text>
+          <rect x="516" y="36" width="56" height="26" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="544" y="53" fill="#9aa0a6">8</text>
+        </g>
+        <path d="M40 70 L40 78 L504 78 L504 70" fill="none" stroke="#ea580c" stroke-width="1.6"/>
+        <text x="272" y="94" font-size="12" fill="#ea580c" text-anchor="middle">前缀 [1, 7] 不含 8</text>
+        <g font-size="12" text-anchor="middle">
+          <rect x="40" y="112" width="56" height="42" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="68" y="130" fill="#6b7280">槽 1</text>
+          <text x="68" y="146" font-size="10" fill="#9aa0a6">值 1</text>
+          <rect x="108" y="112" width="56" height="42" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="136" y="130" fill="#6b7280">槽 2</text>
+          <text x="136" y="146" font-size="10" fill="#9aa0a6">值 2</text>
+          <rect x="176" y="112" width="56" height="42" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="204" y="130" fill="#6b7280">槽 3</text>
+          <text x="204" y="146" font-size="10" fill="#9aa0a6">值 3</text>
+          <rect x="244" y="112" width="56" height="42" rx="4" fill="#eef4ff" stroke="#2563eb" stroke-width="1.8"/>
+          <text x="272" y="130" fill="#2563eb" font-weight="600">槽 4</text>
+          <text x="272" y="146" font-size="10" fill="#2563eb">值 1~4</text>
+          <rect x="312" y="112" width="56" height="42" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="340" y="130" fill="#6b7280">槽 5</text>
+          <text x="340" y="146" font-size="10" fill="#9aa0a6">值 5</text>
+          <rect x="380" y="112" width="56" height="42" rx="4" fill="#eef4ff" stroke="#2563eb" stroke-width="1.8"/>
+          <text x="408" y="130" fill="#2563eb" font-weight="600">槽 6</text>
+          <text x="408" y="146" font-size="10" fill="#2563eb">值 5~6</text>
+          <rect x="448" y="112" width="56" height="42" rx="4" fill="#eef4ff" stroke="#2563eb" stroke-width="1.8"/>
+          <text x="476" y="130" fill="#2563eb" font-weight="600">槽 7</text>
+          <text x="476" y="146" font-size="10" fill="#2563eb">值 7</text>
+          <rect x="516" y="112" width="56" height="42" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2" stroke-dasharray="4 3"/>
+          <text x="544" y="130" fill="#9aa0a6">槽 8</text>
+          <text x="544" y="146" font-size="10" fill="#9aa0a6">值 1~8</text>
+        </g>
+        <text x="30" y="186" font-size="13" fill="#1f2328">p = 7：7 − 1 = 6，6 − 2 = 4，4 − 4 = 0，前缀拆成槽 7、槽 6、槽 4</text>
+        <text x="30" y="208" font-size="13" fill="#2563eb">槽 7 ∪ 槽 6 ∪ 槽 4 = 值 7 ∪ 值 5~6 ∪ 值 1~4 = [1, 7]，段数最多 log v 个</text>
+        <text x="30" y="232" font-size="12" fill="#9aa0a6">槽 8 覆盖 1~8，越过了前缀右端点，所以不参与</text>
+      </svg>
+      <figcaption>前缀查询不用知道范围里具体有哪些点，只需要 O(log v) 个槽位各出一条边</figcaption>
+    </figure>
+
+    <p>于是「连向前缀里的每个点」变成「连向 log 个槽位」。剩下的问题是：槽位里装的是虚点还是实点？点动态进袋，槽位里放什么才能既收下新点、又让旧查询够得着？</p>
+
+    <h2>四、槽位里挂一条版本链</h2>
+    <p>每个槽位维护一条链，链上的节点是这个槽位收到的点，按入袋时间从老到新排列。方向是讲究的，出边和入边要两条方向相反的链：</p>
+    <p>out 链给「范围向 x 连边」用，链边方向是老节点指向新节点，点连向自己入袋那一刻的节点。这样任何一个历史点都能顺着链往前走，一直走到当前的链头。查询只需要从链头连一条边权 w 的边到 x，链头能被所有历史点到达，一条边就覆盖了整个前缀。</p>
+    <p>in 链给「x 向范围连边」用，方向整个反过来：新节点指向老节点，节点指向自己对应的点。x 连向链头，从链头顺着链往回走，就能到达这条链上出现过的每一个点。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 310" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="out 链与 in 链的方向" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="fwg" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="fwb" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+          </marker>
+          <marker id="fwo" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <text x="30" y="24" font-size="13" fill="#1f2328">out 链：老 → 新，历史点都能走到链头，链头统一连向查询目标</text>
+        <g font-size="12" text-anchor="middle">
+          <circle cx="110" cy="66" r="13" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="110" y="71" fill="#1f2328">p1</text>
+          <circle cx="230" cy="66" r="13" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="230" y="71" fill="#1f2328">p2</text>
+          <circle cx="350" cy="66" r="13" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="350" y="71" fill="#1f2328">p3</text>
+          <rect x="82" y="100" width="56" height="28" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="110" y="119" fill="#2563eb">c1 老</text>
+          <rect x="202" y="100" width="56" height="28" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="230" y="119" fill="#2563eb">c2</text>
+          <rect x="322" y="100" width="56" height="28" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="350" y="119" fill="#2563eb">c3 链头</text>
+          <rect x="470" y="100" width="70" height="28" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+          <text x="505" y="119" fill="#ea580c" font-weight="600">目标 x</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.5" fill="none" marker-end="url(#fwg)">
+          <line x1="110" y1="81" x2="110" y2="97"/>
+          <line x1="230" y1="81" x2="230" y2="97"/>
+          <line x1="350" y1="81" x2="350" y2="97"/>
+          <line x1="140" y1="114" x2="199" y2="114"/>
+          <line x1="260" y1="114" x2="319" y2="114"/>
+        </g>
+        <line x1="382" y1="114" x2="467" y2="114" stroke="#ea580c" stroke-width="1.8" marker-end="url(#fwo)"/>
+        <text x="424" y="106" font-size="11" fill="#ea580c" text-anchor="middle">边权 w</text>
+        <text x="30" y="168" font-size="12" fill="#9aa0a6">p1 入袋早，也要先走到链头 c3 再出去：链上走的都是 0 权边</text>
+
+        <text x="30" y="204" font-size="13" fill="#1f2328">in 链：新 → 老，x 连向链头后顺链分发到每个历史点</text>
+        <g font-size="12" text-anchor="middle">
+          <rect x="82" y="228" width="56" height="28" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="110" y="247" fill="#2563eb">i1 老</text>
+          <rect x="202" y="228" width="56" height="28" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="230" y="247" fill="#2563eb">i2</text>
+          <rect x="322" y="228" width="56" height="28" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="350" y="247" fill="#2563eb">i3 链头</text>
+          <rect x="470" y="228" width="70" height="28" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+          <text x="505" y="247" fill="#ea580c" font-weight="600">x</text>
+          <circle cx="110" cy="290" r="13" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="110" y="295" fill="#1f2328">p1</text>
+          <circle cx="230" cy="290" r="13" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="230" y="295" fill="#1f2328">p2</text>
+          <circle cx="350" cy="290" r="13" fill="#fff" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="350" y="295" fill="#1f2328">p3</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.5" fill="none" marker-end="url(#fwg)">
+          <line x1="260" y1="242" x2="141" y2="242"/>
+          <line x1="382" y1="242" x2="261" y2="242"/>
+          <line x1="110" y1="256" x2="110" y2="274"/>
+          <line x1="230" y1="256" x2="230" y2="274"/>
+          <line x1="350" y1="256" x2="350" y2="274"/>
+        </g>
+        <line x1="468" y1="242" x2="382" y2="242" stroke="#ea580c" stroke-width="1.8" marker-end="url(#fwo)"/>
+        <text x="424" y="234" font-size="11" fill="#ea580c" text-anchor="middle">边权 w</text>
+      </svg>
+      <figcaption>两条链方向相反：out 链把历史点汇聚到链头，in 链把链头分发给历史点</figcaption>
+    </figure>
+
+    <p>add(x, xv) 的代价由此确定：覆盖 xv 的槽位恰有 O(log v) 个（xv 不断加 lowbit），每个槽位在链头新挂一个节点、连两条零权边。一个点入袋，总共造 O(log v) 个虚点、O(log v) 条边。</p>
+
+    <h2>五、三个范围操作</h2>
+    <p>rangeToX(p, x, w)：把 p 按 lowbit 拆成槽位，每个非空槽位的 out 链头向 x 连一条边权 w 的边。xToRange(x, p, w) 完全对称，用 in 链。两次循环都是 O(log v)。</p>
+    <p>rangeToRange(p1, p2, w) 是前两个的组合：造两个新虚点 X、Y，前缀 [1..p1] 的链头连向 X（0 权），X 向 Y 连 w，Y 再用 in 链连向前缀 [1..p2]。经过 X 的路径恰好表达了「p1 范围的每个点到 p2 范围的每个点，代价都是 w」。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="rangeToRange 用两个虚点桥接" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="fwr" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="fwr2" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <g font-size="12" text-anchor="middle">
+          <rect x="30" y="60" width="150" height="52" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+          <text x="105" y="82" fill="#2563eb" font-weight="600">前缀 [1, p1]</text>
+          <text x="105" y="100" font-size="11" fill="#2563eb">out 链头们</text>
+          <rect x="250" y="66" width="56" height="40" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.6"/>
+          <text x="278" y="91" fill="#2563eb" font-weight="600">X</text>
+          <rect x="360" y="66" width="56" height="40" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.6"/>
+          <text x="388" y="91" fill="#2563eb" font-weight="600">Y</text>
+          <rect x="464" y="60" width="150" height="52" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+          <text x="539" y="82" fill="#ea580c" font-weight="600">前缀 [1, p2]</text>
+          <text x="539" y="100" font-size="11" fill="#ea580c">in 链头们</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.6" fill="none" marker-end="url(#fwr)">
+          <line x1="184" y1="86" x2="246" y2="86"/>
+          <line x1="420" y1="86" x2="460" y2="86"/>
+        </g>
+        <line x1="310" y1="86" x2="356" y2="86" stroke="#ea580c" stroke-width="2" marker-end="url(#fwr2)"/>
+        <text x="333" y="76" font-size="12" fill="#ea580c" text-anchor="middle">w</text>
+        <text x="214" y="74" font-size="11" fill="#9aa0a6" text-anchor="middle">0</text>
+        <text x="436" y="74" font-size="11" fill="#9aa0a6" text-anchor="middle">0</text>
+        <text x="30" y="30" font-size="13" fill="#1f2328">rangeToRange(p1, p2, w)：整片到整片，只需要两个虚点和一条 w 边</text>
+        <text x="30" y="148" font-size="12" fill="#6b7280">p1 范围的点走到 X 都是 0 权，X 到 Y 付一次 w，Y 到 p2 范围的点也是 0 权</text>
+      </svg>
+      <figcaption>范围到范围的边权只付一次，落在这条桥上</figcaption>
+    </figure>
+
+    <p>有个细节值得注意：链上的边全是 0 权，边权 w 只出现在真正表达语义的那条边上。所以 dijkstra 在虚图上算出的最短路，和朴素建出的图完全一致，对数器里两个版本的 dijkstra 逐对比较，任何一条不一致都会报错。</p>
+
+    <h2>六、演示</h2>
+    <p>值域 1 到 8，四个点依次入袋，然后做一次 rangeToX。点「下一步」看每个槽位的链怎么长出来、前缀怎么拆成槽。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　槽位版本链与一次前缀查询</div>
+      <div id="fwSvg"></div>
+      <div class="breakdown" id="fwStatus"></div>
+      <div class="viz-controls">
+        <button class="fw-btn" id="fwAuto">自动播放</button>
+        <button class="fw-btn" id="fwStep">下一步</button>
+        <button class="fw-btn" id="fwReset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot full"></span>链节点（标入袋的点）</span>
+        <span><span class="dot partial"></span>查询用的槽与边</span>
+        <span><span class="dot skip"></span>不参与的槽</span>
+      </div>
+    </div>
+
+    <h2>七、代码</h2>
+    <p>下面是建图部分的核心。链式前向星存边，cntt 给虚点编号，outTree、inTree 记录每个槽位的链头。对数器部分（暴力建图、双份 dijkstra、随机操作流）没有贴进来。</p>
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 1001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXV = 1001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXE = 100001;
+    <span class="kw">int</span> n, v, cntt;
+
+    <span class="kw">bool</span> inBag[MAXN];
+
+    <span class="kw">int</span> head[MAXT];
+    <span class="kw">int</span> nxt[MAXE];
+    <span class="kw">int</span> to[MAXE];
+    <span class="kw">int</span> weight[MAXE];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> outTree[MAXV];
+    <span class="kw">int</span> inTree[MAXV];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        weight[cntg] = w;
+        head[u] = cntg;
+    }
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &amp; -i;
+    }
+
+    <span class="kw">void</span> <span class="fn">addOut</span>(<span class="kw">int</span> x, <span class="kw">int</span> xv) {
+        <span class="kw">while</span> (xv &lt;= v) {
+            <span class="kw">int</span> preo = outTree[xv];
+            <span class="kw">int</span> curo = ++cntt;
+            <span class="kw">if</span> (preo &gt; 0) {
+                addEdge(preo, curo, 0);
+            }
+            addEdge(x, curo, 0);
+            outTree[xv] = curo;
+            xv += lowbit(xv);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">addIn</span>(<span class="kw">int</span> x, <span class="kw">int</span> xv) {
+        <span class="kw">while</span> (xv &lt;= v) {
+            <span class="kw">int</span> prei = inTree[xv];
+            <span class="kw">int</span> curi = ++cntt;
+            <span class="kw">if</span> (prei &gt; 0) {
+                addEdge(curi, prei, 0);
+            }
+            addEdge(curi, x, 0);
+            inTree[xv] = curi;
+            xv += lowbit(xv);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> x, <span class="kw">int</span> xv) {
+        <span class="kw">if</span> (!inBag[x]) {
+            inBag[x] = <span class="kw">true</span>;
+            addOut(x, xv);
+            addIn(x, xv);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">rangeToX</span>(<span class="kw">int</span> p, <span class="kw">int</span> x, <span class="kw">int</span> w) {
+        <span class="kw">while</span> (p &gt; 0) {
+            <span class="kw">if</span> (outTree[p] &gt; 0) {
+                addEdge(outTree[p], x, w);
+            }
+            p -= lowbit(p);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">xToRange</span>(<span class="kw">int</span> x, <span class="kw">int</span> p, <span class="kw">int</span> w) {
+        <span class="kw">while</span> (p &gt; 0) {
+            <span class="kw">if</span> (inTree[p] &gt; 0) {
+                addEdge(x, inTree[p], w);
+            }
+            p -= lowbit(p);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">rangeToRange</span>(<span class="kw">int</span> p1, <span class="kw">int</span> p2, <span class="kw">int</span> w) {
+        <span class="kw">int</span> x = ++cntt;
+        <span class="kw">int</span> y = ++cntt;
+        rangeToX(p1, x, 0);
+        xToRange(y, p2, 0);
+        addEdge(x, y, w);
+    }</pre>
+
+    <h2>八、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>新增规模</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>add(x, xv)</td><td><code class="inline">O(log v)</code></td><td>虚点 log v 个、边 O(log v) 条</td></tr>
+        <tr><td>rangeToX / xToRange</td><td><code class="inline">O(log v)</code></td><td>边 O(log v) 条</td></tr>
+        <tr><td>rangeToRange</td><td><code class="inline">O(log v)</code></td><td>虚点 2 个、边 O(log v) 条</td></tr>
+        <tr><td>建图总规模</td><td colspan="2">虚点 <code class="inline">n·log v + 2m</code> 个，边 <code class="inline">(n + m)·log v</code> 条</td></tr>
+        <tr><td>朴素建图（对照）</td><td colspan="2">rangeToRange 一条操作就 <code class="inline">O(n²)</code> 条边</td></tr>
+        <tr><td>dijkstra（虚图上）</td><td colspan="2"><code class="inline">O((n + m)·log v · log(n log v))</code></td></tr>
+      </tbody>
+    </table>
+    <p>时间上每个操作都贵在 lowbit 循环，最长 log v 步。整个交互过程是纯增量的：没有删除、没有重构，链只往头上加节点，所以均摊也不需要。</p>
+    <p>空间是链式前向星的常规开销：虚点数组、边数组都按 O((n + m) log v) 开，点权范围 v 只影响槽位下标的空间 O(v)。点数到 10⁵、值域到 10⁹ 时先离散化，槽位照样只有 O(n) 个量级。</p>
+
+    <h2>九、最后</h2>
+    <p>树状数组优化建图把「值域前缀连边」变成「log 个链头各出一条边」，代价是每个点多 log v 个虚点。链边全零权，语义边原样保留，任何图算法搬上来都不变形。</p>
+    <p>限制也很清楚：它只会切前缀 [1..p]。范围是任意区间 [l..r] 时，槽位分解就不够了，那要换成线段树按版本可持久化，是下一页的内容。范围进一步变成「两个权值都不超过我」的偏序关系时，数据结构也不够用了，得让 CDQ 分治上场。</p>
+    <p>这套结构在第四页还会再出现一次：P7477 的 2-SAT 蕴含边正好是「向左侧值排名前缀连边」，链按位置顺序增长，查询天然只看到过去，树状数组的版本链直接就是那道题的建边工厂。</p>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var COV = {1:'1',2:'2',3:'3',4:'1~4',5:'5',6:'5~6',7:'7',8:'1~8'};
+  var SLOT_W = 72, SLOT_X0 = 34, NODE_Y0 = 60, NODE_H = 26, NODE_GAP = 32;
+  function slotX(s){ return SLOT_X0 + (s - 1) * SLOT_W; }
+
+  var frames = [
+    { chains: {}, text: '初始状态：袋子为空。8 个槽位（值域 1~8）都没有链，槽头上标的是它覆盖的值域段。' },
+    { chains: {3:['①'],4:['①'],8:['①']}, newSlots:[3,4,8],
+      text: 'add(1, 3)：点 ①（点权 3）入袋。覆盖 3 的槽位是 3、4、8（3 + 1 = 4，4 + 4 = 8），每个槽新建一个链节点，① 向它们各连一条 0 权边。' },
+    { chains: {3:['①'],4:['①'],5:['②'],6:['②'],8:['②','①']}, newSlots:[5,6,8],
+      text: 'add(2, 5)：点 ②（点权 5）入袋，槽 5、6、8 建新节点。槽 8 已有 ① 的节点，边从老节点指向新节点，out 链的方向永远是老 → 新。' },
+    { chains: {3:['①'],4:['①'],5:['②'],6:['②'],7:['③'],8:['③','②','①']}, newSlots:[7,8],
+      text: 'add(3, 7)：点 ③（点权 7）入袋，槽 7、8 建新节点。槽 8 的链变成 ① → ② → ③，链头（最上面）是 ③。' },
+    { chains: {2:['④'],3:['①'],4:['④','①'],5:['②'],6:['②'],7:['③'],8:['④','③','②','①']}, newSlots:[2,4,8],
+      text: 'add(4, 2)：点 ④（点权 2）入袋，槽 2、4、8 建新节点。槽 4 的链：① → ④；槽 8 的链：① → ② → ③ → ④。袋里现在 4 个点。' },
+    { chains: {2:['④'],3:['①'],4:['④','①'],5:['②'],6:['②'],7:['③'],8:['④','③','②','①']}, query:{p:7, x:5, w:6},
+      text: 'rangeToX(7, 5, w=6)：前缀 [1..7] 分解成槽 7、6、4（7 − 1 = 6，6 − 2 = 4，4 − 4 = 0）。三个槽的链头 ③、②、④ 各连一条边权 6 的边到 5 号点。槽 8 覆盖 1~8 越过了前缀右端，不参与。' },
+    { chains: {2:['④'],3:['①'],4:['④','①'],5:['②'],6:['②'],7:['③'],8:['④','③','②','①']}, query:{p:7, x:5, w:6}, path:{slot:4, from:'①'},
+      text: '检查 ①（点权 3）：① → 槽 4 里自己那个节点 → 顺链到链头 ④ → 5 号点，链上全是 0 权边，只在最后付一次 6。四个袋内点全都这样到达 5 号点，3 条查询边覆盖了朴素做法的 4 条边，规模越大差距越大。' }
+  ];
+
+  function build(f){
+    var svg = '<svg viewBox="0 0 620 316" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+    svg += '<defs>';
+    svg += '<marker id="dm" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/></marker>';
+    svg += '<marker id="dm2" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/></marker>';
+    svg += '</defs>';
+    var qSlots = f.query ? [7, 6, 4] : [];
+    for (var s = 1; s <= 8; s++) {
+      var x = slotX(s);
+      var inQ = qSlots.indexOf(s) >= 0;
+      var head = '<rect x="' + x + '" y="8" width="58" height="40" rx="5" fill="' + (inQ ? '#ffedd5' : '#f6f7f9') + '" stroke="' + (inQ ? '#ea580c' : '#e6e8eb') + '" stroke-width="' + (inQ ? 1.8 : 1.2) + '"/>';
+      head += '<text x="' + (x + 29) + '" y="24" font-size="12" text-anchor="middle" fill="' + (inQ ? '#ea580c' : '#6b7280') + '" font-weight="600">槽 ' + s + '</text>';
+      head += '<text x="' + (x + 29) + '" y="40" font-size="10" text-anchor="middle" fill="#9aa0a6">值 ' + COV[s] + '</text>';
+      svg += head;
+    }
+    var nodePos = {};
+    for (var slot in f.chains) {
+      var list = f.chains[slot];
+      for (var i = 0; i < list.length; i++) {
+        var sx = slotX(parseInt(slot, 10));
+        var y = NODE_Y0 + i * NODE_GAP;
+        nodePos[slot + '_' + list[i]] = { x: sx + 29, y: y, bottom: y + NODE_H };
+        var isNew = f.newSlots && f.newSlots.indexOf(parseInt(slot, 10)) >= 0 && i === 0;
+        svg += '<rect x="' + (sx + 1) + '" y="' + y + '" width="56" height="' + NODE_H + '" rx="5" fill="' + (isNew ? '#dbeafe' : '#eef4ff') + '" stroke="#2563eb" stroke-width="1.4"/>';
+        svg += '<text x="' + (sx + 29) + '" y="' + (y + 17) + '" font-size="12" text-anchor="middle" fill="#2563eb" font-weight="600">' + list[i] + '</text>';
+        if (i + 1 < list.length) {
+          var y2 = NODE_Y0 + (i + 1) * NODE_GAP;
+          svg += '<line x1="' + (sx + 29) + '" y1="' + y2 + '" x2="' + (sx + 29) + '" y2="' + (y - 1) + '" stroke="#9aa0a6" stroke-width="1.4" marker-end="url(#dm)"/>';
+        }
+      }
+    }
+    if (f.query) {
+      var heads = [['7', '③'], ['6', '②'], ['4', '④']];
+      var tx = 300, ty = 262;
+      svg += '<rect x="' + (tx - 52) + '" y="' + ty + '" width="104" height="30" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>';
+      svg += '<text x="' + tx + '" y="' + (ty + 20) + '" font-size="13" text-anchor="middle" fill="#ea580c" font-weight="600">5 号点 x</text>';
+      for (var k = 0; k < heads.length; k++) {
+        var hp = nodePos[heads[k][0] + '_' + heads[k][1]];
+        if (!hp) continue;
+        var isPath = f.path && f.path.slot === parseInt(heads[k][0], 10);
+        svg += '<line x1="' + hp.x + '" y1="' + hp.bottom + '" x2="' + tx + '" y2="' + (ty - 2) + '" stroke="' + (isPath ? '#ea580c' : '#f59e0b') + '" stroke-width="' + (isPath ? 2.2 : 1.6) + '" marker-end="url(#dm2)"/>';
+        svg += '<text x="' + ((hp.x + tx) / 2 + 8) + '" y="' + ((hp.bottom + ty) / 2 - 4) + '" font-size="11" fill="#ea580c">w=6</text>';
+      }
+      if (f.path) {
+        var pl = f.chains[f.path.slot];
+        var yNew = NODE_Y0, yOld = NODE_Y0 + NODE_GAP;
+        svg += '<line x1="' + (slotX(f.path.slot) + 29) + '" y1="' + (yOld + 4) + '" x2="' + (slotX(f.path.slot) + 29) + '" y2="' + (yNew + NODE_H + 2) + '" stroke="#ea580c" stroke-width="2.2" marker-end="url(#dm2)"/>';
+      }
+    }
+    svg += '</svg>';
+    return svg;
+  }
+
+  var svgEl = document.getElementById('fwSvg');
+  var statusEl = document.getElementById('fwStatus');
+  var btnStep = document.getElementById('fwStep');
+  var btnAuto = document.getElementById('fwAuto');
+  var btnReset = document.getElementById('fwReset');
+  var cur = 0;
+  var timer = null;
+
+  function render() {
+    var f = frames[cur];
+    svgEl.innerHTML = build(f);
+    statusEl.innerHTML = '<div class="row">第 ' + cur + ' / ' + (frames.length - 1) + ' 步</div>' +
+                         '<div class="row" style="margin-top:4px;">' + f.text + '</div>';
+    btnStep.disabled = (cur >= frames.length - 1);
+  }
+  function step() {
+    if (cur >= frames.length - 1) { render(); return; }
+    cur++;
+    render();
+  }
+  function stopAuto() {
+    if (timer) { clearInterval(timer); timer = null; }
+    btnAuto.textContent = '自动播放';
+  }
+  function toggleAuto() {
+    if (timer) { stopAuto(); return; }
+    btnAuto.textContent = '暂停';
+    timer = setInterval(function() {
+      if (cur >= frames.length - 1) { stopAuto(); return; }
+      cur++;
+      render();
+    }, 3200);
+  }
+  function reset() {
+    stopAuto();
+    cur = 0;
+    render();
+  }
+  btnStep.addEventListener('click', step);
+  btnAuto.addEventListener('click', toggleAuto);
+  btnReset.addEventListener('click', reset);
+  render();
+})();
+</script>
+</body>
+</html>

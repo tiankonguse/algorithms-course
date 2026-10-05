@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>割边与边双连通分量 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .ce-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .ce-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .ce-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #ceSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .ce-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>割边与边双连通分量</h1>
+    <p class="intro">这一讲讲的是无向图上最基础的一件事：删掉哪条边会让图断开。这样的边叫割边，也常叫桥。把桥都找出来，剩下的极大块就是边双连通分量；把每个块缩成一个点，图就成了一棵树。整讲七道题，前四道只用到割边，后三道在缩点后的树上做。这一页先把两个模版（求割边、求边双并缩点）讲清楚，题目下一节集中看。</p>
+
+    <h2>零、背景</h2>
+    <p>无向图里，「删掉这条边，连通块变多」的边叫割边，也叫桥。等价的说法是：这条边不属于任何一个环。环上的边删掉一条，环上其余的点还能绕另一侧走通；连接两个环、或者一条挂在环外的尾巴，删掉就断了。</p>
+    <p>先把无向图建图的技巧摆出来，后面两页都靠它。边的编号从 2 开始，正反两条边编号相邻：如果一条边是 <code class="inline">e</code>，它的反向边就是 <code class="inline">e ^ 1</code>，这条无向边的编号是 <code class="inline">e >> 1</code>。</p>
+    <p>这样建图有两个好处。一是 tarjan 里判断「来时那条边」只要比较 <code class="inline">(e ^ 1) == preEdge</code>，不用记父点，重边和自环也不会误判；二是按 <code class="inline">e >> 1</code> 就能直接给无向边编号存标记。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="割边的定义" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#c9ced4" stroke-width="1.5" fill="none">
+          <line x1="90" y1="60" x2="170" y2="130"/>
+          <line x1="170" y1="130" x2="90" y2="200"/>
+          <line x1="90" y1="200" x2="90" y2="60"/>
+          <line x1="290" y1="200" x2="370" y2="130"/>
+          <line x1="370" y1="130" x2="290" y2="60"/>
+          <line x1="290" y1="60" x2="290" y2="200"/>
+        </g>
+        <line x1="90" y1="200" x2="290" y2="200" stroke="#ea580c" stroke-width="2.8"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="90" cy="60" r="15"/>
+          <circle cx="170" cy="130" r="15"/>
+          <circle cx="90" cy="200" r="15"/>
+          <circle cx="290" cy="200" r="15"/>
+          <circle cx="370" cy="130" r="15"/>
+          <circle cx="290" cy="60" r="15"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="90" y="64">1</text>
+          <text x="170" y="134">2</text>
+          <text x="90" y="204">3</text>
+          <text x="290" y="204">4</text>
+          <text x="370" y="134">5</text>
+          <text x="290" y="64">6</text>
+        </g>
+        <text x="190" y="190" font-size="10" fill="#ea580c" text-anchor="middle">割边</text>
+        <text x="430" y="74" font-size="11" fill="#374151">环上的边删掉，</text>
+        <text x="430" y="94" font-size="11" fill="#374151">剩下两点还能绕过去；</text>
+        <text x="430" y="126" font-size="11" fill="#ea580c">连接两环的 3-4</text>
+        <text x="430" y="146" font-size="11" fill="#ea580c">删掉，连通区加一。</text>
+        <text x="30" y="228" font-size="11" fill="#6b7280">橙色 3-4 是桥，两个三角形各自是边双</text>
+      </svg>
+      <figcaption>割边就是不属于任何环的边：删掉它，图的连通块数量增加</figcaption>
+    </figure>
+
+    <h2>一、Tarjan 求割边</h2>
+    <p>求割边是 tarjan 求强连通分量的一处微调，还是那两个数组：<code class="inline">dfn[u]</code> 是 u 第一次被访问的时间，<code class="inline">low[u]</code> 是 u 及其子树能回到的最小 dfn。</p>
+    <p>dfs 时遇到一条边，分三种情况。到没访问过的点是树边，递归下去，回来用 <code class="inline">low[v]</code> 更新 <code class="inline">low[u]</code>；到访问过、且不是来时边的点是回边，用 <code class="inline">dfn[v]</code> 更新 <code class="inline">low[u]</code>；来时那条边直接跳过。</p>
+    <p>判定的位置在树边回溯处：如果 <code class="inline">low[v] &gt; dfn[u]</code>，说明 v 的子树里没有任何一条回边能回到 u 或更早，删掉 u-v 就断了，它是割边。</p>
+    <p>这里有个细节：更新 <code class="inline">low[u]</code> 时必须传 <code class="inline">preEdge</code> 而不是父点。重边的情况下，指向父点的那条平行边是一条合法的回边，用父点判断会把它当成来时边跳过，从而漏掉该环、把边误判成割边。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 224" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="low 与 dfn 判定割边" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="58" y="118" width="184" height="88" rx="8" fill="#eef4ff" stroke="#9aa0a6" stroke-width="1.2" stroke-dasharray="6 4"/>
+        <text x="62" y="112" font-size="10" fill="#6b7280">v 的子树</text>
+        <line x1="150" y1="60" x2="150" y2="140" stroke="#ea580c" stroke-width="3"/>
+        <line x1="150" y1="140" x2="95" y2="190" stroke="#c9ced4" stroke-width="1.5"/>
+        <line x1="150" y1="140" x2="205" y2="190" stroke="#c9ced4" stroke-width="1.5"/>
+        <circle cx="150" cy="60" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+        <circle cx="150" cy="140" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.3">
+          <circle cx="95" cy="190" r="13"/>
+          <circle cx="205" cy="190" r="13"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="150" y="64">u</text>
+          <text x="150" y="144">v</text>
+          <text x="95" y="194">·</text>
+          <text x="205" y="194">·</text>
+        </g>
+        <text x="285" y="60" font-size="11" fill="#374151">树边 u-v 回溯时：</text>
+        <text x="285" y="84" font-size="11" fill="#2563eb">low[v] 是 v 子树能回到的最小 dfn</text>
+        <text x="285" y="112" font-size="11" fill="#ea580c">low[v] &gt; dfn[u]</text>
+        <text x="285" y="134" font-size="11" fill="#374151">说明子树里没有回边跨过 u，</text>
+        <text x="285" y="154" font-size="11" fill="#374151">删掉 u-v 就断开，它是桥。</text>
+        <text x="285" y="182" font-size="11" fill="#6b7280">否则子树有一条回边绕上来，</text>
+        <text x="285" y="200" font-size="11" fill="#6b7280">这条边在某个环上，不是桥。</text>
+      </svg>
+      <figcaption>割边的判定式 low[v] &gt; dfn[u]：子树 v 里没有回边能绕过 u 回到更早</figcaption>
+    </figure>
+
+    <p>模版题一的完整代码。多连通区、重边、自环都直接可过：自环的反向边就是自己，遍历时被 <code class="inline">(e ^ 1) == preEdge</code> 跳过，不会带来影响；重边靠边编号判断父边，不会被误跳。</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 2000001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">bool</span> cutEdge[MAXM];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u, <span class="kw">int</span> preEdge) {
+        dfn[u] = low[u] = ++cntd;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">if</span> ((e ^ 1) == preEdge) {
+                <span class="kw">continue</span>;
+            }
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v, e);
+                low[u] = min(low[u], low[v]);
+                <span class="kw">if</span> (low[v] &gt; dfn[u]) {
+                    cutEdge[e &gt;&gt; 1] = <span class="kw">true</span>;
+                }
+            } <span class="kw">else</span> {
+                low[u] = min(low[u], dfn[v]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cntg = 1;
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= m; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i, 0);
+            }
+        }
+        <span class="kw">int</span> ansCnt = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">if</span> (cutEdge[i]) {
+                ansCnt++;
+            }
+        }
+        cout &lt;&lt; ansCnt &lt;&lt; "\n";
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">if</span> (cutEdge[i]) {
+                cout &lt;&lt; i &lt;&lt; " ";
+            }
+        }
+        cout &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <p>模版题二是同一个算法换成 LeetCode 的接口，输出每条割边的两个端点。核心只有 <code class="inline">tarjan</code> 一处判定，把 <code class="inline">cutEdge[e >> 1]</code> 记为真，最后扫一遍边表输出。</p>
+
+    <pre class="code"><span class="kw">class</span> Solution {
+    <span class="kw">public</span>:
+        <span class="kw">static</span> <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+        <span class="kw">static</span> <span class="kw">const</span> <span class="kw">int</span> MAXM = 100001;
+        <span class="kw">int</span> n, m;
+
+        <span class="kw">int</span> a[MAXM];
+        <span class="kw">int</span> b[MAXM];
+
+        <span class="kw">int</span> head[MAXN];
+        <span class="kw">int</span> nxt[MAXM &lt;&lt; 1];
+        <span class="kw">int</span> to[MAXM &lt;&lt; 1];
+        <span class="kw">int</span> cntg;
+
+        <span class="kw">int</span> dfn[MAXN];
+        <span class="kw">int</span> low[MAXN];
+        <span class="kw">int</span> cntd;
+
+        <span class="kw">bool</span> cutEdge[MAXM];
+
+        <span class="kw">void</span> <span class="fn">prepare</span>() {
+            cntg = 1;
+            cntd = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+                head[i] = dfn[i] = low[i] = 0;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+                cutEdge[i] = <span class="kw">false</span>;
+            }
+        }
+
+        <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+            nxt[++cntg] = head[u];
+            to[cntg] = v;
+            head[u] = cntg;
+        }
+
+        <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u, <span class="kw">int</span> preEdge) {
+            dfn[u] = low[u] = ++cntd;
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+                <span class="kw">if</span> ((e ^ 1) == preEdge) {
+                    <span class="kw">continue</span>;
+                }
+                <span class="kw">int</span> v = to[e];
+                <span class="kw">if</span> (dfn[v] == 0) {
+                    tarjan(v, e);
+                    low[u] = min(low[u], low[v]);
+                    <span class="kw">if</span> (low[v] &gt; dfn[u]) {
+                        cutEdge[e &gt;&gt; 1] = <span class="kw">true</span>;
+                    }
+                } <span class="kw">else</span> {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">criticalConnections</span>(<span class="kw">int</span> nodeCnt, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; connections) {
+            n = nodeCnt;
+            m = (<span class="kw">int</span>)connections.size();
+            prepare();
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+                a[i] = connections[i - 1][0] + 1;
+                b[i] = connections[i - 1][1] + 1;
+                addEdge(a[i], b[i]);
+                addEdge(b[i], a[i]);
+            }
+            tarjan(1, 0);
+            vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; ans;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+                <span class="kw">if</span> (cutEdge[i]) {
+                    ans.push_back({a[i] - 1, b[i] - 1});
+                }
+            }
+            <span class="kw">return</span> ans;
+        }
+    };</pre>
+
+    <h2>二、边双连通分量与缩点</h2>
+    <p>两个点 u、v 是边双连通的，指随便删掉图上一条边之后它们仍然连通。一个极大的边双连通点集就是一个边双连通分量，简称边双（E-BCC）。</p>
+    <p>换成割边的语言：两个点边双连通，当且仅当它们之间的所有路径都不经过桥。所以删掉全部桥之后，每个连通块正好是一个边双。桥的两侧必然落在不同边双里，边双内部一条桥都没有。</p>
+    <p>求法和强连通分量几乎一样，用一个栈。dfn 与 low 照旧，访问到 u 时把 u 压栈；当 <code class="inline">dfn[u] == low[u]</code> 时，u 就是它所在边双里 dfn 最小的点，从栈顶一直弹到 u，弹出的这些点同属一个边双。</p>
+    <p>把每个边双缩成一个点，桥就变成连接这些新点的边。桥不在任何环上，所以缩点后不会再有环；原图连通时，缩点结果正好是一棵树。后面所有题都在这棵树上做。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 244" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="边双缩点成树" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#2563eb" stroke-width="1.5" fill="none">
+          <line x1="70" y1="70" x2="140" y2="130"/>
+          <line x1="140" y1="130" x2="70" y2="190"/>
+          <line x1="70" y1="190" x2="70" y2="70"/>
+          <line x1="220" y1="190" x2="290" y2="130"/>
+          <line x1="290" y1="130" x2="220" y2="70"/>
+          <line x1="220" y1="70" x2="220" y2="190"/>
+        </g>
+        <line x1="70" y1="190" x2="220" y2="190" stroke="#ea580c" stroke-width="2.8"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="70" cy="70" r="14"/>
+          <circle cx="140" cy="130" r="14"/>
+          <circle cx="70" cy="190" r="14"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.4">
+          <circle cx="220" cy="190" r="14"/>
+          <circle cx="290" cy="130" r="14"/>
+          <circle cx="220" cy="70" r="14"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="70" y="74">1</text>
+          <text x="140" y="134">2</text>
+          <text x="70" y="194">3</text>
+          <text x="220" y="194">4</text>
+          <text x="290" y="134">5</text>
+          <text x="220" y="74">6</text>
+        </g>
+        <path d="M 336 126 l 16 6 l -16 6" stroke="#9aa0a6" stroke-width="1.6" fill="none"/>
+        <line x1="326" y1="132" x2="352" y2="132" stroke="#9aa0a6" stroke-width="1.6" stroke-dasharray="4 3"/>
+        <circle cx="440" cy="132" r="20" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <circle cx="550" cy="132" r="20" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <line x1="460" y1="132" x2="530" y2="132" stroke="#ea580c" stroke-width="2.6"/>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="440" y="136">A</text>
+          <text x="550" y="136">B</text>
+        </g>
+        <text x="30" y="228" font-size="11" fill="#6b7280">每个边双缩成一个点，桥变成树边，原图变成一棵树</text>
+      </svg>
+      <figcaption>边双缩点：桥两侧的边双分开，桥成为缩点树上的一条边</figcaption>
+    </figure>
+
+    <p>边双模版题的完整代码，弹栈时顺便记录每个边双的大小和成员。</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 2000001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> ebccSiz[MAXN];
+    <span class="kw">int</span> ebccArr[MAXN];
+    <span class="kw">int</span> ebccl[MAXN];
+    <span class="kw">int</span> ebccr[MAXN];
+    <span class="kw">int</span> idx;
+    <span class="kw">int</span> ebccCnt;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u, <span class="kw">int</span> preEdge) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">if</span> ((e ^ 1) == preEdge) {
+                <span class="kw">continue</span>;
+            }
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v, e);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                low[u] = min(low[u], dfn[v]);
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            ebccCnt++;
+            ebccSiz[ebccCnt] = 0;
+            ebccl[ebccCnt] = idx + 1;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                ebccSiz[ebccCnt]++;
+                ebccArr[++idx] = pop;
+            } <span class="kw">while</span> (pop != u);
+            ebccr[ebccCnt] = idx;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cntg = 1;
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= m; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i, 0);
+            }
+        }
+        cout &lt;&lt; ebccCnt &lt;&lt; "\n";
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= ebccCnt; i++) {
+            cout &lt;&lt; ebccSiz[i] &lt;&lt; "\n";
+            <span class="kw">for</span> (<span class="kw">int</span> j = ebccl[i]; j &lt;= ebccr[i]; j++) {
+                cout &lt;&lt; ebccArr[j] &lt;&lt; " ";
+            }
+            cout &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <div class="viz">
+      <div class="viz-title">Tarjan 一边求割边，一边把边双弹出来</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">用一个小图走一遍：两个三角形由一条边相连。点「下一步」看 dfn / low 怎么记、回边怎么把 low 压小、哪条边被判成桥，最后两个边双各自弹出并缩成树上的一个点。</p>
+      <svg id="ceSvg" viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Tarjan 求割边与边双演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>当前 dfs 的环</span>
+        <span><span class="dot partial"></span>某个边双里的点</span>
+        <span><span class="dot skip"></span>还没走到的点</span>
+      </div>
+      <div class="breakdown" id="ceInfo"></div>
+      <div class="viz-controls">
+        <button class="ce-btn" id="cePrev" type="button">上一步</button>
+        <button class="ce-btn" id="ceNext" type="button">下一步</button>
+        <button class="ce-btn" id="ceReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>三、复杂度分析</h2>
+    <p>建图和 tarjan 都是每条边遍历常数次，缩点再扫一遍边表，整体一遍线性。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>链式前向星建图（n 点 m 边）</td><td><code class="inline">O(n + m)</code></td><td rowspan="4"><code class="inline">O(n + m)</code>（前向星 <code class="inline">2m</code> 条有向边 + dfn / low / 栈）</td></tr>
+        <tr><td>tarjan 求割边（每个连通区一次 dfs）</td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>tarjan 求边双并弹栈</td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>缩点重建树（扫边表、按 <code class="inline">belong</code> 连边）</td><td><code class="inline">O(n + m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>求割边那份代码里，<code class="inline">head</code> / <code class="inline">nxt</code> / <code class="inline">to</code> 三个数组各开 <code class="inline">2m + 1</code>，dfn / low / 栈都只开 n 个。规模到 5×10⁵ 点、2×10⁶ 边时，这是这一类题里最省的一套写法。</p>
+
+    <h2>四、最后</h2>
+    <p>割边和边双都只是两个数组加一个栈，真正的分界只有两条：割边看树边回溯时 <code class="inline">low[v] &gt; dfn[u]</code> 是否成立，边双看 <code class="inline">dfn[u] == low[u]</code> 时弹栈。其余全是同一段 tarjan。</p>
+    <p>模版讲完了，下一讲换这些模版在题目里的用法：一条边的两侧各有多少服务、无桥时怎么给边定向、加边后桥数怎么变、最少补几条边能让整张图没有桥。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var svg = document.getElementById('ceSvg');
+  if (!svg) return;
+  var info = document.getElementById('ceInfo');
+  var prev = document.getElementById('cePrev');
+  var next = document.getElementById('ceNext');
+  var reset = document.getElementById('ceReset');
+
+  var N = {1:[80,60],2:[178,140],3:[80,220],4:[300,220],5:[400,140],6:[300,60]};
+  var E = [[1,2],[2,3],[3,1],[3,4],[4,5],[5,6],[6,4]];
+  var DFN = {1:'1',2:'2',3:'3',4:'4',5:'5',6:'6'};
+  var LOW = {1:'1',2:'1',3:'1',4:'4',5:'4',6:'4'};
+  var GRP = {1:1,2:1,3:1,4:2,5:2,6:2};
+
+  var STEPS = [
+    {t:'原图', s:'两个三角形由 3-4 一条边相连，共 6 点 7 边。先按链式前向星建图。', ring:[], bridge:false, mark:false},
+    {t:'从 1 出发 dfs，记 dfn', s:'dfn 是第一次访问的时间序号。按 1-2-3-4-5-6 的顺序依次标上 1 到 6。', ring:[], bridge:false, mark:true},
+    {t:'环 1-2-3 里的回边', s:'走到 3 时遇到回边 3→1，low[3] 压到 dfn[1]=1；回溯时 2、1 的 low 同样压到 1。', ring:['1-2','2-3','1-3'], bridge:false, mark:true},
+    {t:'环 4-5-6 里的回边', s:'进入 4 之后，回边 6→4 把 low[6]、low[5]、low[4] 都压到 dfn[4]=4。', ring:['4-5','5-6','4-6'], bridge:false, mark:true},
+    {t:'判定桥 3-4', s:'回到 3 时看子树 4：low[4]=4 > dfn[3]=3，子树里没有回边跨过 3，边 3-4 是桥。', ring:[], bridge:true, mark:true},
+    {t:'弹栈得到边双', s:'dfn[u]==low[u] 时弹栈：先把 4、5、6 弹出成一个边双，再把 3、2、1 弹出成另一个。', ring:[], bridge:true, mark:true, group:true},
+    {t:'缩点成树', s:'每个边双缩成一个点，桥 3-4 变成树上的一条边，原图变成一棵两点的树。', ring:[], bridge:true, mark:true, group:true}
+  ];
+  var at = 0;
+
+  function key(a,b){ return Math.min(a,b) + '-' + Math.max(a,b); }
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+    p.push('<rect x="14" y="10" width="592" height="278" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+
+    E.forEach(function(e){
+      var a = N[e[0]], b = N[e[1]];
+      var k = key(e[0], e[1]);
+      var isBridge = k === '3-4';
+      var stroke = '#c9ced4', w = 1.5;
+      if (st.bridge && isBridge){ stroke = '#ea580c'; w = 3; }
+      else if (st.ring.indexOf(k) >= 0){ stroke = '#ea580c'; w = 2.4; }
+      p.push('<line x1="'+a[0]+'" y1="'+a[1]+'" x2="'+b[0]+'" y2="'+b[1]+'" stroke="'+stroke+'" stroke-width="'+w+'"/>');
+    });
+
+    Object.keys(N).forEach(function(k){
+      var c = N[k];
+      var fill = '#f6f7f9', stroke = '#9aa0a6';
+      if (st.group){
+        if (GRP[k] === 1){ fill = '#dbeafe'; stroke = '#2563eb'; }
+        else { fill = '#ffedd5'; stroke = '#ea580c'; }
+      } else if (st.ring.length || st.bridge){
+        fill = '#dbeafe'; stroke = '#2563eb';
+      }
+      p.push('<circle cx="'+c[0]+'" cy="'+c[1]+'" r="16" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.5"/>');
+      p.push('<text x="'+c[0]+'" y="'+(c[1]+4)+'" font-size="12" fill="#1f2328" text-anchor="middle">'+k+'</text>');
+      if (st.mark){
+        p.push('<text x="'+(c[0]-26)+'" y="'+(c[1]+4)+'" font-size="10" fill="#2563eb" text-anchor="middle">d'+DFN[k]+'</text>');
+        p.push('<text x="'+(c[0]+26)+'" y="'+(c[1]+4)+'" font-size="10" fill="#ea580c" text-anchor="middle">l'+LOW[k]+'</text>');
+      }
+    });
+
+    if (at >= 5){
+      p.push('<text x="430" y="72" font-size="11" fill="#2563eb">边双 A：{1,2,3}</text>');
+      p.push('<text x="430" y="94" font-size="11" fill="#ea580c">边双 B：{4,5,6}</text>');
+    }
+    if (at >= 6){
+      p.push('<text x="430" y="130" font-size="11" fill="#374151">缩点后：A — B</text>');
+      p.push('<text x="430" y="152" font-size="11" fill="#6b7280">一棵两点一边的树</text>');
+    }
+    if (at === 4){
+      p.push('<text x="430" y="80" font-size="11" fill="#ea580c">low[4]=4 &gt; dfn[3]=3</text>');
+      p.push('<text x="430" y="102" font-size="11" fill="#ea580c">3-4 是桥</text>');
+    }
+    p.push('<text x="40" y="278" font-size="11" fill="#6b7280">d = dfn，l = low；橙线是当前正在看的环或桥</text>');
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div><strong>' + st.t + '</strong><span>：</span></div><div>' + st.s + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if (at > 0){ at--; render(); } });
+  next.addEventListener('click', function(){ if (at < STEPS.length - 1){ at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

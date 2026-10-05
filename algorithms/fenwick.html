@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>树状数组 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.arr-cell{
+  width:40px;height:40px;display:flex;align-items:center;justify-content:center;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+  font-size:15px;font-variant-numeric:tabular-nums;
+  transition:background .12s,border-color .12s;
+}
+.arr-cell.full{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.arr-cell.partial{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+.arr-cell.dim{opacity:.35;}
+.fen-row{display:flex;align-items:center;gap:8px;margin:5px 0;}
+.fen-tag{width:16px;flex:0 0 16px;font-size:13px;color:var(--text-dim);font-weight:600;text-align:right;}
+.fen-cells{display:flex;gap:4px;overflow-x:auto;padding-bottom:2px;}
+.fen-cells .arr-cell{flex:0 0 auto;}
+.fen-idx{width:40px;flex:0 0 40px;height:16px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-dim);}
+
+
+@media(max-width:760px){
+  .arr-cell{width:34px;height:34px;font-size:13px;}
+  .fen-idx{width:34px;flex:0 0 34px;}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>树状数组</h1>
+    <p class="intro">每个 c[i] 只管 lowbit(i) 那么长的一段。查询沿 i −= lowbit(i) 往下跳，修改沿 i += lowbit(i) 往上跳，两边都是 O(log n)。</p>
+
+    <h2>零、背景</h2>
+    <p>分块那一节讲的是同一个问题：数组改一改、查一查，两种操作混着来。分块把查询压到 O(√n)，已经能用。</p>
+    <p>树状数组是另一条路。它借助二进制里的 lowbit，把查询和修改都压到 O(log n)，代码比线段树短得多，是这类题最常见的写法。</p>
+    <p>下面还是从那个问题出发，把树状数组是怎么设计的推一遍。</p>
+
+    <h2>一、问题</h2>
+    <p>长度为 n 的数组 a，支持两种操作。</p>
+    <ul>
+      <li>查询：求区间 [l, r] 的和。</li>
+      <li>修改：把 a[i] 加上 delta。</li>
+    </ul>
+    <p>两种操作交替出现，一共 m 次。</p>
+    <p>举例还是这一组数据，n = 16。</p>
+    <pre class="code">a = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3]</pre>
+    <p>树状数组的下标一律从 1 开始。这不是习惯问题，lowbit(0) 等于 0，循环会卡死，必须把 0 让出来。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>第一种写法，查询时从 l 一路加到 r。查询 O(n)，修改 O(1)。</p>
+    <p>第二种写法，预处理出前缀和 prefix[i] = a[1] + … + a[i]，区间和就是一次减法。</p>
+    <pre class="code">区间和 [l, r] = prefix[r] - prefix[l-1]</pre>
+    <p>查询变成 O(1)，代价落在修改上。a[i] 一变，prefix[i] 到 prefix[n] 全都要跟着改，最坏改 n 个，是 O(n)。</p>
+    <p>可以发现，两种写法各占一头，一个查询慢，一个修改慢。m 次操作混着来的时候，总有一个方向拖后腿。</p>
+    <p>那有没有两头都不慢的做法？有。思路是别让每个位置都从头到尾存一遍，改成每个位置只管一段，而且管得有规律。这就是树状数组。</p>
+
+    <h2>三、lowbit</h2>
+    <p>规律藏在二进制里。先定义 lowbit(x)，表示 x 的二进制里最低位那个 1 所代表的数。</p>
+    <p>x = 6 = 110₂，最低位的 1 在右起第二位，代表 2，所以 lowbit(6) = 2。x = 12 = 1100₂，lowbit(12) = 4。x = 8 = 1000₂，lowbit(8) = 8。奇数末位一定是 1，所以奇数的 lowbit 都是 1。</p>
+    <p>代码一行。</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> x) { <span class="kw">return</span> x &amp; (-x); }</pre>
+    <p>这里的 -x 用的是计算机里的补码，x &amp; (-x) 恰好只把最低位的 1 留下，其余位全清零。可以先把这个公式当成黑盒来用。</p>
+
+    <h2>四、c[i] 管一段</h2>
+    <p>树状数组另外开一个数组 c，规定 c[i] 存的是 a[i - lowbit(i) + 1] 到 a[i] 这一段的和，长度正好是 lowbit(i)。</p>
+    <p>例如 lowbit(6) = 2，c[6] = a[5] + a[6]；lowbit(8) = 8，c[8] = a[1] + … + a[8]。把这 16 行铺开画出来是这样。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>第 i 行是 c[i] 管的那一段，长度正好是 lowbit(i)，i 越大管得越宽</figcaption>
+    </figure>
+
+    <p>这样安排之后，可以发现一件有意思的事：c[i] 这一段往左接上 c[i − lowbit(i)]，正好连成更长的一段，不多也不少。后面查询能一路往下减，靠的就是这个。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ①　c[i] 管哪一段</div>
+      <div id="fen1"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>选择 i</label>
+          <input type="range" id="fi1" min="1" max="16" value="6">
+          <span class="val" id="fi1val">6</span>
+        </div>
+        <div class="ctl">
+          <label>lowbit(i)</label>
+          <span class="val" id="flb1">2</span>
+        </div>
+      </div>
+      <div class="breakdown" id="fb1"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>c[i] 管辖的一段 a</span>
+        <span><span class="dot partial"></span>当前的 c[i]</span>
+      </div>
+    </div>
+
+    <p>每个 c[i] 恰好向上贡献给 c[i + lowbit(i)]，整张结构像一棵倒挂的树，所以叫树状数组。下面把这棵树画出来，点一个节点就能看到改 a[i] 时要沿着哪条路向上走。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ②　lowbit 树：节点 i 的父节点是 i + lowbit(i)</div>
+      <div id="fenTree"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>选择 i</label>
+          <input type="range" id="tk" min="1" max="16" value="5">
+          <span class="val" id="tkval">5</span>
+        </div>
+      </div>
+      <div class="breakdown" id="tb"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>出发的节点 i（对应 a[i]）</span>
+        <span><span class="dot partial"></span>沿树向上经过的节点（都要加 delta）</span>
+      </div>
+    </div>
+
+    <h2>五、前缀和查询</h2>
+    <p>要求 prefix(i) = a[1] + … + a[i]，从 i 开始，累加 c[i]，然后 i -= lowbit(i)，一直做到 i 变成 0。</p>
+    <p>为什么对？c[i] 管的正是以 i 结尾、长度 lowbit(i) 的那一段，加完它，剩下没算的就只剩 [1, i − lowbit(i)]，规模一下就小了。接着又是一个同样的问题。</p>
+    <p>以 i = 13 为例，跳三次就结束。</p>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>prefix(13) 拆成 c[8] + c[12] + c[13]，三段首尾相接，正好铺满 a[1..13]</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">演示 ③　前缀和 prefix(i)：向下减 lowbit</div>
+      <div id="fen2"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>查询 i</label>
+          <input type="range" id="fi2" min="1" max="16" value="13">
+          <span class="val" id="fi2val">13</span>
+        </div>
+      </div>
+      <div class="breakdown" id="fb2"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>要算的前缀 a[1..i]</span>
+        <span><span class="dot partial"></span>累加到的 c 节点</span>
+      </div>
+    </div>
+
+    <p>有了前缀和，区间和就是两次查询相减。</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">rangeSum</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) { <span class="kw">return</span> <span class="fn">query</span>(r) - <span class="fn">query</span>(l - 1); }</pre>
+
+    <h2>六、单点修改</h2>
+    <p>改 a[i] 时，凡是管到了 i 的 c 都要跟着动。</p>
+    <p>规律和查询正好相反，从 i 开始每次 i += lowbit(i)，直到超过 n，这条链上的 c 全部加上 delta。以 i = 5 为例，受影响的是这四行。</p>
+
+    <figure class="fig">
+      <div id="fig3"></div>
+      <figcaption>改 a[5]，管到它的有 c[5]、c[6]、c[8]、c[16] 四个，每个都要加上 delta</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">演示 ④　单点修改 a[i]：向上加 lowbit</div>
+      <div id="fen3"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>修改 i</label>
+          <input type="range" id="fi3" min="1" max="16" value="5">
+          <span class="val" id="fi3val">5</span>
+        </div>
+      </div>
+      <div class="breakdown" id="fb3"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>被修改的 a[i]</span>
+        <span><span class="dot partial"></span>需要更新的 c 节点</span>
+      </div>
+    </div>
+
+    <h2>七、代码</h2>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">const</span> <span class="kw">int</span> N = 16;
+<span class="kw">int</span> a[N + 1] = {0, 3,1,4,1,5,9,2,6,5,3,5,8,9,7,9,3};  <span class="cm">// 下标从 1 开始</span>
+<span class="kw">int</span> n = N;
+<span class="kw">int</span> c[N + 1];                      <span class="cm">// 树状数组</span>
+
+<span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> x) {                <span class="cm">// 最低位的 1</span>
+    <span class="kw">return</span> x &amp; (-x);
+}
+
+<span class="kw">void</span> <span class="fn">update</span>(<span class="kw">int</span> i, <span class="kw">int</span> delta) {   <span class="cm">// 单点修改：a[i] += delta</span>
+    <span class="kw">while</span> (i &lt;= n) {
+        c[i] += delta;
+        i += <span class="fn">lowbit</span>(i);
+    }
+}
+
+<span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> i) {                 <span class="cm">// 前缀和：a[1]+…+a[i]</span>
+    <span class="kw">int</span> s = 0;
+    <span class="kw">while</span> (i &gt; 0) {
+        s += c[i];
+        i -= <span class="fn">lowbit</span>(i);
+    }
+    <span class="kw">return</span> s;
+}
+
+<span class="kw">int</span> <span class="fn">rangeSum</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {     <span class="cm">// 区间和 [l, r]</span>
+    <span class="kw">return</span> <span class="fn">query</span>(r) - <span class="fn">query</span>(l - 1);
+}
+
+<span class="kw">void</span> <span class="fn">build</span>() {                      <span class="cm">// 预处理：n 次单点修改</span>
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) <span class="fn">update</span>(i, a[i]);
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    <span class="fn">build</span>();
+    cout &lt;&lt; <span class="fn">rangeSum</span>(1, 8) &lt;&lt; endl;  <span class="cm">// 31</span>
+    cout &lt;&lt; <span class="fn">query</span>(13) &lt;&lt; endl;        <span class="cm">// 61</span>
+    <span class="fn">update</span>(5, -2);                  <span class="cm">// a[5]：5 → 3</span>
+    cout &lt;&lt; <span class="fn">rangeSum</span>(1, 8) &lt;&lt; endl;  <span class="cm">// 29</span>
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <h2>八、复杂度分析</h2>
+    <p>查询每步 i -= lowbit(i)，相当于把 i 的二进制里最低位的 1 消掉，i 里最多 log n 个 1，所以最多跳 log n 次。</p>
+    <p>修改每步 i += lowbit(i)，进位之后 i 至少翻一倍，最多跳 log n 次就超过 n。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>预处理 <code class="inline">build</code></td><td><code class="inline">O(n log n)</code>（n 次 update，也可优化到 <code class="inline">O(n)</code>）</td></tr>
+        <tr><td>前缀和 <code class="inline">query</code></td><td><code class="inline">O(log n)</code></td></tr>
+        <tr><td>区间和（两次前缀和）</td><td><code class="inline">O(log n)</code></td></tr>
+        <tr><td>单点修改 <code class="inline">update</code></td><td><code class="inline">O(log n)</code></td></tr>
+        <tr><td>m 次操作总计</td><td><code class="inline">O((n + m) log n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间上只多开一个 c 数组，大小和 a 一样，额外空间 O(n)。</p>
+    <p>三种做法放一起看：朴素查询 O(n)，分块 O(√n)，树状数组 O(log n)。n 越大差距越明显，n = 10⁵ 时 log n 大概 17，√n 是 316。</p>
+
+    <h2>九、最后</h2>
+    <p>树状数组能成立，靠的是区间和可以相减。prefix[r] − prefix[l−1] 这一步是减法，如果把求和换成求区间最大值，这一步就做不了，只能改成线段树。</p>
+    <p>另一个边界是它只管单点修改。要整段区间一起加，得配一个差分，那是下一步的内容。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  const A1 = [3,1,4,1,5,9,2,6,5,3,5,8,9,7,9,3]; // a[1..16]，与分块节同一组数据
+  const n = 16;
+  function lowbit(x){ return x & (-x); }
+  const C = new Array(n + 1).fill(0);
+  for (let i = 1; i <= n; i++) {
+    for (let j = i - lowbit(i) + 1; j <= i; j++) C[i] += A1[j - 1];
+  }
+
+  function fenRows(aSet, cSet){
+    let h = '<div class="fen-row"><span class="fen-tag">a</span><div class="fen-cells">';
+    for (let i = 1; i <= n; i++) {
+      const cls = 'arr-cell' + (aSet && aSet.has(i) ? ' full' : '');
+      h += '<div class="' + cls + '">' + A1[i - 1] + '</div>';
+    }
+    h += '</div></div>';
+    h += '<div class="fen-row"><span class="fen-tag"></span><div class="fen-cells">';
+    for (let i = 1; i <= n; i++) h += '<div class="fen-idx">' + i + '</div>';
+    h += '</div></div>';
+    h += '<div class="fen-row"><span class="fen-tag">c</span><div class="fen-cells">';
+    for (let i = 1; i <= n; i++) {
+      const cls = 'arr-cell' + (cSet && cSet.has(i) ? ' partial' : '');
+      h += '<div class="' + cls + '">' + C[i] + '</div>';
+    }
+    h += '</div></div>';
+    return h;
+  }
+
+  // 演示①：c[i] 管哪一段
+  const f1 = document.getElementById('fen1');
+  const fi1 = document.getElementById('fi1');
+  const fi1val = document.getElementById('fi1val');
+  const flb1 = document.getElementById('flb1');
+  const fb1 = document.getElementById('fb1');
+  function refresh1(){
+    const i = parseInt(fi1.value, 10);
+    fi1val.textContent = i;
+    const lb = lowbit(i);
+    flb1.textContent = lb;
+    const aSet = new Set();
+    for (let j = i - lb + 1; j <= i; j++) aSet.add(j);
+    const cSet = new Set([i]);
+    f1.innerHTML = fenRows(aSet, cSet);
+    const lo = i - lb + 1, terms = [];
+    for (let j = lo; j <= i; j++) terms.push('a[' + j + ']=' + A1[j - 1]);
+    fb1.innerHTML =
+      '<div class="row">lowbit(' + i + ') = ' + lb + '，所以 c[' + i + '] 管 <strong>a[' + lo + ' .. ' + i + ']</strong>，共 ' + lb + ' 个元素</div>' +
+      '<div class="row">' + terms.join(' + ') + ' = <strong>' + C[i] + '</strong></div>';
+  }
+  fi1.addEventListener('input', refresh1);
+  refresh1();
+
+  // 演示③：前缀和，向下减 lowbit
+  const f2 = document.getElementById('fen2');
+  const fi2 = document.getElementById('fi2');
+  const fi2val = document.getElementById('fi2val');
+  const fb2 = document.getElementById('fb2');
+  function refresh2(){
+    const i = parseInt(fi2.value, 10);
+    fi2val.textContent = i;
+    const aSet = new Set();
+    for (let j = 1; j <= i; j++) aSet.add(j);
+    const cSet = new Set(), steps = [];
+    let s = 0, x = i;
+    while (x > 0) { cSet.add(x); steps.push('c[' + x + ']=' + C[x]); s += C[x]; x -= lowbit(x); }
+    f2.innerHTML = fenRows(aSet, cSet);
+    fb2.innerHTML =
+      '<div class="row">prefix(' + i + ') = a[1] + … + a[' + i + ']（蓝色部分）</div>' +
+      '<div class="row">' + steps.join(' + ') + ' = <strong>' + s + '</strong></div>' +
+      '<div class="row" style="color:var(--text-dim)">只累加了 ' + steps.length + ' 个节点（橙色）</div>';
+  }
+  fi2.addEventListener('input', refresh2);
+  refresh2();
+
+  // 演示④：单点修改，向上加 lowbit
+  const f3 = document.getElementById('fen3');
+  const fi3 = document.getElementById('fi3');
+  const fi3val = document.getElementById('fi3val');
+  const fb3 = document.getElementById('fb3');
+  function refresh3(){
+    const i = parseInt(fi3.value, 10);
+    fi3val.textContent = i;
+    const aSet = new Set([i]);
+    const cSet = new Set(), chain = [];
+    let x = i;
+    while (x <= n) { cSet.add(x); chain.push('c[' + x + ']'); x += lowbit(x); }
+    f3.innerHTML = fenRows(aSet, cSet);
+    fb3.innerHTML =
+      '<div class="row">改的是 a[' + i + ']（蓝色），它会向上影响这些节点：</div>' +
+      '<div class="row">' + chain.join(' → ') + '</div>' +
+      '<div class="row" style="color:var(--text-dim)">共 ' + chain.length + ' 个 c 节点，每个都要加上 delta</div>';
+  }
+  fi3.addEventListener('input', refresh3);
+  refresh3();
+
+  // 演示②：lowbit 树（节点 i 的父节点是 i + lowbit(i)）
+  const treeEl = document.getElementById('fenTree');
+  const tk = document.getElementById('tk');
+  const tkval = document.getElementById('tkval');
+  const tb = document.getElementById('tb');
+
+  const parent = new Array(n + 1).fill(0);
+  const children = new Array(n + 1).fill(null).map(() => []);
+  for (let i = 1; i <= n; i++) {
+    const p = i + lowbit(i);
+    if (p <= n) { parent[i] = p; children[p].push(i); }
+  }
+
+  const posX = new Array(n + 1).fill(0);
+  const posY = new Array(n + 1).fill(0);
+  let leafX = 0;
+  function assignX(u) {
+    const ch = children[u].sort((a, b) => a - b);
+    if (ch.length === 0) { posX[u] = leafX++; return; }
+    ch.forEach(c => assignX(c));
+    posX[u] = ch.reduce((s, c) => s + posX[c], 0) / ch.length;
+  }
+  function assignY(u, d) { posY[u] = d; children[u].forEach(c => assignY(c, d + 1)); }
+  assignX(n);
+  assignY(n, 0);
+
+  const T_W = 620, T_H = 480, T_X0 = 51, T_XG = 74, T_Y0 = 55, T_YG = 92, T_R = 19;
+  const TX = i => T_X0 + posX[i] * T_XG;
+  const TY = i => T_Y0 + posY[i] * T_YG;
+
+  function renderTree() {
+    const k = parseInt(tk.value, 10);
+    tkval.textContent = k;
+    const chain = [];
+    for (let x = k; x > 0; x = parent[x]) chain.push(x);
+    const chainSet = new Set(chain);
+
+    let s = '<svg viewBox="0 0 ' + T_W + ' ' + T_H + '" style="width:100%;max-width:620px;height:auto;display:block;margin:0 auto;" role="img">';
+    for (let i = 1; i <= n; i++) {
+      if (parent[i]) {
+        s += '<line x1="' + TX(i) + '" y1="' + TY(i) + '" x2="' + TX(parent[i]) + '" y2="' + TY(parent[i]) + '" stroke="#e6e8eb" stroke-width="1.5"/>';
+      }
+    }
+    for (let i = 1; i <= n; i++) {
+      let fill = '#ffffff', stroke = '#e6e8eb', tcol = '#1f2328';
+      if (i === k) { fill = '#dbeafe'; stroke = '#2563eb'; tcol = '#2563eb'; }
+      else if (chainSet.has(i)) { fill = '#ffedd5'; stroke = '#ea580c'; tcol = '#ea580c'; }
+      s += '<g data-i="' + i + '" style="cursor:pointer;">';
+      s += '<circle cx="' + TX(i) + '" cy="' + TY(i) + '" r="' + T_R + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.5"/>';
+      s += '<circle cx="' + TX(i) + '" cy="' + TY(i) + '" r="26" fill="transparent"/>';
+      s += '<text x="' + TX(i) + '" y="' + TY(i) + '" dy=".35em" text-anchor="middle" font-size="14" font-weight="600" fill="' + tcol + '" font-family="inherit">' + i + '</text>';
+      s += '</g>';
+    }
+    s += '</svg>';
+    treeEl.innerHTML = s;
+
+    tb.innerHTML =
+      '<div class="row">改 a[' + k + '] 时，从节点 <strong>' + k + '</strong> 出发，沿树向上走到根：</div>' +
+      '<div class="row">' + chain.map(x => 'c[' + x + ']=' + C[x]).join(' → ') + '</div>' +
+      '<div class="row" style="color:var(--text-dim)">每步都是 i += lowbit(i)，共 ' + chain.length + ' 个节点，每个 c 都要加 delta</div>';
+  }
+
+  treeEl.addEventListener('click', e => {
+    const t = e.target.closest('[data-i]');
+    if (t) { tk.value = t.getAttribute('data-i'); renderTree(); }
+  });
+  tk.addEventListener('input', renderTree);
+  renderTree();
+
+  /* ---------- 图示 ---------- */
+  const GX0 = 56, GStep = 38, GW = 36;
+  const gridW = 16 * GStep - 2;                    // 606
+  const cellCX = j => GX0 + (j - 1) * GStep + GW / 2;
+
+  // 顶部下标轴
+  function topAxis(hlSet, hlColor){
+    let s = '';
+    for (let j = 1; j <= n; j++) {
+      const on = hlSet && hlSet.has(j);
+      s += '<text x="' + cellCX(j) + '" y="16" text-anchor="middle" font-size="10"' +
+           ' fill="' + (on ? hlColor : '#9aa0a6') + '"' + (on ? ' font-weight="600"' : '') + '>' + j + '</text>';
+    }
+    return s;
+  }
+
+  // 一行：灰色底条 + 蓝色管辖段（可选填 a 的值）
+  function fenBar(i, y, h, showVal){
+    const lo = i - lowbit(i) + 1, lb = lowbit(i);
+    let s = '<rect x="' + GX0 + '" y="' + y + '" width="' + gridW + '" height="' + h + '" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>';
+    s += '<rect x="' + (GX0 + (lo - 1) * GStep) + '" y="' + y + '" width="' + (lb * GStep - 2) +
+         '" height="' + h + '" rx="4" fill="#dbeafe" stroke="#2563eb"/>';
+    if (showVal) {
+      for (let j = 1; j <= n; j++) {
+        const inR = j >= lo && j <= i;
+        s += '<text x="' + cellCX(j) + '" y="' + (y + h / 2 + 4) + '" text-anchor="middle" font-size="11" fill="' +
+             (inR ? '#2563eb' : '#9aa0a6') + '">' + A1[j - 1] + '</text>';
+      }
+    }
+    return s;
+  }
+  function rowLabel(i, y, h, color){
+    return '<text x="44" y="' + (y + h / 2 + 4) + '" text-anchor="end" font-size="11" fill="' +
+           (color || '#6b7280') + '">c[' + i + ']</text>';
+  }
+
+  /* 图①：c[1..16] 各管哪一段 */
+  const fig1 = document.getElementById('fig1');
+  if (fig1) {
+    let s = '<svg viewBox="0 0 680 320" role="img" aria-label="树状数组管辖区间示意图">';
+    s += topAxis(null, null);
+    for (let i = 1; i <= n; i++) {
+      const y = 24 + (i - 1) * 18;
+      s += rowLabel(i, y, 15);
+      s += fenBar(i, y, 15, false);
+    }
+    s += '</svg>';
+    fig1.innerHTML = s;
+  }
+
+  /* 图②：prefix(13) = c[8] + c[12] + c[13] */
+  const fig2 = document.getElementById('fig2');
+  if (fig2) {
+    const seg = [8, 12, 13];
+    const hl = new Set();
+    for (let j = 1; j <= 13; j++) hl.add(j);
+    let s = '<svg viewBox="0 0 680 150" role="img" aria-label="前缀和拆分示意图">';
+    s += topAxis(hl, '#2563eb');
+    seg.forEach(function(i, k){
+      const y = 26 + k * 22;
+      s += rowLabel(i, y, 19);
+      s += fenBar(i, y, 19, true);
+    });
+    s += '<text x="340" y="116" text-anchor="middle" font-size="14" font-weight="600">' +
+         '<tspan fill="#2563eb">c[8]</tspan><tspan fill="#6b7280"> + </tspan>' +
+         '<tspan fill="#2563eb">c[12]</tspan><tspan fill="#6b7280"> + </tspan>' +
+         '<tspan fill="#2563eb">c[13]</tspan><tspan fill="#6b7280"> = 31 + 21 + 9 = </tspan>' +
+         '<tspan fill="#1f2328">61</tspan></text>';
+    s += '<text x="340" y="138" text-anchor="middle" font-size="12" fill="#6b7280">13 → 12 → 8 → 0，每步减掉 lowbit</text>';
+    s += '</svg>';
+    fig2.innerHTML = s;
+  }
+
+  /* 图③：改 a[5]，受影响的 c[5] c[6] c[8] c[16] */
+  const fig3 = document.getElementById('fig3');
+  if (fig3) {
+    const seg = [5, 6, 8, 16];
+    let s = '<svg viewBox="0 0 680 170" role="img" aria-label="单点修改影响范围示意图">';
+    s += topAxis(new Set([5]), '#ea580c');
+    s += '<rect x="' + (GX0 + 4 * GStep - 1) + '" y="22" width="' + (GW + 2) + '" height="92" rx="4" fill="#ffedd5" stroke="#ea580c"/>';
+    seg.forEach(function(i, k){
+      const y = 26 + k * 22;
+      s += rowLabel(i, y, 19);
+      s += fenBar(i, y, 19, true);
+    });
+    s += '<text x="340" y="136" text-anchor="middle" font-size="14" font-weight="600" fill="#1f2328">c[5] → c[6] → c[8] → c[16]</text>';
+    s += '<text x="340" y="158" text-anchor="middle" font-size="12" fill="#6b7280">5 → 6 → 8 → 16，每步 i += lowbit(i)，共 4 个节点</text>';
+    s += '</svg>';
+    fig3.innerHTML = s;
+  }
+})();
+</script>
+</body>
+</html>

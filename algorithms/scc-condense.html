@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>缩点与 DAG 上的拓扑排序 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .sc-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .sc-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .sc-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #scSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .sc-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>缩点与 DAG 上的拓扑排序</h1>
+    <p class="intro">上一讲把强连通分量找了出来，这一讲把每个分量压成一个点。压完之后环全没了，剩下的图一定是 DAG，于是拓扑序、线性 dp、最短路这些只在 DAG 上成立的手段全都能用。这一节的四道题都是「缩点 + 在 DAG 上扫一遍」，差别只在 dp 里维护的是什么：点权和、边收益、终点标记、还是路径上的最小价格。</p>
+
+    <h2>零、背景</h2>
+    <p>上篇讲的是怎么求强连通分量：一遍 Tarjan，用 dfn 和 low 把环找出来，栈里一次弹出来的一组点就是一个强连通分量。</p>
+    <p>求出分量之后，把每个分量当成一个点，分量之间的边就是原图里跨分量的边，这样得到的图叫缩点图。缩点图的点数是分量个数，边数不超过原来的边数。</p>
+    <p>缩点图最重要的性质是它没有环。如果缩点图里还有一个环，环上所有分量的点就互相可达，按定义它们本来就该是同一个强连通分量，矛盾。</p>
+
+    <h2>一、缩点：把环压成一个点</h2>
+    <p>没有环这件事，把「能不能到达」这个问题变简单了：判断 u 能否到 v，等价于判断 belong[u] 能否到 belong[v]，分量内部的细节全部被折叠掉。</p>
+    <p>分量内部点权的处理要按题目来。求路径点权和时，只要走进一个分量，就可以把它内部的点全部走一遍再出来，所以分量点权取内部点权之和；求路径上的最值时，分量内部可以随便走，所以只需要记内部的最小值和最大值。</p>
+    <p>缩点还会产生两种副作用，后面几道题会分别用到。一是同一个分量对之间可能出现多条边，也就是重边；二是缩点后可能留下入度为 0 的分量，这些点没有任何前驱。重边对「取最大值」的 dp 无害，对「计数」和「统计入度」却会重复累加。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="原图与缩点后的 DAG" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="scAr" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="scArB" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#2563eb"/>
+          </marker>
+        </defs>
+        <text x="24" y="22" font-size="11" fill="#6b7280">原图：1↔2、3↔4 各成一个环</text>
+        <rect x="42" y="42" width="140" height="54" rx="8" fill="#eef4ff" stroke="#9aa0a6" stroke-width="1.1" stroke-dasharray="5 4"/>
+        <rect x="42" y="142" width="140" height="54" rx="8" fill="#ffedd5" stroke="#9aa0a6" stroke-width="1.1" stroke-dasharray="5 4"/>
+        <g stroke="#c9ced4" stroke-width="1.3" fill="none" marker-end="url(#scAr)">
+          <path d="M78,57 Q112,38 146,57"/>
+          <path d="M146,81 Q112,100 78,81"/>
+          <path d="M78,157 Q112,138 146,157"/>
+          <path d="M146,181 Q112,200 78,181"/>
+          <line x1="70" y1="85" x2="70" y2="151"/>
+          <line x1="150" y1="86" x2="82" y2="158"/>
+          <line x1="169" y1="162" x2="225" y2="86"/>
+          <line x1="167" y1="176" x2="225" y2="172"/>
+          <line x1="242" y1="85" x2="242" y2="151"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="70" cy="68" r="15"/>
+          <circle cx="152" cy="68" r="15"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.4">
+          <circle cx="70" cy="168" r="15"/>
+          <circle cx="152" cy="168" r="15"/>
+        </g>
+        <g fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4">
+          <circle cx="242" cy="68" r="15"/>
+          <circle cx="242" cy="168" r="15"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="70" y="72">1</text>
+          <text x="152" y="72">2</text>
+          <text x="70" y="172">3</text>
+          <text x="152" y="172">4</text>
+          <text x="242" y="72">5</text>
+          <text x="242" y="172">6</text>
+        </g>
+        <text x="308" y="112" font-size="11" fill="#374151">缩点</text>
+        <line x1="300" y1="126" x2="352" y2="126" stroke="#2563eb" stroke-width="2" marker-end="url(#scArB)"/>
+        <text x="378" y="22" font-size="11" fill="#6b7280">缩点图：4 个点，无环</text>
+        <g stroke="#2563eb" stroke-width="1.6" fill="none" marker-end="url(#scArB)">
+          <line x1="410" y1="80" x2="410" y2="146"/>
+          <line x1="428" y1="158" x2="520" y2="124"/>
+          <line x1="430" y1="170" x2="518" y2="206"/>
+          <line x1="540" y1="130" x2="540" y2="204"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+          <circle cx="410" cy="60" r="20"/>
+          <circle cx="410" cy="166" r="20"/>
+          <circle cx="540" cy="110" r="20"/>
+          <circle cx="540" cy="224" r="20"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="410" y="58">A</text>
+          <text x="410" y="72">3</text>
+          <text x="410" y="164">B</text>
+          <text x="410" y="178">7</text>
+          <text x="540" y="108">C</text>
+          <text x="540" y="122">5</text>
+          <text x="540" y="222">D</text>
+          <text x="540" y="236">6</text>
+        </g>
+        <text x="24" y="240" font-size="11" fill="#374151">A、B、C、D 里的数字是分量内点权之和；A→B 在原图里对应 1→3 与 2→3 两条边</text>
+      </svg>
+      <figcaption>缩点把环压成点、点权相加，图从有环变成无环；同一对分量之间可能残留多条边</figcaption>
+    </figure>
+
+    <h2>二、题目1：缩点模板题</h2>
+    <p>题目：n 个点 m 条边的有向图，每个点有非负点权，找一条路径让点权累加和最大，重复经过的点只算一次。</p>
+    <p>重复经过不算，说明绕圈毫无意义。于是把 SCC 缩掉，每个分量取内部点权之和，问题变成「DAG 上找一条路径让点权和最大」。DAG 上任何一条路径都是简单的，重边也不影响最大值。</p>
+    <p>接下来是 dp 顺序。这里有两种写法，结果一样，但道理要讲清。</p>
+    <p>第一种是老老实实做拓扑排序：先算每个缩点的入度，把所有入度为 0 的点放进队列，出队时用它去更新所有出边指向的点，同时把对方的入度减一，减到 0 就入队。队列里点的顺序就是拓扑序。</p>
+    <p>第二种不写队列，直接按 Tarjan 给出的分量编号从大到小扫一遍。原因是 Tarjan 是先确定「汇点」的：一个分量被弹出时，它能到达的分量都已经先被弹出了，所以编号小的分量更靠近汇，编号大的更靠近源。既然每条跨分量边都是从大编号指向小编号，那么从 <code class="inline">sccCnt</code> 倒着扫到 1，就是一次合法的拓扑序。</p>
+    <p>两种写法都写在下面这份代码里，<code class="inline">topo()</code> 是队列版，<code class="inline">dpOnDAG()</code> 是倒序扫描版。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Tarjan 分量编号与拓扑序方向相反" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="scAr2" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#ea580c"/>
+          </marker>
+          <marker id="scAr3" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#2563eb"/>
+          </marker>
+        </defs>
+        <line x1="98" y1="45" x2="500" y2="45" stroke="#ea580c" stroke-width="2" marker-end="url(#scAr2)"/>
+        <text x="299" y="36" font-size="11" fill="#ea580c" text-anchor="middle">拓扑序：源 → 汇</text>
+        <g stroke="#2563eb" stroke-width="1.6" fill="none" marker-end="url(#scAr3)">
+          <line x1="143" y1="95" x2="217" y2="95"/>
+          <line x1="263" y1="95" x2="337" y2="95"/>
+          <line x1="383" y1="95" x2="457" y2="95"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+          <circle cx="120" cy="95" r="22"/>
+          <circle cx="240" cy="95" r="22"/>
+          <circle cx="360" cy="95" r="22"/>
+          <circle cx="480" cy="95" r="22"/>
+        </g>
+        <g font-size="13" fill="#1f2328" text-anchor="middle">
+          <text x="120" y="99">4</text>
+          <text x="240" y="99">3</text>
+          <text x="360" y="99">2</text>
+          <text x="480" y="99">1</text>
+        </g>
+        <g font-size="10" fill="#6b7280" text-anchor="middle">
+          <text x="120" y="133">和 3</text>
+          <text x="240" y="133">和 7</text>
+          <text x="360" y="133">和 5</text>
+          <text x="480" y="133">和 6</text>
+        </g>
+        <line x1="500" y1="160" x2="98" y2="160" stroke="#2563eb" stroke-width="2" marker-end="url(#scAr3)"/>
+        <text x="299" y="178" font-size="11" fill="#2563eb" text-anchor="middle">Tarjan 编号递增方向：1 → 2 → 3 → 4</text>
+        <text x="24" y="202" font-size="11" fill="#374151">编号小的先被弹出，是汇点；所以从 sccCnt 倒着扫一遍就是拓扑序</text>
+      </svg>
+      <figcaption>Tarjan 的分量编号自带逆拓扑序，倒着扫就等于做了一次拓扑排序</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 10001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 100001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> a[MAXM];
+    <span class="kw">int</span> b[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sum[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">int</span> indegree[MAXN];
+    <span class="kw">int</span> que[MAXN];
+    <span class="kw">int</span> dp[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+                sum[sccCnt] += arr[pop];
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> scc1 = belong[a[i]];
+            <span class="kw">int</span> scc2 = belong[b[i]];
+            <span class="kw">if</span> (scc1 != scc2) {
+                indegree[scc2]++;
+                addEdge(scc1, scc2);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">topo</span>() {
+        <span class="kw">int</span> l = 1, r = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            <span class="kw">if</span> (indegree[i] == 0) {
+                dp[i] = sum[i];
+                que[++r] = i;
+            }
+        }
+        <span class="kw">while</span> (l &lt;= r) {
+            <span class="kw">int</span> u = que[l++];
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                dp[v] = max(dp[v], dp[u] + sum[v]);
+                <span class="kw">if</span> (--indegree[v] == 0) {
+                    que[++r] = v;
+                }
+            }
+        }
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            ans = max(ans, dp[i]);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">dpOnDAG</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> u = sccCnt; u &gt; 0; u--) {
+            <span class="kw">if</span> (indegree[u] == 0) {
+                dp[u] = sum[u];
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                dp[v] = max(dp[v], dp[u] + sum[v]);
+            }
+        }
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> u = 1; u &lt;= sccCnt; u++) {
+            ans = max(ans, dp[u]);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; a[i] &gt;&gt; b[i];
+            addEdge(a[i], b[i]);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        condense();
+        <span class="cm">// int ans = topo();</span>
+        <span class="kw">int</span> ans = dpOnDAG();
+        cout &lt;&lt; ans &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <div class="viz">
+      <div class="viz-title">从原图到最大点权和：缩点、拓扑、dp 走一遍</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">用上面那张图当例子，点权是 1 到 6。点「下一步」，看环怎么被压成点、编号怎么变成拓扑序、dp 又怎么一轮轮推出去。</p>
+      <svg id="scSvg" viewBox="0 0 660 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="缩点与 DAG dp 演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>分量 {1,2}</span>
+        <span><span class="dot partial"></span>分量 {3,4}</span>
+        <span><span class="dot skip"></span>单独成点的分量</span>
+      </div>
+      <div class="breakdown" id="scInfo"></div>
+      <div class="viz-controls">
+        <button class="sc-btn" id="scPrev" type="button">上一步</button>
+        <button class="sc-btn" id="scNext" type="button">下一步</button>
+        <button class="sc-btn" id="scReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>三、题目2：采蘑菇</h2>
+    <p>题目：每条边有两个权值，初始收益和恢复系数，恢复系数在 0 到 0.8 之间且最多一位小数。同一条边第 k 次走时，收益是初始收益乘恢复系数的 k−1 次方再向下取整。给定起点 s，求一条从 s 出发的路径，让收益累加和最大。</p>
+    <p>先看一条边重复走时的收益。初始收益 10、恢复系数 0.6，依次拿到 10、6、3、1、0，之后再也没有了。这串数衰减很快，加下去只有 20，是个定值。</p>
+    <p>所以只要一条边落在某个分量内部，我们就一定能把它走到没有收益为止，它对答案的贡献就是这串收益的总和，可以预处理出来。</p>
+    <p>跨分量的边不一样。它连接两个不同的分量，一旦走过去，按 DAG 的性质就再也回不来了，所以每条跨分量边最多被走一次，收益就是它的初始收益。</p>
+    <p>实现上不用另开数组：缩点时枚举原图的每条边，如果两端属于同一个分量，就单独累加它的几何级数；否则按跨分量边加进新图，权值是初始收益。</p>
+    <p>起点固定这一条也有讲究。Tarjan 从 s 出发就够了，走不到的分量 belong 仍是 0，缩点时把它们跳过即可。dp 只在 <code class="inline">belong[s]</code> 处初始化，其余保持负无穷，最后对所有分量取最大值，就等价于「以 s 为起点的所有路径」。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="采蘑菇的收益递减" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="60" y="24" font-size="11" fill="#374151">同一条边反复走过：初始收益 10，恢复系数 0.6，向下取整</text>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.2">
+          <rect x="70" y="60" width="56" height="120" rx="4"/>
+          <rect x="150" y="108" width="56" height="72" rx="4"/>
+          <rect x="230" y="144" width="56" height="36" rx="4"/>
+          <rect x="310" y="168" width="56" height="12" rx="4"/>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.2">
+          <line x1="60" y1="180" x2="510" y2="180"/>
+          <line x1="390" y1="178" x2="446" y2="178"/>
+        </g>
+        <g font-size="11" fill="#2563eb" text-anchor="middle">
+          <text x="98" y="52">10</text>
+          <text x="178" y="100">6</text>
+          <text x="258" y="136">3</text>
+          <text x="338" y="160">1</text>
+          <text x="418" y="170">0</text>
+        </g>
+        <g font-size="10" fill="#6b7280" text-anchor="middle">
+          <text x="98" y="196">第 1 次</text>
+          <text x="178" y="196">第 2 次</text>
+          <text x="258" y="196">第 3 次</text>
+          <text x="338" y="196">第 4 次</text>
+          <text x="418" y="196">第 5 次</text>
+        </g>
+        <text x="60" y="220" font-size="11" fill="#374151">加到最后是 10 + 6 + 3 + 1 = 20，一点残余都拿不到；所以分量内部的边可以一次算干净</text>
+      </svg>
+      <figcaption>分量内部的边可以反复走到没有收益，它的总贡献是一个能预处理出来的定值</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 80001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> INF = 1000000001;
+    <span class="kw">int</span> n, m, s;
+
+    <span class="kw">int</span> a[MAXM];
+    <span class="kw">int</span> b[MAXM];
+    <span class="kw">int</span> init[MAXM];
+    <span class="kw">int</span> recover[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> weight[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sum[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">int</span> dp[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        weight[cntg] = w;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> popv;
+            <span class="kw">do</span> {
+                popv = sta[top--];
+                belong[popv] = sccCnt;
+            } <span class="kw">while</span> (popv != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> scc1 = belong[a[i]];
+            <span class="kw">int</span> scc2 = belong[b[i]];
+            <span class="kw">if</span> (scc1 &gt; 0 &amp;&amp; scc2 &gt; 0) {
+                <span class="kw">int</span> val = init[i];
+                <span class="kw">int</span> rec = recover[i];
+                <span class="kw">if</span> (scc1 == scc2) {
+                    <span class="kw">while</span> (val &gt; 0) {
+                        sum[scc1] += val;
+                        val = val * rec / 10;
+                    }
+                } <span class="kw">else</span> {
+                    addEdge(scc1, scc2, val);
+                }
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">dpOnDAG</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> u = 1; u &lt;= sccCnt; u++) {
+            dp[u] = -INF;
+        }
+        dp[belong[s]] = sum[belong[s]];
+        <span class="kw">for</span> (<span class="kw">int</span> u = sccCnt; u &gt; 0; u--) {
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                <span class="kw">int</span> w = weight[e];
+                dp[v] = max(dp[v], dp[u] + w + sum[v]);
+            }
+        }
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> u = 1; u &lt;= sccCnt; u++) {
+            ans = max(ans, dp[u]);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">double</span> rec;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; a[i] &gt;&gt; b[i] &gt;&gt; init[i];
+            cin &gt;&gt; rec;
+            recover[i] = (<span class="kw">int</span>)(rec * 10);
+            addEdge(a[i], b[i], 0);
+        }
+        cin &gt;&gt; s;
+        tarjan(s);
+        condense();
+        <span class="kw">int</span> ans = dpOnDAG();
+        cout &lt;&lt; ans &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>四、题目3：劫掠计划</h2>
+    <p>题目：n 个城市、m 条有向道路，每个城市有钱数。给定起点 s 和一批「有酒吧」的城市，终点必须是酒吧城市，重复经过的城市钱只拿一次，求最大钱数。</p>
+    <p>这就是题目1 加了两个约束：起点固定、终点必须带标记。钱数只拿一次，所以还是缩点后取分量内钱数之和。</p>
+    <p>终点标记也跟着缩点一起合并。一个分量只要有任意一个城市有酒吧，这个分量就能当终点，用一个或运算 <code class="inline">hasBar[scc] |= isBar[u]</code> 在弹栈时顺手维护。</p>
+    <p>最后的统计不能取全局最大，只能在这些有酒吧的分量里取最大。起点固定则和题目2 一样：Tarjan 只从 s 出发，dp 只在 <code class="inline">belong[s]</code> 初始化，其余是负无穷，这样走不到的分量天然不会贡献答案。</p>
+    <p>顺带一个细节：<code class="inline">hasBar</code> 是 bool 数组，而分量编号是从 1 开始的，每弹出一个新分量要先把它清成 false，否则会读到上一组数据的残留。</p>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> INF = 1000000001;
+    <span class="kw">int</span> n, m, s, p;
+
+    <span class="kw">int</span> money[MAXN];
+    <span class="kw">bool</span> isBar[MAXN];
+    <span class="kw">int</span> a[MAXM];
+    <span class="kw">int</span> b[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sum[MAXN];
+    <span class="kw">bool</span> hasBar[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">int</span> dp[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            sum[sccCnt] = 0;
+            hasBar[sccCnt] = <span class="kw">false</span>;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+                sum[sccCnt] += money[pop];
+                hasBar[sccCnt] |= isBar[pop];
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> scc1 = belong[a[i]];
+            <span class="kw">int</span> scc2 = belong[b[i]];
+            <span class="kw">if</span> (scc1 &gt; 0 &amp;&amp; scc2 &gt; 0 &amp;&amp; scc1 != scc2) {
+                addEdge(scc1, scc2);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">dpOnDAG</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> u = 1; u &lt;= sccCnt; u++) {
+            dp[u] = -INF;
+        }
+        dp[belong[s]] = sum[belong[s]];
+        <span class="kw">for</span> (<span class="kw">int</span> u = sccCnt; u &gt; 0; u--) {
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                dp[v] = max(dp[v], dp[u] + sum[v]);
+            }
+        }
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> u = 1; u &lt;= sccCnt; u++) {
+            <span class="kw">if</span> (hasBar[u]) {
+                ans = max(ans, dp[u]);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; a[i] &gt;&gt; b[i];
+            addEdge(a[i], b[i]);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; money[i];
+        }
+        cin &gt;&gt; s &gt;&gt; p;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x; i &lt;= p; i++) {
+            cin &gt;&gt; x;
+            isBar[x] = <span class="kw">true</span>;
+        }
+        tarjan(s);
+        condense();
+        <span class="kw">int</span> ans = dpOnDAG();
+        cout &lt;&lt; ans &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>五、题目4：最优贸易</h2>
+    <p>题目：每个城市有一个水晶球价格，道路有单向也有双向。从 1 号城市走到 n 号城市，途中可以买入一次、卖出一次，求最大差价；走不到 n 就输出 0。</p>
+    <p>如果图是 DAG，只需要在拓扑序上维护两个量：走到 u 时见过的价格最小值 <code class="inline">premin[u]</code>，以及「卖在 u」能拿到的最大差价 <code class="inline">dp[u]</code>。转移就是 <code class="inline">premin[v] = min(premin[v], premin[u])</code> 和 <code class="inline">dp[v] = max(dp[v], value[v] − premin[v])</code>。</p>
+    <p>但原图有环，而且卖点必须在买点之后。所以还是缩点，分量内部只关心价格的最小值和最大值：最小值用来承接买入，最大值用来承接卖出。</p>
+    <p>双向路会直接把两个城市揉成同一个分量，这一点很关键。看下面这个样例，5 号城市价格 1、4 号城市价格 6，本来可以走回头路「在 5 买入、回到 4 卖出」，赚 5 块；缩点之后 4 和 5 就是同一个分量，<code class="inline">sccMax − sccMin = 6 − 1 = 5</code>，回头路被自动处理掉了，不需要额外考虑。</p>
+    <p>另外注意「能不能到达 n」的判断。判的不是原图的 <code class="inline">belong[n]</code> 是否为 0 吗？是，但只要 <code class="inline">belong[n]</code> 非 0，就说明 Tarjan 从 1 出发能走到 n，此时 dp 一定被赋过值。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="最优贸易的缩点与状态转移" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="scAr4" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="scAr5" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <text x="24" y="22" font-size="11" fill="#6b7280">样例：价格 4、3、5、6、1，其中 4↔5 是双向路</text>
+        <g stroke="#c9ced4" stroke-width="1.3" fill="none" marker-end="url(#scAr4)">
+          <line x1="100" y1="78" x2="172" y2="78"/>
+          <line x1="208" y1="78" x2="280" y2="78"/>
+        </g>
+        <path d="M290,96 Q245,140 200,96" stroke="#ea580c" stroke-width="1.4" fill="none" stroke-dasharray="5 4" marker-end="url(#scAr5)"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+          <circle cx="80" cy="78" r="18"/>
+          <circle cx="190" cy="78" r="18"/>
+          <circle cx="300" cy="78" r="18"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="80" y="82">1</text>
+          <text x="190" y="82">4</text>
+          <text x="300" y="82">5</text>
+        </g>
+        <g font-size="10" fill="#6b7280" text-anchor="middle">
+          <text x="80" y="114">价 4</text>
+          <text x="190" y="114">价 6</text>
+          <text x="300" y="114">价 1</text>
+        </g>
+        <text x="360" y="60" font-size="11" fill="#374151">缩点后：1 → {4,5}</text>
+        <text x="360" y="84" font-size="11" fill="#2563eb">premin：4 → 1</text>
+        <text x="360" y="108" font-size="11" fill="#ea580c">dp：0 → 6 − 1 = 5</text>
+        <text x="24" y="176" font-size="11" fill="#374151">双向路让 4 和 5 落进同一个分量，回头的买与卖被 sccMax − sccMin 直接吃掉</text>
+        <text x="24" y="198" font-size="11" fill="#6b7280">所以 dp 只记「卖在当前分量」的差价，路径上的最小价格单独用一个数组跟着走</text>
+      </svg>
+      <figcaption>分量内部取极值来承接买卖，回头路被折叠进 sccMax − sccMin，不用额外处理</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> INF = 1000000001;
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">int</span> val[MAXN];
+    <span class="kw">int</span> a[MAXM];
+    <span class="kw">int</span> b[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> to[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sccMin[MAXN];
+    <span class="kw">int</span> sccMax[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">int</span> premin[MAXN];
+    <span class="kw">int</span> dp[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            sccMin[sccCnt] = INF;
+            sccMax[sccCnt] = -INF;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+                sccMin[sccCnt] = min(sccMin[sccCnt], val[pop]);
+                sccMax[sccCnt] = max(sccMax[sccCnt], val[pop]);
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">condense</span>() {
+        cntg = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= sccCnt; i++) {
+            head[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> scc1 = belong[a[i]];
+            <span class="kw">int</span> scc2 = belong[b[i]];
+            <span class="kw">if</span> (scc1 &gt; 0 &amp;&amp; scc2 &gt; 0 &amp;&amp; scc1 != scc2) {
+                addEdge(scc1, scc2);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">dpOnDAG</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> u = 1; u &lt;= sccCnt; u++) {
+            premin[u] = INF;
+            dp[u] = -INF;
+        }
+        <span class="kw">int</span> s = belong[1];
+        premin[s] = sccMin[s];
+        dp[s] = sccMax[s] - sccMin[s];
+        <span class="kw">for</span> (<span class="kw">int</span> u = sccCnt; u &gt; 0; u--) {
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                premin[v] = min(premin[v], min(premin[u], sccMin[v]));
+                dp[v] = max(dp[v], max(dp[u], sccMax[v] - premin[v]));
+            }
+        }
+        <span class="kw">return</span> dp[belong[n]];
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; val[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op; i &lt;= m; i++) {
+            cin &gt;&gt; a[i] &gt;&gt; b[i] &gt;&gt; op;
+            <span class="kw">if</span> (op == 1) {
+                addEdge(a[i], b[i]);
+            } <span class="kw">else</span> {
+                addEdge(a[i], b[i]);
+                addEdge(b[i], a[i]);
+            }
+        }
+        tarjan(1);
+        <span class="kw">if</span> (belong[n] == 0) {
+            cout &lt;&lt; 0 &lt;&lt; "\n";
+        } <span class="kw">else</span> {
+            condense();
+            <span class="kw">int</span> ans = dpOnDAG();
+            cout &lt;&lt; ans &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>六、复杂度分析</h2>
+    <p>四道题的结构完全一样：一遍 Tarjan 线性扫过所有点和边，一遍缩点线性重建图，一遍在缩点图上扫描。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>步骤</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Tarjan 求强连通分量</td><td><code class="inline">O(n + m)</code></td><td rowspan="3"><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>缩点重建图（枚举每条原边）</td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>题目1、3、4：拓扑序 / 按编号倒序扫一遍</td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>题目2：分量内部边累加收益</td><td><code class="inline">O(m · log C)</code></td><td><code class="inline">O(n + m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>唯一不是纯线性的是题目2 的收益累加。<code class="inline">while (val &gt; 0)</code> 每轮把 val 乘上恢复系数再除以 10，系数不超过 0.8，所以每一轮至少衰减两成，最多迭代一百来次就归零。这个常数极小，整段跑起来和线性没有区别。</p>
+    <p>空间上，dfn、low、栈、belong、dp 都是 O(n)，边长数组和重建成的新图是 O(m)，没有额外开销。</p>
+
+    <h2>七、最后</h2>
+    <p>四道题连起来看，套路是一致的：先缩点把环消掉，再在 DAG 上扫一遍，dp 里装的东西随题目变，点权和、边收益、终点标记、路径上的最小价格。真正需要想清楚的只有两件事，一个是分量内部的信息怎么合并，另一个是固定的起点或终点怎么在初始化里体现。</p>
+    <p>下一节换一类收口方式：同样是缩点后的 DAG，但 dp 里要开始数方案、跑最短路、套树上背包，还要用入度和出度做一些纯性质的分析。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var svg = document.getElementById('scSvg');
+  if (!svg) return;
+  var info = document.getElementById('scInfo');
+  var prev = document.getElementById('scPrev');
+  var next = document.getElementById('scNext');
+  var reset = document.getElementById('scReset');
+
+  // 原图：1(70,80) 2(152,80) 3(70,180) 4(152,180) 5(245,80) 6(245,180)
+  var LN = {1:[70,80],2:[152,80],3:[70,180],4:[152,180],5:[245,80],6:[245,180]};
+  var LE = [[1,2],[2,1],[1,3],[2,3],[3,4],[4,3],[4,5],[4,6],[5,6]];
+  // 缩点图：A(410,70) B(410,170) C(545,110) D(545,245)
+  var RN = {A:[410,70],B:[410,170],C:[545,110],D:[545,245]};
+  var RE = [['A','B'],['B','C'],['B','D'],['C','D']];
+  var RSUM = {A:3,B:7,C:5,D:6};
+  var RDP  = {A:3,B:10,C:15,D:21};
+
+  var STEPS = [
+    {t:'原图', s:'1↔2 和 3↔4 各自成环，5、6 单独成点。点权是 1 到 6。'},
+    {t:'Tarjan 分组', s:'Tarjan 把 1、2 弹成一组，把 3、4 弹成另一组。分量内点权相加：{1,2} 是 3，{3,4} 是 7。'},
+    {t:'缩点', s:'每个分量压成一个点：A={1,2}、B={3,4}、C={5}、D={6}，环内的边变成自环被丢掉。A→B 残留了 1→3 和 2→3 两条边。'},
+    {t:'拓扑序', s:'Tarjan 的编号是 4、3、2、1，倒着扫就是 A → B → C → D。这个顺序保证转移时前驱已经算完。'},
+    {t:'dp 转移', s:'dp 初值取分量点权和。A 出发得 3；B 拿到 3+7=10；C 拿到 10+5=15；D 从 B 来是 16，从 C 来是 21，取 21。'},
+    {t:'答案', s:'全局最大值是 21，对应路径 1→3→4→5→6，点权和 1+2+3+4+5+6 = 21。'}
+  ];
+  var at = 0;
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+    p.push('<rect x="10" y="8" width="640" height="314" rx="10" fill="#fbfbfc" stroke="#e6e8eb"/>');
+    p.push('<text x="24" y="28" font-size="11" fill="#6b7280">原图</text>');
+    p.push('<text x="372" y="28" font-size="11" fill="#6b7280">缩点图（DAG）</text>');
+
+    // 左侧原图的边
+    LE.forEach(function(e){
+      var a = LN[e[0]], b = LN[e[1]];
+      var dim = (at >= 2);
+      var col = dim ? '#e6e8eb' : '#c9ced4';
+      if (at <= 1 && ((e[0] < 3 && e[1] < 3) || (e[0] > 2 && e[1] > 2))) col = '#9aa0a6';
+      p.push('<line x1="'+a[0]+'" y1="'+a[1]+'" x2="'+b[0]+'" y2="'+b[1]+'" stroke="'+col+'" stroke-width="1.2"/>');
+    });
+    // 左侧 SCC 虚线框
+    if (at >= 1){
+      p.push('<rect x="42" y="54" width="140" height="52" rx="8" fill="none" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="5 4"/>');
+      p.push('<rect x="42" y="154" width="140" height="52" rx="8" fill="none" stroke="#ea580c" stroke-width="1.2" stroke-dasharray="5 4"/>');
+    }
+    // 左节点
+    Object.keys(LN).forEach(function(k){
+      var c = LN[k], fill = '#f6f7f9', stroke = '#9aa0a6', dim = at >= 2;
+      if (!dim){
+        if (k === '1' || k === '2'){ fill = '#dbeafe'; stroke = '#2563eb'; }
+        else if (k === '3' || k === '4'){ fill = '#ffedd5'; stroke = '#ea580c'; }
+      }
+      p.push('<circle cx="'+c[0]+'" cy="'+c[1]+'" r="15" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.4"/>');
+      p.push('<text x="'+c[0]+'" y="'+(c[1]+4)+'" font-size="12" fill="#1f2328" text-anchor="middle">'+k+'</text>');
+    });
+    if (at === 0){
+      Object.keys(LN).forEach(function(k){
+        var c = LN[k];
+        p.push('<text x="'+c[0]+'" y="'+(c[1]-22)+'" font-size="10" fill="#6b7280" text-anchor="middle">点权 '+k+'</text>');
+      });
+    }
+    if (at >= 1){
+      p.push('<text x="112" y="50" font-size="10" fill="#2563eb" text-anchor="middle">和 3</text>');
+      p.push('<text x="112" y="150" font-size="10" fill="#ea580c" text-anchor="middle">和 7</text>');
+    }
+
+    // 右侧缩点图
+    if (at >= 2){
+      RE.forEach(function(e){
+        var a = RN[e[0]], b = RN[e[1]];
+        p.push('<line x1="'+a[0]+'" y1="'+a[1]+'" x2="'+b[0]+'" y2="'+b[1]+'" stroke="#2563eb" stroke-width="1.5"/>');
+      });
+      p.push('<text x="300" y="120" font-size="11" fill="#374151">缩点</text>');
+      p.push('<line x1="296" y1="132" x2="356" y2="132" stroke="#2563eb" stroke-width="1.8"/>');
+      Object.keys(RN).forEach(function(k){
+        var c = RN[k];
+        var hot = (at >= 3);
+        var fill = hot ? '#dbeafe' : '#f6f7f9';
+        var stroke = hot ? '#2563eb' : '#9aa0a6';
+        p.push('<circle cx="'+c[0]+'" cy="'+c[1]+'" r="20" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.5"/>');
+        p.push('<text x="'+c[0]+'" y="'+(c[1]-1)+'" font-size="11" fill="#1f2328" text-anchor="middle">'+k+'</text>');
+        p.push('<text x="'+c[0]+'" y="'+(c[1]+13)+'" font-size="10" fill="#6b7280" text-anchor="middle">'+RSUM[k]+'</text>');
+        if (at >= 4){
+          p.push('<text x="'+(c[0]+30)+'" y="'+(c[1]+4)+'" font-size="10" fill="#ea580c">dp '+RDP[k]+'</text>');
+        }
+      });
+      if (at >= 3){
+        p.push('<text x="600" y="70" font-size="10" fill="#2563eb" text-anchor="end">扫序：A → B → C → D</text>');
+      }
+      if (at >= 5){
+        p.push('<text x="600" y="292" font-size="12" fill="#ea580c" text-anchor="end">答案 21</text>');
+      }
+    }
+    p.push('<text x="24" y="306" font-size="11" fill="#6b7280">缩点后重边不影响最大值；dp 在拓扑序上从源推到汇</text>');
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div><strong>' + st.t + '</strong></div><div>' + st.s + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if (at > 0){ at--; render(); } });
+  next.addEventListener('click', function(){ if (at < STEPS.length - 1){ at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

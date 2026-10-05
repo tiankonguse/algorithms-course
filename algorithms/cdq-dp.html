@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CDQ 分治优化 dp：序列与拦截导弹 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.sq-row{display:flex;gap:6px;flex-wrap:wrap;}
+.sq-cell{
+  min-width:70px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);
+  background:var(--bg-soft);text-align:center;font-variant-numeric:tabular-nums;
+}
+.sq-cell .si{font-size:11px;color:var(--text-dim);}
+.sq-cell .sv{font-size:15px;font-weight:600;}
+.sq-cell .sr{font-size:11px;color:var(--text-dim);}
+.sq-cell.added{background:var(--full-bg);border-color:var(--full);color:var(--full);}
+.sq-cell.added .si,.sq-cell.added .sr{color:var(--full);opacity:.75;}
+.sq-cell.cur{background:#fff;border-color:var(--text);box-shadow:0 0 0 2px rgba(31,35,40,.08);}
+.sq-cell.dim{opacity:.4;}
+.sq-cell.done{background:var(--accent-soft);border-color:var(--accent);}
+.sq-col{display:flex;flex-direction:column;gap:8px;}
+.sq-lab{font-size:12px;color:var(--text-dim);}
+.mi-tbl{border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums;}
+.mi-tbl th,.mi-tbl td{border:1px solid var(--border);padding:6px 12px;text-align:center;}
+.mi-tbl th{background:var(--bg-soft);font-weight:600;}
+.mi-tbl td.on{background:var(--accent-soft);color:var(--accent);font-weight:600;}
+.mi-tbl td.hit{background:var(--full-bg);color:var(--full);font-weight:600;}
+.btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
+.viz button{
+  font:inherit;font-size:14px;padding:6px 14px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--border);background:var(--bg);color:var(--text);
+}
+.viz button:hover{border-color:var(--accent);color:var(--accent);}
+.viz button.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+@media(max-width:640px){
+  .sq-cell{min-width:60px;padding:5px 6px;}
+  .mi-tbl th,.mi-tbl td{padding:5px 8px;font-size:13px;}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>CDQ 分治优化 dp</h1>
+    <p class="intro">dp 的转移如果只从左边来、并且「谁能转移给谁」能用一个偏序判出来，就可以把转移整批交给分治。这一节两道题：一道是模版，另一道还要顺带统计方案数。</p>
+
+    <h2>零、背景</h2>
+    <p>能用 CDQ 分治优化的 dp，一般都有三个特征。</p>
+    <p>一是历史依赖性，算 dp[i] 时只依赖下标更小的历史状态。</p>
+    <p>二是转移的偏序性，两个对象之间能不能转移，由若干属性的比较决定。</p>
+    <p>三是可批量维护性，左边的状态能塞进一个数据结构里，一次更新右边的若干个 dp。</p>
+    <p>做法是把递归的顺序换一下。原来是「左、右、中」，现在变成「左、中、右」。</p>
+    <pre class="code"><span class="fn">cdq</span>(l, mid);          <span class="cm">// 1，先把左半的 dp 全部算成最终值</span>
+<span class="fn">merge</span>(l, mid, r);    <span class="cm">// 2，用左半的 dp 整批更新右半</span>
+<span class="fn">cdq</span>(mid + 1, r);     <span class="cm">// 3，再递归算右半</span></pre>
+    <p>第二步是整个过程的关键，它要快。左右两半各自按某个标准排好序之后，一般用双指针加树状数组做到 O(n log n)。</p>
+    <p>这里有个细节：如果 merge 里为了方便统计而重新排序，一定要用辅助数组，不能动原数组的下标次序。dp 必须保持从左到右计算，次序乱了答案就错了。</p>
+
+    <figure class="fig">
+      <div id="fig0"></div>
+      <figcaption>递归顺序从「左右中」换成「左中右」，merge 时左半的 dp 已经是最终值</figcaption>
+    </figure>
+
+    <h2>一、问题：序列</h2>
+    <p>给定一个长度为 n 的数组 arr，一共有 m 条操作，格式为 x v，表示 x 位置的数变成 v。</p>
+    <p>你可以选择不执行任何操作，或者只选择一个操作来执行，然后 arr 不再变动。</p>
+    <p>请在 arr 中选出一组下标序列，不管你做出什么选择，下标序列所代表的数字都是不下降的。打印序列能达到的最大长度。</p>
+    <p>1 ≤ 所有数字 ≤ 10⁵。</p>
+    <p>测试链接：<a href="https://www.luogu.com.cn/problem/P4093" target="_blank" rel="noopener">洛谷 P4093</a>。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>设 dp[j] 是选了 j 作为最后一个下标时的最大长度。转移时枚举前一个下标 i &lt; j，判断这一对能不能相邻。</p>
+    <p>判断本身要先预处理。每个位置 x 记两个值：lv[x] 是 x 位置可能取到的最小值，rv[x] 是可能取到的最大值，初值都是原值，每条操作都拿来更新一次 min 和 max。</p>
+    <pre class="code">lv[idx] = min(lv[idx], val);
+rv[idx] = max(rv[idx], val);</pre>
+    <p>有了 lv 和 rv，一对下标 i &lt; j 能不能相邻就变成两个不等式。</p>
+    <p>操作作用在 i 上时，i 最大会变成 rv[i]，j 保持原值，要求 rv[i] ≤ arr[j]。操作作用在 j 上时，j 最小会变成 lv[j]，i 保持原值，要求 arr[i] ≤ lv[j]。操作作用在别处或者不执行时，要求 arr[i] ≤ arr[j]，这一条被前两条包住了。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>一次只能动一个位置，所以相邻的两个下标只要满足 rv[i] ≤ arr[j] 且 arr[i] ≤ lv[j]</figcaption>
+    </figure>
+
+    <p>于是转移条件是：i &lt; j 且 arr[i] ≤ lv[j] 且 rv[i] ≤ arr[j]。朴素枚举是 O(n²)。</p>
+
+    <h2>三、分治里批量转移</h2>
+    <p>下标这一维交给分治：cdq(l, r) 先递归算完左半，再用左半整批更新右半，最后递归右半。</p>
+    <p>merge 里做的事是这样：左半按 arr（原值）从小到大排，右半按 lv 从小到大排。双指针把 arr[i] ≤ lv[j] 的左半元素逐个加进树状数组，加的位置是 rv[i]，值是 dp[i]。</p>
+    <p>这时候树状数组里存的是「所有满足第一个不等式的左半元素」，按 rv 组织。右半的 j 要的是 rv[i] ≤ arr[j] 里最大的 dp[i]，正好是一次前缀最大值查询，查到 arr[j] 为止。</p>
+    <pre class="code">dp[j] = max(dp[j], <span class="fn">query</span>(arr[j]) + 1);</pre>
+    <p>树状数组按下标值开，取 max 而不是求和，清空的时候要把加过的格子逐个还原成 0。</p>
+    <p>代码里树状数组的上界直接用了 n。本题所有数字不超过 10⁵，n 也是这个量级，够用；换成别的数据范围时记得按真实值域开。</p>
+
+    <h2>四、代码：序列</h2>
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> i, v, lv, rv;
+    };
+
+    <span class="kw">bool</span> <span class="fn">CmpV</span>(Node a, Node b) {
+        <span class="kw">return</span> a.v &lt; b.v;
+    }
+
+    <span class="kw">bool</span> <span class="fn">CmpLv</span>(Node a, Node b) {
+        <span class="kw">return</span> a.lv &lt; b.lv;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> v[MAXN];
+    <span class="kw">int</span> lv[MAXN];
+    <span class="kw">int</span> rv[MAXN];
+
+    Node arr[MAXN];
+    <span class="kw">int</span> tree[MAXN];
+    <span class="kw">int</span> dp[MAXN];
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &amp; -i;
+    }
+
+    <span class="kw">void</span> <span class="fn">more</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">while</span> (i &lt;= n) {
+            tree[i] = max(tree[i], num);
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> ret = 0;
+        <span class="kw">while</span> (i &gt; 0) {
+            ret = max(ret, tree[i]);
+            i -= lowbit(i);
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">clear</span>(<span class="kw">int</span> i) {
+        <span class="kw">while</span> (i &lt;= n) {
+            tree[i] = 0;
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+            arr[i].i = i;
+            arr[i].v = v[i];
+            arr[i].lv = lv[i];
+            arr[i].rv = rv[i];
+        }
+        sort(arr + l, arr + m + 1, CmpV);
+        sort(arr + m + 1, arr + r + 1, CmpLv);
+        <span class="kw">int</span> p1, p2;
+        <span class="kw">for</span> (p1 = l - 1, p2 = m + 1; p2 &lt;= r; p2++) {
+            <span class="kw">while</span> (p1 + 1 &lt;= m &amp;&amp; arr[p1 + 1].v &lt;= arr[p2].lv) {
+                p1++;
+                more(arr[p1].rv, dp[arr[p1].i]);
+            }
+            dp[arr[p2].i] = max(dp[arr[p2].i], query(arr[p2].v) + 1);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= p1; i++) {
+            clear(arr[i].rv);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">cdq</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">int</span> mid = (l + r) / 2;
+        cdq(l, mid);
+        merge(l, mid, r);
+        cdq(mid + 1, r);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; v[i];
+            lv[i] = v[i];
+            rv[i] = v[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, idx, val; i &lt;= m; i++) {
+            cin &gt;&gt; idx &gt;&gt; val;
+            lv[idx] = min(lv[idx], val);
+            rv[idx] = max(rv[idx], val);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            dp[i] = 1;
+        }
+        cdq(1, n);
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            ans = max(ans, dp[i]);
+        }
+        cout &lt;&lt; ans &lt;&lt; '\n';
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+
+    <div class="viz">
+      <div class="viz-title">演示 ①　五个位置的 dp 是怎么被更新的</div>
+      <p class="sq-lab">样例：n = 5，arr = [3, 1, 4, 2, 5]，操作 (2,3) (4,1) (3,5)，答案是 3。</p>
+      <div class="sq-col" id="viz1"></div>
+      <div class="viz-controls">
+        <button class="primary" id="btnNext1">下一步</button>
+        <button id="btnReset1">重置</button>
+      </div>
+      <div class="breakdown" id="bd1"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>已加入树状数组的左半元素</span>
+        <span><span class="dot partial"></span>当前更新的右半位置</span>
+      </div>
+    </div>
+
+    <h2>五、问题：拦截导弹</h2>
+    <p>一共有 n 个导弹，编号 1 ~ n，表示导弹从早到晚依次到达，每个导弹给定高度 h、速度 v。</p>
+    <p>你有导弹拦截系统，第 1 次可以拦截任意参数的导弹，但是之后拦截的导弹，高度和速度都不能比前一次拦截的导弹大。</p>
+    <p>你的目的是尽可能多的拦截导弹，如果有多个最优方案，会随机选一个执行。打印最多能拦截几个导弹，并且打印每个导弹被拦截的概率。</p>
+    <p>1 ≤ n ≤ 5 * 10⁴，1 ≤ h、v ≤ 10⁹。</p>
+    <p>测试链接：<a href="https://www.luogu.com.cn/problem/P2487" target="_blank" rel="noopener">洛谷 P2487</a>。</p>
+
+    <h2>六、两遍 dp 拼概率</h2>
+    <p>拦截的序列要求 h 和 v 都不上升，就是最长不上升子序列。长度好算，概率要数方案。</p>
+    <p>第一遍从左到右，len1[i] 是以 i 结尾的最长长度，cnt1[i] 是达到它的方案数。第二遍从右到左，len2[i] 是以 i 开头的最长长度，cnt2[i] 同理。</p>
+    <p>第二遍不用另写一套，把 h、v 数组整个反过来，条件就从「不上升」变成「不下降」，再跑一遍同样的 CDQ 就行，跑完把 len2、cnt2 也反转回来。</p>
+    <p>设最长长度是 len，总方案数是所有 len1[i] == len 的 cnt1[i] 之和。导弹 i 落在某个最优方案里，当且仅当 len1[i] + len2[i] - 1 == len。</p>
+    <p>它对应的方案数是 cnt1[i] * cnt2[i]，i 在两边各算了一次，长度加了两次所以要减一。于是概率就是下面这个式子。</p>
+    <pre class="code">概率(i) = cnt1[i] * cnt2[i] / 总方案数</pre>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>以 i 结尾的方案数乘上以 i 开头的方案数，就是经过 i 的最优方案数</figcaption>
+    </figure>
+
+    <p>剩下的细节是树状数组。它要维护前缀最大值，还要同时维护这个最大值出现了几次：更新时遇到更大的值就替换并重置次数，遇到相等的值就把次数累加。</p>
+    <p>条件是不上升，下标要反过来用。v 离散化之后取 s - v + 1，原来「v 更小」就变成「下标更大」，前缀查询查到的就是所有 v 不小于当前 v 的状态。</p>
+    <p>方案数可能非常大，代码里用 double 存，概率按浮点输出。</p>
+
+    <h2>七、代码：拦截导弹</h2>
+    <pre class="code">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> i, h, v;
+    };
+
+    <span class="kw">bool</span> <span class="fn">Cmp1</span>(Node a, Node b) {
+        <span class="kw">return</span> a.h &gt; b.h;
+    }
+
+    <span class="kw">bool</span> <span class="fn">Cmp2</span>(Node a, Node b) {
+        <span class="kw">return</span> a.h &lt; b.h;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 50001;
+    <span class="kw">int</span> n, s;
+    <span class="kw">int</span> h[MAXN];
+    <span class="kw">int</span> v[MAXN];
+    <span class="kw">int</span> sortv[MAXN];
+
+    Node arr[MAXN];
+
+    <span class="kw">int</span> treeVal[MAXN];
+    <span class="kw">double</span> treeCnt[MAXN];
+
+    <span class="kw">int</span> len1[MAXN];
+    <span class="kw">double</span> cnt1[MAXN];
+
+    <span class="kw">int</span> len2[MAXN];
+    <span class="kw">double</span> cnt2[MAXN];
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &amp; -i;
+    }
+
+    <span class="kw">void</span> <span class="fn">more</span>(<span class="kw">int</span> i, <span class="kw">int</span> val, <span class="kw">double</span> cnt) {
+        <span class="kw">while</span> (i &lt;= s) {
+            <span class="kw">if</span> (val &gt; treeVal[i]) {
+                treeVal[i] = val;
+                treeCnt[i] = cnt;
+            } <span class="kw">else</span> <span class="kw">if</span> (val == treeVal[i]) {
+                treeCnt[i] += cnt;
+            }
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">int</span> queryVal;
+    <span class="kw">double</span> queryCnt;
+
+    <span class="kw">void</span> <span class="fn">query</span>(<span class="kw">int</span> i) {
+        queryVal = 0;
+        queryCnt = 0;
+        <span class="kw">while</span> (i &gt; 0) {
+            <span class="kw">if</span> (treeVal[i] &gt; queryVal) {
+                queryVal = treeVal[i];
+                queryCnt = treeCnt[i];
+            } <span class="kw">else</span> <span class="kw">if</span> (treeVal[i] == queryVal) {
+                queryCnt += treeCnt[i];
+            }
+            i -= lowbit(i);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">clear</span>(<span class="kw">int</span> i) {
+        <span class="kw">while</span> (i &lt;= s) {
+            treeVal[i] = 0;
+            treeCnt[i] = 0;
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">merge1</span>(<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+            arr[i].i = i;
+            arr[i].h = h[i];
+            arr[i].v = v[i];
+        }
+        sort(arr + l, arr + m + 1, Cmp1);
+        sort(arr + m + 1, arr + r + 1, Cmp1);
+        <span class="kw">int</span> p1, p2;
+        <span class="kw">for</span> (p1 = l - 1, p2 = m + 1; p2 &lt;= r; p2++) {
+            <span class="kw">while</span> (p1 + 1 &lt;= m &amp;&amp; arr[p1 + 1].h &gt;= arr[p2].h) {
+                p1++;
+                more(s - arr[p1].v + 1, len1[arr[p1].i], cnt1[arr[p1].i]);
+            }
+            query(s - arr[p2].v + 1);
+            <span class="kw">if</span> (queryVal + 1 &gt; len1[arr[p2].i]) {
+                len1[arr[p2].i] = queryVal + 1;
+                cnt1[arr[p2].i] = queryCnt;
+            } <span class="kw">else</span> <span class="kw">if</span> (queryVal + 1 == len1[arr[p2].i]) {
+                cnt1[arr[p2].i] += queryCnt;
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= p1; i++) {
+            clear(s - arr[i].v + 1);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">cdq1</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">int</span> m = (l + r) / 2;
+        cdq1(l, m);
+        merge1(l, m, r);
+        cdq1(m + 1, r);
+    }
+
+    <span class="kw">void</span> <span class="fn">merge2</span>(<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+            arr[i].i = i;
+            arr[i].h = h[i];
+            arr[i].v = v[i];
+        }
+        sort(arr + l, arr + m + 1, Cmp2);
+        sort(arr + m + 1, arr + r + 1, Cmp2);
+        <span class="kw">int</span> p1, p2;
+        <span class="kw">for</span> (p1 = l - 1, p2 = m + 1; p2 &lt;= r; p2++) {
+            <span class="kw">while</span> (p1 + 1 &lt;= m &amp;&amp; arr[p1 + 1].h &lt;= arr[p2].h) {
+                p1++;
+                more(arr[p1].v, len2[arr[p1].i], cnt2[arr[p1].i]);
+            }
+            query(arr[p2].v);
+            <span class="kw">if</span> (queryVal + 1 &gt; len2[arr[p2].i]) {
+                len2[arr[p2].i] = queryVal + 1;
+                cnt2[arr[p2].i] = queryCnt;
+            } <span class="kw">else</span> <span class="kw">if</span> (queryVal + 1 == len2[arr[p2].i]) {
+                cnt2[arr[p2].i] += queryCnt;
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= p1; i++) {
+            clear(arr[i].v);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">cdq2</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">int</span> m = (l + r) / 2;
+        cdq2(l, m);
+        merge2(l, m, r);
+        cdq2(m + 1, r);
+    }
+
+    <span class="kw">int</span> <span class="fn">lower</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> l = 1, r = s, ans = 1;
+        <span class="kw">while</span> (l &lt;= r) {
+            <span class="kw">int</span> mid = (l + r) / 2;
+            <span class="kw">if</span> (sortv[mid] &gt;= num) {
+                ans = mid;
+                r = mid - 1;
+            } <span class="kw">else</span> {
+                l = mid + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            sortv[i] = v[i];
+        }
+        sort(sortv + 1, sortv + n + 1);
+        s = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            <span class="kw">if</span> (sortv[s] != sortv[i]) {
+                sortv[++s] = sortv[i];
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            v[i] = lower(v[i]);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            len1[i] = len2[i] = 1;
+            cnt1[i] = cnt2[i] = 1.0;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>() {
+        cdq1(1, n);
+        <span class="kw">for</span> (<span class="kw">int</span> l = 1, r = n; l &lt; r; l++, r--) {
+            swap(h[l], h[r]);
+            swap(v[l], v[r]);
+        }
+        cdq2(1, n);
+        <span class="kw">for</span> (<span class="kw">int</span> l = 1, r = n; l &lt; r; l++, r--) {
+            swap(len2[l], len2[r]);
+            swap(cnt2[l], cnt2[r]);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        scanf("%d", &amp;n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            scanf("%d%d", &amp;h[i], &amp;v[i]);
+        }
+        prepare();
+        compute();
+        <span class="kw">int</span> len = 0;
+        <span class="kw">double</span> cnt = 0.0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            len = max(len, len1[i]);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (len1[i] == len) {
+                cnt += cnt1[i];
+            }
+        }
+        printf("%d\n", len);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (len1[i] + len2[i] - 1 &lt; len) {
+                printf("0 ");
+            } <span class="kw">else</span> {
+                printf("%.5f ", cnt1[i] * cnt2[i] / cnt);
+            }
+        }
+        printf("\n");
+        <span class="kw">return</span> 0;
+    }</pre></pre>
+
+    <div class="viz">
+      <div class="viz-title">演示 ②　四枚导弹的长度、方案数与概率</div>
+      <p class="sq-lab">样例：n = 4，(h, v) = (3,5) (1,2) (2,3) (4,4)，最多拦 2 枚。</p>
+      <div id="viz2"></div>
+      <div class="viz-controls">
+        <button class="primary" id="btnNext2">下一步</button>
+        <button id="btnReset2">重置</button>
+      </div>
+      <div class="breakdown" id="bd2"></div>
+    </div>
+
+    <h2>八、复杂度分析</h2>
+    <p>设 n 为序列长度，m 为操作数（第一道）。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>题 1 预处理 lv、rv</td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>题 1 每层 merge 合计</td><td><code class="inline">O(n log n)</code>（排序 O(n log n) 加双指针与树状数组）</td></tr>
+        <tr><td>题 1 总计</td><td><code class="inline">O(n log² n)</code></td></tr>
+        <tr><td>题 2 离散化</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>题 2 每遍 CDQ</td><td><code class="inline">O(n log² n)</code></td></tr>
+        <tr><td>题 2 总计</td><td><code class="inline">O(n log² n)</code>（两遍是常数倍）</td></tr>
+      </tbody>
+    </table>
+    <p>题 1 每层里的排序是 O(len log len)，一层加起来 O(n log n)，乘上 log n 层是 O(n log²n)。题 2 同理，跑两遍只差一个常数。</p>
+    <p>空间上，题 1 多了 arr、树状数组和 dp，是 O(n)；题 2 多了两遍的 len、cnt，也是 O(n)。</p>
+
+    <h2>九、最后</h2>
+    <p>这两道题的 merge 都只处理了一个维度的偏序，靠双指针加树状数组收工。约束再多一维的时候，双指针就不够用了，得再往里套一层分治。</p>
+    <p>下一部分就是这件事：CDQ 套 CDQ 处理四维偏序。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  /* ================= 演示①：序列 ================= */
+  // arr = [3,1,4,2,5]，操作 (2,3) (4,1) (3,5)
+  // lv: 3,1,4,1,5   rv: 3,3,5,2,5
+  var V = [3,1,4,2,5], LV = [3,1,4,1,5], RV = [3,3,5,2,5];
+  var N = 5;
+  var FR = [
+    {name:'cdq(1, 2) 的 merge', left:[{i:1,v:3,rv:3}], right:[{j:2,lv:1,v:1}], add:[], q:1, best:0, nd:1},
+    {name:'cdq(1, 3) 的 merge', left:[{i:2,v:1,rv:3},{i:1,v:3,rv:3}], right:[{j:3,lv:4,v:4}], add:[2,1], q:4, best:1, nd:2},
+    {name:'cdq(1, 5) 的 merge', left:[{i:2,v:1,rv:3},{i:1,v:3,rv:3},{i:3,v:4,rv:5}], right:[{j:4,lv:1,v:2},{j:5,lv:5,v:5}], add:[2], q:2, best:0, nd:1, j:'4'},
+    {name:'cdq(1, 5) 的 merge', left:[{i:2,v:1,rv:3},{i:1,v:3,rv:3},{i:3,v:4,rv:5}], right:[{j:4,lv:1,v:2},{j:5,lv:5,v:5}], add:[2,1,3], q:5, best:2, nd:3, j:'5'},
+    {name:'cdq(4, 5) 的 merge', left:[{i:4,v:2,rv:2}], right:[{j:5,lv:5,v:5}], add:[4], q:5, best:1, nd:3}
+  ];
+  var dp = [1,1,1,1,1];
+  var step1 = 0;
+  var viz1 = document.getElementById('viz1');
+  var bd1 = document.getElementById('bd1');
+
+  function setDp(k){
+    dp = [1,1,1,1,1];
+    for (var i = 0; i < k; i++){
+      var f = FR[i];
+      var jj = f.j ? parseInt(f.j, 10) : f.right[0].j;
+      dp[jj - 1] = Math.max(dp[jj - 1], f.nd);
+    }
+  }
+  function render1(){
+    setDp(step1);
+    var cur = step1 > 0 ? FR[step1 - 1] : null;
+    var s = '';
+    s += '<div class="sq-lab">五个位置：arr、lv、rv 与当前的 dp（下标 1 ~ 5）</div><div class="sq-row">';
+    for (var i = 1; i <= N; i++){
+      var cls = 'sq-cell';
+      var isLeft = cur && cur.left.some(function(o){ return o.i === i; });
+      var isRight = cur && cur.right.some(function(o){ return o.j === i; });
+      var curJ = cur && (cur.j ? parseInt(cur.j, 10) === i : cur.right[0].j === i);
+      if (curJ) cls += ' cur';
+      else if (isRight) cls += ' dim';
+      else if (isLeft && cur.add.indexOf(i) >= 0) cls += ' added';
+      else if (isLeft) cls += ' done';
+      s += '<div class="' + cls + '"><div class="si">位置 ' + i + '</div><div class="sv">' + V[i - 1] +
+           '</div><div class="sr">lv ' + LV[i - 1] + ' / rv ' + RV[i - 1] + ' / dp ' + dp[i - 1] + '</div></div>';
+    }
+    s += '</div>';
+    if (cur){
+      s += '<div class="sq-lab">' + cur.name + '：左半按 arr 排序 ' +
+           cur.left.map(function(o){ return '位置' + o.i + '(arr=' + o.v + ',rv=' + o.rv + ')'; }).join('　') + '</div>';
+    } else {
+      s += '<div class="sq-lab">dp 初值全是 1，每个位置自己就能成为一个序列。</div>';
+    }
+    viz1.innerHTML = s;
+
+    if (!cur){
+      bd1.innerHTML = '<div class="row">点「下一步」开始第一次批量转移。</div>';
+      return;
+    }
+    var jj = cur.j ? parseInt(cur.j, 10) : cur.right[0].j;
+    var t = '<div class="row">' + cur.name + '，当前更新位置 ' + jj + '</div>';
+    t += '<div class="row">右半按 lv 排序，位置 ' + jj + ' 的 lv = ' + LV[jj - 1] + '，双指针加入 arr ≤ ' + LV[jj - 1] +
+         ' 的左半元素：' + (cur.add.length ? cur.add.map(function(i){ return '位置' + i + '(rv=' + RV[i - 1] + ',dp=' + dpOf(i) + ')'; }).join('、') : '无') + '</div>';
+    t += '<div class="row">查询 rv ≤ arr[' + jj + '] = ' + V[jj - 1] + ' 的最大 dp = <span class="num">' + cur.best + '</span></div>';
+    t += '<div class="row">dp[' + jj + '] = max(' + dpBefore(jj, step1) + ', ' + (cur.best + 1) +
+         ') = <span class="num">' + dp[jj - 1] + '</span></div>';
+    if (step1 >= FR.length){
+      t += '<div class="total">dp = ' + dp.join(', ') + '，答案 ' + Math.max.apply(null, dp) + '</div>';
+    }
+    bd1.innerHTML = t;
+  }
+  function dpOf(i){ return dp[i - 1]; }
+  function dpBefore(j, k){
+    var d = [1,1,1,1,1];
+    for (var i = 0; i < k - 1; i++){
+      var f = FR[i];
+      var jj = f.j ? parseInt(f.j, 10) : f.right[0].j;
+      d[jj - 1] = Math.max(d[jj - 1], f.nd);
+    }
+    return d[j - 1];
+  }
+  document.getElementById('btnNext1').addEventListener('click', function(){
+    if (step1 >= FR.length) return;
+    step1++;
+    render1();
+  });
+  document.getElementById('btnReset1').addEventListener('click', function(){ step1 = 0; render1(); });
+  render1();
+
+  /* ================= 演示②：拦截导弹 ================= */
+  var MI = [
+    {id:1, h:3, v:5, l1:1, c1:1, l2:2, c2:2, p:'1'},
+    {id:2, h:1, v:2, l1:2, c1:1, l2:1, c2:1, p:'0.5'},
+    {id:3, h:2, v:3, l1:2, c1:1, l2:1, c2:1, p:'0.5'},
+    {id:4, h:4, v:4, l1:1, c1:1, l2:1, c2:1, p:'0'}
+  ];
+  var step2 = 0;
+  var viz2 = document.getElementById('viz2');
+  var bd2 = document.getElementById('bd2');
+
+  function render2(){
+    var show1 = step2 >= 2, show2 = step2 >= 3, showP = step2 >= 4;
+    var s = '<table class="mi-tbl"><thead><tr><th>导弹</th><th>h</th><th>v</th>' +
+            '<th>len1</th><th>cnt1</th><th>len2</th><th>cnt2</th><th>概率</th></tr></thead><tbody>';
+    MI.forEach(function(m){
+      s += '<tr><td>' + m.id + '</td><td>' + m.h + '</td><td>' + m.v + '</td>' +
+           '<td' + (show1 ? ' class="on"' : '') + '>' + (show1 ? m.l1 : '-') + '</td>' +
+           '<td' + (show1 ? ' class="on"' : '') + '>' + (show1 ? m.c1 : '-') + '</td>' +
+           '<td' + (show2 ? ' class="on"' : '') + '>' + (show2 ? m.l2 : '-') + '</td>' +
+           '<td' + (show2 ? ' class="on"' : '') + '>' + (show2 ? m.c2 : '-') + '</td>' +
+           '<td' + (showP ? ' class="hit"' : '') + '>' + (showP ? m.p : '-') + '</td></tr>';
+    });
+    s += '</tbody></table>';
+    viz2.innerHTML = s;
+
+    var t = '';
+    if (step2 === 0) t = '<div class="row">四枚导弹按到达顺序排列，拦截序列要求 h 和 v 都不上升。</div>';
+    if (step2 === 1) t = '<div class="row">第一遍从左到右：len1 是以该导弹结尾的最长长度，cnt1 是方案数。</div>' +
+                         '<div class="row">1 → 2 和 1 → 3 都合法，所以 len1[2] = len1[3] = 2。</div>';
+    if (step2 === 2) t = '<div class="row">第一遍结果：len1 = 1, 2, 2, 1，最长长度 len = 2。</div>' +
+                         '<div class="row">总方案数 = cnt1[2] + cnt1[3] = 2。</div>';
+    if (step2 === 3) t = '<div class="row">第二遍从右到左：len2 是以该导弹开头的最长长度。</div>' +
+                         '<div class="row">导弹 1 后面能接 2 或 3，所以 len2[1] = 2、cnt2[1] = 2。</div>';
+    if (step2 >= 4) t = '<div class="row">导弹 i 落在最优方案里当且仅当 len1[i] + len2[i] - 1 == 2。</div>' +
+                        '<div class="row">导弹 1：1 * 2 / 2 = 1；导弹 2：1 * 1 / 2 = 0.5；导弹 3：1 * 1 / 2 = 0.5；导弹 4：1 + 1 - 1 = 1 &lt; 2，概率 0。</div>' +
+                        '<div class="total">输出：2　　1.00000 0.50000 0.50000 0.00000</div>';
+    bd2.innerHTML = t;
+  }
+  document.getElementById('btnNext2').addEventListener('click', function(){
+    if (step2 >= 4) return;
+    step2++;
+    render2();
+  });
+  document.getElementById('btnReset2').addEventListener('click', function(){ step2 = 0; render2(); });
+  render2();
+
+  /* ================= 图示 ================= */
+  var C1 = '#2563eb', C1B = '#dbeafe', C2 = '#ea580c', C2B = '#ffedd5', GY = '#9aa0a6', DIM = '#6b7280';
+
+  /* 图⓪：左中右的递归顺序 */
+  var f0 = document.getElementById('fig0');
+  if (f0){
+    var s = '<svg viewBox="0 0 680 210" role="img" aria-label="CDQ 优化 dp 的递归顺序">';
+    var box = function(x, y, w, txt, fill, stroke, tc){
+      return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="34" rx="8" fill="' + fill + '" stroke="' + stroke + '"/>' +
+             '<text x="' + (x + w / 2) + '" y="' + (y + 22) + '" text-anchor="middle" font-size="13" fill="' + tc + '">' + txt + '</text>';
+    };
+    s += '<text x="14" y="20" font-size="12" fill="' + DIM + '">统计点对时：左右先算完，最后算中间</text>';
+    s += box(30, 34, 120, 'cdq(l, mid)', C1B, C1, C1);
+    s += box(170, 34, 120, 'cdq(mid+1, r)', C1B, C1, C1);
+    s += box(310, 34, 130, 'merge 统计跨区间', '#f6f7f9', '#e6e8eb', '#1f2328');
+    s += '<text x="14" y="104" font-size="12" fill="' + DIM + '">优化 dp 时：左半先算完，立刻用它更新右半，再递归右半</text>';
+    s += box(30, 118, 120, 'cdq(l, mid)', C1B, C1, C1);
+    s += box(170, 118, 150, 'merge 更新右半 dp', C2B, C2, C2);
+    s += box(340, 118, 120, 'cdq(mid+1, r)', C1B, C1, C1);
+    s += '<path d="M150 135 L166 135" stroke="' + GY + '" stroke-width="1.5" fill="none" marker-end="url(#ah0)"/>';
+    s += '<path d="M320 135 L336 135" stroke="' + GY + '" stroke-width="1.5" fill="none" marker-end="url(#ah0)"/>';
+    s += '<defs><marker id="ah0" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="' + GY + '"/></marker></defs>';
+    s += '<text x="14" y="184" font-size="12" fill="' + DIM + '">换成这个顺序，merge 时左半的 dp 已经是最终值，可以直接拿来更新右边</text>';
+    s += '</svg>';
+    f0.innerHTML = s;
+  }
+
+  /* 图①：两个不等式 */
+  var f1 = document.getElementById('fig1');
+  if (f1){
+    var s = '<svg viewBox="0 0 680 240" role="img" aria-label="序列题的转移条件">';
+    var y = 60;
+    s += '<text x="14" y="20" font-size="12" fill="' + DIM + '">选出的相邻下标 i &lt; j，操作只能执行一条</text>';
+    // 情况一
+    s += '<text x="14" y="46" font-size="13" fill="#1f2328">操作落在 i 上</text>';
+    s += '<rect x="120" y="34" width="120" height="34" rx="8" fill="' + C2B + '" stroke="' + C2 + '"/>';
+    s += '<text x="180" y="56" text-anchor="middle" font-size="13" fill="' + C2 + '">i 取 rv[i]</text>';
+    s += '<rect x="270" y="34" width="120" height="34" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>';
+    s += '<text x="330" y="56" text-anchor="middle" font-size="13" fill="#1f2328">j 取 arr[j]</text>';
+    s += '<text x="420" y="56" font-size="13" fill="' + C2 + '">要求 rv[i] ≤ arr[j]</text>';
+    // 情况二
+    s += '<text x="14" y="106" font-size="13" fill="#1f2328">操作落在 j 上</text>';
+    s += '<rect x="120" y="94" width="120" height="34" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>';
+    s += '<text x="180" y="116" text-anchor="middle" font-size="13" fill="#1f2328">i 取 arr[i]</text>';
+    s += '<rect x="270" y="94" width="120" height="34" rx="8" fill="' + C1B + '" stroke="' + C1 + '"/>';
+    s += '<text x="330" y="116" text-anchor="middle" font-size="13" fill="' + C1 + '">j 取 lv[j]</text>';
+    s += '<text x="420" y="116" font-size="13" fill="' + C1 + '">要求 arr[i] ≤ lv[j]</text>';
+    // 情况三
+    s += '<text x="14" y="166" font-size="13" fill="#1f2328">操作落在别处</text>';
+    s += '<rect x="120" y="154" width="120" height="34" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>';
+    s += '<text x="180" y="176" text-anchor="middle" font-size="13" fill="#1f2328">i 取 arr[i]</text>';
+    s += '<rect x="270" y="154" width="120" height="34" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>';
+    s += '<text x="330" y="176" text-anchor="middle" font-size="13" fill="#1f2328">j 取 arr[j]</text>';
+    s += '<text x="420" y="176" font-size="13" fill="' + GY + '">要求 arr[i] ≤ arr[j]，已被上面包住</text>';
+    s += '<text x="14" y="216" font-size="13" fill="#1f2328">两个不等式都不含第三个位置，所以「不管做出什么选择」只需要这两条</text>';
+    s += '</svg>';
+    f1.innerHTML = s;
+  }
+
+  /* 图②：两遍 dp 拼概率 */
+  var f2 = document.getElementById('fig2');
+  if (f2){
+    var s = '<svg viewBox="0 0 680 200" role="img" aria-label="拦截导弹的两遍 dp 与概率">';
+    s += '<text x="14" y="20" font-size="12" fill="' + DIM + '">最优方案经过导弹 i 时，前一半以 i 结尾、后一半以 i 开头</text>';
+    // 前一半
+    for (var i = 0; i < 3; i++){
+      var x = 30 + i * 66;
+      s += '<rect x="' + x + '" y="40" width="56" height="36" rx="8" fill="' + C1B + '" stroke="' + C1 + '"/>';
+      s += '<text x="' + (x + 28) + '" y="63" text-anchor="middle" font-size="12" fill="' + C1 + '">导弹</text>';
+    }
+    s += '<rect x="228" y="40" width="56" height="36" rx="8" fill="' + C2B + '" stroke="' + C2 + '"/>';
+    s += '<text x="256" y="63" text-anchor="middle" font-size="12" fill="' + C2 + '">i</text>';
+    for (var j = 0; j < 2; j++){
+      var x2 = 300 + j * 66;
+      s += '<rect x="' + x2 + '" y="40" width="56" height="36" rx="8" fill="' + C1B + '" stroke="' + C1 + '"/>';
+      s += '<text x="' + (x2 + 28) + '" y="63" text-anchor="middle" font-size="12" fill="' + C1 + '">导弹</text>';
+    }
+    s += '<text x="144" y="96" text-anchor="middle" font-size="12" fill="' + C1 + '">cnt1[i] 种</text>';
+    s += '<text x="256" y="96" text-anchor="middle" font-size="12" fill="' + C2 + '">同一个 i</text>';
+    s += '<text x="362" y="96" text-anchor="middle" font-size="12" fill="' + C1 + '">cnt2[i] 种</text>';
+    s += '<text x="14" y="140" font-size="13" fill="#1f2328">经过 i 的最优方案数 = cnt1[i] * cnt2[i]</text>';
+    s += '<text x="14" y="166" font-size="13" fill="#1f2328">概率 = 经过 i 的最优方案数 / 全部最优方案数</text>';
+    s += '<text x="14" y="190" font-size="12" fill="' + DIM + '">len1[i] + len2[i] - 1 &lt; len 的导弹，概率直接是 0</text>';
+    s += '</svg>';
+    f2.innerHTML = s;
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>欧拉序求 LCA · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .el-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .el-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .el-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #elSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .el-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>欧拉序求 LCA</h1>
+    <p class="intro">树上倍增求一次 LCA 要 O(log n)，查询多起来就吃力。这一节把整棵树拍成一条欧拉序，两点各自第一次出现的位置夹住一段区间，区间里最靠上的那个点就是 LCA。配上倍增表，单次查询降到 O(1)。</p>
+
+    <h2>零、背景</h2>
+    <p>前面已经讲过两条路：树上倍增，预处理 O(n log n)，单次查询 O(log n)；重链剖分，预处理 O(n)，单次查询 O(log n)。这两条路都是「查询时往上跳」，跳的步数带了 log。</p>
+    <p>想做到 O(1) 查询，得换思路：把「跳」变成「查表」。树上的祖先关系如果能压到一段连续区间上，区间最值就是现成的 RMQ 问题，而 RMQ 有经典的 O(1) 查询做法，稀疏表。</p>
+    <p>欧拉序就是那个「把树压成区间」的序列。代价是序列长度变成 2n - 1，预处理空间和时间都是 O(n log n)，而且树不能动。静态树、海量查询，正是它的主场。</p>
+
+    <h2>一、问题</h2>
+    <p>题目：一共有 n 个节点，给定 n - 1 条边，所有节点组成一棵树，给定树头 root。一共有 m 条查询，格式 u v，打印 u 和 v 的最低公共祖先。1 ≤ n、m ≤ 5 × 10⁵。测试链接：https://www.luogu.com.cn/problem/P3379。</p>
+    <p>朴素做法就是每次查询都从两点往上走：把 u 到根的路径全打上标记，再让 v 一直往父走，第一个碰到标记的点就是 LCA。一次查询最坏走满树高，链形树上是 O(n)，m 次查询就是 O(nm)，5 × 10⁵ 的规模直接超时。</p>
+    <p>倍增法把单次查询压到 O(log n)，但 m = 5 × 10⁵ 时这个 log 仍然可观。目标很明确：预处理 O(n log n) 不变，单次查询 O(1)。</p>
+
+    <h2>二、欧拉序是什么</h2>
+    <p>对树做一遍 DFS。每到一个节点就把它写进序列；每从一个孩子回回来，再把当前节点写一遍。走完整棵树，写出来的长度恰是 2n - 1 的序列就是欧拉序。</p>
+    <p>可以发现一个关键性质：任何点在欧拉序里可能出现多次，但它的所有出现都落在自己子树对应的那段连续区间里。第一次出现的位置记为 first[u]，最后一次出现的位置就是子树段的右边界。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="示例树与它的欧拉序" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#9aa0a6" stroke-width="1.3">
+          <line x1="95" y1="40" x2="40" y2="66"/>
+          <line x1="95" y1="40" x2="95" y2="66"/>
+          <line x1="95" y1="40" x2="150" y2="66"/>
+          <line x1="95" y1="40" x2="215" y2="66"/>
+          <line x1="40" y1="90" x2="40" y2="116"/>
+          <line x1="150" y1="90" x2="130" y2="116"/>
+          <line x1="150" y1="90" x2="170" y2="116"/>
+          <line x1="170" y1="140" x2="170" y2="166"/>
+          <line x1="215" y1="90" x2="215" y2="116"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="95" cy="28" r="12"/>
+          <circle cx="40" cy="78" r="12"/>
+          <circle cx="95" cy="78" r="12"/>
+          <circle cx="150" cy="78" r="12"/>
+          <circle cx="215" cy="78" r="12"/>
+          <circle cx="40" cy="128" r="12"/>
+          <circle cx="130" cy="128" r="12"/>
+          <circle cx="170" cy="128" r="12"/>
+          <circle cx="215" cy="128" r="12"/>
+          <circle cx="170" cy="178" r="12"/>
+        </g>
+        <g font-size="10" fill="#1f2328" text-anchor="middle">
+          <text x="95" y="31">1</text>
+          <text x="40" y="81">2</text>
+          <text x="95" y="81">3</text>
+          <text x="150" y="81">5</text>
+          <text x="215" y="81">8</text>
+          <text x="40" y="131">4</text>
+          <text x="130" y="131">6</text>
+          <text x="170" y="131">7</text>
+          <text x="215" y="131">10</text>
+          <text x="170" y="181">9</text>
+        </g>
+        <text x="20" y="212" font-size="10" fill="#6b7280">n = 10 的树，孩子按编号从小到大访问</text>
+        <rect x="250" y="14" width="398" height="272" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="262" y="36" font-size="11" fill="#374151">欧拉序（19 项 = 2n - 1）</text>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <rect x="262" y="48" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="274" y="64">1</text>
+          <rect x="292" y="48" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="304" y="64">2</text>
+          <rect x="322" y="48" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="334" y="64">4</text>
+          <rect x="352" y="48" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="364" y="64">2</text>
+          <rect x="382" y="48" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="394" y="64">1</text>
+          <rect x="412" y="48" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="424" y="64">3</text>
+          <rect x="442" y="48" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="454" y="64">1</text>
+          <rect x="472" y="48" width="24" height="24" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="484" y="64">5</text>
+          <rect x="502" y="48" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="514" y="64">6</text>
+          <rect x="532" y="48" width="24" height="24" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="544" y="64">5</text>
+          <rect x="262" y="96" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="274" y="112">7</text>
+          <rect x="292" y="96" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="304" y="112">9</text>
+          <rect x="322" y="96" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="334" y="112">7</text>
+          <rect x="352" y="96" width="24" height="24" rx="4" fill="#ffedd5" stroke="#ea580c"/><text x="364" y="112">5</text>
+          <rect x="382" y="96" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="394" y="112">1</text>
+          <rect x="412" y="96" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="424" y="112">8</text>
+          <rect x="442" y="96" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="454" y="112">10</text>
+          <rect x="472" y="96" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="484" y="112">8</text>
+          <rect x="502" y="96" width="24" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/><text x="514" y="112">1</text>
+        </g>
+        <g font-size="10" fill="#9aa0a6" text-anchor="middle">
+          <text x="262" y="88">1</text>
+          <text x="292" y="88">2</text>
+          <text x="322" y="88">3</text>
+          <text x="352" y="88">4</text>
+          <text x="382" y="88">5</text>
+          <text x="412" y="88">6</text>
+          <text x="442" y="88">7</text>
+          <text x="472" y="88">8</text>
+          <text x="502" y="88">9</text>
+          <text x="532" y="88">10</text>
+          <text x="262" y="136">11</text>
+          <text x="292" y="136">12</text>
+          <text x="322" y="136">13</text>
+          <text x="352" y="136">14</text>
+          <text x="382" y="136">15</text>
+          <text x="412" y="136">16</text>
+          <text x="442" y="136">17</text>
+          <text x="472" y="136">18</text>
+          <text x="502" y="136">19</text>
+        </g>
+        <text x="262" y="160" font-size="11" fill="#374151">1 出现 5 次：进入 1 次，4 个孩子各回一次</text>
+        <text x="262" y="182" font-size="11" fill="#ea580c">5 出现 3 次（橙格）：进入 1 次，两个孩子的回溯各 1 次</text>
+        <text x="262" y="204" font-size="11" fill="#2563eb">first[7] = 11，第二次出现 13，都在 5 的子树段 [8,14] 里</text>
+        <text x="262" y="226" font-size="11" fill="#6b7280">一棵子树的踪迹 = 欧拉序里一段连续区间</text>
+        <text x="262" y="248" font-size="11" fill="#6b7280">长度 = n 次进入 + (n - 1) 次回溯 = 2n - 1</text>
+        <text x="262" y="270" font-size="11" fill="#6b7280">first[u] 越小，进入越早</text>
+      </svg>
+      <figcaption>一棵 10 个点的树和它的欧拉序：每个点出现多次，但全部落在自己子树的连续段内</figcaption>
+    </figure>
+
+    <p>以这棵树为例，欧拉序是「1 2 4 2 1 3 1 5 6 5 7 9 7 5 1 8 10 8 1」。注意 5 这个点：孩子 6 走完回一次，孩子 7 的整棵子树走完又回一次，所以 5 出现了三次。</p>
+    <p>序列长度是 2n - 1：每个点进入时写一次共 n 次，每个非根点回溯到父时父再写一次共 n - 1 次，加起来 2n - 1 项。这棵 10 个点的树写了 19 项，正好对上。</p>
+
+    <h2>三、为什么区间最浅就是 LCA</h2>
+    <p>设 u ≠ v，看欧拉序里 first[u] 和 first[v] 夹住的那段（不妨设 first[u] &lt; first[v]）。这段序列记录的是：从进入 u 开始，绕行到进入 v 为止的完整路径。</p>
+    <p>这段路上经过的深度最浅的点，恰好是 LCA(u, v)。可以发现，绕行路径的最高点只可能是 LCA：比 LCA 更浅的点在这段路上根本不会出现，比 LCA 深的点又顶多和 LCA 的孩子持平。区间深度最浅那个点，就是 LCA 本尊。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="first 区间夹住 LCA" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#9aa0a6" stroke-width="1.3">
+          <line x1="70" y1="48" x2="45" y2="79"/>
+          <line x1="70" y1="48" x2="120" y2="79"/>
+          <line x1="45" y1="111" x2="20" y2="142"/>
+          <line x1="45" y1="111" x2="65" y2="142"/>
+          <line x1="120" y1="111" x2="150" y2="142"/>
+          <line x1="150" y1="174" x2="170" y2="199"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+          <circle cx="70" cy="32" r="16"/>
+          <circle cx="45" cy="95" r="16"/>
+          <circle cx="120" cy="95" r="16"/>
+          <circle cx="20" cy="158" r="16"/>
+          <circle cx="65" cy="158" r="16"/>
+          <circle cx="150" cy="158" r="16"/>
+          <circle cx="170" cy="215" r="16"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="70" y="36">a</text>
+          <text x="45" y="99">b</text>
+          <text x="120" y="99">c</text>
+          <text x="20" y="162">u</text>
+          <text x="65" y="162">d</text>
+          <text x="150" y="162">f</text>
+          <text x="170" y="219">v</text>
+        </g>
+        <rect x="230" y="18" width="412" height="194" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="248" y="44" font-size="11" fill="#374151">欧拉序：a b u b d b a c f v f c a</text>
+        <text x="248" y="70" font-size="11" fill="#2563eb">查 LCA(u, v)：first[u] = 3，first[v] = 10</text>
+        <text x="248" y="96" font-size="11" fill="#2563eb">闭区间 [3, 10]：u b d b a c f v</text>
+        <text x="248" y="122" font-size="11" fill="#374151">深度：2 1 2 1 0 1 2 3 → 最浅是 a</text>
+        <text x="248" y="148" font-size="11" fill="#ea580c">LCA(u, v) = a</text>
+        <text x="248" y="174" font-size="11" fill="#6b7280">若 u 是 v 的祖先，区间右端就是 v 自己</text>
+        <text x="248" y="198" font-size="11" fill="#6b7280">u 已在左端，最浅点仍是 LCA，无需特判</text>
+      </svg>
+      <figcaption>u 到 v 的绕行路径最高点就是 LCA：first[u] 与 first[v] 的闭区间里深度最小的点</figcaption>
+    </figure>
+
+    <p>区间含两端点是有讲究的。如果 u 是 v 的祖先，那么 first[u] &lt; first[v]，区间右端就是 v 自己，途中不再回到 u，但 u 已经作为左端点在区间里了，最浅点正是 u，答案正确。所以查询不需要任何特判，u 等于 v 时区间长度为 1，查出来就是自己。</p>
+
+    <h2>四、倍增表怎么建</h2>
+    <p>「最上方的节点」可以直接比：getUp(x, y) 返回 first 更小的那个。这里有个容易误解的地方：单独拎出两个节点，「first 小」并不等于「深度浅」，别的子树里先进入的深点就是反例。真正成立的是区间性质：欧拉序的任何连续一段里，最上方的节点必然是这一段里 first 最小的，其余节点都是它走下去再回来的后代，进入都更晚。倍增表合并的子区间都落在查询区间内，这个性质一路保持。</p>
+    <p>这里有个细节：两个点的 first 相同是不可能的，first 是唯一的进入时刻。所以比较函数无需并列处理。</p>
+    <p>rmq[i][p] 的含义：从欧拉序第 i 项开始、往右长度 2 的 p 次方的区间里，最上方的节点。转移就是两个半区拼起来：</p>
+    <pre class="code">rmq[i][cur] = getUp(rmq[i][pre], rmq[i + (1 &lt;&lt; pre)][pre]);</pre>
+    <p>查询 [l, r] 时取 k = lg2[r - l + 1]，两段长 2 的 k 次方的区间重叠覆盖即可，单次 O(1)。lg2 预处理成数组，避免查询时调用库函数。</p>
+    <p>完整代码：</p>
+
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 20;
+    <span class="kw">int</span> n, m, root;
+
+    <span class="kw">int</span> headg[MAXN];
+    <span class="kw">int</span> nextg[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> tog[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> first[MAXN];
+    <span class="kw">int</span> lg2[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> rmq[MAXN &lt;&lt; 1][MAXP];
+    <span class="kw">int</span> cntEuler;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nextg[++cntg] = headg[u];
+        tog[cntg] = v;
+        headg[u] = cntg;
+    }
+
+    <span class="kw">int</span> <span class="fn">getUp</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">return</span> first[x] &lt; first[y] ? x : y;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        first[u] = ++cntEuler;
+        rmq[first[u]][0] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = headg[u]; e &gt; 0; e = nextg[e]) {
+            <span class="kw">int</span> v = tog[e];
+            <span class="kw">if</span> (v != fa) {
+                dfs(v, u);
+                rmq[++cntEuler][0] = u;
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">buildRmq</span>() {
+        dfs(root, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= cntEuler; i++) {
+            lg2[i] = lg2[i &gt;&gt; 1] + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> pre = 0, cur = 1; cur &lt;= lg2[cntEuler]; pre++, cur++) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i + (1 &lt;&lt; cur) - 1 &lt;= cntEuler; i++) {
+                rmq[i][cur] = getUp(rmq[i][pre], rmq[i + (1 &lt;&lt; pre)][pre]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getLCA</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        x = first[x];
+        y = first[y];
+        <span class="kw">if</span> (x &gt; y) {
+            swap(x, y);
+        }
+        <span class="kw">int</span> k = lg2[y - x + 1];
+        <span class="kw">return</span> getUp(rmq[x][k], rmq[y - (1 &lt;&lt; k) + 1][k]);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; root;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        buildRmq();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= m; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            cout &lt;&lt; getLCA(u, v) &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>五、查询的正确路径</h2>
+    <p>getLCA 先把两点换算成 first 位置，令 x &lt; y，然后在欧拉序的 [x, y] 闭区间上查「最上方的节点」。整个流程没有一行特判，u 等于 v 时区间长度为 1，查出来就是自己。</p>
+    <p>预处理那侧有两个容易写错的地方。一是 rmq 的第二维要开到 lg2[2n - 1]，欧拉序长度接近 2n；二是 dfs 里回溯写 rmq[++cntEuler][0] = u，这条语句在「每个孩子走完」之后执行一次，漏写会把序列长度和区间全部搞错。</p>
+
+    <div class="viz">
+      <div class="viz-title">欧拉序上查一次 LCA</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">还是那棵 10 个点的树。点「下一步」，看欧拉序怎么生成、first 位置怎么夹区间、倍增表两段覆盖怎么把 LCA 挑出来。</p>
+      <svg id="elSvg" viewBox="0 0 660 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="欧拉序求 LCA 演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>查询区间 [9,12]</span>
+        <span><span class="dot partial"></span>first 位置（查询端点）</span>
+        <span><span class="dot skip"></span>区间外的项</span>
+      </div>
+      <div class="breakdown" id="elInfo"></div>
+      <div class="viz-controls">
+        <button class="el-btn" id="elPrev" type="button">上一步</button>
+        <button class="el-btn" id="elNext" type="button">下一步</button>
+        <button class="el-btn" id="elReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>六、复杂度分析</h2>
+    <p>全流程只有「建表」和「查表」两种操作，规模都由欧拉序长度 2n - 1 决定。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>步骤</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>DFS 生成欧拉序</td><td><code class="inline">O(n)</code></td><td rowspan="3"><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>预处理 lg2 数组</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>倍增表逐层递推</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>单次查询 getLCA</td><td><code class="inline">O(1)</code></td><td><code class="inline">O(1)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间是这套做法的主要代价：rmq 开到 (2n - 1) × log(2n - 1)，n = 5 × 10⁵ 时约 10⁶ 行 × 20 层。每次查询只做两次比较函数调用加一次数组访问，常数极小。</p>
+    <p>和树上倍增对比：预处理同是 O(n log n)，但查询从 O(log n) 降到 O(1)。查询次数越多，这笔换来越划算。</p>
+
+    <h2>七、最后</h2>
+    <p>欧拉序求 LCA 的链条是：树 → 欧拉序 → first 区间 → RMQ → 稀疏表。每一步都不难，串起来就把「树上跳祖先」变成了「区间查最浅」。</p>
+    <p>适用前提也说清楚：树是静态的，改动会废掉整张表；空间吃得下 O(n log n)。动态树上求 LCA，后面讲 LCT 时会专门处理。</p>
+    <p>欧拉序的表建在长度 2n - 1 的序列上，还能再省一半。下一讲用 dfn 序求 LCA，序列长度只有 n，常数砍半，思路如出一辙。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  // 示例树：root=1，边 1-2 1-3 1-5 1-8 2-4 5-6 5-7 7-9 8-10，孩子按编号升序访问
+  var seq = [1,2,4,2,1,3,1,5,6,5,7,9,7,5,1,8,10,8,1]; // 19 项
+  var first = {1:1,2:2,4:3,3:6,5:8,6:9,7:11,9:12,8:16,10:17};
+  var depth = {1:0,2:1,3:1,4:2,5:1,6:2,7:2,9:3,8:1,10:2};
+  var XY = {1:[300,24],2:[150,58],3:[250,58],5:[360,58],8:[490,58],4:[150,92],6:[320,92],7:[400,92],10:[520,92],9:[400,126]};
+  var E = [[1,2],[1,3],[1,5],[1,8],[2,4],[5,6],[5,7],[7,9],[8,10]];
+  var pos = function(i){ return 25 + (i-1) * 32; };
+
+  var STEPS = [
+    { t:'第一步：DFS 生成欧拉序',
+      s:'进点写一次，每走完一个孩子回来再写一次。19 项，长度 2n - 1。' },
+    { t:'第二步：first[u] 与 first[v]',
+      s:'查 LCA(6, 9)：first[6] = 9，first[9] = 12。' },
+    { t:'第三步：夹出闭区间 [9, 12]',
+      s:'区间内容 6 5 7 9，深度 2 1 2 3，最浅的是 5。' },
+    { t:'第四步：k = lg2[12-9+1] = 2',
+      s:'两段长 4 的区间 [9,12] 与 [9,12] 重叠覆盖，查表得 5。' },
+    { t:'结论：LCA(6, 9) = 5',
+      s:'两段覆盖不重不漏，最上方的节点 5 就是答案，单次查询 O(1)。' }
+  ];
+
+  var svg = document.getElementById('elSvg');
+  var info = document.getElementById('elInfo');
+  var prev = document.getElementById('elPrev');
+  var next = document.getElementById('elNext');
+  var reset = document.getElementById('elReset');
+  var at = 0;
+
+  function cell(i, fill, stroke){
+    var v = seq[i-1];
+    return '<rect x="' + (pos(i)-13) + '" y="18" width="26" height="24" rx="4" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.4"/>'
+      + '<text x="' + pos(i) + '" y="34" font-size="11" fill="#1f2328" text-anchor="middle">' + v + '</text>'
+      + '<text x="' + pos(i) + '" y="56" font-size="10" fill="#9aa0a6" text-anchor="middle">' + i + '</text>';
+  }
+
+  function tree(){
+    var p = [];
+    p.push('<g stroke="#9aa0a6" stroke-width="1.3">');
+    for (var i = 0; i < E.length; i++){
+      var a = XY[E[i][0]], b = XY[E[i][1]];
+      p.push('<line x1="' + a[0] + '" y1="' + (a[1]+14) + '" x2="' + b[0] + '" y2="' + (b[1]-14) + '"/>');
+    }
+    p.push('</g>');
+    for (var u in XY){
+      p.push('<circle cx="' + XY[u][0] + '" cy="' + XY[u][1] + '" r="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>');
+      p.push('<text x="' + XY[u][0] + '" y="' + (XY[u][1]+4) + '" font-size="11" fill="#1f2328" text-anchor="middle">' + u + '</text>');
+    }
+    return p.join('');
+  }
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+    // 树（下方）
+    p.push('<g transform="translate(0,80)">' + tree() + '</g>');
+    // 欧拉序条带（上方）
+    for (var i = 1; i <= 19; i++){
+      if (at >= 2 && i >= 9 && i <= 12){
+        p.push(cell(i, '#ffedd5', '#ea580c'));
+      } else {
+        p.push(cell(i, '#f6f7f9', '#e6e8eb'));
+      }
+    }
+    if (at === 1){
+      p.push('<circle cx="' + pos(9) + '" cy="30" r="17" fill="none" stroke="#2563eb" stroke-width="1.8"/>');
+      p.push('<circle cx="' + pos(12) + '" cy="30" r="17" fill="none" stroke="#2563eb" stroke-width="1.8"/>');
+    }
+    if (at >= 2){
+      p.push('<rect x="' + (pos(9)-15) + '" y="14" width="' + (pos(12)-pos(9)+30) + '" height="32" rx="5" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="5 3"/>');
+      p.push('<text x="' + pos(9) + '" y="10" font-size="10" fill="#2563eb" text-anchor="middle">first[6]</text>');
+      p.push('<text x="' + pos(12) + '" y="10" font-size="10" fill="#2563eb" text-anchor="middle">first[9]</text>');
+    }
+    if (at === 4){
+      p.push('<text x="' + ((pos(9)+pos(12))/2) + '" y="70" font-size="11" fill="#ea580c" text-anchor="middle">区间内深度 2 1 2 3 → 最浅为 5</text>');
+    }
+    // 树上高亮：查询点 6、9；答案 5
+    var dy = 80;
+    if (at >= 1){
+      p.push('<circle cx="' + XY[6][0] + '" cy="' + (XY[6][1]+dy) + '" r="17" fill="none" stroke="#2563eb" stroke-width="1.8"/>');
+      p.push('<circle cx="' + XY[9][0] + '" cy="' + (XY[9][1]+dy) + '" r="17" fill="none" stroke="#2563eb" stroke-width="1.8"/>');
+    }
+    if (at >= 2){
+      p.push('<circle cx="' + XY[5][0] + '" cy="' + (XY[5][1]+dy) + '" r="17" fill="none" stroke="#ea580c" stroke-width="2"/>');
+    }
+    if (at === 4){
+      p.push('<text x="' + XY[5][0] + '" y="' + (XY[5][1]+dy-24) + '" font-size="11" fill="#ea580c" text-anchor="middle">LCA = 5</text>');
+    }
+    p.push('<text x="24" y="262" font-size="11" fill="#6b7280">树上闭区间 [9,12] 的两段覆盖在序列上完全重叠，答案取区间内 first 最小的节点</text>');
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div><strong>' + st.t + '</strong></div><div>' + st.s + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if (at > 0){ at--; render(); } });
+  next.addEventListener('click', function(){ if (at < STEPS.length - 1){ at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

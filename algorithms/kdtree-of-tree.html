@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>树套树（树状数组套 K-D 树）· 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .ts-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .ts-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .ts-btn:disabled{opacity:.4;cursor:default;}
+  .ts-btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;}
+  .ts-svg{display:block;width:100%;height:auto;margin:0 auto;}
+  @media(max-width:760px){
+    .ts-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>树套树（树状数组套 K-D 树）</h1>
+    <p class="intro">一个数据结构管不了一维以上的约束，就把维度拆开分给两层：外层管第一维，外层的每个节点背后再挂一棵 K-D 树管剩下的两维。这就是树套树。</p>
+
+    <h2>零、背景</h2>
+    <p>树状数组管前缀和，K-D 树管平面上的矩形。两个都只擅长自己那一摊：树状数组只认「下标的前缀」，K-D 树认「二维的盒子」。遇到三维、四维的约束，单独哪一个都不够。</p>
+    <p>把它们拼起来的办法很直接，让树状数组的每个下标背后不再是一个数，而是挂一整棵 K-D 树。外层负责把第一维切成一个个前缀，内层在每个前缀里回答剩下两维的问题。</p>
+
+    <h2>一、问题</h2>
+    <p>四维偏序最长链。一共 n 个点，每个点有四维坐标 (a, b, c, d)。可以任意挑点排成一列，每个点最多用一次；点 x 后面能放点 y 的条件是 x 的每一维都不超过 y 对应的那一维。问这列最长能有多长。</p>
+    <p>例子用 6 个点：</p>
+
+    <table class="complexity">
+      <thead><tr><th>点编号</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th></tr></thead>
+      <tbody>
+        <tr><td>(a, b, c, d)</td><td>(1, 2, 3, 4)</td><td>(2, 3, 4, 5)</td><td>(1, 1, 2, 3)</td><td>(2, 2, 3, 5)</td><td>(3, 1, 1, 2)</td><td>(2, 4, 2, 6)</td></tr>
+      </tbody>
+    </table>
+
+    <p>手算一下：3 号 (1,1,2,3) → 1 号 (1,2,3,4) → 4 号 (2,2,3,5) → 2 号 (2,3,4,5)，四维都是不减的，长度 4。答案就是 4。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>把它当最长上升子序列做：dp[i] 表示以 i 号点结尾时最长能排多长，枚举所有 j 看能不能接到 i 后面。判断是 O(1)，枚举是 O(n²)，n = 5 × 10⁴ 时要比 2.5 × 10⁹ 次，过不去。</p>
+    <p>三维偏序有成熟的做法：CDQ 分治，O(n log² n)。四维要 CDQ 套 CDQ，O(n log³ n)，写得动但不好写。这一节走另一条路，用数据结构直接把三维的「前缀最大值」查出来。</p>
+
+    <h2>三、先按 a 排序，剩下三维</h2>
+    <p>先把所有点按 a、b、c、d 的字典序排一遍。排完之后，序列里位置靠前的点，a 一定不大于位置靠后的点，因为 a 是排序的第一关键字。于是 a 这一维不用再管了。</p>
+    <p>排好序之后，dp 的式子就变成：</p>
+    <p style="text-align:center;font-size:17px;"><code class="inline">dp[i] = 1 + max{ dp[j] : j 在 i 前面，且 bⱼ ≤ bᵢ、cⱼ ≤ cᵢ、dⱼ ≤ dᵢ }</code></p>
+    <p>剩下 b、c、d 三维，正好对应「在某个前缀里查三维的最大值」。前缀交给树状数组，剩下两维交给 K-D 树。</p>
+
+    <h2>四、外层管 b，内层管 c 和 d</h2>
+    <p>b 的值域很大（题目给到 ±10⁹），所以先离散化：把 b 值从小到大排一遍，用排名代替原值。这里有个细节，排名必须两两不同，否则 b 相等的点会互相贡献，把「不减」变成「严格小于」了。做法是排序时以 b 为主关键字、点的下标为次关键字。</p>
+    <p>于是结构是这样：树状数组的第 i 个下标，对应 b 排名 ≤ i 的那些点；它挂着的那棵 K-D 树，存的是这些点的 (c, d) 坐标，每个点上带着自己的 dp 值，子树上维护 maxdp。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="树套树的两层结构" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="30" font-size="12" fill="#6b7280">外层 · 树状数组（管 b 的排名，一维前缀）</text>
+        <g font-size="13" text-anchor="middle">
+          <rect x="30" y="44" width="90" height="44" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="75" y="62" fill="#2563eb" font-weight="600">槽 1</text>
+          <text x="75" y="78" font-size="11" fill="#2563eb">b 排名</text>
+          <rect x="128" y="44" width="90" height="44" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="173" y="62" fill="#2563eb" font-weight="600">槽 2</text>
+          <text x="173" y="78" font-size="11" fill="#2563eb">b 排名</text>
+          <rect x="226" y="44" width="90" height="44" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="271" y="62" fill="#2563eb" font-weight="600">槽 3</text>
+          <text x="271" y="78" font-size="11" fill="#2563eb">b 排名</text>
+          <rect x="324" y="44" width="90" height="44" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="369" y="62" fill="#2563eb" font-weight="600">槽 4</text>
+          <text x="369" y="78" font-size="11" fill="#2563eb">b 排名</text>
+          <rect x="422" y="44" width="90" height="44" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="467" y="62" fill="#2563eb" font-weight="600">槽 5</text>
+          <text x="467" y="78" font-size="11" fill="#2563eb">b 排名</text>
+          <rect x="520" y="44" width="90" height="44" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="565" y="62" fill="#6b7280" font-weight="600">槽 6</text>
+          <text x="565" y="78" font-size="11" fill="#6b7280">b 排名</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.2" fill="none">
+          <line x1="75" y1="88" x2="75" y2="128"/>
+          <line x1="173" y1="88" x2="173" y2="128"/>
+          <line x1="271" y1="88" x2="271" y2="128"/>
+          <line x1="369" y1="88" x2="369" y2="128"/>
+          <line x1="467" y1="88" x2="467" y2="128"/>
+        </g>
+        <text x="30" y="118" font-size="12" fill="#6b7280">内层</text>
+        <g font-size="13" text-anchor="middle">
+          <rect x="30" y="132" width="90" height="46" rx="6" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.2"/>
+          <text x="75" y="152" fill="#0f6e56" font-weight="600">K-D 树</text>
+          <text x="75" y="169" font-size="11" fill="#0f6e56">管 (c, d)</text>
+          <rect x="128" y="132" width="90" height="46" rx="6" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.2"/>
+          <text x="173" y="152" fill="#0f6e56" font-weight="600">K-D 树</text>
+          <text x="173" y="169" font-size="11" fill="#0f6e56">管 (c, d)</text>
+          <rect x="226" y="132" width="90" height="46" rx="6" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.2"/>
+          <text x="271" y="152" fill="#0f6e56" font-weight="600">K-D 树</text>
+          <text x="271" y="169" font-size="11" fill="#0f6e56">管 (c, d)</text>
+          <rect x="324" y="132" width="90" height="46" rx="6" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.2"/>
+          <text x="369" y="152" fill="#0f6e56" font-weight="600">K-D 树</text>
+          <text x="369" y="169" font-size="11" fill="#0f6e56">管 (c, d)</text>
+          <rect x="422" y="132" width="90" height="46" rx="6" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.2"/>
+          <text x="467" y="152" fill="#0f6e56" font-weight="600">K-D 树</text>
+          <text x="467" y="169" font-size="11" fill="#0f6e56">管 (c, d)</text>
+        </g>
+        <rect x="30" y="196" width="580" height="40" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <text x="46" y="216" font-size="13" fill="#1f2328">查一次：外层沿 i −= lowbit(i) 跳若干棵，每棵在 (c, d) 平面上查 c ≤ qc 且 d ≤ qd 的最大 dp</text>
+      </svg>
+      <figcaption>外层把 b 切成前缀，外层每个槽位背后是一棵独立的动态 K-D 树</figcaption>
+    </figure>
+
+    <p>改一个点的时候，外层走 <code class="inline">i += lowbit(i)</code>，把新状态加进沿途每一棵 K-D 树；查的时候走 <code class="inline">i -= lowbit(i)</code>，把沿途每棵的答案取最大值。和一维树状数组的写法完全一样，只是「维护的信息」从整数换成了一棵 K-D 树。</p>
+
+    <h2>五、一次查询到底跳几棵</h2>
+    <p>这里有个反直觉的结论：单次查询是 O(√n)，不是 O(log n · √n)。</p>
+    <p>原因在于树状数组跳的这些槽位，管辖的区间长度各不相同。以查询排名 7 为例，它访问槽 7、槽 6、槽 4，三个槽分别管 1 个、2 个、4 个点。在管 k 个点的 K-D 树里查一次是 O(√k)，于是总代价是：</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 268" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="树状数组查询路径上各槽位的规模与总代价" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="26" font-size="12" fill="#6b7280">查询排名 7，树状数组沿着 7 → 6 → 4 → 0 跳，橙色是被访问到的槽位</text>
+        <g font-size="12" text-anchor="middle">
+          <rect x="30" y="40" width="62" height="42" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="61" y="58" fill="#1f2328" font-weight="600">槽 1</text>
+          <text x="61" y="74" font-size="11" fill="#6b7280">管 1 个</text>
+          <rect x="100" y="40" width="62" height="42" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="131" y="58" fill="#1f2328" font-weight="600">槽 2</text>
+          <text x="131" y="74" font-size="11" fill="#6b7280">管 2 个</text>
+          <rect x="170" y="40" width="62" height="42" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="201" y="58" fill="#1f2328" font-weight="600">槽 3</text>
+          <text x="201" y="74" font-size="11" fill="#6b7280">管 1 个</text>
+          <rect x="240" y="40" width="62" height="42" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+          <text x="271" y="58" fill="#ea580c" font-weight="600">槽 4</text>
+          <text x="271" y="74" font-size="11" fill="#ea580c">管 4 个</text>
+          <rect x="310" y="40" width="62" height="42" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="341" y="58" fill="#1f2328" font-weight="600">槽 5</text>
+          <text x="341" y="74" font-size="11" fill="#6b7280">管 1 个</text>
+          <rect x="380" y="40" width="62" height="42" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+          <text x="411" y="58" fill="#ea580c" font-weight="600">槽 6</text>
+          <text x="411" y="74" font-size="11" fill="#ea580c">管 2 个</text>
+          <rect x="450" y="40" width="62" height="42" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+          <text x="481" y="58" fill="#ea580c" font-weight="600">槽 7</text>
+          <text x="481" y="74" font-size="11" fill="#ea580c">管 1 个</text>
+          <rect x="520" y="40" width="62" height="42" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="551" y="58" fill="#1f2328" font-weight="600">槽 8</text>
+          <text x="551" y="74" font-size="11" fill="#6b7280">管 8 个</text>
+        </g>
+        <g font-size="13" text-anchor="middle">
+          <rect x="30" y="112" width="176" height="52" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="118" y="134" fill="#ea580c" font-weight="600">c[7]：管 1 个</text>
+          <text x="118" y="152" font-size="12" fill="#ea580c">查询代价 √1 = 1</text>
+          <rect x="222" y="112" width="176" height="52" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="310" y="134" fill="#ea580c" font-weight="600">c[6]：管 2 个</text>
+          <text x="310" y="152" font-size="12" fill="#ea580c">查询代价 √2 ≈ 1.41</text>
+          <rect x="414" y="112" width="176" height="52" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="502" y="134" fill="#ea580c" font-weight="600">c[4]：管 4 个</text>
+          <text x="502" y="152" font-size="12" fill="#ea580c">查询代价 √4 = 2</text>
+        </g>
+        <g font-size="12" fill="#ea580c">
+          <text x="206" y="142">+</text>
+          <text x="398" y="142">+</text>
+          <text x="590" y="142">=</text>
+        </g>
+        <rect x="30" y="182" width="580" height="30" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <text x="46" y="202" font-size="13" fill="#1f2328">合计 = 1 + 1.41 + 2 ≈ 4.41，而 √7 ≈ 2.65，只差 1.67 倍</text>
+        <rect x="30" y="222" width="580" height="30" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1"/>
+        <text x="46" y="242" font-size="13" fill="#2563eb">一般地 Σ√(2ʲ) ≈ 2.41 · √(2ᵏ) ≤ 2.41√n，公比 √2 的等比数列被最大那一项卡住</text>
+      </svg>
+      <figcaption>槽位规模是 1、2、4、… 翻倍上去的，√ 求和是收敛的等比数列，所以总量级仍是 O(√n)</figcaption>
+    </figure>
+
+    <p>也就是说，虽然访问了 O(log n) 棵 K-D 树，但除最大的那棵之外，其余都很小，加起来也翻不出 √n 这个量级。这一点是这题能过的关键，写复杂度的时候别顺手乘上 log n。</p>
+
+    <h2>六、K-D 树里怎么查</h2>
+    <p>内层的查询和上一节的矩形查询一个套路，只是这次要的不是最小编号，而是「c ≤ qc 且 d ≤ qd 的点里最大的 dp」。每个节点维护子树的 maxdp，剪枝条件对应变成四条：</p>
+    <ol>
+      <li>子树里 c 的最小值已经大于 qc，或者 d 的最小值已经大于 qd，整棵剪掉。</li>
+      <li>子树的 maxdp 不大于当前答案，剪掉，再怎么找也超不过。</li>
+      <li>子树的包围盒完全落在 c ≤ qc、d ≤ qd 里，直接取整棵的 maxdp，不用往下走。</li>
+      <li>都不满足，看当前点自己满不满足，然后递归两个儿子。</li>
+    </ol>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="K-D 树内部的查询剪枝" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="t3a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+        <text x="30" y="26" font-size="13" fill="#1f2328">查询：c ≤ 3，d ≤ 6　　答案 3</text>
+        <g stroke="#9aa0a6" stroke-width="1.4" fill="none" marker-end="url(#t3a)">
+          <line x1="272" y1="86" x2="172" y2="122"/>
+          <line x1="328" y1="86" x2="428" y2="122"/>
+          <line x1="146" y1="176" x2="174" y2="212"/>
+          <line x1="454" y1="176" x2="474" y2="212"/>
+        </g>
+        <g font-size="12" text-anchor="middle">
+          <rect x="235" y="34" width="130" height="52" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+          <text x="300" y="50" fill="#ea580c" font-weight="600">E (3, 3) dp 2</text>
+          <text x="300" y="65" font-size="11" fill="#ea580c">盒 [1, 5] × [1, 5]</text>
+          <text x="300" y="79" font-size="11" fill="#ea580c">maxdp 4</text>
+
+          <rect x="85" y="124" width="130" height="52" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+          <text x="150" y="140" fill="#2563eb" font-weight="600">A (1, 2) dp 2</text>
+          <text x="150" y="155" font-size="11" fill="#2563eb">盒 [1, 2] × [2, 5]</text>
+          <text x="150" y="169" font-size="11" fill="#2563eb">maxdp 3</text>
+
+          <rect x="385" y="124" width="130" height="52" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="450" y="140" fill="#9aa0a6" font-weight="600">B (4, 1) dp 1</text>
+          <text x="450" y="155" font-size="11" fill="#9aa0a6">盒 [4, 5] × [1, 4]</text>
+          <text x="450" y="169" font-size="11" fill="#9aa0a6">maxdp 4</text>
+
+          <rect x="115" y="214" width="130" height="52" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="180" y="230" fill="#9aa0a6" font-weight="600">C (2, 5) dp 3</text>
+          <text x="180" y="245" font-size="11" fill="#9aa0a6">盒 [2, 2] × [5, 5]</text>
+          <text x="180" y="259" font-size="11" fill="#9aa0a6">maxdp 3</text>
+
+          <rect x="415" y="214" width="130" height="52" rx="6" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="480" y="230" fill="#9aa0a6" font-weight="600">D (5, 4) dp 4</text>
+          <text x="480" y="245" font-size="11" fill="#9aa0a6">盒 [5, 5] × [4, 4]</text>
+          <text x="480" y="259" font-size="11" fill="#9aa0a6">maxdp 4</text>
+        </g>
+        <g font-size="13" fill="#2563eb">
+          <text x="30" y="292">蓝框那棵整棵落在 c ≤ 3、d ≤ 6 里，直接取它的 maxdp = 3，不用往下走</text>
+        </g>
+        <g font-size="13" fill="#9aa0a6">
+          <text x="30" y="314">右边那棵 cmin = 4 &gt; 3，一次比较就整棵剪掉；C、D 两个节点根本没被访问到</text>
+        </g>
+      </svg>
+      <figcaption>整棵包住时直接取 maxdp，c 的最小值超了就一次砍掉；两条剪枝配合，多数节点连递归都不用进</figcaption>
+    </figure>
+
+    <p>注意 A 那棵虽然整棵被包住，但它下面挂的 C 号点 d = 5，本来是在范围里的（d ≤ 6），所以取它的 maxdp = 3 是对的，不需要再往下确认。反过来，如果查询是 d ≤ 4，A 的包围盒 dmax = 5 就包不住了，得往下走，走到 C 的时候 dmin = 5 > 4 才会被剪掉。</p>
+
+    <h2>七、演示</h2>
+    <p>点「下一步」走一遍 6 个点的处理过程：每步先查（橙色是这一次访问到的树状数组槽位），算出 dp，再把新状态加进沿途的 K-D 树。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　四维偏序最长链（6 个点，答案 4）</div>
+      <div id="tsSvg"></div>
+      <div class="breakdown" id="tsStatus"></div>
+      <div class="ts-btns">
+        <button class="ts-btn" id="tsStep">下一步</button>
+        <button class="ts-btn" id="tsAuto">自动播放</button>
+        <button class="ts-btn" id="tsReset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot partial"></span>本次访问到的槽位</span>
+        <span><span class="dot full"></span>当前处理的点</span>
+      </div>
+    </div>
+
+    <h2>八、换个外层：权值线段树</h2>
+    <p>树套树的外层不一定非得是树状数组。把第一维换成「权值」，外层就是一棵权值线段树，内层照样是 K-D 树。一道题正好是这个形状：崂山白花蛇草水。</p>
+    <p>网格 n × n，两种操作：在 (a, b) 加一个点权为 v 的点；查询以 (a, b) 为左下角、(c, d) 为右上角的矩形中第 k 大的点权。强制在线，所有参数都要异或上一次的答案。</p>
+    <p>强制在线带来的麻烦是：点权没法提前收集起来离散化。所以外层的权值线段树必须开点，值域取 1 到 10⁹，深度 30。加一个点时，沿着根到叶子的路径，每一层都往那棵 K-D 树里插一次坐标；一个点因此会进 31 棵 K-D 树。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 292" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="权值线段树套 K-D 树与第 k 大的二分" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="40" y="26" font-size="12" fill="#6b7280">外层 · 开点的权值线段树（值域 1 到 10⁹）</text>
+        <g font-size="13" text-anchor="middle">
+          <rect x="40" y="40" width="160" height="46" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="120" y="60" fill="#2563eb" font-weight="600">根 [1, 10⁹]</text>
+          <text x="120" y="77" font-size="11" fill="#2563eb">所有点</text>
+          <rect x="40" y="106" width="160" height="46" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="120" y="126" fill="#2563eb" font-weight="600">[1, 5 × 10⁸]</text>
+          <text x="120" y="143" font-size="11" fill="#2563eb">权在这段的点</text>
+          <rect x="40" y="172" width="160" height="46" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="120" y="196" fill="#6b7280">⋯ 一共 30 层 ⋯</text>
+          <rect x="40" y="238" width="160" height="46" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="120" y="258" fill="#2563eb" font-weight="600">叶子 [v, v]</text>
+          <text x="120" y="275" font-size="11" fill="#2563eb">权等于 v 的点</text>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.2" fill="none">
+          <line x1="200" y1="63" x2="232" y2="63"/>
+          <line x1="200" y1="129" x2="232" y2="129"/>
+          <line x1="200" y1="261" x2="232" y2="261"/>
+        </g>
+        <g font-size="12" text-anchor="middle">
+          <rect x="232" y="44" width="76" height="38" rx="6" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.2"/>
+          <text x="270" y="68" fill="#0f6e56">K-D 树</text>
+          <rect x="232" y="110" width="76" height="38" rx="6" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.2"/>
+          <text x="270" y="134" fill="#0f6e56">K-D 树</text>
+          <rect x="232" y="242" width="76" height="38" rx="6" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.2"/>
+          <text x="270" y="266" fill="#0f6e56">K-D 树</text>
+        </g>
+
+        <text x="350" y="26" font-size="12" fill="#6b7280">第 k 大：在权值线段树上二分</text>
+        <rect x="350" y="40" width="250" height="66" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+        <text x="366" y="64" font-size="13" fill="#ea580c" font-weight="600">右儿子矩形内点数 cnt ≥ k</text>
+        <text x="366" y="86" font-size="12" fill="#ea580c">→ 往右走，大权值那一半</text>
+        <rect x="350" y="122" width="250" height="66" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+        <text x="366" y="146" font-size="13" fill="#2563eb" font-weight="600">cnt &lt; k</text>
+        <text x="366" y="168" font-size="12" fill="#2563eb">→ k −= cnt，往左走</text>
+        <g font-size="13" fill="#1f2328">
+          <text x="350" y="216">每层一次 K-D 矩形计数，代价 O(√n)</text>
+          <text x="350" y="240">走 log V ≈ 30 层，总 O(log V · √n)</text>
+          <text x="350" y="264">强制在线 → 不能离散化 → 必须开点</text>
+        </g>
+      </svg>
+      <figcaption>外层换成权值线段树之后，「第 k 大」就是在这棵树上从上往下二分，每层用 K-D 树数一下矩形里有多少个点</figcaption>
+    </figure>
+
+    <p>查询时先数一下整棵里矩形内的点数够不够 k，不够直接输出题目要求的那串字符。够的话就在权值线段树上二分：右儿子（大权值那半）矩形内的点数 cnt 不小于 k，说明第 k 大在右边，往右走；否则第 k 大在左边，k 减去 cnt 再往左走。</p>
+
+    <h2>九、代码</h2>
+    <p>下面是四维偏序那题的完整实现。K-D 树用的是上一节那套动态实现，只是没有删除操作，维护的信息换成了 maxdp。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">struct</span> ABCD {
+    <span class="kw">int</span> a, b, c, d;
+};
+
+<span class="kw">bool</span> <span class="fn">ABCDCmp</span>(ABCD x, ABCD y) {
+    <span class="kw">if</span> (x.a != y.a) <span class="kw">return</span> x.a &lt; y.a;
+    <span class="kw">if</span> (x.b != y.b) <span class="kw">return</span> x.b &lt; y.b;
+    <span class="kw">if</span> (x.c != y.c) <span class="kw">return</span> x.c &lt; y.c;
+    <span class="kw">return</span> x.d &lt; y.d;
+}
+
+<span class="kw">struct</span> BI {
+    <span class="kw">int</span> b, i;
+};
+
+<span class="kw">bool</span> <span class="fn">BICmp</span>(BI x, BI y) {
+    <span class="kw">if</span> (x.b != y.b) <span class="kw">return</span> x.b &lt; y.b;
+    <span class="kw">return</span> x.i &lt; y.i;
+}
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 50001;
+<span class="kw">const</span> <span class="kw">int</span> MAXT = 500001;    <span class="cm">// 每个点进 O(log n) 棵 K-D 树</span>
+<span class="kw">const</span> <span class="kw">int</span> INF  = 1 &lt;&lt; 30;
+<span class="kw">int</span> n;
+
+ABCD abcd[MAXN];
+BI bi[MAXN];
+<span class="kw">int</span> ranking[MAXN];
+
+<span class="cm">// K-D 树维护 c、d 坐标</span>
+<span class="kw">int</span> c[MAXT], d[MAXT], cntkdt;
+<span class="kw">int</span> rootkdt[MAXN];        <span class="cm">// 每个树状数组的下标，背后是一棵动态 kdt</span>
+<span class="kw">int</span> ls[MAXT], rs[MAXT];
+<span class="kw">int</span> siz[MAXT];
+<span class="kw">int</span> cmin[MAXT], cmax[MAXT], dmin[MAXT], dmax[MAXT];
+
+<span class="kw">int</span> dp[MAXT];             <span class="cm">// 单点结尾时的最长偏序链的长度</span>
+<span class="kw">int</span> maxdp[MAXT];          <span class="cm">// 区域的最大 dp 值</span>
+
+<span class="kw">double</span> ALPHA = 0.7;
+<span class="kw">int</span> top, topFather, topSide, topDimension;
+<span class="kw">int</span> arr[MAXN], treeSiz;
+
+<span class="kw">int</span> <span class="fn">init</span>(<span class="kw">int</span> qc, <span class="kw">int</span> qd, <span class="kw">int</span> qv) {
+    cntkdt++;
+    c[cntkdt] = qc;
+    d[cntkdt] = qd;
+    ls[cntkdt] = rs[cntkdt] = 0;
+    siz[cntkdt] = 1;
+    cmin[cntkdt] = cmax[cntkdt] = qc;
+    dmin[cntkdt] = dmax[cntkdt] = qd;
+    dp[cntkdt] = maxdp[cntkdt] = qv;
+    <span class="kw">return</span> cntkdt;
+}
+
+<span class="kw">void</span> <span class="fn">maintain</span>(<span class="kw">int</span> i) {
+    siz[i] = 1 + siz[ls[i]] + siz[rs[i]];
+    cmin[i] = min(c[i], min(cmin[ls[i]], cmin[rs[i]]));
+    cmax[i] = max(c[i], max(cmax[ls[i]], cmax[rs[i]]));
+    dmin[i] = min(d[i], min(dmin[ls[i]], dmin[rs[i]]));
+    dmax[i] = max(d[i], max(dmax[ls[i]], dmax[rs[i]]));
+    maxdp[i] = max(dp[i], max(maxdp[ls[i]], maxdp[rs[i]]));
+}
+
+<span class="kw">int</span> <span class="fn">compareNode</span>(<span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> dimension) {
+    <span class="kw">int</span> v1 = dimension == 0 ? c[i] : d[i];
+    <span class="kw">int</span> v2 = dimension == 0 ? c[j] : d[j];
+    <span class="kw">return</span> v1 == v2 ? 0 : v1 &lt; v2 ? -1 : 1;
+}
+
+<span class="kw">struct</span> Cmp {
+    <span class="kw">int</span> dimension;
+
+    <span class="kw">bool</span> <span class="kw">operator</span>()(<span class="kw">int</span> a, <span class="kw">int</span> b) <span class="kw">const</span> {
+        <span class="kw">return</span> compareNode(a, b, dimension) &lt; 0;
+    }
+};
+
+<span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> dimension) {
+    <span class="kw">if</span> (l &gt; r) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+    nth_element(arr + l, arr + mid, arr + r + 1, Cmp{dimension});
+    <span class="kw">int</span> rt = arr[mid];
+    ls[rt] = build(l, mid - 1, dimension ^ 1);
+    rs[rt] = build(mid + 1, r, dimension ^ 1);
+    maintain(rt);
+    <span class="kw">return</span> rt;
+}
+
+<span class="kw">bool</span> <span class="fn">balance</span>(<span class="kw">int</span> i) {
+    <span class="kw">return</span> ALPHA * siz[i] &gt;= max(siz[ls[i]], siz[rs[i]]);
+}
+
+<span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> i) {
+    <span class="kw">if</span> (i != 0) {
+        arr[++treeSiz] = i;
+        dfs(ls[i]);
+        dfs(rs[i]);
+    }
+}
+
+<span class="kw">void</span> <span class="fn">rebuild</span>(<span class="kw">int</span> version) {
+    <span class="kw">if</span> (top != 0) {
+        treeSiz = 0;
+        dfs(top);
+        <span class="kw">int</span> newRoot = build(1, treeSiz, topDimension);
+        <span class="kw">if</span> (topFather == 0) {
+            rootkdt[version] = newRoot;
+        } <span class="kw">else</span> <span class="kw">if</span> (topSide == 1) {
+            ls[topFather] = newRoot;
+        } <span class="kw">else</span> {
+            rs[topFather] = newRoot;
+        }
+    }
+}
+
+<span class="kw">int</span> <span class="fn">addKdt</span>(<span class="kw">int</span> insertNode, <span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">int</span> side, <span class="kw">int</span> dimension) {
+    <span class="kw">if</span> (u == 0) {
+        <span class="kw">return</span> insertNode;
+    }
+    <span class="kw">if</span> (compareNode(insertNode, u, dimension) &lt;= 0) {
+        ls[u] = addKdt(insertNode, ls[u], u, 1, dimension ^ 1);
+    } <span class="kw">else</span> {
+        rs[u] = addKdt(insertNode, rs[u], u, 2, dimension ^ 1);
+    }
+    maintain(u);
+    <span class="kw">if</span> (!balance(u)) {
+        top = u;
+        topFather = fa;
+        topSide = side;
+        topDimension = dimension;
+    }
+    <span class="kw">return</span> u;
+}
+
+<span class="kw">void</span> <span class="fn">addKdt</span>(<span class="kw">int</span> version, <span class="kw">int</span> qc, <span class="kw">int</span> qd, <span class="kw">int</span> qv) {
+    top = topFather = topSide = topDimension = 0;
+    <span class="kw">int</span> insertNode = init(qc, qd, qv);
+    rootkdt[version] = addKdt(insertNode, rootkdt[version], 0, 0, 0);
+    rebuild(version);
+}
+
+<span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+    <span class="kw">return</span> i &amp; -i;
+}
+
+<span class="cm">// 新增一个状态，b 排名为 rank，二维坐标为 (qc, qd)，dp 值为 qv</span>
+<span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> rank, <span class="kw">int</span> qc, <span class="kw">int</span> qd, <span class="kw">int</span> qv) {
+    <span class="kw">for</span> (<span class="kw">int</span> i = rank; i &lt;= n; i += lowbit(i)) {
+        addKdt(i, qc, qd, qv);
+    }
+}
+
+<span class="kw">int</span> queryAns;
+
+<span class="cm">// 一棵 KDT 中查询，c 坐标 &lt;= qc，d 坐标 &lt;= qd，最大的 dp 值</span>
+<span class="kw">void</span> <span class="fn">updateAns</span>(<span class="kw">int</span> qc, <span class="kw">int</span> qd, <span class="kw">int</span> i) {
+    <span class="kw">if</span> (i == 0) {
+        <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (cmin[i] &gt; qc || dmin[i] &gt; qd) {
+        <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (maxdp[i] &lt;= queryAns) {
+        <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (cmax[i] &lt;= qc &amp;&amp; dmax[i] &lt;= qd) {
+        queryAns = max(queryAns, maxdp[i]);
+        <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (c[i] &lt;= qc &amp;&amp; d[i] &lt;= qd) {
+        queryAns = max(queryAns, dp[i]);
+    }
+    updateAns(qc, qd, ls[i]);
+    updateAns(qc, qd, rs[i]);
+}
+
+<span class="cm">// 查询 b 排名 &lt;= rank，c 坐标 &lt;= qc，d 坐标 &lt;= qd，最大的 dp 值</span>
+<span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> rank, <span class="kw">int</span> qc, <span class="kw">int</span> qd) {
+    queryAns = 0;
+    <span class="kw">for</span> (<span class="kw">int</span> i = rank; i &gt; 0; i -= lowbit(i)) {
+        updateAns(qc, qd, rootkdt[i]);
+    }
+    <span class="kw">return</span> queryAns;
+}
+
+<span class="kw">void</span> <span class="fn">prepare</span>() {
+    sort(abcd + 1, abcd + n + 1, ABCDCmp);
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        bi[i].b = abcd[i].b;
+        bi[i].i = i;
+    }
+    sort(bi + 1, bi + n + 1, BICmp);
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        ranking[bi[i].i] = i;
+    }
+    cmin[0] = dmin[0] = INF;
+    cmax[0] = dmax[0] = -INF;
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    ios::sync_with_stdio(<span class="kw">false</span>);
+    cin.tie(<span class="kw">nullptr</span>);
+    cin &gt;&gt; n;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        cin &gt;&gt; abcd[i].a &gt;&gt; abcd[i].b &gt;&gt; abcd[i].c &gt;&gt; abcd[i].d;
+    }
+    prepare();
+    <span class="kw">int</span> ans = 0;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        <span class="kw">int</span> cur = query(ranking[i], abcd[i].c, abcd[i].d) + 1;
+        ans = max(ans, cur);
+        add(ranking[i], abcd[i].c, abcd[i].d, cur);
+    }
+    cout &lt;&lt; ans &lt;&lt; <span class="cm">'\n'</span>;
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <p>空间是这题最容易爆的地方。每个点要进 O(log n) 棵 K-D 树，n = 5 × 10⁴ 时节点总数是 n log n 量级，MAXT 开到 5 × 10⁵ 才够。重构用的临时数组 <code class="inline">arr</code> 只要开 MAXN，因为一次只重建其中一棵。</p>
+
+    <h2>十、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>排序（a、b、c、d 一次，b 排名一次）</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>加入一个状态（外层 O(log n) 棵 × 内层插入）</td><td><code class="inline">O(log² n)</code> 摊还</td></tr>
+        <tr><td>查询一次（外层若干棵 × 内层 O(√k)）</td><td><code class="inline">O(√n)</code></td></tr>
+        <tr><td>四维偏序整体</td><td><code class="inline">O(n√n)</code></td></tr>
+        <tr><td>朴素做法（对照）</td><td><code class="inline">O(n²)</code></td></tr>
+        <tr><td>崂山白花蛇草水单次操作</td><td><code class="inline">O(log V · √n)</code>，V 是权值值域</td></tr>
+        <tr><td>额外空间</td><td><code class="inline">O(n log n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>查询那一行的 O(√n) 已经在第五节推导过：外层访问 O(log n) 棵，但它们的规模是 1、2、4、… 成倍变大，Σ√ 是收敛的等比数列，被最大的那一项卡住，总共约 2.41√n。</p>
+    <p>整体复杂度由查询主导。加入是 O(log² n)，n 次也才 n log² n，比 n√n 小。</p>
+    <p>空间上，K-D 树节点按「点数 × log n」算，每个点有坐标、左右儿子、子树大小、包围盒、dp 与 maxdp，十来个 int。n = 5 × 10⁴ 时约 5 × 10⁵ 个节点，二十兆上下，注意别开小了。</p>
+
+    <h2>十一、最后</h2>
+    <p>树套树的思路说穿了就是把维度分给不同的层：哪一维适合当「前缀」，就交给外层的树状数组或线段树；剩下几维适合当「盒子」，就交给内层的 K-D 树。外层选择哪种树，取决于第一维是下标、是权值，还是能不能离线离散化。</p>
+    <p>代价也很清楚：每个点要被复制进 O(log n) 棵 K-D 树，空间跟着涨一个 log。n 到 10⁵ 还撑得住，再往上就得换别的做法了。</p>
+    <p>还有一点值得记：这类题的瓶颈常常不是渐进复杂度，而是常数。K-D 树的重构、递归、包围盒比较都是实打实的开销，写的时候能剪的枝尽早剪，尤其是「maxdp 不大于当前答案」这一条，它让大量子树连递归都不用进。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var P = [
+    {id:3, a:1, b:1, c:2, d:3, rank:1},
+    {id:1, a:1, b:2, c:3, d:4, rank:3},
+    {id:4, a:2, b:2, c:3, d:5, rank:4},
+    {id:2, a:2, b:3, c:4, d:5, rank:5},
+    {id:6, a:2, b:4, c:2, d:6, rank:6},
+    {id:5, a:3, b:1, c:1, d:2, rank:2}
+  ];
+  var N = 6;
+
+  function lowbit(i) { return i & -i; }
+  function queryPath(rank) {
+    var out = [];
+    for (var i = rank; i > 0; i -= lowbit(i)) out.push(i);
+    return out;
+  }
+  function addPath(rank) {
+    var out = [];
+    for (var i = rank; i <= N; i += lowbit(i)) out.push(i);
+    return out;
+  }
+
+  function build(state) {
+    var s = '<svg class="ts-svg" viewBox="0 0 620 290" xmlns="http://www.w3.org/2000/svg" ' +
+            'font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+    s += '<text x="20" y="24" font-size="12" fill="#6b7280">处理顺序（按 a、b、c、d 排序）</text>';
+
+    for (var k = 0; k < N; k++) {
+      var p = P[k];
+      var x = 20 + k * 98;
+      var done = state.done[k];
+      var cur = (state.cur === k);
+      var bg = cur ? '#dbeafe' : (done ? '#f6f7f9' : '#ffffff');
+      var bd = cur ? '#2563eb' : (done ? '#e6e8eb' : '#e6e8eb');
+      var tc = cur ? '#2563eb' : (done ? '#9aa0a6' : '#1f2328');
+      s += '<g><rect x="' + x + '" y="34" width="92" height="44" rx="6" fill="' + bg +
+           '" stroke="' + bd + '" stroke-width="' + (cur ? 2 : 1.2) + '"/>';
+      s += '<text x="' + (x + 46) + '" y="52" font-size="13" fill="' + tc +
+           '" text-anchor="middle" font-weight="600">' + p.id + ' 号</text>';
+      s += '<text x="' + (x + 46) + '" y="69" font-size="11" fill="' + tc +
+           '" text-anchor="middle">r = ' + p.rank + '：(' + p.a + ', ' + p.b + ', ' + p.c + ', ' + p.d + ')</text></g>';
+    }
+
+    s += '<text x="20" y="110" font-size="12" fill="#6b7280">树状数组的 6 个槽位，每个挂一棵 K-D 树（里面列出已加入的点）</text>';
+    for (var i = 1; i <= N; i++) {
+      var x = 20 + (i - 1) * 98;
+      var hot = state.visited.indexOf(i) >= 0;
+      var bg = hot ? '#ffedd5' : '#ffffff';
+      var bd = hot ? '#ea580c' : '#e6e8eb';
+      var tc = hot ? '#ea580c' : '#1f2328';
+      var items = state.slots[i] || [];
+      s += '<g><rect x="' + x + '" y="122" width="92" height="150" rx="6" fill="' + bg +
+           '" stroke="' + bd + '" stroke-width="' + (hot ? 2 : 1.2) + '"/>';
+      s += '<text x="' + (x + 46) + '" y="140" font-size="12" fill="' + tc +
+           '" text-anchor="middle" font-weight="600">槽 ' + i + '</text>';
+      for (var t = 0; t < items.length; t++) {
+        var it = items[t];
+        s += '<text x="' + (x + 46) + '" y="' + (160 + t * 22) + '" font-size="11" fill="' + tc +
+             '" text-anchor="middle">' + it.id + '：(' + it.c + ', ' + it.d + ') dp ' + it.dp + '</text>';
+      }
+      s += '</g>';
+    }
+    s += '</svg>';
+    return s;
+  }
+
+  var frames = [];
+  var slots = {};
+  for (var i = 1; i <= N; i++) slots[i] = [];
+  var done = [];
+
+  function snap(o) {
+    var c = {};
+    for (var i = 1; i <= N; i++) c[i] = (slots[i] || []).slice();
+    return {slots: c, done: done.slice(), cur: o.cur, visited: o.visited || []};
+  }
+
+  frames.push({
+    st: snap({cur: -1, visited: []}),
+    text: '6 个点按 a、b、c、d 的字典序排好，顺序是 3、1、4、2、6、5。a 这一维因此自动满足。再把 b 值离散化成不重复的排名 r（b 相同时按点的下标排），3 号 r = 1、1 号 r = 3、4 号 r = 4、2 号 r = 5、6 号 r = 6、5 号 r = 2。'
+  });
+
+  for (var k = 0; k < N; k++) {
+    var p = P[k];
+    var path = queryPath(p.rank);
+    var best = 0;
+    var who = 0;
+    path.forEach(function(i) {
+      (slots[i] || []).forEach(function(it) {
+        if (it.c <= p.c && it.d <= p.d && it.dp > best) { best = it.dp; who = it.id; }
+      });
+    });
+    var dp = best + 1;
+    frames.push({
+      st: snap({cur: k, visited: path}),
+      text: '处理 ' + p.id + ' 号 (a, b, c, d) = (' + p.a + ', ' + p.b + ', ' + p.c + ', ' + p.d + ')，b 排名 r = ' + p.rank +
+            '。查询沿 r → ' + path.join(' → ') + ' 跳，只在这几个槽位的 K-D 树里找 c ≤ ' + p.c + ' 且 d ≤ ' + p.d + ' 的点。' +
+            (best === 0 ? '一棵都没找到，' : '最优的是 ' + who + ' 号，dp = ' + best + '，') + '于是 dp[' + p.id + '] = ' + dp + '。'
+    });
+    addPath(p.rank).forEach(function(i) { slots[i].push({id: p.id, c: p.c, d: p.d, dp: dp}); });
+    done.push(true);
+    frames.push({
+      st: snap({cur: k, visited: addPath(p.rank)}),
+      text: '把 ' + p.id + ' 号的状态加进去：沿 r = ' + p.rank + ' 往上走 ' + addPath(p.rank).join(' → ') +
+            '，这几个槽位的 K-D 树里各插入一个点 (c, d) = (' + p.c + ', ' + p.d + ')，dp = ' + dp + '。'
+    });
+  }
+
+  frames.push({
+    st: snap({cur: -1, visited: []}),
+    text: '六个点都处理完了，最大的 dp 是 4（2 号点结尾）。对应的链是 3 号 → 1 号 → 4 号 → 2 号，四维依次是 (1,1,2,3) → (1,2,3,4) → (2,2,3,5) → (2,3,4,5)，每一维都不减。答案就是 4。'
+  });
+
+  var svgEl = document.getElementById('tsSvg');
+  var statusEl = document.getElementById('tsStatus');
+  var btnStep = document.getElementById('tsStep');
+  var btnAuto = document.getElementById('tsAuto');
+  var btnReset = document.getElementById('tsReset');
+
+  var cur = 0;
+  var timer = null;
+
+  function render() {
+    var f = frames[cur];
+    svgEl.innerHTML = build(f.st);
+    statusEl.innerHTML = '<div class="row">第 ' + cur + ' / ' + (frames.length - 1) + ' 步</div>' +
+                         '<div class="row" style="margin-top:4px;">' + f.text + '</div>';
+    btnStep.disabled = (cur >= frames.length - 1);
+  }
+  function step() {
+    if (cur >= frames.length - 1) { render(); return; }
+    cur++;
+    render();
+  }
+  function stopAuto() {
+    if (timer) { clearInterval(timer); timer = null; }
+    btnAuto.textContent = '自动播放';
+  }
+  function toggleAuto() {
+    if (timer) { stopAuto(); return; }
+    btnAuto.textContent = '暂停';
+    timer = setInterval(function() {
+      if (cur >= frames.length - 1) { stopAuto(); return; }
+      cur++;
+      render();
+    }, 2400);
+  }
+  function reset() {
+    stopAuto();
+    cur = 0;
+    render();
+  }
+
+  btnStep.addEventListener('click', step);
+  btnAuto.addEventListener('click', toggleAuto);
+  btnReset.addEventListener('click', reset);
+  render();
+})();
+</script>
+</body>
+</html>

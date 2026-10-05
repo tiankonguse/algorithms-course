@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>下一个更小元素 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  :root{
+    --success:#16a34a;
+    --success-bg:#dcfce7;
+  }
+  .arr-cell{
+    width:46px;height:46px;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+    background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+    font-size:15px;font-variant-numeric:tabular-nums;
+    transition:background .12s,border-color .12s;
+  }
+  .arr-cell .v{font-size:15px;line-height:1.1;}
+  .arr-cell .ix{font-size:10px;color:var(--text-dim);line-height:1.1;margin-top:1px;}
+  .arr-cell.cur{
+    background:var(--accent-soft);border-color:var(--accent);color:var(--accent);
+    font-weight:700;box-shadow:0 0 0 3px var(--accent-soft);
+  }
+  .arr-cell.found{
+    background:var(--success-bg);border-color:var(--success);color:var(--success);font-weight:600;
+  }
+  .arr-cell.instack{
+    background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;
+  }
+  .arr-cell.dim{opacity:.35;}
+  .arr-row{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;}
+  .arr-row.answer .arr-cell{font-size:13px;height:42px;}
+  .arr-row.answer .arr-cell .v{font-size:13px;}
+  .stack-area{
+    display:flex;flex-direction:column;align-items:center;gap:8px;margin:14px 0;
+    padding:14px;border:1px dashed var(--border);border-radius:8px;background:var(--bg-soft);
+  }
+  .stack-label{font-size:12px;color:var(--text-dim);letter-spacing:.5px;}
+  .stack-row{display:flex;gap:6px;align-items:flex-end;min-height:54px;justify-content:center;}
+  .stack-cell{
+    width:62px;min-height:46px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:var(--bg);border:1px solid var(--border);border-radius:6px;
+    padding:4px;font-variant-numeric:tabular-nums;
+  }
+  .stack-cell .v{font-size:16px;font-weight:600;line-height:1.1;}
+  .stack-cell .ix{font-size:11px;color:var(--text-dim);line-height:1.1;margin-top:1px;}
+  .stack-cell.top{background:var(--partial-bg);border-color:var(--partial);}
+  .stack-cell.top .v{color:var(--partial);}
+  .stack-cell.empty{
+    color:var(--text-dim);font-size:13px;background:transparent;border-style:dashed;
+  }
+  .pop-row{
+    display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+    font-size:13px;color:var(--text-dim);margin-top:4px;
+  }
+  .pop-chip{
+    background:var(--partial-bg);color:var(--partial);border:1px solid var(--partial);
+    border-radius:6px;padding:2px 10px;font-size:12px;
+    font-variant-numeric:tabular-nums;
+  }
+  .pop-chip.none{
+    background:var(--bg);color:var(--text-dim);border-style:dashed;
+  }
+  .dot.cur{background:var(--accent-soft);border:1px solid var(--accent);}
+  .dot.found{background:var(--success-bg);border:1px solid var(--success);}
+  .dot.instack{background:var(--partial-bg);border:1px solid var(--partial);}
+  .step-desc{
+    margin-top:14px;background:var(--bg-soft);border:1px solid var(--border);
+    border-radius:8px;padding:10px 14px;font-size:14px;font-variant-numeric:tabular-nums;
+    line-height:1.8;
+  }
+  .step-desc .row{margin:2px 0;}
+  .step-desc .hl{color:var(--accent);font-weight:600;}
+  .ctl input[type=range]{width:200px;accent-color:var(--accent);}
+  @media(max-width:760px){
+    .arr-cell{width:38px;height:42px;}
+    .arr-cell .v{font-size:13px;}
+    .stack-cell{width:50px;min-height:42px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>下一个更小元素</h1>
+    <p class="intro">给一个数组，求每个位置 i 右侧第一个小于 nums[i] 的位置，从右往左扫一遍，用一个单调栈把候选留下来，整道题压到 O(n)。</p>
+
+    <h2>零、背景</h2>
+    <p>前面几节处理的都是「给一个区间，问这个区间的答案」：分块按位置切、莫队按查询排序、值域分治按值拆开。</p>
+    <p>这一节换一类问题：不问区间，而是对每个位置单独问一句，它右边第一个满足某个条件的位置在哪。</p>
+    <p>这类问题有个共同点：条件只跟「大小」有关，跟「距离多远」无关。只要抓住这一点，就能一遍扫完。</p>
+
+    <h2>一、问题</h2>
+    <p>给定一个长度为 <code class="inline">n</code> 的数组 <code class="inline">nums</code>，对每个位置 <code class="inline">i</code>，找它右侧第一个小于 <code class="inline">nums[i]</code> 的位置 <code class="inline">j</code>；不存在就记 <code class="inline">-1</code>。</p>
+    <p>例子沿用前面几节那个数组：</p>
+    <p style="text-align:center;font-size:17px;">
+      <code class="inline">nums = [3, 1, 4, 1, 5, 9, 2, 6]</code>
+    </p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 268" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="下一个更小元素的答案" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g fill="none" stroke="#ea580c" stroke-width="1.5">
+          <path d="M158,56 Q184,22 210,56"/>
+          <path d="M262,56 Q288,22 314,56"/>
+          <path d="M366,56 Q418,-24 470,56"/>
+          <path d="M418,56 Q444,22 470,56"/>
+        </g>
+        <g font-size="12" fill="#6b7280" text-anchor="end">
+          <text x="126" y="85">nums</text>
+          <text x="126" y="175">ans</text>
+        </g>
+        <g>
+          <rect x="136" y="60" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="158" y="85" text-anchor="middle" font-size="15" fill="#1f2328">3</text>
+          <rect x="188" y="60" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="210" y="85" text-anchor="middle" font-size="15" fill="#1f2328">1</text>
+          <rect x="240" y="60" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="262" y="85" text-anchor="middle" font-size="15" fill="#1f2328">4</text>
+          <rect x="292" y="60" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="314" y="85" text-anchor="middle" font-size="15" fill="#1f2328">1</text>
+          <rect x="344" y="60" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="366" y="85" text-anchor="middle" font-size="15" fill="#1f2328">5</text>
+          <rect x="396" y="60" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="418" y="85" text-anchor="middle" font-size="15" fill="#1f2328">9</text>
+          <rect x="448" y="60" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="470" y="85" text-anchor="middle" font-size="15" fill="#1f2328">2</text>
+          <rect x="500" y="60" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="522" y="85" text-anchor="middle" font-size="15" fill="#1f2328">6</text>
+        </g>
+        <g>
+          <rect x="136" y="150" width="44" height="40" rx="6" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="158" y="175" text-anchor="middle" font-size="15" fill="#ea580c" font-weight="600">1</text>
+          <rect x="188" y="150" width="44" height="40" rx="6" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="210" y="175" text-anchor="middle" font-size="15" fill="#9aa0a6">-1</text>
+          <rect x="240" y="150" width="44" height="40" rx="6" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="262" y="175" text-anchor="middle" font-size="15" fill="#ea580c" font-weight="600">3</text>
+          <rect x="292" y="150" width="44" height="40" rx="6" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="314" y="175" text-anchor="middle" font-size="15" fill="#9aa0a6">-1</text>
+          <rect x="344" y="150" width="44" height="40" rx="6" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="366" y="175" text-anchor="middle" font-size="15" fill="#ea580c" font-weight="600">6</text>
+          <rect x="396" y="150" width="44" height="40" rx="6" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="418" y="175" text-anchor="middle" font-size="15" fill="#ea580c" font-weight="600">6</text>
+          <rect x="448" y="150" width="44" height="40" rx="6" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="470" y="175" text-anchor="middle" font-size="15" fill="#9aa0a6">-1</text>
+          <rect x="500" y="150" width="44" height="40" rx="6" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="522" y="175" text-anchor="middle" font-size="15" fill="#9aa0a6">-1</text>
+        </g>
+        <g font-size="10" fill="#9aa0a6" text-anchor="middle">
+          <text x="158" y="116">0</text><text x="210" y="116">1</text><text x="262" y="116">2</text><text x="314" y="116">3</text>
+          <text x="366" y="116">4</text><text x="418" y="116">5</text><text x="470" y="116">6</text><text x="522" y="116">7</text>
+          <text x="158" y="206">0</text><text x="210" y="206">1</text><text x="262" y="206">2</text><text x="314" y="206">3</text>
+          <text x="366" y="206">4</text><text x="418" y="206">5</text><text x="470" y="206">6</text><text x="522" y="206">7</text>
+        </g>
+        <text x="340" y="240" text-anchor="middle" font-size="13" fill="#6b7280">ans = [1, -1, 3, -1, 6, 6, -1, -1]，-1 表示右侧没有比它更小的元素</text>
+        <text x="340" y="260" text-anchor="middle" font-size="12" fill="#9aa0a6">弧线连的是 i 和它的答案；位置 1、3、6、7 右侧没有更小的，答案是 -1</text>
+      </svg>
+      <figcaption>每个 i 的答案是它右侧第一个小于 nums[i] 的下标</figcaption>
+    </figure>
+
+    <p>逐个看一遍：位置 0 的 3，右边第一个比它小的是位置 1 的 1；位置 4 的 5 和位置 5 的 9，右边第一个比它们小的都是位置 6 的 2；位置 1、3 的 1 右侧没有更小的，位置 6 右侧只有一个 6，位置 7 右侧没有元素，答案都是 -1。</p>
+    <p>要的是对所有位置同时给出答案，而不是单个查询。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>对每个位置 <code class="inline">i</code>，从 <code class="inline">i+1</code> 一路向右扫到第一个比它小的数：</p>
+    <pre class="code"><span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+    ans[i] = -1;
+    <span class="kw">for</span> (<span class="kw">int</span> j = i + 1; j &lt; n; j++) {
+        <span class="kw">if</span> (nums[j] &lt; nums[i]) {
+            ans[i] = j;
+            <span class="kw">break</span>;
+        }
+    }
+}</pre>
+    <p>把每个 <code class="inline">i</code> 实际扫过的范围画出来，是这个样子：</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 350" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="朴素做法的扫描范围" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g>
+          <rect x="136" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="158" y="69" text-anchor="middle" font-size="15" fill="#1f2328">3</text>
+          <rect x="188" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="210" y="69" text-anchor="middle" font-size="15" fill="#1f2328">1</text>
+          <rect x="240" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="262" y="69" text-anchor="middle" font-size="15" fill="#1f2328">4</text>
+          <rect x="292" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="314" y="69" text-anchor="middle" font-size="15" fill="#1f2328">1</text>
+          <rect x="344" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="366" y="69" text-anchor="middle" font-size="15" fill="#1f2328">5</text>
+          <rect x="396" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="418" y="69" text-anchor="middle" font-size="15" fill="#1f2328">9</text>
+          <rect x="448" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="470" y="69" text-anchor="middle" font-size="15" fill="#1f2328">2</text>
+          <rect x="500" y="44" width="44" height="40" rx="6" fill="#fff" stroke="#e6e8eb"/>
+          <text x="522" y="69" text-anchor="middle" font-size="15" fill="#1f2328">6</text>
+        </g>
+        <g font-size="10" fill="#9aa0a6" text-anchor="middle">
+          <text x="158" y="100">0</text><text x="210" y="100">1</text><text x="262" y="100">2</text><text x="314" y="100">3</text>
+          <text x="366" y="100">4</text><text x="418" y="100">5</text><text x="470" y="100">6</text><text x="522" y="100">7</text>
+        </g>
+
+        <g font-size="12" fill="#6b7280" text-anchor="end">
+          <text x="126" y="135">i = 0</text>
+          <text x="126" y="157">i = 1</text>
+          <text x="126" y="179">i = 2</text>
+          <text x="126" y="201">i = 3</text>
+          <text x="126" y="223">i = 4</text>
+          <text x="126" y="245">i = 5</text>
+          <text x="126" y="267">i = 6</text>
+          <text x="126" y="289">i = 7</text>
+        </g>
+        <g>
+          <rect x="188" y="124" width="44" height="14" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <rect x="240" y="146" width="304" height="14" rx="4" fill="#f6f7f9" stroke="#c8ccd1" stroke-dasharray="4 3"/>
+          <rect x="292" y="168" width="44" height="14" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <rect x="344" y="190" width="200" height="14" rx="4" fill="#f6f7f9" stroke="#c8ccd1" stroke-dasharray="4 3"/>
+          <rect x="396" y="212" width="96" height="14" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <rect x="448" y="234" width="44" height="14" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <rect x="500" y="256" width="44" height="14" rx="4" fill="#f6f7f9" stroke="#c8ccd1" stroke-dasharray="4 3"/>
+        </g>
+        <g font-size="11" fill="#6b7280" text-anchor="start">
+          <text x="240" y="135">1 次</text>
+          <text x="552" y="157">6 次，扫到底也没有</text>
+          <text x="344" y="179">1 次</text>
+          <text x="552" y="201">4 次，扫到底也没有</text>
+          <text x="500" y="223">2 次</text>
+          <text x="500" y="245">1 次</text>
+          <text x="552" y="267">1 次，无解</text>
+          <text x="560" y="289">0 次</text>
+        </g>
+        <text x="340" y="322" text-anchor="middle" font-size="13" fill="#6b7280">一共 1 + 6 + 1 + 4 + 2 + 1 + 1 = 16 次比较；橙色是找到了，虚线是扫到末尾也没找到</text>
+        <text x="340" y="342" text-anchor="middle" font-size="12" fill="#9aa0a6">n 个位置各扫一遍，量级是 n²/2，n 上到 10⁵ 就是 5×10⁹ 次</text>
+      </svg>
+      <figcaption>朴素做法对每个 i 单独向右扫，之前扫过的信息一次也没留下</figcaption>
+    </figure>
+
+    <p>可以发现，位置 3 的 1 和位置 1 的 1 都要把右边整个尾巴走一遍才知道「没有」。而位置 4 扫过 9 之后才碰到 2，位置 5 又重新扫了一遍同样的 9 和 2。</p>
+    <p>重复就出在这里：右边这段到底有没有更小的数、第一个更小的是谁，其实跟 <code class="inline">i</code> 是谁没关系，只跟 <code class="inline">nums[i]</code> 有多大有关。</p>
+
+    <h2>三、从右往左扫</h2>
+    <p>既然每次问的都是「右边第一个比我小的」，那就倒着走：先处理最右边，一路往左，处理到 <code class="inline">i</code> 时，<code class="inline">i</code> 右边的所有位置都已经看过了。</p>
+    <p>看过的这些位置里，并不是每个都需要留着。比如下标 <code class="inline">k</code> 和 <code class="inline">i</code> 满足 <code class="inline">i &lt; k</code> 且 <code class="inline">nums[i] ≤ nums[k]</code>，那么 <code class="inline">k</code> 就可以扔掉了。</p>
+    <p>理由是：假设某个 <code class="inline">p ≤ i</code> 的答案本来是 <code class="inline">k</code>，也就是 <code class="inline">nums[k] &lt; nums[p]</code>，且 <code class="inline">k</code> 是右边第一个满足的。可是 <code class="inline">i</code> 在 <code class="inline">p</code> 和 <code class="inline">k</code> 之间，<code class="inline">nums[i] ≤ nums[k] &lt; nums[p]</code>，<code class="inline">i</code> 也满足，而且离 <code class="inline">p</code> 更近。矛盾。所以 <code class="inline">k</code> 不可能成为任何 <code class="inline">p ≤ i</code> 的答案。</p>
+    <p>于是维护一个栈，里面只放「还没被扔掉」的下标。处理 <code class="inline">i</code> 时做三件事：</p>
+    <ol>
+      <li>把栈顶所有满足 <code class="inline">nums[k] ≥ nums[i]</code> 的下标弹出，按上面的理由，它们以后用不上了。</li>
+      <li>弹完之后栈顶如果还在，它的值一定 <code class="inline">&lt; nums[i]</code>，而且它是剩下这些里最靠左的，正是 <code class="inline">i</code> 右侧第一个更小的位置，记进 <code class="inline">ans[i]</code>。</li>
+      <li>把 <code class="inline">i</code> 压进栈，留给更左边的位置用。</li>
+    </ol>
+    <p>这里有个细节：弹出某个下标，不代表它的答案丢了，它的答案在上一步已经写进 <code class="inline">ans</code> 了。弹的是「它作为别人 candidate 的资格」。</p>
+
+    <h2>四、栈是什么形状</h2>
+    <p>从右往左走，先压进去的下标大、后压进去的下标小，所以从栈底到栈顶，下标是递减的。</p>
+    <p>再看值：每次压入 <code class="inline">i</code> 之前，所有 <code class="inline">≥ nums[i]</code> 的都被弹掉了，留下来的都比 <code class="inline">nums[i]</code> 小，压进去之后 <code class="inline">nums[i]</code> 就变成了栈里最大的那个。所以从栈底到栈顶，值是递增的。</p>
+    <p>两个方向合起来：栈底是最靠右、最小的那个，栈顶是最靠左、最大的那个。这就是「单调栈」这个名字的来历。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 344" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="处理 i=3 这一步" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="20" y="24" font-size="12" fill="#6b7280">数组（当前处理 i = 3）</text>
+        <g>
+          <rect x="20" y="36" width="36" height="32" rx="5" fill="#fff" stroke="#e6e8eb" opacity=".4"/>
+          <text x="38" y="57" text-anchor="middle" font-size="13" fill="#9aa0a6">3</text>
+          <rect x="60" y="36" width="36" height="32" rx="5" fill="#fff" stroke="#e6e8eb" opacity=".4"/>
+          <text x="78" y="57" text-anchor="middle" font-size="13" fill="#9aa0a6">1</text>
+          <rect x="100" y="36" width="36" height="32" rx="5" fill="#fff" stroke="#e6e8eb" opacity=".4"/>
+          <text x="118" y="57" text-anchor="middle" font-size="13" fill="#9aa0a6">4</text>
+          <rect x="140" y="36" width="36" height="32" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="158" y="57" text-anchor="middle" font-size="13" fill="#ea580c" font-weight="700">1</text>
+          <rect x="180" y="36" width="36" height="32" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="198" y="57" text-anchor="middle" font-size="13" fill="#2563eb" font-weight="600">5</text>
+          <rect x="220" y="36" width="36" height="32" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="238" y="57" text-anchor="middle" font-size="13" fill="#9aa0a6">9</text>
+          <rect x="260" y="36" width="36" height="32" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="278" y="57" text-anchor="middle" font-size="13" fill="#2563eb" font-weight="600">2</text>
+          <rect x="300" y="36" width="36" height="32" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="318" y="57" text-anchor="middle" font-size="13" fill="#9aa0a6">6</text>
+        </g>
+        <g font-size="10" fill="#9aa0a6" text-anchor="middle">
+          <text x="38" y="82">0</text><text x="78" y="82">1</text><text x="118" y="82">2</text><text x="158" y="82">3</text>
+          <text x="198" y="82">4</text><text x="238" y="82">5</text><text x="278" y="82">6</text><text x="318" y="82">7</text>
+        </g>
+        <text x="20" y="104" font-size="12" fill="#6b7280">橙色是当前，蓝色是栈里还留着的，灰色是已经扔掉的或还没看到的</text>
+
+        <g font-size="12" fill="#6b7280">
+          <text x="370" y="145">处理前</text>
+          <text x="370" y="207">弹出 ≥ 1 的</text>
+          <text x="370" y="269">压入后</text>
+        </g>
+        <g>
+          <rect x="440" y="120" width="64" height="38" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="472" y="141" text-anchor="middle" font-size="15" fill="#2563eb" font-weight="700">2</text>
+          <text x="472" y="154" text-anchor="middle" font-size="10" fill="#2563eb">下标 6</text>
+          <rect x="512" y="120" width="64" height="38" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="544" y="141" text-anchor="middle" font-size="15" fill="#2563eb" font-weight="700">5</text>
+          <text x="544" y="154" text-anchor="middle" font-size="10" fill="#2563eb">下标 4</text>
+        </g>
+        <text x="440" y="174" font-size="11" fill="#6b7280">栈底 → 栈顶：下标 6 → 4 递减，值 2 → 5 递增</text>
+        <g>
+          <rect x="440" y="182" width="64" height="38" rx="6" fill="#f6f7f9" stroke="#c8ccd1" stroke-dasharray="4 3"/>
+          <text x="472" y="203" text-anchor="middle" font-size="15" fill="#9aa0a6">2</text>
+          <text x="472" y="216" text-anchor="middle" font-size="10" fill="#9aa0a6">下标 6</text>
+          <rect x="512" y="182" width="64" height="38" rx="6" fill="#f6f7f9" stroke="#c8ccd1" stroke-dasharray="4 3"/>
+          <text x="544" y="203" text-anchor="middle" font-size="15" fill="#9aa0a6">5</text>
+          <text x="544" y="216" text-anchor="middle" font-size="10" fill="#9aa0a6">下标 4</text>
+          <text x="600" y="210" font-size="18" fill="#c8ccd1">✕</text>
+        </g>
+        <text x="440" y="236" font-size="11" fill="#6b7280">栈空了，所以 ans[3] = -1</text>
+        <g>
+          <rect x="440" y="244" width="64" height="38" rx="6" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="472" y="265" text-anchor="middle" font-size="15" fill="#ea580c" font-weight="700">1</text>
+          <text x="472" y="278" text-anchor="middle" font-size="10" fill="#ea580c">下标 3</text>
+        </g>
+        <text x="596" y="270" font-size="12" fill="#6b7280">栈里只剩 3</text>
+        <text x="20" y="312" font-size="12" fill="#6b7280">弹掉的 4 和 6 从此不再需要：对任何 p ≤ 3，位置 3 都比它们更近且值不大于它们</text>
+        <text x="20" y="332" font-size="12" fill="#9aa0a6">这一步弹出 2 个、压入 1 个；整个扫描过程里每个下标最多被弹一次</text>
+      </svg>
+      <figcaption>处理 nums[3] = 1 时，栈顶所有 ≥ 1 的下标全部弹出，栈空说明右侧没有更小的</figcaption>
+    </figure>
+
+    <p>栈顶是「最靠左、值最大」的那个，所以它也是第一个可能挡不住 <code class="inline">nums[i]</code> 的位置。弹出之后剩下的栈顶，就是值小于 <code class="inline">nums[i]</code> 的里面最靠左的，正是要找的答案。</p>
+
+    <h2>五、走完整个数组</h2>
+    <p>把八步连起来看：</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="八步扫描的栈快照" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="12" fill="#6b7280">
+          <text x="28" y="28">i</text>
+          <text x="76" y="28">nums[i]</text>
+          <text x="140" y="28">处理前栈（底 → 顶）</text>
+          <text x="310" y="28">弹出</text>
+          <text x="430" y="28">ans[i]</text>
+          <text x="500" y="28">压入后栈</text>
+        </g>
+        <line x1="20" y1="36" x2="660" y2="36" stroke="#e6e8eb"/>
+
+        <g font-size="12" fill="#1f2328">
+          <text x="28" y="60">7</text><text x="76" y="60">6</text>
+          <text x="140" y="60" fill="#9aa0a6">（空）</text>
+          <text x="310" y="60" fill="#9aa0a6">—</text>
+          <text x="430" y="60" fill="#9aa0a6">-1</text>
+          <text x="500" y="60">7(6)</text>
+
+          <text x="28" y="86">6</text><text x="76" y="86">2</text>
+          <text x="140" y="86">7(6)</text>
+          <text x="310" y="86" fill="#ea580c">7(6)</text>
+          <text x="430" y="86" fill="#9aa0a6">-1</text>
+          <text x="500" y="86">6(2)</text>
+
+          <text x="28" y="112">5</text><text x="76" y="112">9</text>
+          <text x="140" y="112">6(2)</text>
+          <text x="310" y="112" fill="#9aa0a6">—</text>
+          <text x="430" y="112" fill="#ea580c">6</text>
+          <text x="500" y="112">6(2) 5(9)</text>
+
+          <text x="28" y="138">4</text><text x="76" y="138">5</text>
+          <text x="140" y="138">6(2) 5(9)</text>
+          <text x="310" y="138" fill="#ea580c">5(9)</text>
+          <text x="430" y="138" fill="#ea580c">6</text>
+          <text x="500" y="138">6(2) 4(5)</text>
+
+          <text x="28" y="164">3</text><text x="76" y="164">1</text>
+          <text x="140" y="164">6(2) 4(5)</text>
+          <text x="310" y="164" fill="#ea580c">4(5) 6(2)</text>
+          <text x="430" y="164" fill="#9aa0a6">-1</text>
+          <text x="500" y="164">3(1)</text>
+
+          <text x="28" y="190">2</text><text x="76" y="190">4</text>
+          <text x="140" y="190">3(1)</text>
+          <text x="310" y="190" fill="#9aa0a6">—</text>
+          <text x="430" y="190" fill="#ea580c">3</text>
+          <text x="500" y="190">3(1) 2(4)</text>
+
+          <text x="28" y="216">1</text><text x="76" y="216">1</text>
+          <text x="140" y="216">3(1) 2(4)</text>
+          <text x="310" y="216" fill="#ea580c">2(4) 3(1)</text>
+          <text x="430" y="216" fill="#9aa0a6">-1</text>
+          <text x="500" y="216">1(1)</text>
+
+          <text x="28" y="242">0</text><text x="76" y="242">3</text>
+          <text x="140" y="242">1(1)</text>
+          <text x="310" y="242" fill="#9aa0a6">—</text>
+          <text x="430" y="242" fill="#ea580c">1</text>
+          <text x="500" y="242">1(1) 0(3)</text>
+        </g>
+        <line x1="20" y1="254" x2="660" y2="254" stroke="#e6e8eb"/>
+        <text x="20" y="278" font-size="13" fill="#6b7280">8 次入栈、6 次弹出；ans = [1, -1, 3, -1, 6, 6, -1, -1]</text>
+        <text x="20" y="296" font-size="12" fill="#9aa0a6">括号里是该下标对应的值，注意每行的栈从底到顶值都是递增的</text>
+      </svg>
+      <figcaption>八步快照：每个下标最多进栈一次、出栈一次</figcaption>
+    </figure>
+
+    <p>可以发现栈的深度一直很小，最多两层。原因就是第四节的单调性：值大的进来会把前面一串推掉。</p>
+
+    <h2>六、演示</h2>
+    <p>拖动滑条改变当前处理的位置 <code class="inline">i</code>，看栈的内容、弹出的下标和答案数组怎么一点点填出来。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　单调栈扫描过程</div>
+
+      <div class="arr-row" id="arrRow"></div>
+
+      <div class="stack-area">
+        <div class="stack-label">栈（从栈底到栈顶，下标递减、值递增）</div>
+        <div class="stack-row" id="stackRow"></div>
+      </div>
+
+      <div class="pop-row" id="popRow"></div>
+
+      <div class="step-desc" id="stepDesc"></div>
+
+      <p class="intro" style="margin:18px 0 6px;">处理后的答案数组</p>
+      <div class="arr-row answer" id="ansRow"></div>
+
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>当前 i</label>
+          <input type="range" id="si" min="0" max="7" value="7">
+          <span class="val" id="sival">7</span>
+        </div>
+      </div>
+      <div class="legend">
+        <span><span class="dot cur"></span>当前处理 i</span>
+        <span><span class="dot found"></span>已找到答案</span>
+        <span><span class="dot instack"></span>在栈中（右侧无更小）</span>
+      </div>
+    </div>
+
+    <p>滑条拖到最左（<code class="inline">i = 0</code>），答案就齐了，栈里剩下的是那些右侧从未出现过更小元素的下标。</p>
+
+    <h2>七、代码</h2>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="cm">// 示例：与上文同一数组</span>
+<span class="kw">int</span> nums[] = {3, 1, 4, 1, 5, 9, 2, 6};
+<span class="kw">int</span> n = <span class="kw">sizeof</span>(nums) / <span class="kw">sizeof</span>(nums[0]);
+<span class="kw">int</span> ans[100];                  <span class="cm">// 答案：ans[i] = 右侧第一个 &lt; nums[i] 的下标，没有则 -1</span>
+
+<span class="kw">void</span> <span class="fn">next_smaller</span>() {
+    vector&lt;<span class="kw">int</span>&gt; st;            <span class="cm">// 单调栈，存下标；对应的 nums[st[...]] 严格递增</span>
+    <span class="kw">for</span> (<span class="kw">int</span> i = n - 1; i &gt;= 0; i--) {
+        <span class="cm">// 1. 弹出栈顶所有 &gt;= nums[i] 的下标（它们不可能成为 i 的答案）</span>
+        <span class="kw">while</span> (!st.empty() &amp;&amp; nums[st.back()] &gt;= nums[i])
+            st.pop_back();
+
+        <span class="cm">// 2. 此时栈顶（如果存在）就是 i 右侧第一个更小的位置</span>
+        ans[i] = st.empty() ? -1 : st.back();
+
+        <span class="cm">// 3. 把 i 入栈，留给左侧的位置用</span>
+        st.push_back(i);
+    }
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    <span class="fn">next_smaller</span>();
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++)
+        cout &lt;&lt; <span class="str">"ans["</span> &lt;&lt; i &lt;&lt; <span class="str">"] = "</span> &lt;&lt; ans[i] &lt;&lt; endl;
+    <span class="kw">return</span> 0;
+}</pre>
+    <p>输出是 <code class="inline">1, -1, 3, -1, 6, 6, -1, -1</code>，与第一节那张图一致。</p>
+
+    <h2>八、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>遍历 <code class="inline">i</code>（从 n-1 到 0）</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>入栈合计（每个下标一次）</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>出栈合计（每个下标至多一次）</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>单次比较（只比栈顶）</td><td><code class="inline">O(1)</code></td></tr>
+        <tr><td>整体</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>朴素做法（对照）</td><td><code class="inline">O(n²)</code></td></tr>
+      </tbody>
+    </table>
+    <p>出栈次数为什么是 <code class="inline">O(n)</code>：下标一旦弹出就再也不会回到栈里，而入栈总共只有 <code class="inline">n</code> 次，所以弹出次数不可能超过 <code class="inline">n</code>。<code class="inline">while</code> 循环看着像嵌套，摊下来是常数。</p>
+    <p>空间上，栈里最多同时放 <code class="inline">n</code> 个下标，答案数组 <code class="inline">n</code> 个 <code class="inline">int</code>，额外空间 <code class="inline">O(n)</code>；不算答案数组的话是栈的 <code class="inline">O(n)</code>。</p>
+
+    <h2>九、最后</h2>
+    <p>这套写法能用的前提是：条件只跟「大小」有关，而且要的是「第一个」，不是「第几个」也不是「一共有几个」。求第 k 个更小、或者统计右边比它小的有多少个，单调栈给不出答案，那类问题得用树状数组或归并。</p>
+    <p>换个条件基本是照抄：求「右侧第一个大于」，把 <code class="inline">&gt;=</code> 改成 <code class="inline">&lt;=</code>，栈就变成值递减；求「左侧第一个小于」，把循环改成从左往右，其余不动。</p>
+    <p>一个常见用法是两边各扫一次：比如直方图最大矩形，对每个柱子求左、右两侧第一个比它矮的位置，就把它能撑开的宽度定下来了。两次单调栈，整体还是 <code class="inline">O(n)</code>。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  const A = [3,1,4,1,5,9,2,6];
+  const N = A.length;
+
+  /* 处理完 j = i+1..N-1 之后的栈（存下标）和答案 */
+  function stateBefore(i){
+    const stack = [];
+    const ans = new Array(N).fill(-1);
+    for (let j = N-1; j > i; j--) {
+      while (stack.length && A[stack[stack.length-1]] >= A[j]) stack.pop();
+      if (stack.length) ans[j] = stack[stack.length-1];
+      stack.push(j);
+    }
+    return { stack, ans };
+  }
+
+  /* 在位置 i 上执行完「弹出 → 记答案 → 入栈」之后的状态 */
+  function stepAt(i){
+    const before = stateBefore(i);
+    const popped = [];
+    const stack = before.stack.slice();
+    while (stack.length && A[stack[stack.length-1]] >= A[i]) {
+      popped.push(stack.pop());
+    }
+    const ans = before.ans.slice();
+    ans[i] = stack.length ? stack[stack.length-1] : -1;
+    stack.push(i);
+    return { popped, ans };
+  }
+
+  const arrRow = document.getElementById('arrRow');
+  const stackRow = document.getElementById('stackRow');
+  const popRow = document.getElementById('popRow');
+  const stepDesc = document.getElementById('stepDesc');
+  const ansRow = document.getElementById('ansRow');
+  const si = document.getElementById('si');
+  const sival = document.getElementById('sival');
+
+  function render(){
+    const i = parseInt(si.value, 10);
+    sival.textContent = i;
+
+    const before = stateBefore(i);
+    const { popped, ans } = stepAt(i);
+    const stackSet = new Set(before.stack);
+
+    /* 1. 数组单元 */
+    arrRow.innerHTML = '';
+    for (let j = 0; j < N; j++) {
+      const c = document.createElement('div');
+      c.className = 'arr-cell';
+      if (j === i) c.classList.add('cur');
+      else if (j < i) c.classList.add('dim');
+      else if (ans[j] !== -1) c.classList.add('found');
+      else c.classList.add('instack');
+      c.innerHTML = '<div class="v">' + A[j] + '</div><div class="ix">i=' + j + '</div>';
+      arrRow.appendChild(c);
+    }
+
+    /* 2. 栈 */
+    stackRow.innerHTML = '';
+    if (before.stack.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'stack-cell empty';
+      e.textContent = '（空）';
+      stackRow.appendChild(e);
+    } else {
+      before.stack.forEach((idx, k) => {
+        const s = document.createElement('div');
+        s.className = 'stack-cell';
+        if (k === before.stack.length - 1) s.classList.add('top');
+        s.innerHTML = '<div class="v">' + A[idx] + '</div><div class="ix">下标 ' + idx + '</div>';
+        stackRow.appendChild(s);
+      });
+    }
+
+    /* 3. 弹出提示 */
+    popRow.innerHTML = '<span>处理 i=' + i + '（值 ' + A[i] + '）时，从栈顶弹出的下标：</span>';
+    if (popped.length === 0) {
+      const none = document.createElement('span');
+      none.className = 'pop-chip none';
+      if (before.stack.length === 0) {
+        none.textContent = '无（栈为空）';
+      } else {
+        const topIdx = before.stack[before.stack.length - 1];
+        none.textContent = '无（栈顶 ' + A[topIdx] + ' < ' + A[i] + '）';
+      }
+      popRow.appendChild(none);
+    } else {
+      popped.forEach(idx => {
+        const ch = document.createElement('span');
+        ch.className = 'pop-chip';
+        ch.textContent = 'i=' + idx + '（值 ' + A[idx] + '）';
+        popRow.appendChild(ch);
+      });
+    }
+
+    /* 4. 步骤描述 */
+    const ansTxt = ans[i] === -1 ? '-1（右侧无更小元素）' : ('位置 ' + ans[i] + '（值 ' + A[ans[i]] + '）');
+    stepDesc.innerHTML =
+      '<div class="row">当前正在处理 <span class="hl">i = ' + i + '</span>，其值 <span class="hl">nums[' + i + '] = ' + A[i] + '</span>。</div>' +
+      '<div class="row">弹出栈顶所有 ≥ ' + A[i] + ' 的下标，共弹出 <span class="hl">' + popped.length + '</span> 个。</div>' +
+      '<div class="row">此时栈顶（若存在）就是右侧第一个更小的位置，故 <span class="hl">ans[' + i + '] = ' + ansTxt + '</span>。</div>' +
+      '<div class="row">把 i=' + i + ' 压入栈中，留给左侧的位置使用。</div>';
+
+    /* 5. 答案数组（i 处理完之后） */
+    ansRow.innerHTML = '';
+    for (let j = 0; j < N; j++) {
+      const c = document.createElement('div');
+      c.className = 'arr-cell';
+      if (j < i) c.classList.add('dim');
+      else if (j === i) c.classList.add('found');
+      else if (ans[j] === -1) c.classList.add('instack');
+      else c.classList.add('found');
+      const v = (j < i) ? '·' : (ans[j] === -1 ? '-1' : ans[j]);
+      c.innerHTML = '<div class="v">' + v + '</div><div class="ix">j=' + j + '</div>';
+      ansRow.appendChild(c);
+    }
+  }
+
+  si.addEventListener('input', render);
+  render();
+
+})();
+</script>
+</body>
+</html>

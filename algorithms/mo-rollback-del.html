@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>只删回滚莫队 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.row.total{display:flex;flex-wrap:wrap;gap:14px;}
+.du-cells{display:flex;flex-direction:column;gap:4px;overflow-x:auto;}
+.du-row{display:flex;gap:4px;align-items:flex-start;}
+.du-cell{
+  width:38px;height:38px;flex:none;display:flex;align-items:center;justify-content:center;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+  font-size:14px;font-variant-numeric:tabular-nums;transition:background .12s,border-color .12s;
+}
+.du-cell.full{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.du-cell.edge{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+.du-idx{width:38px;height:16px;flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-dim);}
+.du-idx.now{color:var(--accent);font-weight:600;}
+.du-btns{display:flex;gap:10px;margin-top:6px;}
+.du-btn{border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;}
+.du-btn:hover{border-color:var(--accent);color:var(--accent);}
+.du-btn:disabled{opacity:.4;cursor:default;}
+.du-cnt{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 0;}
+.du-cnt span{border:1px solid var(--border);border-radius:6px;padding:2px 10px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--text-dim);}
+.du-cnt span.zero{border-color:var(--partial);color:var(--partial);font-weight:600;}
+@media(max-width:760px){
+  .du-cell{width:32px;height:32px;font-size:12px;}
+  .du-idx{width:32px;}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>只删回滚莫队</h1>
+    <p class="intro">删掉容易、加回去难的答案，反过来做：窗口从整段 [1, n] 出发只往里缩，每个任务临时缩到位、记下答案，再靠备份把答案和窗口一起还原。</p>
+
+    <h2>零、背景</h2>
+    <p>上一节的只增回滚莫队对付的是「加容易、删难」。这一类正好反过来。</p>
+    <p>典型例子是区间 mex：一段范围里没出现过的最小自然数。删掉一个数字时，如果它的出现次数变成 0，mex 有可能变小，取个 min 就行；把数字加回来时，mex 有可能变大，变大到多少得重新往后查一遍。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>删的时候 mex 只会变小，一步就能更新；加回来时它只会变大，变大到多少没法直接算</figcaption>
+    </figure>
+
+    <h2>一、问题</h2>
+    <p>长度为 n 的数组 arr，一共 m 条查询 l r，打印 arr[l..r] 内没有出现过的最小自然数，0 也算自然数。0 &lt;= n、m、arr[i] &lt;= 2 * 10^5。测试链接：<a href="https://www.luogu.com.cn/problem/P4137">P4137</a>。</p>
+    <p>这题的最优解是主席树，前面讲主席树时已经给过。这里拿它当只删回滚莫队的入门题，因为它把「加回去难」这件事暴露得最清楚。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>每条查询开一个标记数组，扫一遍 l..r 把出现过的数字打上标记，再从 0 开始找第一个没被打标记的位置。</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">force</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+    <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) vis[arr[i]] = <span class="kw">true</span>;
+    <span class="kw">int</span> ret = 0;
+    <span class="kw">while</span> (vis[ret]) ret++;
+    <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) vis[arr[i]] = <span class="kw">false</span>;
+    <span class="kw">return</span> ret;
+}</pre>
+    <p>一次 O(r - l + 1)，m 条最坏 O(nm)。n、m 都是 2 * 10^5 时是 4 * 10^10，跑不动。</p>
+
+    <h2>三、只让窗口删数字</h2>
+    <p>窗口要是只删不减，就得从最大的窗口开始：初始 winl = 1，winr = n，cnt 记下所有数字的出现次数，mex 也算好。</p>
+    <p>排序的规则跟着反过来。查询还是按 l 所在块分组，但块内按 r <strong>从大到小</strong>排，这样同一个组里 winr 只往左走。</p>
+    <p>设 l 所在块的左边界是 bl。来到某一组，先让 winl 走到 bl（一直在删），此时的答案记为 beforeJob。</p>
+    <p>组内每个任务还是四步。</p>
+    <p>第一步，让 winr 走到 jobr，一路删，答案跟着更新。第二步，把答案存成 backup。第三步，让 winl 走到 jobl，继续删，答案更新完就是这个任务的答案，记下来。第四步，让 winl 退回 bl，这一步在加数字，但不碰答案，答案直接赋回 backup。</p>
+    <p>一组做完后，让 winr 回到 n，同样只更新 cnt 不更新答案，答案赋回 beforeJob。</p>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>一个任务里 winr 往左走一次、winl 往右走两次；两次加回来的动作都不更新答案</figcaption>
+    </figure>
+
+    <p>和只增那版对照着看：那边是右指针只往右、左指针临时左扩；这边是右指针只往左、左指针临时右扩。备份的位置也一样，都在「临时那一半开始之前」。</p>
+
+    <h2>四、演示</h2>
+    <p>数组取 9 个数，块长取 3，下面跑块 1（l 落在 1..3）的三个任务，它们在组内按 r 从大到小排好。</p>
+    <div class="viz">
+      <div class="viz-title">演示　只删回滚莫队：块 1 的三个任务（块长 3，bl = 1）</div>
+      <div class="du-cells" id="duCells"></div>
+      <div class="du-cnt" id="duCnt"></div>
+      <div class="breakdown" id="duStatus"></div>
+      <div class="du-btns">
+        <button class="du-btn" id="duStep">下一步</button>
+        <button class="du-btn" id="duAuto">自动播放</button>
+        <button class="du-btn" id="duReset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot full"></span>窗口内的数</span>
+        <span><span class="dot" style="background:var(--partial-bg);border-color:var(--partial);"></span>已被删掉的数</span>
+      </div>
+    </div>
+
+    <h2>五、题目1 的代码</h2>
+    <p>del 里只有一句：出现次数减到 0 时，mex 取 min。add 里只有一句 cnt++，答案全靠 backup 和 beforeJob 还原。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Query {
+        <span class="kw">int</span> l, r, id;
+    };
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXB = 501;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+    Query query[MAXN];
+
+    <span class="kw">int</span> blen, bnum;
+    <span class="kw">int</span> bi[MAXN];
+    <span class="kw">int</span> bl[MAXB];
+
+    <span class="kw">int</span> cnt[MAXN];
+    <span class="kw">int</span> mex;
+    <span class="kw">int</span> ans[MAXN];
+
+    <span class="kw">bool</span> <span class="fn">QueryCmp</span>(Query &amp;a, Query &amp;b) {
+        <span class="kw">if</span> (bi[a.l] != bi[b.l]) {
+            <span class="kw">return</span> bi[a.l] &lt; bi[b.l];
+        }
+        <span class="kw">return</span> b.r &lt; a.r;
+    }
+
+    <span class="kw">void</span> <span class="fn">del</span>(<span class="kw">int</span> num) {
+        <span class="kw">if</span> (--cnt[num] == 0) {
+            mex = min(mex, num);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        cnt[num]++;
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cnt[arr[i]]++;
+        }
+        mex = 0;
+        <span class="kw">while</span> (cnt[mex] != 0) {
+            mex++;
+        }
+        <span class="kw">int</span> winl = 1, winr = n;
+        <span class="kw">for</span> (<span class="kw">int</span> block = 1, qi = 1; block &lt;= bnum &amp;&amp; qi &lt;= m; block++) {
+            <span class="kw">while</span> (winl &lt; bl[block]) {
+                del(arr[winl++]);
+            }
+            <span class="kw">int</span> beforeJob = mex;
+            <span class="kw">for</span> (; qi &lt;= m &amp;&amp; bi[query[qi].l] == block; qi++) {
+                <span class="kw">int</span> jobl = query[qi].l;
+                <span class="kw">int</span> jobr = query[qi].r;
+                <span class="kw">int</span> id = query[qi].id;
+                <span class="kw">while</span> (winr &gt; jobr) {
+                    del(arr[winr--]);
+                }
+                <span class="kw">int</span> backup = mex;
+                <span class="kw">while</span> (winl &lt; jobl) {
+                    del(arr[winl++]);
+                }
+                ans[id] = mex;
+                mex = backup;
+                <span class="kw">while</span> (winl &gt; bl[block]) {
+                    add(arr[--winl]);
+                }
+            }
+            <span class="kw">while</span> (winr &lt; n) {
+                add(arr[++winr]);
+            }
+            mex = beforeJob;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        blen = (<span class="kw">int</span>)sqrt(n);
+        bnum = (n + blen - 1) / blen;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= bnum; i++) {
+            bl[i] = (i - 1) * blen + 1;
+        }
+        sort(query + 1, query + m + 1, QueryCmp);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; query[i].l &gt;&gt; query[i].r;
+            query[i].id = i;
+        }
+        prepare();
+        compute();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>六、秃子酋长</h2>
+    <p>长度为 n 的数组 arr，1 到 n 这些数字各出现一次。一共 m 条查询 l r：把 arr[l..r] 里的数按值排序，求排序后相邻两个数在原序列中位置的差的绝对值之和。1 &lt;= n、m &lt;= 5 * 10^5。测试链接：<a href="https://www.luogu.com.cn/problem/P8078">P8078</a>。</p>
+    <p>这题的答案本身两边都好维护：加一个数字，在有序表里找到前后邻居，把三条距离换成两条；删一个数字同理。真正麻烦的是有序表。数组上做插入删除是 O(n) 的，平衡树又重。</p>
+    <p>把「按值排序」看成一条双向链表就能绕开：数字就是节点，lst 记前驱、nxt 记后继，删除一个节点只要改两根指针，O(1)。</p>
+    <p>加回来同样只要两行：nxt[lst[num]] = num 和 lst[nxt[num]] = num。前提是这个节点的前驱和后继此刻还相邻，也就是加回来的顺序必须正好是删的顺序反过来。只删回滚莫队恰好提供这个性质：删的时候是某个方向一路删，回滚的时候就按相反方向一路加回去。</p>
+
+    <figure class="fig">
+      <div id="fig3"></div>
+      <figcaption>链表里删掉一个节点只改两根指针；按删除的逆序加回去时，它的两个邻居还挨着，两行就能接回</figcaption>
+    </figure>
+
+    <p>初始时把 1 到 n 全部串好，两端各放一个哨兵 0 和 n + 1，sum 先算成整条链的距离和，之后每个任务只做删除和回滚。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Query {
+        <span class="kw">int</span> l, r, id;
+    };
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+    Query query[MAXN];
+    <span class="kw">int</span> pos[MAXN];
+
+    <span class="kw">int</span> blen, bnum;
+    <span class="kw">int</span> bi[MAXN];
+    <span class="kw">int</span> bl[MAXN];
+
+    <span class="kw">int</span> lst[MAXN + 1];
+    <span class="kw">int</span> nxt[MAXN + 1];
+    <span class="kw">long</span> <span class="kw">long</span> sum;
+    <span class="kw">long</span> <span class="kw">long</span> ans[MAXN];
+
+    <span class="kw">bool</span> <span class="fn">QueryCmp</span>(Query &amp;a, Query &amp;b) {
+        <span class="kw">if</span> (bi[a.l] != bi[b.l]) {
+            <span class="kw">return</span> bi[a.l] &lt; bi[b.l];
+        }
+        <span class="kw">return</span> a.r &gt; b.r;
+    }
+
+    <span class="kw">inline</span> <span class="kw">void</span> <span class="fn">del</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> less = lst[num], more = nxt[num];
+        <span class="kw">if</span> (less != 0) {
+            sum -= abs(pos[num] - pos[less]);
+        }
+        <span class="kw">if</span> (more != n + 1) {
+            sum -= abs(pos[more] - pos[num]);
+        }
+        <span class="kw">if</span> (less != 0 &amp;&amp; more != n + 1) {
+            sum += abs(pos[more] - pos[less]);
+        }
+        nxt[less] = more;
+        lst[more] = less;
+    }
+
+    <span class="kw">inline</span> <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        nxt[lst[num]] = num;
+        lst[nxt[num]] = num;
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            pos[arr[i]] = i;
+        }
+        blen = (<span class="kw">int</span>)sqrt(n);
+        bnum = (n + blen - 1) / blen;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= bnum; i++) {
+            bl[i] = (i - 1) * blen + 1;
+        }
+        sort(query + 1, query + 1 + m, QueryCmp);
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> v = 1; v &lt;= n; v++) {
+            lst[v] = v - 1;
+            nxt[v] = v + 1;
+        }
+        nxt[0] = 1;
+        lst[n + 1] = n;
+        <span class="kw">for</span> (<span class="kw">int</span> v = 2; v &lt;= n; v++) {
+            sum += abs(pos[v] - pos[v - 1]);
+        }
+        <span class="kw">int</span> winl = 1, winr = n;
+        <span class="kw">for</span> (<span class="kw">int</span> block = 1, qi = 1; block &lt;= bnum &amp;&amp; qi &lt;= m; block++) {
+            <span class="kw">while</span> (winl &lt; bl[block]) {
+                del(arr[winl++]);
+            }
+            <span class="kw">long</span> <span class="kw">long</span> beforeJob = sum;
+            <span class="kw">for</span> (; qi &lt;= m &amp;&amp; bi[query[qi].l] == block; qi++) {
+                <span class="kw">int</span> jobl = query[qi].l;
+                <span class="kw">int</span> jobr = query[qi].r;
+                <span class="kw">int</span> id = query[qi].id;
+                <span class="kw">while</span> (winr &gt; jobr) {
+                    del(arr[winr--]);
+                }
+                <span class="kw">long</span> <span class="kw">long</span> backup = sum;
+                <span class="kw">while</span> (winl &lt; jobl) {
+                    del(arr[winl++]);
+                }
+                ans[id] = sum;
+                sum = backup;
+                <span class="kw">while</span> (winl &gt; bl[block]) {
+                    add(arr[--winl]);
+                }
+            }
+            <span class="kw">while</span> (winr &lt; n) {
+                add(arr[++winr]);
+            }
+            sum = beforeJob;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; query[i].l &gt;&gt; query[i].r;
+            query[i].id = i;
+        }
+        prepare();
+        compute();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>七、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>环节</th><th>复杂度</th><th>说明</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>初始化窗口</td><td><code class="inline">O(n)</code></td><td>统计全部数字的出现次数，扫一遍算出初始答案</td></tr>
+        <tr><td>查询排序</td><td><code class="inline">O(m log m)</code></td><td>按 l 的块号、再按 r 从大到小</td></tr>
+        <tr><td>每组的右指针</td><td><code class="inline">O(n)</code></td><td>组内 jobr 不上升，winr 从 n 走到 bl 附近，组末再回到 n</td></tr>
+        <tr><td>全部组的右指针</td><td><code class="inline">O(n√n)</code></td><td>共约 √n 组</td></tr>
+        <tr><td>每个任务的左指针</td><td><code class="inline">O(√n)</code></td><td>winl 只在块内移动，且每次都退回 bl</td></tr>
+        <tr><td>总时间</td><td><code class="inline">O((n + m)√n)</code></td><td>与只增回滚莫队同量级</td></tr>
+        <tr><td>额外空间</td><td><code class="inline">O(n + m)</code></td><td>计数数组 cnt 和查询数组</td></tr>
+      </tbody>
+    </table>
+    <p>两类回滚莫队的代价完全一样，选哪个只看 add 和 del 里哪一个是写不出来的那个。</p>
+
+    <h2>八、最后</h2>
+    <p>判断方法可以固定成一句话：写出 add 和 del，哪个需要「重新扫一遍别的东西」才能更新答案，就把哪个踢出窗口，剩下的交给备份。</p>
+    <p>莫队这套排序加窗口的办法不止能用在数组上。下一节的树上莫队，把树上的路径也变成一段区间。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  const ARR = [0, 0, 1, 2, 0, 1, 3, 0, 2, 1];
+  const N = 9, BLEN = 3, BL = 1;
+  const JOBS = [{l:2, r:8}, {l:1, r:6}, {l:3, r:4}];
+  const VALS = [0, 1, 2, 3];
+
+  /* ---------- 图1：删容易、加难 ---------- */
+  const f1 = document.getElementById('fig1');
+  {
+    let s = '<svg viewBox="0 0 680 240" xmlns="http://www.w3.org/2000/svg">';
+    s += '<defs><marker id="ahd" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#9aa0a6"/></marker></defs>';
+    function chips(x, y, cnts){
+      cnts.forEach(function(c, k){
+        const cx = x + k * 50;
+        s += '<rect x="' + cx + '" y="' + y + '" width="44" height="28" rx="5" fill="' + (c === 0 ? '#ffedd5' : '#dbeafe') + '" stroke="' + (c === 0 ? '#ea580c' : '#2563eb') + '"/>';
+        s += '<text x="' + (cx + 22) + '" y="' + (y + 19) + '" text-anchor="middle" font-size="12" fill="' + (c === 0 ? '#ea580c' : '#2563eb') + '">' + k + ' × ' + c + '</text>';
+      });
+    }
+    s += '<text x="8" y="28" font-size="13" fill="#1f2328">删掉数字 3</text>';
+    chips(60, 38, [2, 1, 2, 1]);
+    s += '<text x="60" y="82" font-size="12" fill="#2563eb">mex = 4</text>';
+    s += '<path d="M 280 52 L 320 52" stroke="#9aa0a6" stroke-width="1.5" marker-end="url(#ahd)"/>';
+    chips(340, 38, [2, 1, 2, 0]);
+    s += '<text x="340" y="82" font-size="12" fill="#2563eb">mex = 3</text>';
+    s += '<text x="8" y="104" font-size="12" fill="#6b7280">3 的计数归零，mex = min(4, 3) = 3，一步算完</text>';
+    s += '<text x="8" y="146" font-size="13" fill="#1f2328">把 3 加回来</text>';
+    chips(60, 156, [2, 1, 2, 0]);
+    s += '<text x="60" y="200" font-size="12" fill="#2563eb">mex = 3</text>';
+    s += '<path d="M 280 170 L 320 170" stroke="#9aa0a6" stroke-width="1.5" marker-end="url(#ahd)"/>';
+    chips(340, 156, [2, 1, 2, 1]);
+    s += '<text x="340" y="200" font-size="12" fill="#ea580c">mex = 4？</text>';
+    s += '<text x="8" y="224" font-size="12" fill="#6b7280">3 填上了，可 4 在不在窗口里并不知道，mex 只能重新往后查</text>';
+    s += '</svg>';
+    f1.innerHTML = s;
+  }
+
+  /* ---------- 图2：指针怎么走 ---------- */
+  const f2 = document.getElementById('fig2');
+  {
+    let s = '<svg viewBox="0 0 680 244" xmlns="http://www.w3.org/2000/svg">';
+    const X = function(i){ return 40 + (i - 1) * 66; };
+    s += '<text x="8" y="18" font-size="12" fill="#6b7280">下标与 arr</text>';
+    for (let i = 1; i <= N; i++) {
+      s += '<rect x="' + (X(i) - 22) + '" y="24" width="44" height="32" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>';
+      s += '<text x="' + X(i) + '" y="37" text-anchor="middle" font-size="10" fill="#6b7280">' + i + '</text>';
+      s += '<text x="' + X(i) + '" y="51" text-anchor="middle" font-size="13" fill="#1f2328">' + ARR[i] + '</text>';
+    }
+    s += '<line x1="' + (X(1) - 30) + '" y1="20" x2="' + (X(1) - 30) + '" y2="228" stroke="#ea580c" stroke-dasharray="4 3"/>';
+    s += '<text x="' + (X(1) - 26) + '" y="240" font-size="11" fill="#ea580c">bl = 1</text>';
+    const rows = [
+      {t: '① winr 走到 jobr = 8（删）', from: 1, to: 8, c: '#2563eb'},
+      {t: '② winl 走到 jobl = 2（删），记下答案', from: 2, to: 8, c: '#2563eb'},
+      {t: '③ winl 退回 bl（加，只改 cnt）', from: 1, to: 8, c: '#ea580c'},
+      {t: '④ 组末 winr 回到 n（加，只改 cnt）', from: 1, to: 9, c: '#ea580c'}
+    ];
+    rows.forEach(function(r, k){
+      const top = 72 + k * 40;
+      s += '<text x="8" y="' + top + '" font-size="12" fill="#1f2328">' + r.t + '</text>';
+      const x1 = X(r.from) - 22, x2 = X(r.to) + 22;
+      s += '<rect x="' + x1 + '" y="' + (top + 8) + '" width="' + (x2 - x1) + '" height="16" rx="6" fill="' + r.c + '" opacity="0.9"/>';
+    });
+    s += '</svg>';
+    f2.innerHTML = s;
+  }
+
+  /* ---------- 图3：有序双链表的删与加回 ---------- */
+  const f3 = document.getElementById('fig3');
+  {
+    let s = '<svg viewBox="0 0 680 226" xmlns="http://www.w3.org/2000/svg">';
+    s += '<defs><marker id="ahc" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#2563eb"/></marker></defs>';
+    const X = function(i){ return 40 + i * 108; };
+    s += '<text x="8" y="20" font-size="12" fill="#6b7280">按值从小到串好的双向链表</text>';
+    for (let i = 0; i < 5; i++) {
+      s += '<rect x="' + X(i) + '" y="30" width="62" height="32" rx="6" fill="#dbeafe" stroke="#2563eb"/>';
+      s += '<text x="' + (X(i) + 31) + '" y="52" text-anchor="middle" font-size="14" fill="#2563eb">' + (i + 1) + '</text>';
+      if (i < 4) {
+        s += '<line x1="' + (X(i) + 62) + '" y1="42" x2="' + X(i + 1) + '" y2="42" stroke="#2563eb" stroke-width="1.5" marker-end="url(#ahc)"/>';
+        s += '<line x1="' + X(i + 1) + '" y1="50" x2="' + (X(i) + 62) + '" y2="50" stroke="#2563eb" stroke-width="1.5" marker-end="url(#ahc)"/>';
+      }
+    }
+    s += '<text x="8" y="96" font-size="12" fill="#1f2328">删掉 3：nxt[2] = 4，lst[4] = 2，答案减去两条旧距离、加上一条新距离</text>';
+    [0, 1, 3, 4].forEach(function(i){
+      s += '<rect x="' + X(i) + '" y="106" width="62" height="32" rx="6" fill="#dbeafe" stroke="#2563eb"/>';
+      s += '<text x="' + (X(i) + 31) + '" y="128" text-anchor="middle" font-size="14" fill="#2563eb">' + (i + 1) + '</text>';
+    });
+    s += '<rect x="' + X(2) + '" y="106" width="62" height="32" rx="6" fill="#ffffff" stroke="#ea580c" stroke-dasharray="4 3"/>';
+    s += '<text x="' + (X(2) + 31) + '" y="128" text-anchor="middle" font-size="14" fill="#ea580c">3</text>';
+    s += '<line x1="' + (X(1) + 62) + '" y1="122" x2="' + X(2) + '" y2="122" stroke="#ea580c" stroke-width="1.5" stroke-dasharray="5 3"/>';
+    s += '<line x1="' + (X(2) + 62) + '" y1="122" x2="' + X(3) + '" y2="122" stroke="#ea580c" stroke-width="1.5" stroke-dasharray="5 3"/>';
+    s += '<text x="8" y="176" font-size="12" fill="#1f2328">加回 3：nxt[lst[3]] = 3，lst[nxt[3]] = 3</text>';
+    s += '<text x="8" y="200" font-size="12" fill="#6b7280">回滚时 2 和 4 还挨着，两行就能接回原位；顺序反了就接不回去</text>';
+    s += '<text x="8" y="220" font-size="12" fill="#6b7280">lst[3]、nxt[3] 一直没被清掉，删的时候只改了邻居的两根指针</text>';
+    s += '</svg>';
+    f3.innerHTML = s;
+  }
+
+  /* ---------- 演示 ---------- */
+  function buildSteps(){
+    const steps = [];
+    let winl = 1, winr = N, mex = 0;
+    const cnt = {};
+    for (let i = 1; i <= N; i++) cnt[ARR[i]] = (cnt[ARR[i]] || 0) + 1;
+    while (cnt[mex] !== undefined && cnt[mex] > 0) mex++;
+    const answers = new Array(JOBS.length).fill(null);
+    function snap(phase){
+      const c = {};
+      for (const k in cnt) if (cnt[k] > 0) c[k] = cnt[k];
+      steps.push({winl: winl, winr: winr, mex: mex, cnt: c, answers: answers.slice(), phase: phase});
+    }
+    snap('初始窗口 [1, ' + N + ']，mex = ' + mex);
+    const beforeJob = mex;
+    JOBS.forEach(function(job, ji){
+      while (winr > job.r) {
+        const v = ARR[winr];
+        cnt[v]--; if (cnt[v] === 0) mex = Math.min(mex, v);
+        winr--;
+        snap('右缩：删掉 a[' + (winr + 1) + '] = ' + v + '，窗口 [' + winl + ', ' + winr + ']');
+      }
+      const backup = mex;
+      snap('右缩结束，备份 backup = ' + backup);
+      while (winl < job.l) {
+        const v = ARR[winl];
+        cnt[v]--; if (cnt[v] === 0) mex = Math.min(mex, v);
+        winl++;
+        snap('左缩：删掉 a[' + (winl - 1) + '] = ' + v + '，窗口 [' + winl + ', ' + winr + ']');
+      }
+      answers[ji] = mex;
+      snap('窗口到位，记下本任务答案 ' + mex);
+      mex = backup;
+      while (winl > BL) { winl--; cnt[ARR[winl]]++; }
+      snap('回滚：winl 退回 ' + BL + '，只改 cnt，mex 还原为 backup = ' + backup);
+    });
+    while (winr < N) { winr++; cnt[ARR[winr]]++; }
+    snap('组末：winr 回到 ' + N + '，只改 cnt，mex 还原为 beforeJob = ' + beforeJob);
+    mex = beforeJob;
+    snap('块 1 处理完毕，窗口回到 [1, ' + N + ']');
+    return steps;
+  }
+
+  const steps = buildSteps();
+  let idx = 0, timer = null;
+  const cellsEl = document.getElementById('duCells');
+  const cntEl = document.getElementById('duCnt');
+  const statusEl = document.getElementById('duStatus');
+  const btnStep = document.getElementById('duStep');
+  const btnAuto = document.getElementById('duAuto');
+  const btnReset = document.getElementById('duReset');
+
+  function render(){
+    const s = steps[idx];
+    let h = '<div class="du-row">';
+    for (let i = 1; i <= N; i++) {
+      let cls = 'du-cell';
+      if (i >= s.winl && i <= s.winr) cls += ' full'; else cls += ' edge';
+      h += '<div class="' + cls + '">' + ARR[i] + '</div>';
+    }
+    h += '</div><div class="du-row">';
+    for (let i = 1; i <= N; i++) {
+      let cls = 'du-idx';
+      if (i === s.winl || i === s.winr) cls += ' now';
+      h += '<div class="' + cls + '">' + ((i === s.winl) ? 'winl' : (i === s.winr ? 'winr' : i)) + '</div>';
+    }
+    h += '</div>';
+    cellsEl.innerHTML = h;
+
+    let c = '';
+    VALS.forEach(function(v){
+      const n = s.cnt[v] || 0;
+      c += '<span' + (n === 0 ? ' class="zero"' : '') + '>' + v + ' × ' + n + '</span>';
+    });
+    cntEl.innerHTML = c;
+
+    let chips = '';
+    JOBS.forEach(function(q, k){
+      chips += '<span>' + (k + 1) + ') [' + q.l + ', ' + q.r + '] = ' + (s.answers[k] === null ? '?' : s.answers[k]) + '</span>';
+    });
+    statusEl.innerHTML =
+      '<div class="row">' + s.phase + '</div>' +
+      '<div class="row">窗口 [' + s.winl + ', ' + s.winr + ']　mex = <strong>' + s.mex + '</strong></div>' +
+      '<div class="row total">' + chips + '</div>';
+    btnStep.disabled = (idx >= steps.length - 1);
+  }
+
+  function step(){ if (idx < steps.length - 1) { idx++; render(); } }
+  function reset(){ idx = 0; render(); }
+  function stopAuto(){ if (timer) { clearInterval(timer); timer = null; btnAuto.textContent = '自动播放'; } }
+  btnStep.addEventListener('click', function(){ stopAuto(); step(); });
+  btnReset.addEventListener('click', function(){ stopAuto(); reset(); });
+  btnAuto.addEventListener('click', function(){
+    if (timer) { stopAuto(); return; }
+    btnAuto.textContent = '暂停';
+    timer = setInterval(function(){
+      if (idx >= steps.length - 1) { stopAuto(); return; }
+      step();
+    }, 900);
+  });
+  render();
+})();
+</script>
+</body>
+</html>

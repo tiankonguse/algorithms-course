@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Johnson 全源最短路 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  :root{
+    --ok:#16a34a;
+    --ok-bg:#dcfce7;
+    --bad:#dc2626;
+    --bad-bg:#fee2e2;
+  }
+  .jn-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .jn-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .jn-btn:disabled{opacity:.4;cursor:default;}
+  .jn-btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;}
+  .jn-svg{display:block;width:100%;height:auto;margin:0 auto;}
+  .jn-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+  .jn-chip{
+    border:1px solid var(--border);border-radius:6px;padding:4px 10px;
+    font-size:13px;font-variant-numeric:tabular-nums;background:var(--bg);color:var(--text-dim);
+  }
+  .jn-chip.set{border-color:var(--full);background:var(--full-bg);color:var(--full);font-weight:600;}
+  .jn-chip.ok{border-color:var(--ok);background:var(--ok-bg);color:var(--ok);font-weight:600;}
+  .jn-chip.bad{border-color:var(--bad);background:var(--bad-bg);color:var(--bad);font-weight:600;}
+  .jn-table{
+    border-collapse:collapse;margin-top:12px;font-size:13px;
+    font-variant-numeric:tabular-nums;
+  }
+  .jn-table th,.jn-table td{border:1px solid var(--border);padding:4px 12px;text-align:center;}
+  .jn-table th{background:var(--bg-soft);font-weight:600;color:var(--text-dim);}
+  .jn-table td.nw{color:var(--text-dim);}
+  .jn-table td.nw.set{color:var(--full);font-weight:600;background:var(--accent-soft);}
+  .jn-table tr.hot td{background:var(--partial-bg);}
+  .jn-label{font-size:12px;color:var(--text-dim);margin-top:14px;}
+  @media(max-width:760px){
+    .jn-chip{font-size:12px;padding:3px 8px;}
+    .jn-table{font-size:12px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>Johnson 全源最短路</h1>
+    <p class="intro">图里有负边时，Floyd 是 O(n³)、每个点跑一次 Bellman-Ford 是 O(n²·m)。Johnson 的想法是先用一次 Bellman-Ford 把每条边的权改成非负值，之后每个点跑一次 Dijkstra，总时间 O(n·m·log n)。</p>
+
+    <h2>零、背景</h2>
+    <p>前面几节说的都是单源最短路：一个起点到所有点。这一节要的是全源最短路，任意两点 i、j 之间的距离都要。</p>
+    <p>没有负边的时候很简单，从每个点跑一次 Dijkstra，n 次下来是 O(n·m·log n)。有负边就麻烦了，Dijkstra 的贪心不再成立，只能每个点跑一次 Bellman-Ford，变成 O(n²·m)，或者干脆用 Floyd，O(n³)。</p>
+    <p>差距不小。n = 3000、m = 6000 时，Floyd 要做 2.7 × 10¹⁰ 次松弛，n 次 Dijkstra 只有 2 × 10⁸ 量级。挡在中间的只有一件事：负边。</p>
+
+    <h2>一、问题</h2>
+    <p>一共 n 个点 m 条有向边，边有边权，可能有负边、重边、自环。图里有负环就输出 −1；否则求任意两点的最短距离，不连通记 10⁹，自己到自己记 0。</p>
+    <p>例子用下面这张图，5 个点 7 条边：</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="带负边的示例图" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="j1a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="j1o" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <g stroke="#9aa0a6" stroke-width="1.6" fill="none" marker-end="url(#j1a)">
+          <line x1="171" y1="99" x2="306" y2="57"/>
+          <line x1="172" y1="110" x2="496" y2="110"/>
+          <line x1="330" y1="67" x2="518" y2="88"/>
+          <line x1="342" y1="63" x2="444" y2="188"/>
+          <line x1="498" y1="126" x2="463" y2="188"/>
+          <line x1="427" y1="205" x2="247" y2="205"/>
+          <line x1="243" y1="191" x2="498" y2="124"/>
+        </g>
+        <g font-size="14" fill="#1f2328" text-anchor="middle">
+          <text x="240" y="60">4</text>
+          <text x="335" y="96">2</text>
+          <text x="428" y="62">6</text>
+          <text x="404" y="118">5</text>
+          <text x="504" y="146">−2</text>
+          <text x="337" y="192">−3</text>
+          <text x="368" y="140">1</text>
+        </g>
+        <g>
+          <circle cx="150" cy="110" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="150" y="116" text-anchor="middle" font-size="16" fill="#1f2328">1</text>
+          <circle cx="330" cy="45" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="330" y="51" text-anchor="middle" font-size="16" fill="#1f2328">2</text>
+          <circle cx="520" cy="110" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="520" y="116" text-anchor="middle" font-size="16" fill="#1f2328">3</text>
+          <circle cx="450" cy="205" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="450" y="211" text-anchor="middle" font-size="16" fill="#1f2328">4</text>
+          <circle cx="225" cy="205" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="225" y="211" text-anchor="middle" font-size="16" fill="#1f2328">5</text>
+        </g>
+        <g font-size="13" fill="#6b7280">
+          <text x="40" y="252">1 → 3 → 4 → 5：　2 + 5 + (−2) = 5</text>
+          <text x="40" y="272">1 → 2 → 3 → 4 → 5：4 + (−3) + 5 + (−2) = 4　　最短</text>
+          <text x="40" y="292">1 → 2 → 4 → 5：　4 + 6 + (−2) = 8</text>
+        </g>
+        <g font-size="13" fill="#ea580c">
+          <text x="470" y="272">← 靠这条负边才最短</text>
+        </g>
+      </svg>
+      <figcaption>1 到 5 的最短路长度为 4，走的正是含负边 2→3 的那条路</figcaption>
+    </figure>
+
+    <p>可以发现，最短的那条路里有一条 −3 的边。这条边让路径越走越「便宜」，也正是它让 Dijkstra 在这张图上失效。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>能直接用的办法有两个。一是 Floyd，三重循环枚举跳板，O(n³)。二是每个点跑一次 Bellman-Ford，每次 O(n·m)，n 次就是 O(n²·m)。两个都不快。</p>
+    <p>想快就得用 Dijkstra，可它有负边。失效的过程是这样的：</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="原图上直接跑 Dijkstra 出错" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="j2a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="j2o" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/>
+          </marker>
+        </defs>
+        <g stroke="#9aa0a6" stroke-width="1.6" fill="none" marker-end="url(#j2a)">
+          <line x1="171" y1="99" x2="306" y2="57"/>
+          <line x1="342" y1="63" x2="444" y2="188"/>
+          <line x1="498" y1="126" x2="463" y2="188"/>
+          <line x1="427" y1="205" x2="247" y2="205"/>
+          <line x1="243" y1="191" x2="498" y2="124"/>
+        </g>
+        <line x1="172" y1="110" x2="496" y2="110" stroke="#ea580c" stroke-width="2" fill="none" marker-end="url(#j2o)"/>
+        <line x1="318" y1="64" x2="301" y2="184" stroke="#ea580c" stroke-width="2" stroke-dasharray="5 4" fill="none" marker-end="url(#j2o)"/>
+        <g font-size="14" text-anchor="middle">
+          <text x="240" y="60" fill="#1f2328">4</text>
+          <text x="335" y="96" fill="#ea580c" font-weight="600">2</text>
+          <text x="428" y="62" fill="#1f2328">6</text>
+          <text x="404" y="118" fill="#1f2328">5</text>
+          <text x="504" y="146" fill="#1f2328">−2</text>
+          <text x="337" y="192" fill="#1f2328">−3</text>
+          <text x="368" y="140" fill="#1f2328">1</text>
+        </g>
+        <rect x="252" y="116" width="46" height="18" rx="4" fill="#fff" stroke="none"/>
+        <text x="275" y="130" font-size="14" fill="#ea580c" font-weight="600">1</text>
+        <g>
+          <circle cx="150" cy="110" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="150" y="116" text-anchor="middle" font-size="16" fill="#1f2328">1</text>
+          <circle cx="330" cy="45" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="330" y="51" text-anchor="middle" font-size="16" fill="#1f2328">2</text>
+          <circle cx="520" cy="110" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+          <text x="520" y="116" text-anchor="middle" font-size="16" fill="#2563eb" font-weight="600">3</text>
+          <circle cx="450" cy="205" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="450" y="211" text-anchor="middle" font-size="16" fill="#1f2328">4</text>
+          <circle cx="225" cy="205" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="225" y="211" text-anchor="middle" font-size="16" fill="#1f2328">5</text>
+        </g>
+        <g font-size="13" fill="#6b7280">
+          <text x="40" y="252">从 1 出发：dist[2] = 4、dist[3] = 2，Dijkstra 先弹出更小的 3（已出堆，蓝色）</text>
+          <text x="40" y="272">之后弹出 2 时才算出 1 → 2 → 3 = 4 + (−3) = 1，但 3 已出堆，这次更新被丢掉</text>
+          <text x="40" y="292">错误一路传到 5：得到 5，而真实最短是 4</text>
+        </g>
+      </svg>
+      <figcaption>Dijkstra 的「弹出即最终」在负边上不成立，先弹出的点后来还能被更新</figcaption>
+    </figure>
+
+    <p>问题出在 Dijkstra 的前提：弹出来的点的距离不再变小。这个前提靠的是「边权非负」，一旦有负边，后弹出的点还能把先弹出的点改小。</p>
+
+    <h2>三、统一加个常数行不行</h2>
+    <p>最直接的想法是给每条边加上同一个值，把负数抬成正的。这样做不行，因为路径经过的边数不一样，被抬高的总量也不一样。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="统一加常数会改变最短路" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="j3a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+        <text x="150" y="24" text-anchor="middle" font-size="13" fill="#6b7280">原图</text>
+        <g stroke="#9aa0a6" stroke-width="1.6" fill="none" marker-end="url(#j3a)">
+          <path d="M70 78 Q150 40 230 78"/>
+          <line x1="72" y1="90" x2="134" y2="146"/>
+          <line x1="166" y1="146" x2="228" y2="90"/>
+        </g>
+        <g font-size="14" fill="#1f2328" text-anchor="middle">
+          <text x="150" y="52">5</text>
+          <text x="96" y="132">2</text>
+          <text x="204" y="132">2</text>
+        </g>
+        <circle cx="60" cy="84" r="18" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+        <text x="60" y="90" text-anchor="middle" font-size="14" fill="#1f2328">s</text>
+        <circle cx="240" cy="84" r="18" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+        <text x="240" y="90" text-anchor="middle" font-size="14" fill="#1f2328">t</text>
+        <circle cx="150" cy="152" r="18" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+        <text x="150" y="158" text-anchor="middle" font-size="14" fill="#1f2328">m</text>
+        <text x="150" y="192" text-anchor="middle" font-size="13" fill="#1f2328">最短 = 4（走下面）</text>
+
+        <path d="M292 96 L336 96" stroke="#ea580c" stroke-width="2" fill="none" marker-end="url(#j3a)"/>
+        <text x="314" y="86" text-anchor="middle" font-size="13" fill="#ea580c">每条边 +3</text>
+
+        <text x="480" y="24" text-anchor="middle" font-size="13" fill="#6b7280">加完之后</text>
+        <g stroke="#9aa0a6" stroke-width="1.6" fill="none" marker-end="url(#j3a)">
+          <path d="M400 78 Q480 40 560 78"/>
+          <line x1="402" y1="90" x2="464" y2="146"/>
+          <line x1="496" y1="146" x2="558" y2="90"/>
+        </g>
+        <g font-size="14" text-anchor="middle">
+          <text x="480" y="52" fill="#1f2328">8</text>
+          <text x="426" y="132" fill="#1f2328">5</text>
+          <text x="534" y="132" fill="#1f2328">5</text>
+        </g>
+        <circle cx="390" cy="84" r="18" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+        <text x="390" y="90" text-anchor="middle" font-size="14" fill="#1f2328">s</text>
+        <circle cx="570" cy="84" r="18" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+        <text x="570" y="90" text-anchor="middle" font-size="14" fill="#1f2328">t</text>
+        <circle cx="480" cy="152" r="18" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+        <text x="480" y="158" text-anchor="middle" font-size="14" fill="#1f2328">m</text>
+        <text x="480" y="192" text-anchor="middle" font-size="13" fill="#1f2328">最短 = 8（变成走上面）</text>
+      </svg>
+      <figcaption>每条边加同一个常数，边数多的路径被抬得更多，最短路就换了</figcaption>
+    </figure>
+
+    <p>具体来说，上面这条路只加一次，下面那条加两次。最短路从下面变成上面，答案错了。</p>
+    <p>因此要的不是「统一加」，而是「每条边加的量各不相同，但任意两条同源同终的路径加起来一样多」。这正是 Johnson 做的事。</p>
+
+    <h2>四、最低势能 h</h2>
+    <p>Johnson 先建一个虚拟的超级源点 s，从 s 向每个点连一条权值为 0 的边，然后从 s 跑一次 Bellman-Ford（实现上常用 SPFA），得到 h[i]。</p>
+    <p>因为 s 到谁都是 0，所以 h[i] 的含义是：从任意点出发，走任意一条路到 i，累计边权的最小值。这个值不会是正的（走空路径就是 0），负值越小说明「到 i 越便宜」。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="超级源点与势能 h" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="j4a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="j4s" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+          </marker>
+        </defs>
+        <g stroke="#2563eb" stroke-width="1.4" stroke-dasharray="5 4" fill="none" marker-end="url(#j4s)">
+          <line x1="311" y1="249" x2="163" y2="128"/>
+          <line x1="333" y1="243" x2="330" y2="70"/>
+          <line x1="359" y1="249" x2="503" y2="128"/>
+          <line x1="335" y1="243" x2="437" y2="223"/>
+          <line x1="316" y1="251" x2="239" y2="221"/>
+        </g>
+        <g stroke="#9aa0a6" stroke-width="1.6" fill="none" marker-end="url(#j4a)">
+          <line x1="171" y1="99" x2="306" y2="57"/>
+          <line x1="172" y1="110" x2="496" y2="110"/>
+          <line x1="330" y1="67" x2="518" y2="88"/>
+          <line x1="342" y1="63" x2="444" y2="188"/>
+          <line x1="498" y1="126" x2="463" y2="188"/>
+          <line x1="427" y1="205" x2="247" y2="205"/>
+          <line x1="243" y1="191" x2="498" y2="124"/>
+        </g>
+        <g font-size="14" fill="#1f2328" text-anchor="middle">
+          <text x="240" y="60">4</text>
+          <text x="335" y="96">2</text>
+          <text x="428" y="62">6</text>
+          <text x="404" y="118">5</text>
+          <text x="504" y="146">−2</text>
+          <text x="337" y="192">−3</text>
+          <text x="368" y="140">1</text>
+        </g>
+        <g>
+          <circle cx="335" cy="265" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+          <text x="335" y="271" text-anchor="middle" font-size="16" fill="#2563eb" font-weight="600">0</text>
+          <circle cx="150" cy="110" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="150" y="107" text-anchor="middle" font-size="15" fill="#1f2328">1</text>
+          <text x="150" y="124" text-anchor="middle" font-size="10" fill="#2563eb">h = 0</text>
+          <circle cx="330" cy="45" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="330" y="42" text-anchor="middle" font-size="15" fill="#1f2328">2</text>
+          <text x="330" y="59" text-anchor="middle" font-size="10" fill="#2563eb">h = 0</text>
+          <circle cx="520" cy="110" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="520" y="107" text-anchor="middle" font-size="15" fill="#1f2328">3</text>
+          <text x="520" y="124" text-anchor="middle" font-size="10" fill="#2563eb">h = −3</text>
+          <circle cx="450" cy="205" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="450" y="202" text-anchor="middle" font-size="15" fill="#1f2328">4</text>
+          <text x="450" y="219" text-anchor="middle" font-size="10" fill="#2563eb">h = 0</text>
+          <circle cx="225" cy="205" r="22" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>
+          <text x="225" y="202" text-anchor="middle" font-size="15" fill="#1f2328">5</text>
+          <text x="225" y="219" text-anchor="middle" font-size="10" fill="#2563eb">h = −2</text>
+        </g>
+        <text x="40" y="308" font-size="13" fill="#6b7280">虚线是超级源点连出的 0 边，h[i] 就是「从任意点出发到 i 的最小累计边权」</text>
+        <text x="40" y="330" font-size="13" fill="#6b7280">h[3] = −3 来自 2 → 3 这条边；从 1 走 1 → 2 → 3 是 1，不是最小的</text>
+      </svg>
+      <figcaption>跑完一次 SPFA，每个点得到一个势能 h[i]，它满足 h[v] ≤ h[u] + w</figcaption>
+    </figure>
+
+    <p>这里有个关键性质。h 是最短路的距离，所以对任何一条边 u → v 都满足三角不等式：</p>
+    <p style="text-align:center;font-size:17px;"><code class="inline">h[v] ≤ h[u] + w</code></p>
+    <p>否则的话，走 u 再到 v 就能把 h[v] 变得更小，和「h[v] 已经是最小」矛盾。</p>
+    <p>顺带一提，跑 Bellman-Ford 的时候如果某个点被松弛了超过 n + 1 次，说明图里有负环，此时最短路没有意义，直接输出 −1 就行。这也是题目里负环判断的来历。</p>
+
+    <h2>五、按势能改边权</h2>
+    <p>把三角不等式移项，得到 <code class="inline">w + h[u] − h[v] ≥ 0</code>。于是把每条边的权改成：</p>
+    <p style="text-align:center;font-size:17px;"><code class="inline">w′ = w + h[u] − h[v]</code></p>
+    <p>这样改完的边权全都非负。例子里的七条边：</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 262" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="七条边改权前后对照" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="40" y="34" width="540" height="26" rx="5" fill="#f6f7f9"/>
+        <g font-size="13" fill="#6b7280" font-weight="600">
+          <text x="60" y="52">边 u → v</text>
+          <text x="200" y="52">原权 w</text>
+          <text x="300" y="52">w + h[u] − h[v]</text>
+          <text x="520" y="52">新权 w′</text>
+        </g>
+        <g font-size="13">
+          <g fill="#1f2328">
+            <text x="60" y="80">1 → 2</text><text x="200" y="80">4</text><text x="300" y="80">4 + 0 − 0</text>
+            <text x="60" y="106">1 → 3</text><text x="200" y="106">2</text><text x="300" y="106">2 + 0 − (−3)</text>
+            <text x="60" y="132">2 → 3</text><text x="200" y="132">−3</text><text x="300" y="132">−3 + 0 − (−3)</text>
+            <text x="60" y="158">2 → 4</text><text x="200" y="158">6</text><text x="300" y="158">6 + 0 − 0</text>
+            <text x="60" y="184">3 → 4</text><text x="200" y="184">5</text><text x="300" y="184">5 + (−3) − 0</text>
+            <text x="60" y="210">4 → 5</text><text x="200" y="210">−2</text><text x="300" y="210">−2 + 0 − (−2)</text>
+            <text x="60" y="236">5 → 3</text><text x="200" y="236">1</text><text x="300" y="236">1 + (−2) − (−3)</text>
+          </g>
+          <g fill="#2563eb" font-weight="600" text-anchor="middle">
+            <text x="546" y="80">4</text>
+            <text x="546" y="106">5</text>
+            <text x="546" y="132">0</text>
+            <text x="546" y="158">6</text>
+            <text x="546" y="184">2</text>
+            <text x="546" y="210">0</text>
+            <text x="546" y="236">2</text>
+          </g>
+        </g>
+        <text x="40" y="258" font-size="13" fill="#2563eb">七条新权分别是 4、5、0、6、2、0、2，全部 ≥ 0，Dijkstra 可以用了</text>
+      </svg>
+      <figcaption>原来 −3 和 −2 两条负边改成 0，靠的就是 h[u] − h[v] 这个差</figcaption>
+    </figure>
+
+    <h2>六、为什么最短路没变</h2>
+    <p>改权看着是把每条边都动了一遍，其实对一条完整的路径来说，中间那些 h 全都会抵消掉。</p>
+    <p>设路径是 x = v₀ → v₁ → … → vₖ = y，改权后的长度是：</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="路径上势能逐项抵消" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="40" y="26" font-size="13" fill="#6b7280">路径 1 → 2 → 3 → 4 → 5，四条边各自加上 h[u] − h[v]：</text>
+        <g font-size="13" fill="#1f2328" text-anchor="middle">
+          <rect x="40" y="40" width="130" height="28" rx="5" fill="#fff" stroke="#e6e8eb"/>
+          <text x="105" y="59">4 + h[1] − h[2]</text>
+          <rect x="182" y="40" width="130" height="28" rx="5" fill="#fff" stroke="#e6e8eb"/>
+          <text x="247" y="59">−3 + h[2] − h[3]</text>
+          <rect x="324" y="40" width="130" height="28" rx="5" fill="#fff" stroke="#e6e8eb"/>
+          <text x="389" y="59">5 + h[3] − h[4]</text>
+          <rect x="466" y="40" width="130" height="28" rx="5" fill="#fff" stroke="#e6e8eb"/>
+          <text x="531" y="59">−2 + h[4] − h[5]</text>
+        </g>
+        <text x="40" y="96" font-size="13" fill="#6b7280">把 h 的部分单独拆出来排成一排：</text>
+        <g font-size="13" text-anchor="middle">
+          <rect x="40" y="106" width="58" height="28" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="69" y="125" fill="#2563eb">+h[1]</text>
+          <rect x="104" y="106" width="58" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="133" y="125" fill="#ea580c">−h[2]</text>
+          <rect x="168" y="106" width="58" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="197" y="125" fill="#ea580c">+h[2]</text>
+          <rect x="232" y="106" width="58" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="261" y="125" fill="#ea580c">−h[3]</text>
+          <rect x="296" y="106" width="58" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="325" y="125" fill="#ea580c">+h[3]</text>
+          <rect x="360" y="106" width="58" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="389" y="125" fill="#ea580c">−h[4]</text>
+          <rect x="424" y="106" width="58" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="453" y="125" fill="#ea580c">+h[4]</text>
+          <rect x="488" y="106" width="58" height="28" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+          <text x="517" y="125" fill="#2563eb">−h[5]</text>
+        </g>
+        <g stroke="#ea580c" stroke-width="1.4" fill="none">
+          <path d="M133 138 L133 150 L197 150 L197 138"/>
+          <path d="M261 138 L261 150 L325 150 L325 138"/>
+          <path d="M389 138 L389 150 L453 150 L453 138"/>
+        </g>
+        <text x="165" y="166" font-size="12" fill="#ea580c" text-anchor="middle">成对相消</text>
+        <text x="40" y="196" font-size="14" fill="#1f2328">改权后长度 = 原长度 + h[1] − h[5] = 4 + 0 − (−2) = 6</text>
+        <text x="40" y="220" font-size="14" fill="#1f2328">还原：真实距离 = dist′ − h[1] + h[5] = 6 − 0 + (−2) = 4</text>
+        <text x="40" y="244" font-size="13" fill="#6b7280">同一个起点终点的所有路径都只多了 h[x] − h[y] 这一个常数，谁最短不会变</text>
+      </svg>
+      <figcaption>路径中间的势能一项加一项减，全部抵消，只剩下两端的 h[x] − h[y]</figcaption>
+    </figure>
+
+    <p>于是整个算法就是五步：</p>
+    <ol>
+      <li>建超级源点 s，s 向每个点连一条权值为 0 的边。</li>
+      <li>从 s 跑一次 Bellman-Ford（SPFA），得到 h[i]，顺便判负环。</li>
+      <li>每条边 u → v 的权改成 w + h[u] − h[v]。</li>
+      <li>每个点跑一次 Dijkstra，得到改权后的距离 dist′(u, v)。</li>
+      <li>还原真实距离：dist(u, v) = dist′(u, v) − h[u] + h[v]。</li>
+    </ol>
+
+    <h2>七、演示</h2>
+    <p>点「下一步」走一遍上面五步：先求势能 h，再改边权，最后从 1 跑一次 Dijkstra 并还原。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　Johnson 的五步（目标：1 到各点的真实距离）</div>
+      <div id="jnGraph"></div>
+      <div class="jn-label">势能 h</div>
+      <div id="jnH" class="jn-chips"></div>
+      <div class="jn-label">边权（改前 → 改后）</div>
+      <div id="jnEdges"></div>
+      <div class="jn-label">从 1 出发的距离</div>
+      <div id="jnDist" class="jn-chips"></div>
+      <div class="breakdown" id="jnStatus"></div>
+      <div class="jn-btns">
+        <button class="jn-btn" id="jnStep">下一步</button>
+        <button class="jn-btn" id="jnAuto">自动播放</button>
+        <button class="jn-btn" id="jnReset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot full"></span>已弹出的点</span>
+        <span><span class="dot partial"></span>本步正在处理</span>
+      </div>
+    </div>
+
+    <h2>八、代码</h2>
+    <p>下面是模板题的完整实现。SPFA 负责求势能和判负环，之后 n 次 Dijkstra 用优先队列。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">using</span> ll = <span class="kw">long long</span>;
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 3005;                  <span class="cm">// 点 1..n，外加超级源点 0</span>
+<span class="kw">const</span> <span class="kw">int</span> MAXM = 12005;                 <span class="cm">// m 条边 + 超级源点连出的 n 条边</span>
+<span class="kw">const</span> <span class="kw">int</span> INF  = 1000000000;
+
+<span class="kw">int</span> n, m;
+<span class="kw">int</span> head[MAXN], nxt[MAXM], to[MAXM], weight[MAXM], cntg;
+<span class="kw">int</span> h[MAXN], dist[MAXN], updateCnt[MAXN];
+<span class="kw">bool</span> enter[MAXN], vis[MAXN];
+
+<span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+    nxt[++cntg] = head[u];
+    to[cntg] = v;
+    weight[cntg] = w;
+    head[u] = cntg;
+}
+
+<span class="cm">// 返回 true 表示发现了负环</span>
+<span class="kw">bool</span> <span class="fn">spfa</span>(<span class="kw">int</span> s) {
+    fill(h, h + n + 1, INF);
+    fill(updateCnt, updateCnt + n + 1, 0);
+    fill(enter, enter + n + 1, <span class="kw">false</span>);
+    queue&lt;<span class="kw">int</span>&gt; q;
+    h[s] = 0;
+    updateCnt[s] = 1;
+    enter[s] = <span class="kw">true</span>;
+    q.push(s);
+    <span class="kw">while</span> (!q.empty()) {
+        <span class="kw">int</span> u = q.front();
+        q.pop();
+        enter[u] = <span class="kw">false</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e], w = weight[e];
+            <span class="kw">if</span> (h[v] &gt; h[u] + w) {
+                h[v] = h[u] + w;
+                <span class="kw">if</span> (!enter[v]) {
+                    <span class="kw">if</span> (++updateCnt[v] &gt; n + 1) <span class="kw">return</span> <span class="kw">true</span>;   <span class="cm">// 含超级源点共 n+1 个点</span>
+                    enter[v] = <span class="kw">true</span>;
+                    q.push(v);
+                }
+            }
+        }
+    }
+    <span class="kw">return</span> <span class="kw">false</span>;
+}
+
+<span class="kw">void</span> <span class="fn">dijkstra</span>(<span class="kw">int</span> s) {
+    fill(dist, dist + n + 1, INF);
+    fill(vis, vis + n + 1, <span class="kw">false</span>);
+    priority_queue&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;, vector&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;, greater&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;&gt; heap;
+    dist[s] = 0;
+    heap.push({0, s});
+    <span class="kw">while</span> (!heap.empty()) {
+        <span class="kw">auto</span> [d, u] = heap.top();
+        heap.pop();
+        <span class="kw">if</span> (vis[u]) <span class="kw">continue</span>;
+        vis[u] = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e], w = weight[e];
+            <span class="kw">if</span> (!vis[v] &amp;&amp; dist[v] &gt; d + w) {
+                dist[v] = d + w;
+                heap.push({dist[v], v});
+            }
+        }
+    }
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    ios::sync_with_stdio(<span class="kw">false</span>);
+    cin.tie(<span class="kw">nullptr</span>);
+    cin &gt;&gt; n &gt;&gt; m;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 0, u, v, w; i &lt; m; i++) {
+        cin &gt;&gt; u &gt;&gt; v &gt;&gt; w;
+        addEdge(u, v, w);
+    }
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) addEdge(0, i, 0);   <span class="cm">// 超级源点</span>
+
+    <span class="kw">if</span> (spfa(0)) {
+        cout &lt;&lt; <span class="cm">"-1\n"</span>;
+        <span class="kw">return</span> 0;
+    }
+
+    <span class="kw">for</span> (<span class="kw">int</span> u = 1; u &lt;= n; u++)                      <span class="cm">// 改边权</span>
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e; e = nxt[e])
+            weight[e] += h[u] - h[to[e]];
+
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        dijkstra(i);
+        ll ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= n; j++) {
+            <span class="kw">if</span> (dist[j] == INF) ans += 1LL * j * INF;         <span class="cm">// 不连通</span>
+            <span class="kw">else</span> ans += 1LL * j * (dist[j] - h[i] + h[j]);    <span class="cm">// 还原</span>
+        }
+        cout &lt;&lt; ans &lt;&lt; <span class="cm">'\n'</span>;
+    }
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <p>有两个细节。改边权那层循环只从 1 走到 n，超级源点连出的边不动，因为它们已经用不上了。还原时用 <code class="inline">long long</code>，n 到 3000 时一行的累加能到 10¹² 量级。</p>
+
+    <h2>九、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>SPFA 求势能 h（含判负环）</td><td><code class="inline">O(n·m)</code> 最坏，实际远小于此</td></tr>
+        <tr><td>改 m 条边的权</td><td><code class="inline">O(m)</code></td></tr>
+        <tr><td>每个点跑一次 Dijkstra（共 n 次）</td><td><code class="inline">O(n·m·log n)</code></td></tr>
+        <tr><td>总时间</td><td><code class="inline">O(n·m·log n)</code></td></tr>
+        <tr><td>Floyd（对照）</td><td><code class="inline">O(n³)</code></td></tr>
+        <tr><td>每个点跑 Bellman-Ford（对照）</td><td><code class="inline">O(n²·m)</code></td></tr>
+        <tr><td>额外空间</td><td><code class="inline">O(n + m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间上有四份数组：邻接表 <code class="inline">O(n + m)</code>，势能 h <code class="inline">O(n)</code>，距离 dist <code class="inline">O(n)</code>，堆最多 <code class="inline">O(m)</code>。合起来是 <code class="inline">O(n + m)</code>。</p>
+    <p>用题目给的量级算一下：n = 3000、m = 6000 时，Floyd 是 2.7 × 10¹⁰ 次松弛，n 次 Bellman-Ford 是 5.4 × 10¹⁰，Johnson 只有 n · m · log n ≈ 2 × 10⁸，加上一次 SPFA，能过。</p>
+    <p>可以发现，Johnson 适合的是稀疏图。图一旦稠密到 m ≈ n²，n·m·log n 就比 n³ 还差，那时候直接用 Floyd 反而更省事。</p>
+
+    <h2>十、最后</h2>
+    <p>Johnson 的全部技巧就是那个「差」：给每条边加上 h[u] − h[v]。边权因此非负，路径长度却只多了一个只跟端点有关的常数，最短路原封不动。</p>
+    <p>这个「最低势能」的想法后面还会遇到，费用流里用它把负费用变成非负，是同一个套路。</p>
+    <p>它的适用边界也清楚：图里不能有负环。有负环时 Bellman-Ford 的松弛停不下来，最短路本身也没有定义。这类图上该问的是「有没有负环」，而不是「最短路是多少」。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var R = 22;
+  var POS = {0:[335,265], 1:[150,110], 2:[330,45], 3:[520,110], 4:[450,205], 5:[225,205]};
+  var E = [[1,2,4],[1,3,2],[2,3,-3],[2,4,6],[3,4,5],[4,5,-2],[5,3,1]];
+  var LP = [[240,60],[335,94],[428,62],[404,118],[504,146],[337,192],[368,140]];
+  var H  = {1:0, 2:0, 3:-3, 4:0, 5:-2};
+
+  function newW(i){
+    return E[i][2] + H[E[i][0]] - H[E[i][1]];
+  }
+
+  function trim(a, b){
+    var x1 = POS[a][0], y1 = POS[a][1], x2 = POS[b][0], y2 = POS[b][1];
+    var dx = x2 - x1, dy = y2 - y1;
+    var len = Math.sqrt(dx * dx + dy * dy);
+    var ux = dx / len, uy = dy / len;
+    return [x1 + R * ux, y1 + R * uy, x2 - (R + 3) * ux, y2 - (R + 3) * uy];
+  }
+
+  function buildSvg(){
+    var s = '<svg class="jn-svg" viewBox="0 0 620 310" xmlns="http://www.w3.org/2000/svg">';
+    s += '<defs>';
+    s += '<marker id="jnar" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/></marker>';
+    s += '<marker id="jnao" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/></marker>';
+    s += '<marker id="jnab" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/></marker>';
+    s += '</defs>';
+
+    // 超级源点连出的边
+    s += '<g id="jn-super" style="display:none" stroke="#2563eb" stroke-width="1.4" stroke-dasharray="5 4" fill="none" marker-end="url(#jnab)">';
+    for (var i = 1; i <= 5; i++) {
+      var t = trim(0, i);
+      s += '<line x1="' + t[0] + '" y1="' + t[1] + '" x2="' + t[2] + '" y2="' + t[3] + '"/>';
+    }
+    s += '</g>';
+
+    // 原图的七条边
+    s += '<g stroke="#9aa0a6" stroke-width="1.6" fill="none">';
+    for (var i = 0; i < E.length; i++) {
+      var t = trim(E[i][0], E[i][1]);
+      s += '<line id="jn-e' + i + '" x1="' + t[0] + '" y1="' + t[1] + '" x2="' + t[2] + '" y2="' + t[3] + '" marker-end="url(#jnar)"/>';
+    }
+    s += '</g>';
+
+    // 边权标签
+    s += '<g font-size="14" fill="#1f2328" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+    for (var i = 0; i < E.length; i++) {
+      s += '<text id="jn-l' + i + '" x="' + LP[i][0] + '" y="' + LP[i][1] + '">' + E[i][2] + '</text>';
+    }
+    s += '</g>';
+
+    // 点
+    for (var i = 0; i <= 5; i++) {
+      var p = POS[i];
+      s += '<g id="jn-g' + i + '">';
+      s += '<circle id="jn-c' + i + '" cx="' + p[0] + '" cy="' + p[1] + '" r="' + R + '" fill="#fff" stroke="#e6e8eb" stroke-width="1.6"/>';
+      s += '<text id="jn-t' + i + '" x="' + p[0] + '" y="' + (p[1] + 6) + '" text-anchor="middle" font-size="16" fill="#1f2328"' +
+           ' font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">' + i + '</text>';
+      s += '</g>';
+    }
+    s += '</svg>';
+    return s;
+  }
+
+  var frames = [];
+  frames.push({
+    h: null, wNew: false, showSuper: false, nodes: {}, hot: [], dist: null, real: null,
+    text: '原始图：1 到 5 的真实最短路是 4（1 → 2 → 3 → 4 → 5）。直接在原图上跑 Dijkstra 会得到 5，因为它先弹出了 dist = 2 的点 3。目标是先把边权改成非负的。'
+  });
+  frames.push({
+    h: null, wNew: false, showSuper: true, nodes: {0:'active'}, hot: [], dist: null, real: null,
+    text: '第一步：建超级源点 0（蓝色），向每个点连一条权值为 0 的边。这样从 0 出发能到达所有点，一次 Bellman-Ford 就能算出全部 h。'
+  });
+  frames.push({
+    h: {1:0, 2:0, 3:0, 4:0, 5:0}, wNew: false, showSuper: true, nodes: {0:'done'}, hot: [], dist: null, real: null,
+    text: '第二步：从 0 跑 SPFA。0 到每个点都是 0，于是所有 h 先被置成 0。负边还能把它们压得更低，继续松弛。'
+  });
+  frames.push({
+    h: {1:0, 2:0, 3:-3, 4:0, 5:0}, wNew: false, showSuper: true, nodes: {2:'active'}, hot: [2], dist: null, real: null,
+    text: '处理点 2 的出边 2 → 3：h[3] = h[2] + (−3) = −3。这一步把负边的信息记进了势能里。'
+  });
+  frames.push({
+    h: {1:0, 2:0, 3:-3, 4:0, 5:-2}, wNew: false, showSuper: true, nodes: {4:'active'}, hot: [5], dist: null, real: null,
+    text: '处理点 4 的出边 4 → 5：h[5] = h[4] + (−2) = −2。松弛结束，h = 0、0、−3、0、−2，没有点被松弛超过 n + 1 次，说明无负环。'
+  });
+  frames.push({
+    h: H, wNew: true, showSuper: true, nodes: {}, hot: [], dist: null, real: null,
+    text: '第三步：每条边改成 w′ = w + h[u] − h[v]。七条新权是 4、5、0、6、2、0、2，全部非负，可以跑 Dijkstra 了。'
+  });
+  frames.push({
+    h: H, wNew: true, showSuper: false, nodes: {1:'active'}, hot: [], dist: {1:0}, real: null,
+    text: '第四步：从 1 跑 Dijkstra。dist′[1] = 0，先把 1 放进堆。'
+  });
+  frames.push({
+    h: H, wNew: true, showSuper: false, nodes: {1:'done'}, hot: [0,1], dist: {1:0, 2:4, 3:5}, real: null,
+    text: '弹出 1（dist′ = 0）。1 → 2 的新权 4、1 → 3 的新权 5，于是 dist′[2] = 4、dist′[3] = 5。'
+  });
+  frames.push({
+    h: H, wNew: true, showSuper: false, nodes: {1:'done', 2:'active'}, hot: [2,3], dist: {1:0, 2:4, 3:4, 4:10}, real: null,
+    text: '弹出 2（dist′ = 4）。2 → 3 的新权是 0，dist′[3] 从 5 降到 4；2 → 4 的新权 6，dist′[4] = 10。注意这次更新被接受了，因为新权非负，3 还没出堆。'
+  });
+  frames.push({
+    h: H, wNew: true, showSuper: false, nodes: {1:'done', 2:'done', 3:'active'}, hot: [4], dist: {1:0, 2:4, 3:4, 4:6}, real: null,
+    text: '弹出 3（dist′ = 4）。3 → 4 的新权是 2，dist′[4] 从 10 降到 6。'
+  });
+  frames.push({
+    h: H, wNew: true, showSuper: false, nodes: {1:'done', 2:'done', 3:'done', 4:'active'}, hot: [5], dist: {1:0, 2:4, 3:4, 4:6, 5:6}, real: null,
+    text: '弹出 4（dist′ = 6）。4 → 5 的新权是 0，dist′[5] = 6。'
+  });
+  frames.push({
+    h: H, wNew: true, showSuper: false, nodes: {1:'done', 2:'done', 3:'done', 4:'done', 5:'active'}, hot: [6], dist: {1:0, 2:4, 3:4, 4:6, 5:6}, real: null,
+    text: '弹出 5（dist′ = 6）。5 → 3 的新权 2，算出 6 + 2 = 8，比已有的 4 大，不更新。Dijkstra 结束。'
+  });
+  frames.push({
+    h: H, wNew: true, showSuper: false, nodes: {1:'done', 2:'done', 3:'done', 4:'done', 5:'done'}, hot: [],
+    dist: {1:0, 2:4, 3:4, 4:6, 5:6}, real: {1:0, 2:4, 3:1, 4:6, 5:4},
+    text: '第五步：还原。真实距离 = dist′ − h[1] + h[j]，h[1] = 0。dist′[5] = 6，h[5] = −2，得到 6 − 0 + (−2) = 4，正是 1 → 2 → 3 → 4 → 5 的长度。对照一下：原图上直接跑 Dijkstra 得到的是 5。'
+  });
+
+  var graphEl   = document.getElementById('jnGraph');
+  var hEl       = document.getElementById('jnH');
+  var edgesEl   = document.getElementById('jnEdges');
+  var distEl    = document.getElementById('jnDist');
+  var statusEl  = document.getElementById('jnStatus');
+  var btnStep   = document.getElementById('jnStep');
+  var btnAuto   = document.getElementById('jnAuto');
+  var btnReset  = document.getElementById('jnReset');
+
+  graphEl.innerHTML = buildSvg();
+
+  var cur = 0;
+  var timer = null;
+
+  function num(x){ return x < 0 ? '−' + (-x) : String(x); }
+
+  function drawGraph(f){
+    document.getElementById('jn-super').style.display = f.showSuper ? '' : 'none';
+    for (var i = 1; i <= 5; i++) {
+      var c = document.getElementById('jn-c' + i);
+      var t = document.getElementById('jn-t' + i);
+      var st = f.nodes[i] || '';
+      if (st === 'done') {
+        c.setAttribute('fill', '#dbeafe');
+        c.setAttribute('stroke', '#2563eb');
+        c.setAttribute('stroke-width', '2');
+        t.setAttribute('fill', '#2563eb');
+        t.setAttribute('font-weight', '600');
+      } else if (st === 'active') {
+        c.setAttribute('fill', '#ffedd5');
+        c.setAttribute('stroke', '#ea580c');
+        c.setAttribute('stroke-width', '2');
+        t.setAttribute('fill', '#ea580c');
+        t.setAttribute('font-weight', '600');
+      } else {
+        c.setAttribute('fill', '#fff');
+        c.setAttribute('stroke', '#e6e8eb');
+        c.setAttribute('stroke-width', '1.6');
+        t.setAttribute('fill', '#1f2328');
+        t.setAttribute('font-weight', '400');
+      }
+    }
+    var c0 = document.getElementById('jn-c0');
+    c0.setAttribute('fill', '#dbeafe');
+    c0.setAttribute('stroke', '#2563eb');
+    document.getElementById('jn-t0').setAttribute('fill', '#2563eb');
+
+    for (var i = 0; i < E.length; i++) {
+      var line = document.getElementById('jn-e' + i);
+      var lab  = document.getElementById('jn-l' + i);
+      var hot  = f.hot.indexOf(i) >= 0;
+      if (hot) {
+        line.setAttribute('stroke', '#ea580c');
+        line.setAttribute('stroke-width', '2');
+        line.setAttribute('marker-end', 'url(#jnao)');
+        lab.setAttribute('fill', '#ea580c');
+        lab.setAttribute('font-weight', '600');
+      } else if (f.wNew) {
+        line.setAttribute('stroke', '#2563eb');
+        line.setAttribute('stroke-width', '1.6');
+        line.setAttribute('marker-end', 'url(#jnab)');
+        lab.setAttribute('fill', '#2563eb');
+        lab.setAttribute('font-weight', '400');
+      } else {
+        line.setAttribute('stroke', '#9aa0a6');
+        line.setAttribute('stroke-width', '1.6');
+        line.setAttribute('marker-end', 'url(#jnar)');
+        lab.setAttribute('fill', '#1f2328');
+        lab.setAttribute('font-weight', '400');
+      }
+      lab.textContent = f.wNew ? newW(i) : E[i][2];
+    }
+  }
+
+  function drawChips(el, prefix, vals, cls){
+    var h = '';
+    for (var i = 1; i <= 5; i++) {
+      var known = vals && vals[i] !== undefined && vals[i] !== null;
+      h += '<span class="jn-chip' + (known ? ' set' : '') + '">' + prefix + '[' + i + '] = ' +
+           (known ? num(vals[i]) : '?') + '</span>';
+    }
+    el.innerHTML = h;
+  }
+
+  function drawDist(f){
+    var h = '';
+    for (var i = 1; i <= 5; i++) {
+      var tag = '', val = '—';
+      if (f.real && f.real[i] !== undefined) {
+        tag = ' ok';
+        val = num(f.real[i]);
+      } else if (f.dist && f.dist[i] !== undefined) {
+        val = num(f.dist[i]);
+      }
+      h += '<span class="jn-chip' + tag + '">到 ' + i + '：' + val + '</span>';
+    }
+    distEl.innerHTML = h;
+  }
+
+  function drawEdges(f){
+    var s = '<table class="jn-table"><thead><tr><th>边</th><th>原权 w</th><th>新权 w′</th></tr></thead><tbody>';
+    for (var i = 0; i < E.length; i++) {
+      var hot = f.hot.indexOf(i) >= 0;
+      s += '<tr' + (hot ? ' class="hot"' : '') + '><td>' + E[i][0] + ' → ' + E[i][1] + '</td><td>' + num(E[i][2]) + '</td>' +
+           '<td class="nw' + (f.wNew ? ' set' : '') + '">' + (f.wNew ? num(newW(i)) : '?') + '</td></tr>';
+    }
+    s += '</tbody></table>';
+    edgesEl.innerHTML = s;
+  }
+
+  function render(){
+    var f = frames[cur];
+    drawGraph(f);
+    drawChips(hEl, 'h', f.h, 'set');
+    drawEdges(f);
+    drawDist(f);
+    statusEl.innerHTML = '<div class="row">第 ' + cur + ' / ' + (frames.length - 1) + ' 步</div>' +
+                         '<div class="row" style="margin-top:4px;">' + f.text + '</div>';
+    btnStep.disabled = (cur >= frames.length - 1);
+  }
+
+  function step(){
+    if (cur >= frames.length - 1) { render(); return; }
+    cur++;
+    render();
+  }
+  function stopAuto(){
+    if (timer) { clearInterval(timer); timer = null; }
+    btnAuto.textContent = '自动播放';
+  }
+  function toggleAuto(){
+    if (timer) { stopAuto(); return; }
+    btnAuto.textContent = '暂停';
+    timer = setInterval(function(){
+      if (cur >= frames.length - 1) { stopAuto(); return; }
+      cur++;
+      render();
+    }, 1400);
+  }
+  function reset(){
+    stopAuto();
+    cur = 0;
+    render();
+  }
+
+  btnStep.addEventListener('click', step);
+  btnAuto.addEventListener('click', toggleAuto);
+  btnReset.addEventListener('click', reset);
+  render();
+})();
+</script>
+</body>
+</html>

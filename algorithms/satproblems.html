@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2-SAT 的优化建图 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .sp-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .sp-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .sp-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  @media(max-width:760px){
+    .sp-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>2-SAT 的优化建图</h1>
+    <p class="intro">上一节把 2-SAT 的判定和前缀优化建图讲完了。这一节看它在真题里怎么用：约束一旦变成「一组里至多一个」或者「某个取值和一段位置上的取值互斥」，两两连边就是 O(k²)，得换成前后缀链、线段树、前缀树把边数压下来。三道题，两次二分，三种压缩结构。</p>
+
+    <h2>零、背景</h2>
+    <p>回顾一句。2-SAT 把每个变量的两种取值各建一个点，一个子句 (a ∨ b) 拆成两条蕴含边 ¬a → b 与 ¬b → a。整张图跑一遍 tarjan 求强连通分量，某个变量的两个点落在同一个分量里就无解，否则按分量编号就能拼出一组赋值。细节在前一节 <a href="sat.html">2-SAT 与前缀优化建图</a>。</p>
+    <p>蕴含边天然成对出现。图上有一条 p → q，就一定还有一条 ¬q → ¬p，因为 ¬p ∨ q 和 ¬¬q ∨ ¬p 是同一个子句。这条性质是一种优化手法的前提：只连一半的边，另一半由对称性补上；反过来也表示建图时不能只连单方向。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="子句拆成两条蕴含边，蕴含边自带逆否边" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#c9ced4" stroke-width="1.2" stroke-dasharray="4 3">
+          <line x1="110" y1="70" x2="110" y2="180"/>
+          <line x1="250" y1="70" x2="250" y2="180"/>
+          <line x1="400" y1="70" x2="400" y2="180"/>
+          <line x1="520" y1="70" x2="520" y2="180"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="110" cy="70" r="16"/>
+          <circle cx="250" cy="70" r="16"/>
+          <circle cx="400" cy="70" r="16"/>
+          <circle cx="520" cy="70" r="16"/>
+        </g>
+        <g fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.4">
+          <circle cx="110" cy="180" r="16"/>
+          <circle cx="250" cy="180" r="16"/>
+          <circle cx="400" cy="180" r="16"/>
+          <circle cx="520" cy="180" r="16"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="110" y="74">a</text>
+          <text x="250" y="74">b</text>
+          <text x="110" y="184">¬a</text>
+          <text x="250" y="184">¬b</text>
+          <text x="400" y="74">p</text>
+          <text x="520" y="74">q</text>
+          <text x="400" y="184">¬p</text>
+          <text x="520" y="184">¬q</text>
+        </g>
+        <g stroke="#2563eb" stroke-width="1.8" fill="none">
+          <line x1="120" y1="170" x2="240" y2="82"/>
+          <line x1="240" y1="170" x2="120" y2="82"/>
+        </g>
+        <polygon points="240,82 231,88 238,93" fill="#2563eb"/>
+        <polygon points="120,82 129,88 122,93" fill="#2563eb"/>
+        <g stroke="#ea580c" stroke-width="1.8" fill="none">
+          <line x1="412" y1="70" x2="508" y2="70"/>
+          <line x1="508" y1="180" x2="412" y2="180"/>
+        </g>
+        <polygon points="508,70 499,66 499,74" fill="#ea580c"/>
+        <polygon points="412,180 421,176 421,184" fill="#ea580c"/>
+        <text x="20" y="30" font-size="11" fill="#374151">子句 (a ∨ b)</text>
+        <text x="110" y="232" font-size="11" fill="#2563eb" text-anchor="middle">¬a → b，¬b → a</text>
+        <text x="460" y="30" font-size="11" fill="#374151" text-anchor="middle">一条蕴含边的逆否</text>
+        <text x="460" y="232" font-size="11" fill="#ea580c" text-anchor="middle">p → q 与 ¬q → ¬p 同时存在</text>
+      </svg>
+      <figcaption>一个子句拆成两条方向相反的蕴含边；图上每条边都自带逆否边，永远成对出现</figcaption>
+    </figure>
+
+    <p>这一节三道题的约束都不是两个固定变量之间的蕴含，而是「一组里至多一个」和「某个取值要和一段位置上的取值互斥」。这类约束朴素长这样：组里有 k 个候选，任意两个都不能同时为真，于是两两连边，一组 k(k−1) 条，组一大就爆。三种压缩结构分别管三种「一组」的形状：前后缀链管一列候选，线段树管一段位置区间，前缀树管一条前缀链。</p>
+
+    <h2>一、题目1：黑手党</h2>
+    <p>n 个点、m 条无向边，每条边给两个端点 x、y，一个颜色 c，一个破坏时间 t。要选出一些边摧毁，剩下的留作幸存。摧毁是并行进行的，所以耗时等于被摧毁边里 t 的最大值。</p>
+    <p>两条限制：任意两条摧毁边在图中不能相邻；任意两条同色的幸存边在图中也不能相邻。求可行方案里最小的摧毁耗时。</p>
+    <p>外层套二分答案。固定一个上限 limit，破坏时间超过 limit 的边就不能被摧毁，只能幸存，于是问题变成存在性判定，正好交给 2-SAT。</p>
+    <p>变量取每条边，真表示摧毁，假表示幸存。「t &gt; limit 的边必须幸存」就是强行规定这个变量为假，连一条 i → ¬i，也就是代码里的 <code class="inline">addEdge(i, i + m)</code>。</p>
+    <p>剩下两条限制都能读成「一组里至多一个为真」。</p>
+    <p>第一条，摧毁边不能相邻。对每个点，挂在它身上的边里至多一条被摧毁。把每条边的两个端点各摊开一次，按端点分组，组内对「摧毁」这个字面量要求至多一个为真。</p>
+    <p>第二条，同色幸存边不能相邻。对每个点，挂在它身上且同色的边里至多一条幸存。按「端点、颜色」分组，组内对「幸存」这个字面量，也就是摧毁字面量的反面 <code class="inline">other(eid)</code>，要求至多一个为真。</p>
+
+    <p>「一组里至多一个为真」怎么建才不爆边。设一组的候选字面量是 g₁ 到 g_k，朴素做法是任取 i ≠ j 连一条 g_i → ¬g_j，共 k(k−1) 条。m 到 5×10⁴ 时，一个点上挂满边，这一组的边长就是 2.5×10⁹ 条，直接爆。</p>
+    <p>前后缀链把它压到线性，结构和 <a href="sat-prefix.html">前缀优化建图</a>里那套是同一个思路，只是这里要「至多一个」，所以前缀和后缀两条链都得建。前缀链的节点 P_i 表示「g₁ 到 g_i 全部为假」，三条边把含义钉死：P_i → ¬g_i 说明 P_i 成立则 g_i 为假；P_i → P_{i−1} 把「全假」往左传；关键是 g_i → P_{i−1}，只要 g_i 为真，它前面的候选就一个都不能真。后缀链的 S_i 表示「g_i 到 g_k 全部为假」，完全对称，g_i → S_{i+1} 压住后面。</p>
+    <p>两条链一合，g_i 为真时它前面全假、后面也全假，正是至多一个。一组 k 个候选，代价是 2k 个辅助点加 6k−4 条边。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 332" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="前后缀优化建图把一组至多一个真压成两条链" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#2563eb" stroke-width="1.2" fill="none">
+          <line x1="280" y1="190" x2="155" y2="190"/>
+          <line x1="420" y1="190" x2="295" y2="190"/>
+          <line x1="560" y1="190" x2="435" y2="190"/>
+          <line x1="140" y1="176" x2="140" y2="125"/>
+          <line x1="280" y1="176" x2="280" y2="125"/>
+          <line x1="420" y1="176" x2="420" y2="125"/>
+          <line x1="560" y1="176" x2="560" y2="125"/>
+          <line x1="265" y1="64" x2="155" y2="176"/>
+          <line x1="405" y1="64" x2="295" y2="176"/>
+          <line x1="545" y1="64" x2="435" y2="176"/>
+        </g>
+        <g stroke="#ea580c" stroke-width="1.2" fill="none">
+          <line x1="140" y1="280" x2="265" y2="280"/>
+          <line x1="280" y1="280" x2="405" y2="280"/>
+          <line x1="420" y1="280" x2="545" y2="280"/>
+          <line x1="140" y1="266" x2="140" y2="125"/>
+          <line x1="280" y1="266" x2="280" y2="125"/>
+          <line x1="420" y1="266" x2="420" y2="125"/>
+          <line x1="560" y1="266" x2="560" y2="125"/>
+          <line x1="295" y1="64" x2="405" y2="266"/>
+          <line x1="435" y1="64" x2="545" y2="266"/>
+          <line x1="155" y1="64" x2="265" y2="266"/>
+        </g>
+        <g stroke="#c9ced4" stroke-width="1.2" stroke-dasharray="3 3">
+          <line x1="140" y1="65" x2="140" y2="99"/>
+          <line x1="280" y1="65" x2="280" y2="99"/>
+          <line x1="420" y1="65" x2="420" y2="99"/>
+          <line x1="560" y1="65" x2="560" y2="99"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="140" cy="50" r="15"/>
+          <circle cx="280" cy="50" r="15"/>
+          <circle cx="420" cy="50" r="15"/>
+          <circle cx="560" cy="50" r="15"/>
+        </g>
+        <g fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.3">
+          <circle cx="140" cy="112" r="13"/>
+          <circle cx="280" cy="112" r="13"/>
+          <circle cx="420" cy="112" r="13"/>
+          <circle cx="560" cy="112" r="13"/>
+        </g>
+        <g fill="#eef4ff" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="140" cy="190" r="14"/>
+          <circle cx="280" cy="190" r="14"/>
+          <circle cx="420" cy="190" r="14"/>
+          <circle cx="560" cy="190" r="14"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.4">
+          <circle cx="140" cy="280" r="14"/>
+          <circle cx="280" cy="280" r="14"/>
+          <circle cx="420" cy="280" r="14"/>
+          <circle cx="560" cy="280" r="14"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="140" y="54">g₁</text>
+          <text x="280" y="54">g₂</text>
+          <text x="420" y="54">g₃</text>
+          <text x="560" y="54">g₄</text>
+          <text x="140" y="116">¬g₁</text>
+          <text x="280" y="116">¬g₂</text>
+          <text x="420" y="116">¬g₃</text>
+          <text x="560" y="116">¬g₄</text>
+          <text x="140" y="194">P₁</text>
+          <text x="280" y="194">P₂</text>
+          <text x="420" y="194">P₃</text>
+          <text x="560" y="194">P₄</text>
+          <text x="140" y="284">S₁</text>
+          <text x="280" y="284">S₂</text>
+          <text x="420" y="284">S₃</text>
+          <text x="560" y="284">S₄</text>
+        </g>
+        <text x="20" y="30" font-size="11" fill="#374151">候选字面量 g₁..g₄，要求至多一个为真</text>
+        <text x="18" y="116" font-size="11" fill="#6b7280">否定字面量</text>
+        <text x="18" y="194" font-size="11" fill="#2563eb">前缀链 P</text>
+        <text x="18" y="284" font-size="11" fill="#ea580c">后缀链 S</text>
+        <text x="310" y="322" font-size="11" fill="#374151" text-anchor="middle">关键边：g_i → P_(i−1)（蓝）与 g_i → S_(i+1)（橙）</text>
+      </svg>
+      <figcaption>前缀链记「前面全假」，后缀链记「后面全假」，关键边把 g_i 为真的后果分别往前、往后压住</figcaption>
+    </figure>
+
+    <p>二分答案就套在这上面：每次 check 按 limit 重建一遍图，tarjan 判一次矛盾；有解就把上限往小里收，最后得到最小的可行上限。</p>
+
+    <div class="viz">
+      <div class="viz-title">「一组里至多一个为真」的前后缀优化建图</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">点 v 上挂着 4 条边，字面量 g₁ 到 g₄ 表示「第 i 条边被摧毁」，要求至多一条为真。点「下一步」，看前后缀两条链怎么把两两互斥的边收成线性条数。</p>
+      <svg id="spSvg" viewBox="0 0 620 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="前后缀优化建图演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>候选字面量 g</span>
+        <span><span class="dot partial"></span>前缀链 P / 后缀链 S</span>
+        <span><span class="dot skip"></span>否定字面量 ¬g</span>
+      </div>
+      <div class="breakdown" id="spInfo"></div>
+      <div class="viz-controls">
+        <button class="sp-btn" id="spPrev" type="button">上一步</button>
+        <button class="sp-btn" id="spNext" type="button">下一步</button>
+        <button class="sp-btn" id="spReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <p>完整代码。groupLink 就是前后缀优化建图，两次分组分别处理两条限制：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> eid, nid, color;
+    };
+
+    <span class="kw">bool</span> <span class="fn">NodeCmp</span>(Node a, Node b) {
+        <span class="kw">if</span> (a.nid != b.nid) {
+            <span class="kw">return</span> a.nid &lt; b.nid;
+        }
+        <span class="kw">return</span> a.color &lt; b.color;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 50001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXE = 1000001;
+    <span class="kw">int</span> n, m, k, maxt, cntt;
+
+    Node arr[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> destroyTime[MAXM];
+
+    <span class="kw">int</span> head[MAXT];
+    <span class="kw">int</span> nxt[MAXE];
+    <span class="kw">int</span> to[MAXE];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> group[MAXM];
+    <span class="kw">int</span> gsiz;
+
+    <span class="kw">int</span> dfn[MAXT];
+    <span class="kw">int</span> low[MAXT];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXT];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXT];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">int</span> ansTime;
+    <span class="kw">int</span> ansSize;
+    <span class="kw">int</span> ansArr[MAXM];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">other</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &lt;= m ? i + m : i - m;
+    }
+
+    <span class="kw">void</span> <span class="fn">groupLink</span>() {
+        <span class="kw">if</span> (gsiz &gt; 1) {
+            cntt++;
+            addEdge(cntt, other(group[1]));
+            <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= gsiz; i++) {
+                cntt++;
+                addEdge(cntt, other(group[i]));
+                addEdge(group[i], cntt - 1);
+                addEdge(cntt, cntt - 1);
+            }
+            cntt++;
+            addEdge(cntt, other(group[gsiz]));
+            <span class="kw">for</span> (<span class="kw">int</span> i = gsiz - 1; i &gt;= 1; i--) {
+                cntt++;
+                addEdge(cntt, other(group[i]));
+                addEdge(group[i], cntt - 1);
+                addEdge(cntt, cntt - 1);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">buildGraph</span>(<span class="kw">int</span> limit) {
+        cntt = m &lt;&lt; 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">if</span> (destroyTime[i] &gt; limit) {
+                addEdge(i, i + m);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> l = 1, r = 1; l &lt;= k; l = ++r) {
+            <span class="kw">int</span> curx = arr[l].nid;
+            <span class="kw">while</span> (r + 1 &lt;= k &amp;&amp; curx == arr[r + 1].nid) {
+                r++;
+            }
+            gsiz = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+                group[++gsiz] = arr[i].eid;
+            }
+            groupLink();
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> l = 1, r = 1; l &lt;= k; l = ++r) {
+            <span class="kw">int</span> curx = arr[l].nid;
+            <span class="kw">int</span> curc = arr[l].color;
+            <span class="kw">while</span> (r + 1 &lt;= k &amp;&amp; curx == arr[r + 1].nid &amp;&amp; curc == arr[r + 1].color) {
+                r++;
+            }
+            gsiz = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+                group[++gsiz] = other(arr[i].eid);
+            }
+            groupLink();
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">clear</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntt; i++) {
+            head[i] = dfn[i] = belong[i] = 0;
+        }
+        cntt = cntg = cntd = top = sccCnt = 0;
+    }
+
+    <span class="kw">bool</span> <span class="fn">getAns</span>(<span class="kw">int</span> limit) {
+        buildGraph(limit);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= (m &lt;&lt; 1); i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        <span class="kw">bool</span> check = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">if</span> (belong[i] == belong[i + m]) {
+                check = <span class="kw">false</span>;
+                <span class="kw">break</span>;
+            }
+        }
+        <span class="kw">if</span> (check) {
+            ansTime = ansSize = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+                <span class="kw">if</span> (belong[i] &lt; belong[i + m]) {
+                    ansTime = max(ansTime, destroyTime[i]);
+                    ansArr[++ansSize] = i;
+                }
+            }
+        }
+        clear();
+        <span class="kw">return</span> check;
+    }
+
+    <span class="kw">bool</span> <span class="fn">compute</span>() {
+        sort(arr + 1, arr + k + 1, NodeCmp);
+        <span class="kw">int</span> l = 1, r = maxt, mid;
+        <span class="kw">bool</span> hasAns = <span class="kw">false</span>;
+        <span class="kw">while</span> (l &lt;= r) {
+            mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (getAns(mid)) {
+                hasAns = <span class="kw">true</span>;
+                r = mid - 1;
+            } <span class="kw">else</span> {
+                l = mid + 1;
+            }
+        }
+        <span class="kw">return</span> hasAns;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        maxt = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x, y, c, t; i &lt;= m; i++) {
+            cin &gt;&gt; x &gt;&gt; y &gt;&gt; c &gt;&gt; t;
+            arr[++k].eid = i;
+            arr[k].nid = x;
+            arr[k].color = c;
+            arr[++k].eid = i;
+            arr[k].nid = y;
+            arr[k].color = c;
+            destroyTime[i] = t;
+            maxt = max(maxt, t);
+        }
+        <span class="kw">bool</span> check = compute();
+        <span class="kw">if</span> (check) {
+            cout &lt;&lt; "Yes" &lt;&lt; "\n";
+            cout &lt;&lt; ansTime &lt;&lt; " " &lt;&lt; ansSize &lt;&lt; "\n";
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= ansSize; i++) {
+                cout &lt;&lt; ansArr[i] &lt;&lt; " ";
+            }
+        } <span class="kw">else</span> {
+            cout &lt;&lt; "No" &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>二、题目2：旗帜</h2>
+    <p>n 面旗子，第 i 面有 a[i]、b[i] 两个可选位置，每面旗子挑一个放下。两面旗子之间的最小距离 d 越大越好看，求所有可能 d 里的最大值。</p>
+    <p>还是二分。固定 d 之后，「距离小于 d 的两面旗子不能同时出现」是一条硬约束，判定交给 2-SAT。</p>
+    <p>变量取每面旗子，真表示放 a[i]，假表示放 b[i]。所有候选位置一共 2n 个，编号 i 与 i+n 是同一面旗子的两个选择。约束说的是：候选位置 u 和候选位置 v 来自不同旗子、并且距离小于 d，那么 u 和 v 不能同时被选，连一条 u → ¬v。</p>
+
+    <p>朴素做法对每个候选扫一遍和它距离小于 d 的所有候选，一条条连。一个候选平均要连 O(n) 条，总共 O(n²)，n 到 10⁴ 已经是 10⁸ 量级，再乘上二分就没法看。</p>
+    <p>注意到「和 u 冲突的候选」在按位置排好序之后是一段连续区间。把 2n 个候选位置按坐标排序，在这条序列上建线段树，每个树节点代表一段区间，树边从父节点指向两个儿子，于是「落到某个节点」就等价于「落到这个节点管的所有位置」。这套结构就是 <a href="graphopt.html">线段树优化建图</a>里那副，搬过来用。候选 u 连向覆盖它冲突区间的若干个树节点，每次只要 O(log n) 条边，总数从 O(n²) 降到 O(n log n)。</p>
+    <p>叶子挂的不是别的，正是「这个候选没有被选中」的否定字面量，这样区间节点往下推，推出来的就是「这些候选全部不能选」。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="线段树优化建图把候选连向一段区间" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#c9ced4" stroke-width="1.3" fill="none">
+          <line x1="300" y1="69" x2="195" y2="106"/>
+          <line x1="300" y1="69" x2="405" y2="106"/>
+          <line x1="180" y1="134" x2="132" y2="171"/>
+          <line x1="180" y1="134" x2="228" y2="171"/>
+          <line x1="420" y1="134" x2="372" y2="171"/>
+          <line x1="420" y1="134" x2="468" y2="171"/>
+          <line x1="120" y1="199" x2="96" y2="236"/>
+          <line x1="120" y1="199" x2="144" y2="236"/>
+          <line x1="240" y1="199" x2="216" y2="236"/>
+          <line x1="240" y1="199" x2="264" y2="236"/>
+          <line x1="360" y1="199" x2="336" y2="236"/>
+          <line x1="360" y1="199" x2="384" y2="236"/>
+          <line x1="480" y1="199" x2="456" y2="236"/>
+          <line x1="480" y1="199" x2="504" y2="236"/>
+        </g>
+        <g stroke="#ea580c" stroke-width="1.6" fill="none">
+          <line x1="240" y1="185" x2="216" y2="236"/>
+          <line x1="240" y1="185" x2="264" y2="236"/>
+          <line x1="360" y1="185" x2="336" y2="236"/>
+          <line x1="360" y1="185" x2="384" y2="236"/>
+        </g>
+        <g stroke="#2563eb" stroke-width="2" fill="none">
+          <line x1="62" y1="110" x2="222" y2="176"/>
+          <line x1="62" y1="110" x2="342" y2="176"/>
+        </g>
+        <polygon points="228,178 217,176 222,186" fill="#2563eb"/>
+        <polygon points="348,178 337,176 342,186" fill="#2563eb"/>
+        <g fill="#eef4ff" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="300" cy="55" r="14"/>
+          <circle cx="180" cy="120" r="14"/>
+          <circle cx="420" cy="120" r="14"/>
+        </g>
+        <circle cx="120" cy="185" r="14" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+        <circle cx="480" cy="185" r="14" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.6">
+          <circle cx="240" cy="185" r="14"/>
+          <circle cx="360" cy="185" r="14"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.3">
+          <circle cx="90" cy="250" r="12"/>
+          <circle cx="150" cy="250" r="12"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.6">
+          <circle cx="210" cy="250" r="12"/>
+          <circle cx="270" cy="250" r="12"/>
+          <circle cx="330" cy="250" r="12"/>
+          <circle cx="390" cy="250" r="12"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.3">
+          <circle cx="450" cy="250" r="12"/>
+          <circle cx="510" cy="250" r="12"/>
+        </g>
+        <g font-size="10" fill="#1f2328" text-anchor="middle">
+          <text x="90" y="254">¬1</text>
+          <text x="150" y="254">¬2</text>
+          <text x="210" y="254">¬3</text>
+          <text x="270" y="254">¬4</text>
+          <text x="330" y="254">¬5</text>
+          <text x="390" y="254">¬6</text>
+          <text x="450" y="254">¬7</text>
+          <text x="510" y="254">¬8</text>
+        </g>
+        <circle cx="50" cy="110" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="50" y="114" font-size="12" fill="#1f2328" text-anchor="middle">u</text>
+        <text x="16" y="80" font-size="11" fill="#374151">候选 u 与一段区间冲突</text>
+        <text x="310" y="288" font-size="11" fill="#6b7280" text-anchor="middle">区间拆成 O(log n) 个节点，节点再推到叶子上的否定字面量</text>
+      </svg>
+      <figcaption>u 只连覆盖冲突区间的两个节点，区间节点往下推到叶子，把「这些候选都不能选」一次表达完</figcaption>
+    </figure>
+
+    <p>这里有个细节。冲突区间要挖掉候选自己，代码里把它拆成 <code class="inline">[l, i−1]</code> 和 <code class="inline">[i+1, r]</code> 两段再连。如果不挖，就会出现 u → ¬u 这种自指边，等于强行规定 u 必须为假，把本来可以选的位置给禁掉了。除非确实想表达「这个取值不能用」，否则建图时要避开会推出 x → ¬x 的假设。</p>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> pos, xid;
+    };
+
+    <span class="kw">bool</span> <span class="fn">NodeCmp</span>(Node a, Node b) {
+        <span class="kw">if</span> (a.pos != b.pos) {
+            <span class="kw">return</span> a.pos &lt; b.pos;
+        }
+        <span class="kw">return</span> a.xid &lt; b.xid;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 10001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXE = 1000001;
+    <span class="kw">int</span> n, k;
+    <span class="kw">int</span> a[MAXN];
+    <span class="kw">int</span> b[MAXN];
+
+    Node arr[MAXN &lt;&lt; 1];
+
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> root;
+    <span class="kw">int</span> cntt;
+
+    <span class="kw">int</span> head[MAXT];
+    <span class="kw">int</span> nxt[MAXE];
+    <span class="kw">int</span> to[MAXE];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXT];
+    <span class="kw">int</span> low[MAXT];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXT];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXT];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">int</span> <span class="fn">kth</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> l = 1, r = k, mid, ans = k + 1;
+        <span class="kw">while</span> (l &lt;= r) {
+            mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (arr[mid].pos &gt;= num) {
+                ans = mid;
+                r = mid - 1;
+            } <span class="kw">else</span> {
+                l = mid + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">other</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &lt;= n ? i + n : i - n;
+    }
+
+    <span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> rt;
+        <span class="kw">if</span> (l == r) {
+            rt = other(arr[l].xid);
+        } <span class="kw">else</span> {
+            rt = ++cntt;
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            ls[rt] = build(l, mid);
+            rs[rt] = build(mid + 1, r);
+            addEdge(rt, ls[rt]);
+            addEdge(rt, rs[rt]);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">void</span> <span class="fn">xToRange</span>(<span class="kw">int</span> xid, <span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &gt; jobr) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            addEdge(xid, i);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                xToRange(xid, jobl, jobr, l, mid, ls[i]);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                xToRange(xid, jobl, jobr, mid + 1, r, rs[i]);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">buildGraph</span>(<span class="kw">int</span> d) {
+        cntt = k;
+        root = build(1, k);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= k; i++) {
+            <span class="kw">int</span> pos = arr[i].pos;
+            <span class="kw">int</span> l = kth(pos - d + 1);
+            <span class="kw">int</span> r = kth(pos + d) - 1;
+            <span class="kw">int</span> x = arr[i].xid;
+            xToRange(x, l, i - 1, 1, k, root);
+            xToRange(x, i + 1, r, 1, k, root);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">clear</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntt; i++) {
+            head[i] = dfn[i] = belong[i] = 0;
+        }
+        cntt = cntg = cntd = top = sccCnt = 0;
+    }
+
+    <span class="kw">bool</span> <span class="fn">check</span>(<span class="kw">int</span> d) {
+        buildGraph(d);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= (n &lt;&lt; 1); i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        <span class="kw">bool</span> check = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (belong[i] == belong[i + n]) {
+                check = <span class="kw">false</span>;
+                <span class="kw">break</span>;
+            }
+        }
+        clear();
+        <span class="kw">return</span> check;
+    }
+
+    <span class="kw">int</span> <span class="fn">compute</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            arr[i].pos = a[i];
+            arr[i].xid = i;
+            arr[i + n].pos = b[i];
+            arr[i + n].xid = i + n;
+        }
+        k = n &lt;&lt; 1;
+        sort(arr + 1, arr + k + 1, NodeCmp);
+        <span class="kw">int</span> l = 0, r = arr[k].pos, d, ans = 0;
+        <span class="kw">while</span> (l &lt;= r) {
+            d = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (check(d)) {
+                ans = d;
+                l = d + 1;
+            } <span class="kw">else</span> {
+                r = d - 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; a[i] &gt;&gt; b[i];
+        }
+        <span class="kw">int</span> ans = compute();
+        cout &lt;&lt; ans &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>三、题目3：编码</h2>
+    <p>n 个只含 0、1、? 的字符串，每个串最多一个问号。问号要定成 0 或 1，要求确定之后没有任何一个串是另一个串的前缀。</p>
+    <p>变量取每个串的问号，真表示定成 0，假表示定成 1；本来就没有问号的串，取值被锁死。约束是「两个串不能一个是另一个的前缀」，翻译过去就是这两个串的取值不能同时被选，一条互斥边。</p>
+
+    <p>朴素地枚举每一对串比较前缀关系，是 O(n²) 次比较，字符总数到 5×10⁵ 也过不去。把所有候选串塞进一棵前缀树，前缀关系就变成了树上的祖先—后代关系。</p>
+    <p>于是约束分三种，全在树上处理。第一种，一个候选串 x 和「根到它父亲这条链上所有候选串」互斥，那些是 x 的真前缀。第二种，x 和「它所在节点的子树里所有候选串」互斥，那些串把 x 当成了真前缀。第三种，终点落在同一个节点的候选串其实是同一个字符串，彼此也互斥。</p>
+    <p>前两种靠树上两条链压。每个树节点配一个 up 节点和一个 down 节点：up 顺着父指针往上垒，表示「这条到根的路径上有候选串被选中」；down 顺着子树往下垒，表示「这棵子树里有候选串被选中」。候选 x 只要连到 up、down 上，就能一次性把「所有和它前缀互斥的串」排除掉，边数是 O(串长) 而不是 O(串数)。</p>
+    <p>第三种还是前后缀优化建图，和题目1 的 groupLink 是同一段代码：把同一个节点上的候选串排成一列，组内至多一个被选。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="前缀树上 up 链与 down 链" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#c9ced4" stroke-width="1.3" fill="none">
+          <line x1="300" y1="64" x2="205" y2="101"/>
+          <line x1="300" y1="64" x2="395" y2="101"/>
+          <line x1="190" y1="129" x2="140" y2="166"/>
+          <line x1="190" y1="129" x2="240" y2="166"/>
+          <line x1="410" y1="129" x2="470" y2="166"/>
+        </g>
+        <g stroke="#2563eb" stroke-width="2.4" fill="none">
+          <line x1="300" y1="64" x2="205" y2="101"/>
+        </g>
+        <polygon points="205,101 213,95 208,90" fill="#2563eb"/>
+        <g stroke="#ea580c" stroke-width="2.4" fill="none">
+          <line x1="190" y1="129" x2="140" y2="166"/>
+          <line x1="190" y1="129" x2="240" y2="166"/>
+        </g>
+        <polygon points="140,166 148,160 143,155" fill="#ea580c"/>
+        <polygon points="240,166 232,160 237,155" fill="#ea580c"/>
+        <circle cx="300" cy="50" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+        <circle cx="190" cy="115" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+        <circle cx="410" cy="115" r="15" fill="#eef4ff" stroke="#2563eb" stroke-width="1.4"/>
+        <circle cx="130" cy="180" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+        <circle cx="250" cy="180" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+        <circle cx="470" cy="180" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="300" y="54">根</text>
+          <text x="190" y="119">x</text>
+          <text x="410" y="119">y</text>
+          <text x="130" y="184">p</text>
+          <text x="250" y="184">q</text>
+          <text x="470" y="184">r</text>
+        </g>
+        <text x="30" y="40" font-size="11" fill="#2563eb">up 链：x 的真前缀串（蓝）不能同选</text>
+        <text x="30" y="240" font-size="11" fill="#ea580c">down 链：把 x 当前缀的串（橙边）也不能同选</text>
+        <text x="30" y="262" font-size="11" fill="#6b7280">两种关系各走一条链，x 只连常数条边</text>
+      </svg>
+      <figcaption>x 往上的 up 链管真前缀，往下的 down 链管自己当前缀的那些串，前缀互斥一次压成两条链</figcaption>
+    </figure>
+
+    <p>完整代码：</p>
+
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 1000002;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 5000001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXE = 10000001;
+    <span class="kw">int</span> n, cntt;
+
+    <span class="kw">string</span> arr[MAXN &lt;&lt; 1];
+
+    <span class="kw">int</span> headg[MAXT];
+    <span class="kw">int</span> nextg[MAXE];
+    <span class="kw">int</span> tog[MAXE];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> tree[MAXP][2];
+    <span class="kw">int</span> fa[MAXP];
+    <span class="kw">int</span> up[MAXP];
+    <span class="kw">int</span> down[MAXP];
+    <span class="kw">int</span> cntp;
+
+    <span class="kw">int</span> headx[MAXP];
+    <span class="kw">int</span> nextx[MAXP];
+    <span class="kw">int</span> tox[MAXP];
+    <span class="kw">int</span> cntx;
+
+    <span class="kw">int</span> group[MAXN];
+    <span class="kw">int</span> gsiz;
+
+    <span class="kw">int</span> dfn[MAXT];
+    <span class="kw">int</span> low[MAXT];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXT];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXT];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nextg[++cntg] = headg[u];
+        tog[cntg] = v;
+        headg[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = headg[u]; e &gt; 0; e = nextg[e]) {
+            <span class="kw">int</span> v = tog[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">other</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> x &lt;= n ? x + n : x - n;
+    }
+
+    <span class="kw">void</span> <span class="fn">addGroup</span>(<span class="kw">int</span> u, <span class="kw">int</span> x) {
+        nextx[++cntx] = headx[u];
+        tox[cntx] = x;
+        headx[u] = cntx;
+    }
+
+    <span class="kw">void</span> <span class="fn">insert</span>(<span class="kw">int</span> x) {
+        <span class="kw">string</span> str = arr[x];
+        <span class="kw">int</span> cur = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> si = 0; si &lt; (<span class="kw">int</span>)str.length(); si++) {
+            <span class="kw">int</span> path = str[si] == '0' ? 0 : 1;
+            <span class="kw">if</span> (tree[cur][path] == 0) {
+                tree[cur][path] = ++cntp;
+                fa[cntp] = cur;
+                up[cntp] = ++cntt;
+                down[cntp] = ++cntt;
+                addEdge(up[cntp], up[cur]);
+                addEdge(down[cur], down[cntp]);
+            }
+            cur = tree[cur][path];
+        }
+        addEdge(x, up[fa[cur]]);
+        addEdge(up[cur], other(x));
+        addEdge(x, down[cur]);
+        addEdge(down[fa[cur]], other(x));
+        addGroup(cur, x);
+    }
+
+    <span class="kw">void</span> <span class="fn">groupLink</span>() {
+        <span class="kw">if</span> (gsiz &gt; 1) {
+            cntt++;
+            addEdge(cntt, other(group[1]));
+            <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= gsiz; i++) {
+                cntt++;
+                addEdge(cntt, other(group[i]));
+                addEdge(group[i], cntt - 1);
+                addEdge(cntt, cntt - 1);
+            }
+            cntt++;
+            addEdge(cntt, other(group[gsiz]));
+            <span class="kw">for</span> (<span class="kw">int</span> i = gsiz - 1; i &gt;= 1; i--) {
+                cntt++;
+                addEdge(cntt, other(group[i]));
+                addEdge(group[i], cntt - 1);
+                addEdge(cntt, cntt - 1);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">buildGraph</span>() {
+        cntt = n &lt;&lt; 1;
+        cntp = 1;
+        up[1] = ++cntt;
+        down[1] = ++cntt;
+        <span class="kw">for</span> (<span class="kw">int</span> x = 1; x &lt;= (n &lt;&lt; 1); x++) {
+            insert(x);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> u = 1; u &lt;= cntp; u++) {
+            gsiz = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> e = headx[u]; e &gt; 0; e = nextx[e]) {
+                group[++gsiz] = tox[e];
+            }
+            groupLink();
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">addString</span>(<span class="kw">int</span> i, <span class="kw">string</span> s) {
+        <span class="kw">int</span> mark = -1;
+        <span class="kw">for</span> (<span class="kw">int</span> si = 0; si &lt; (<span class="kw">int</span>)s.length(); si++) {
+            <span class="kw">if</span> (s[si] == '?') {
+                mark = si;
+                <span class="kw">break</span>;
+            }
+        }
+        <span class="kw">if</span> (mark == -1) {
+            <span class="kw">if</span> (s[0] == '0') {
+                addEdge(i + n, i);
+            } <span class="kw">else</span> {
+                addEdge(i, i + n);
+            }
+            mark = 0;
+        }
+        s[mark] = '0';
+        arr[i] = s;
+        s[mark] = '1';
+        arr[i + n] = s;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">string</span> s;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; s;
+            addString(i, s);
+        }
+        buildGraph();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= (n &lt;&lt; 1); i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        <span class="kw">bool</span> check = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (belong[i] == belong[i + n]) {
+                check = <span class="kw">false</span>;
+                <span class="kw">break</span>;
+            }
+        }
+        <span class="kw">if</span> (check) {
+            cout &lt;&lt; "YES" &lt;&lt; "\n";
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+                <span class="kw">if</span> (belong[i] &lt; belong[i + n]) {
+                    cout &lt;&lt; arr[i] &lt;&lt; "\n";
+                } <span class="kw">else</span> {
+                    cout &lt;&lt; arr[i + n] &lt;&lt; "\n";
+                }
+            }
+        } <span class="kw">else</span> {
+            cout &lt;&lt; "NO" &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>四、复杂度分析</h2>
+    <p>三道题的建图规模都从「候选数的平方」降到了「候选数的线性或者对数」。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>步骤</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>题目1 一次 check（前后缀建图 + tarjan）</td><td><code class="inline">O(m)</code></td><td rowspan="2"><code class="inline">O(m)</code></td></tr>
+        <tr><td>题目1 整体（二分 <code class="inline">O(log maxT)</code> 次）</td><td><code class="inline">O(m log maxT)</code></td></tr>
+        <tr><td>题目2 一次 check（线段树建图 + tarjan）</td><td><code class="inline">O(n log n)</code></td><td rowspan="2"><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>题目2 整体（二分 <code class="inline">O(log maxP)</code> 次）</td><td><code class="inline">O(n log n log maxP)</code></td></tr>
+        <tr><td>题目3 建图 + tarjan（L 为字符总数）</td><td><code class="inline">O(L)</code></td><td><code class="inline">O(L)</code></td></tr>
+      </tbody>
+    </table>
+    <p>边数的对比更直观。题目1 的一组候选，朴素是 k(k−1) 条，前后缀链是 6k−4 条，前者平方级、后者线性，两组分组都跑一遍，总量从最坏 O(m²) 掉到 O(m)。题目2 里每个候选要连的是一段区间，朴素 O(n) 条，线段树拆成 O(log n) 个节点，总量从 O(n²) 掉到 O(n log n)。题目3 的候选串总共 L 个字符，前缀树上每个候选只连常数条边，总量 O(L)。</p>
+    <p>tarjan 的复杂度是点数加边数的线性，所以三题的判定步骤都跟着建图规模走。空间同样是线性的，题目2 的线段树把点数和边数都乘了一个 log n。</p>
+
+    <h2>五、最后</h2>
+    <p>三道题的骨架完全一样：二分答案或者直接判定，把约束翻成「一组里至多一个」，按组的形状选一种压缩结构，tarjan 收尾。前后缀链对应一列候选，线段树对应一段位置区间，前缀树对应一条前缀链。</p>
+    <p>建图的手法记住之后，剩下的都是翻译。黑手党要把两条限制分别按端点和按「端点、颜色」分组，旗帜要看出冲突候选排好序之后是连续区间，编码要把前缀关系认到树上的祖先关系上。翻译对了，图自然就是线性的。</p>
+    <p>下一页换两种题型：取值有三个的怎么变回布尔，以及区间合法性有单调性、干脆不建图直接算的方案。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var GX = [140,280,420,560], gY = 50, nY = 112, PY = 190, SY = 280;
+  var svg = document.getElementById('spSvg');
+  var info = document.getElementById('spInfo');
+  var prev = document.getElementById('spPrev');
+  var next = document.getElementById('spNext');
+  var reset = document.getElementById('spReset');
+  var at = 0;
+
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GRAY = '#9aa0a6', RED = '#dc2626';
+  var PREFILL = '#eef4ff', SUFFILL = '#ffedd5', GFILL = '#dbeafe';
+
+  var STEPS = [
+    {info:'点 v 上挂着 4 条边，字面量 g₁ 到 g₄ 分别表示「第 i 条边被摧毁」。要求至多一条为真。'},
+    {info:'前缀链：Pᵢ 表示 g₁ 到 gᵢ 全假。Pᵢ → ¬gᵢ 保证 Pᵢ 成立时 gᵢ 为假，Pᵢ → P_(i−1) 把「全假」往左传。'},
+    {info:'关键边 gᵢ → P_(i−1)：只要 gᵢ 为真，它前面的候选一个都不能真。'},
+    {info:'后缀链对称：Sᵢ 表示 gᵢ 到 g_k 全假，gᵢ → S_(i+1) 把 gᵢ 后面的候选也压住。两条链合起来就是「至多一个为真」。'},
+    {info:'试赋值 g₂ 与 g₄ 同时为真：g₄ → P₃ → P₂ → ¬g₂ 推出 g₂ 为假，和 g₂ 为真矛盾，这组赋值被排除。'},
+    {info:'4 条候选的一组，朴素两两互斥要 12 条边；前后缀链是 2k 个辅助点加 6k−4 条边。k 大起来，平方级和线性级的差距就是可做与不可做。'}
+  ];
+
+  function arrow(x1, y1, x2, y2, color, w, dash){
+    var dx = x2 - x1, dy = y2 - y1;
+    var L = Math.sqrt(dx*dx + dy*dy) || 1;
+    var ux = dx / L, uy = dy / L;
+    var hl = 8, hw = 3.4;
+    var bx = x2 - ux * hl, by = y2 - uy * hl;
+    var p1 = (bx - uy*hw).toFixed(1) + ',' + (by + ux*hw).toFixed(1);
+    var p2 = (bx + uy*hw).toFixed(1) + ',' + (by - ux*hw).toFixed(1);
+    var d = dash ? ' stroke-dasharray="' + dash + '"' : '';
+    return '<line x1="'+x1+'" y1="'+y1+'" x2="'+bx.toFixed(1)+'" y2="'+by.toFixed(1)+'" stroke="'+color+'" stroke-width="'+w+'"'+d+'/>'
+      + '<polygon points="'+x2+','+y2+' '+p1+' '+p2+'" fill="'+color+'"/>';
+  }
+
+  function node(x, y, r, fill, stroke, label, fs, dash, lw){
+    var d = dash ? ' stroke-dasharray="' + dash + '"' : '';
+    return '<circle cx="'+x+'" cy="'+y+'" r="'+r+'" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+(lw||1.4)+'"'+d+'/>'
+      + '<text x="'+x+'" y="'+(y+ (fs>=11?4:3.5))+'" font-size="'+fs+'" fill="#1f2328" text-anchor="middle">'+label+'</text>';
+  }
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+    var i;
+
+    // 否定字面量与配对虚线
+    for (i = 0; i < 4; i++) {
+      p.push('<line x1="'+GX[i]+'" y1="'+(gY+15)+'" x2="'+GX[i]+'" y2="'+(nY-13)+'" stroke="#c9ced4" stroke-width="1.2" stroke-dasharray="3 3"/>');
+      p.push(node(GX[i], nY, 13, '#f6f7f9', GRAY, '¬g' + '₁₂₃₄'[i], 11, '3 3'));
+    }
+
+    if (at >= 1) {
+      for (i = 1; i < 4; i++) {
+        p.push(arrow(GX[i], PY, GX[i-1] + 15, PY, BLUE, 1.2));
+      }
+      for (i = 0; i < 4; i++) {
+        p.push(arrow(GX[i], PY - 14, GX[i], nY + 13, BLUE, 1.2));
+      }
+    }
+    if (at >= 2) {
+      for (i = 1; i < 4; i++) {
+        p.push(arrow(GX[i], gY + 15, GX[i-1] + 14, PY - 14, '#3b82f6', 1.6));
+      }
+    }
+    if (at >= 3) {
+      for (i = 0; i < 3; i++) {
+        p.push(arrow(GX[i], SY, GX[i+1] - 15, SY, ORANGE, 1.2));
+      }
+      for (i = 0; i < 4; i++) {
+        p.push(arrow(GX[i], SY - 14, GX[i], nY + 13, ORANGE, 1.2));
+      }
+      for (i = 0; i < 3; i++) {
+        p.push(arrow(GX[i], gY + 15, GX[i+1] - 14, SY - 14, '#f97316', 1.6));
+      }
+    }
+
+    // 节点
+    for (i = 0; i < 4; i++) {
+      var gh = (at === 4 && (i === 1 || i === 3));
+      p.push(node(GX[i], gY, 15, gh ? '#ffedd5' : GFILL, gh ? RED : BLUE, 'g' + '₁₂₃₄'[i], 11, null, gh ? 2.2 : 1.4));
+    }
+    if (at >= 1) {
+      for (i = 0; i < 4; i++) {
+        p.push(node(GX[i], PY, 14, PREFILL, (at === 4 && (i === 1 || i === 2)) ? RED : BLUE, 'P' + '₁₂₃₄'[i], 11, null, (at === 4 && (i===1||i===2)) ? 2.2 : 1.4));
+      }
+    }
+    if (at >= 3) {
+      for (i = 0; i < 4; i++) {
+        p.push(node(GX[i], SY, 14, SUFFILL, ORANGE, 'S' + '₁₂₃₄'[i], 11));
+      }
+    }
+
+    if (at === 4) {
+      p.push('<text x="310" y="316" font-size="11" fill="'+RED+'" text-anchor="middle">g₂ 与 g₄ 不能同时为真</text>');
+    } else if (at === 5) {
+      p.push('<text x="310" y="316" font-size="11" fill="#374151" text-anchor="middle">朴素 k(k−1) = 12 条边 → 压缩后 2k 个辅助点、6k−4 条边</text>');
+    } else {
+      p.push('<text x="310" y="316" font-size="11" fill="#6b7280" text-anchor="middle">一个点上的 4 条边，摧毁字面量记为 g₁..g₄</text>');
+    }
+    p.push('<text x="310" y="26" font-size="11" fill="#374151" text-anchor="middle">前缀链 P（蓝）与后缀链 S（橙）</text>');
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div>' + st.info + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if(at > 0){ at--; render(); } });
+  next.addEventListener('click', function(){ if(at < STEPS.length - 1){ at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

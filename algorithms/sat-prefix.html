@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>前缀优化建图 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .pre-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .pre-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .pre-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  @media(max-width:760px){
+    .pre-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>前缀优化建图</h1>
+    <p class="intro">上一节讲过 2-SAT：一条子句两条边。但有些限制天生是「一对多」，一个点要向一整段前缀里的每个点连边。逐条连边会让边数涨到平方级，n 到 10⁶ 时直接存不下。办法是给前缀配一串辅助点，把「连一整段」压成一条边。这一节讲这套构造，再配三道用到它的题。</p>
+
+    <h2>零、背景</h2>
+    <p>前面讲过 2-SAT 的基本做法：每个取值假设一个点，一条子句两条边，跑一遍强连通分量判定。</p>
+    <p>建图时会遇到一类麻烦的连边：某个点 p 一旦成立，就要求一整段位置里的每个点都跟着变。位置这一段通常是前缀。</p>
+    <p>线段树优化建图能处理这个问题，代价是每次连边 O(log n)，还要先搭一棵完整的线段树。前缀这种形状比任意区间规整得多，用一串辅助点就能压到 O(1) 条边，比线段树更省也更好写。</p>
+    <p>后缀是同样的事情反过来做，两者配合就能覆盖「一段区间」的限制。</p>
+
+    <h2>一、问题</h2>
+    <p>把限制写成有向边，就是「点 p → 前缀里每一个点」，或者反过来「前缀里每一个点 → 点 p」。</p>
+    <p>这类限制在 2-SAT 里很常见。拿集合来说：集合里有若干个点，要求至多选一个。等价的说法是，只要选了其中一个，就必须排除掉其余全部，这正是「一个点 → 一整个集合」。</p>
+    <p>麻烦在于数量。一段长 L 的前缀逐个连边要连 L 条；题里每个点都来一次，总边数就是 O(n²)。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="朴素做法：点向前缀每个点连边" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="24" y="26" font-size="12" fill="#374151">朴素：点 p 连到前缀 [1, x] 的每个点</text>
+        <circle cx="100" cy="72" r="16" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="100" y="77" font-size="12" fill="#1f2328" text-anchor="middle">p</text>
+        <text x="126" y="60" font-size="11" fill="#ea580c">L 条边</text>
+        <g stroke="#ea580c" stroke-width="1.5">
+          <line x1="100" y1="88" x2="100" y2="191"/>
+          <line x1="104" y1="88" x2="188" y2="190"/>
+          <line x1="107" y1="89" x2="278" y2="190"/>
+          <line x1="109" y1="89" x2="368" y2="190"/>
+          <line x1="111" y1="90" x2="458" y2="190"/>
+          <line x1="113" y1="90" x2="548" y2="190"/>
+        </g>
+        <g fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.3">
+          <circle cx="100" cy="205" r="14"/>
+          <circle cx="190" cy="205" r="14"/>
+          <circle cx="280" cy="205" r="14"/>
+          <circle cx="370" cy="205" r="14"/>
+          <circle cx="460" cy="205" r="14"/>
+          <circle cx="550" cy="205" r="14"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="100" y="210">1</text>
+          <text x="190" y="210">2</text>
+          <text x="280" y="210">3</text>
+          <text x="370" y="210">4</text>
+          <text x="460" y="210">5</text>
+          <text x="550" y="210">6</text>
+        </g>
+        <text x="24" y="250" font-size="11" fill="#6b7280">x 就是前缀长度 L；每个点都来一次，总边数 O(n²)</text>
+      </svg>
+      <figcaption>前缀有多长就要连多少条边，这类限制一多，边数就平方级了</figcaption>
+    </figure>
+
+    <h2>二、朴素做法</h2>
+    <p>就按字面连。当前要处理前缀 [1, x]，把它里面的点一一列出来，从 p 引出 x 条边。</p>
+    <p>每条这样的限制都做一遍，总边数是所有前缀长度之和。最坏情况（每次都是整个前缀）就是 O(n²)。</p>
+    <p>换线段树能压到 O(log n)，但要额外搭一棵树。前缀这种形状有更省的做法：造一串辅助点，让它们替 p 去连。</p>
+
+    <h2>三、前缀优化：一串辅助点</h2>
+    <p>给每个位置 i 配一个辅助点，记作 pre(i)。它承担「把连边引到前缀 [1, i] 全部点」的职责。</p>
+    <p>把辅助点串成一条链：pre(i) → pre(i−1)，同时 pre(i) → 点 i。</p>
+    <p>这样从 pre(x) 出发，沿链能走到 pre(x−1)、pre(x−2)、…、pre(1)，而每个 pre(j) 又有一条边通向点 j。于是「点 p 连到 [1, x] 里的每一个点」只需要一条边：p → pre(x)。</p>
+    <p>链是建图前一次性搭好的，与具体限制无关，总共约 2n 条边。之后每条前缀限制只花 1 条边。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 265" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="前缀辅助点链" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <defs>
+          <marker id="pf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/>
+          </marker>
+          <marker id="pfb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/>
+          </marker>
+        </defs>
+        <text x="24" y="26" font-size="12" fill="#374151">前缀辅助点：一条边覆盖一整段</text>
+        <circle cx="55" cy="150" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="55" y="155" font-size="12" fill="#1f2328" text-anchor="middle">p</text>
+
+        <g stroke="#c9ced4" stroke-width="1.4" marker-end="url(#pf)">
+          <line x1="493" y1="80" x2="419" y2="80"/>
+          <line x1="373" y1="80" x2="299" y2="80"/>
+          <line x1="253" y1="80" x2="179" y2="80"/>
+        </g>
+        <g stroke="#c9ced4" stroke-width="1.3" marker-end="url(#pf)">
+          <line x1="155" y1="102" x2="155" y2="175"/>
+          <line x1="275" y1="102" x2="275" y2="175"/>
+          <line x1="395" y1="102" x2="395" y2="175"/>
+          <line x1="515" y1="102" x2="515" y2="175"/>
+        </g>
+        <line x1="70" y1="146" x2="493" y2="84" stroke="#2563eb" stroke-width="2" marker-end="url(#pfb)"/>
+        <text x="205" y="112" font-size="11" fill="#2563eb">一条边</text>
+
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.4">
+          <circle cx="155" cy="80" r="20"/>
+          <circle cx="275" cy="80" r="20"/>
+          <circle cx="395" cy="80" r="20"/>
+          <circle cx="515" cy="80" r="20"/>
+        </g>
+        <g font-size="10" fill="#1f2328" text-anchor="middle">
+          <text x="155" y="84">pre1</text>
+          <text x="275" y="84">pre2</text>
+          <text x="395" y="84">pre3</text>
+          <text x="515" y="84">pre4</text>
+        </g>
+        <g fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.3">
+          <circle cx="155" cy="195" r="14"/>
+          <circle cx="275" cy="195" r="14"/>
+          <circle cx="395" cy="195" r="14"/>
+          <circle cx="515" cy="195" r="14"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="155" y="200">1</text>
+          <text x="275" y="200">2</text>
+          <text x="395" y="200">3</text>
+          <text x="515" y="200">4</text>
+        </g>
+        <text x="24" y="248" font-size="11" fill="#6b7280">链是建图前一次搭好的，约 2n 条边</text>
+      </svg>
+      <figcaption>p → pre(x) 一条边，再沿链和竖直边走到 [1, x] 的每个点</figcaption>
+    </figure>
+
+    <p>反方向同理。「前缀 [1, x] 里的每个点到点 p」，把链的边反过来，让点 i 先接上自己的辅助点：点 i → t(i)、t(i) → t(i−1)，出口 t(1) → p。每个 i 都能沿链走到 t(1)，再走到 p。</p>
+    <p>还有一种「前缀 [1, x] 的每个点到前缀 [1, y] 的每个点」，两边各搭一串链，中间用一条边对接即可。</p>
+
+    <h2>四、后缀与区间</h2>
+    <p>后缀就是把前缀反过来。后缀 [x, f] 的每个点，用一串 suf 辅助点：suf(i) → suf(i+1)，点 i 接在自己的辅助点上，出口放在 suf(f)。</p>
+    <p>前缀和后缀配合，就能覆盖一段区间 [l, r] 的限制。2-SAT 里「挖掉」不方便直接做，但很多限制本来就拆成两半：一半是「位置 ≤ r 的一个前缀」，一半是「位置 ≥ l 的一个后缀」，左右各一条边就建完了。</p>
+    <p>本课三道用它的题，都是这个形态：要么是「集合里至多选一个」，要么是「单选的阈值开关」。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="区间限制拆成前缀与后缀" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="24" y="26" font-size="12" fill="#374151">一段区间，拆成前缀加后缀</text>
+        <text x="40" y="58" font-size="11" fill="#2563eb">前缀 [1, r]：一串 pre 辅助点</text>
+        <g stroke-width="1.3">
+          <rect x="40" y="70" width="56" height="32" rx="4" fill="#dbeafe" stroke="#2563eb"/>
+          <rect x="116" y="70" width="56" height="32" rx="4" fill="#dbeafe" stroke="#2563eb"/>
+          <rect x="192" y="70" width="56" height="32" rx="4" fill="#dbeafe" stroke="#2563eb"/>
+          <rect x="268" y="70" width="56" height="32" rx="4" fill="#dbeafe" stroke="#2563eb"/>
+          <rect x="344" y="70" width="56" height="32" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <rect x="420" y="70" width="56" height="32" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <rect x="496" y="70" width="56" height="32" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="68" y="91">1</text>
+          <text x="144" y="91">2</text>
+          <text x="220" y="91">3</text>
+          <text x="296" y="91">4</text>
+          <text x="372" y="91">5</text>
+          <text x="448" y="91">6</text>
+          <text x="524" y="91">7</text>
+        </g>
+
+        <text x="40" y="138" font-size="11" fill="#ea580c">后缀 [l, f]：一串 suf 辅助点</text>
+        <g stroke-width="1.3">
+          <rect x="40" y="150" width="56" height="32" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <rect x="116" y="150" width="56" height="32" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <rect x="192" y="150" width="56" height="32" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <rect x="268" y="150" width="56" height="32" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <rect x="344" y="150" width="56" height="32" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <rect x="420" y="150" width="56" height="32" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+          <rect x="496" y="150" width="56" height="32" rx="4" fill="#ffedd5" stroke="#ea580c"/>
+        </g>
+        <g font-size="12" fill="#1f2328" text-anchor="middle">
+          <text x="68" y="171">1</text>
+          <text x="144" y="171">2</text>
+          <text x="220" y="171">3</text>
+          <text x="296" y="171">4</text>
+          <text x="372" y="171">5</text>
+          <text x="448" y="171">6</text>
+          <text x="524" y="171">7</text>
+        </g>
+        <text x="24" y="232" font-size="11" fill="#6b7280">两半各花 O(1) 条边，区间限制就建好了</text>
+      </svg>
+      <figcaption>位置上一个区间，落到图里是一段前缀加一段后缀，各用一条边接出去</figcaption>
+    </figure>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="朴素与优化后的边数对比" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="24" y="26" font-size="12" fill="#374151">同样的限制，边数差一个量级</text>
+        <rect x="40" y="50" width="540" height="22" rx="4" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+        <text x="52" y="66" font-size="11" fill="#ea580c">朴素：每条限制 O(L)，总计 O(n²)</text>
+        <rect x="40" y="98" width="120" height="22" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.4"/>
+        <text x="172" y="114" font-size="11" fill="#2563eb">前缀链：每条限制 O(1)，总计 O(n + m)</text>
+        <text x="24" y="160" font-size="11" fill="#6b7280">n = 10⁶ 时，朴素是 10¹² 条边，存不下；优化后是线性条边。</text>
+        <text x="24" y="184" font-size="11" fill="#6b7280">链本身只搭一次，被同方向的所有限制共享。</text>
+      </svg>
+      <figcaption>辅助点链把平方级的边数压回线性，代价是预先花 O(n) 搭链</figcaption>
+    </figure>
+
+    <p>交互演示走一遍这套构造。</p>
+
+    <div class="viz">
+      <div class="viz-title">从逐条连边到一条边覆盖一整段</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">点 p 要让前缀 [1, 5] 里的每个点都被覆盖。点「下一步」，看朴素做法怎么连、辅助点链怎么搭、一条边怎么替掉一整排边。</p>
+      <svg id="preSvg" viewBox="0 0 620 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="前缀优化建图逐步演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot partial"></span>正在处理的连边</span>
+        <span><span class="dot full"></span>辅助点链</span>
+        <span><span class="dot skip"></span>被覆盖的点</span>
+      </div>
+      <div class="breakdown" id="preInfo"></div>
+      <div class="viz-controls">
+        <button class="pre-btn" id="prePrev" type="button">上一步</button>
+        <button class="pre-btn" id="preNext" type="button">下一步</button>
+        <button class="pre-btn" id="preReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>五、题目1：谜语</h2>
+    <p>无向图有 n 个点、m 条边，一共 k 个阵营，每个点属于恰好一个阵营。选一些点当关键点，要求每个阵营恰好一个关键点，并且每条边至少有一个端点被选。</p>
+    <p>两条限制分开建图。变量是「点 i 是不是关键点」，节点 i 表示选，节点 i+n 表示不选。</p>
+    <p>每条边 (u, v) 至少一个端点被选，就是子句 (u ∨ v)，拆成两条边 ¬u → v、¬v → u。</p>
+    <p>「每个阵营恰好一个」拆两半。核心那半边是「阵营里不能同时选两个」：设阵营的点排成 arr[1..w]，只要 arr[i] 被选，前缀 arr[1..i−1] 和后缀 arr[i+1..w] 里就都不能有被选的点。</p>
+    <p>于是一组配两串辅助点。前缀链 A(i) 表示「arr[1..i] 里一个都没选」，边 A(i) → ¬arr[i]（前缀空则 arr[i] 不能选）、A(i) → A(i−1)（前缀更长也空）、arr[i] → A(i−1)（arr[i] 选了，前缀就必须空）。后缀链 B(i) 表示「arr[i..w] 里一个都没选」，边方向对称。</p>
+    <p>这样 link 一次给整组配好 O(w) 条边，替换掉原本的 w² 条。</p>
+    <p>另一半边，「至少一个」，不用建图。如果某个阵营一个都没选，随手把一个点改成关键点就行；而增加关键点只会让「每条边至少一个端点」更容易满足。所以判定可满足性时，只判「至多一个」就够了。</p>
+
+    <p>完整代码：</p>
+
+            <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 5000001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 10000001;
+    <span class="kw">int</span> n, m, k, w, cntt;
+    <span class="kw">int</span> arr[MAXN];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">link</span>() {
+        cntt++;
+        addEdge(cntt, arr[1] + n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= w; i++) {
+            cntt++;
+            addEdge(cntt, arr[i] + n);
+            addEdge(arr[i], cntt - 1);
+            addEdge(cntt, cntt - 1);
+        }
+        cntt++;
+        addEdge(cntt, arr[w] + n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = w - 1; i &gt;= 1; i--) {
+            cntt++;
+            addEdge(cntt, arr[i] + n);
+            addEdge(arr[i], cntt - 1);
+            addEdge(cntt, cntt - 1);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; k;
+        cntt = n &lt;&lt; 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= m; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u + n, v);
+            addEdge(v + n, u);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= k; i++) {
+            cin &gt;&gt; w;
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= w; j++) {
+                cin &gt;&gt; arr[j];
+            }
+            link();
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntt; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        <span class="kw">bool</span> check = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (belong[i] == belong[i + n]) {
+                check = <span class="kw">false</span>;
+                <span class="kw">break</span>;
+            }
+        }
+        cout &lt;&lt; (check ? "TAK" : "NIE") &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>六、题目2：互质</h2>
+    <p>n 张卡片，每张给两个待选数字，各选一个作为卡片的值。要求任意两张卡片的值都互质，问有没有方案。</p>
+    <p>变量是「卡片 i 选 a_i 还是 b_i」，两个假设就是节点 i 与 i+n。</p>
+    <p>两个数不互质，等价于它们共享一个质因子。于是换个角度按质因子分组：对每个质数 p，把所有「值能被 p 整除」的那一侧假设归成一组，这一组里最多只能有一个成立。</p>
+    <p>这又回到「集合里至多选一个」，用前缀加后缀链压边。做法是先用欧拉筛求出最小质因子表，把每张卡片的两个值分解成质因子，得到一堆（质因子 p，节点编号）的二元组。按 p 排序，同一个 p 的聚成一组，组内在节点顺序上套用上一节那串链。</p>
+    <p>每个节点只在自己所属的组里被约束一次，辅助点总数和总质因子个数同阶。</p>
+
+            <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Node {
+        <span class="kw">int</span> p, i;
+    };
+
+    <span class="kw">bool</span> <span class="fn">NodeCmp</span>(Node a, Node b) {
+        <span class="kw">if</span> (a.p != b.p) {
+            <span class="kw">return</span> a.p &lt; b.p;
+        }
+        <span class="kw">return</span> a.i &lt; b.i;
+    }
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 1000001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXV = 2000001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 3000001;
+    <span class="kw">int</span> n, cntt, maxv;
+    <span class="kw">int</span> ab[MAXN];
+
+    <span class="kw">bool</span> vis[MAXV];
+    <span class="kw">int</span> prime[MAXV];
+    <span class="kw">int</span> minp[MAXV];
+    <span class="kw">int</span> cntp;
+
+    Node arr[MAXN];
+    <span class="kw">int</span> cnta;
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXN];
+    <span class="kw">int</span> low[MAXN];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">int</span> <span class="fn">other</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> x &lt;= n ? (x + n) : (x - n);
+    }
+
+    <span class="kw">void</span> <span class="fn">euler</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= maxv; i++) {
+            <span class="kw">if</span> (!vis[i]) {
+                prime[++cntp] = i;
+                minp[i] = i;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1, p, v; j &lt;= cntp; j++) {
+                p = prime[j];
+                v = i * p;
+                <span class="kw">if</span> (v &gt; maxv) {
+                    <span class="kw">break</span>;
+                }
+                vis[v] = <span class="kw">true</span>;
+                minp[v] = p;
+                <span class="kw">if</span> (i % p == 0) {
+                    <span class="kw">break</span>;
+                }
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">decompose</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n &lt;&lt; 1; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> v = ab[i], p = minp[v]; v &gt; 1; p = minp[v]) {
+                arr[++cnta].p = p;
+                arr[cnta].i = i;
+                <span class="kw">while</span> (v % p == 0) {
+                    v /= p;
+                }
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">link</span>() {
+        sort(arr + 1, arr + cnta + 1, NodeCmp);
+        <span class="kw">for</span> (<span class="kw">int</span> l = 1, r = 1; l &lt;= cnta; l = ++r) {
+            <span class="kw">while</span> (r + 1 &lt;= cnta &amp;&amp; arr[l].p == arr[r + 1].p) {
+                r++;
+            }
+            cntt++;
+            addEdge(cntt, other(arr[l].i));
+            <span class="kw">for</span> (<span class="kw">int</span> i = l + 1; i &lt;= r; i++) {
+                cntt++;
+                addEdge(cntt, other(arr[i].i));
+                addEdge(arr[i].i, cntt - 1);
+                addEdge(cntt, cntt - 1);
+            }
+            cntt++;
+            addEdge(cntt, other(arr[r].i));
+            <span class="kw">for</span> (<span class="kw">int</span> i = r - 1; i &gt;= l; i--) {
+                cntt++;
+                addEdge(cntt, other(arr[i].i));
+                addEdge(arr[i].i, cntt - 1);
+                addEdge(cntt, cntt - 1);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        cntt = n &lt;&lt; 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, a, b; i &lt;= n; i++) {
+            cin &gt;&gt; a &gt;&gt; b;
+            ab[i] = a;
+            ab[i + n] = b;
+            maxv = max(maxv, max(a, b));
+        }
+        euler();
+        decompose();
+        link();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntt; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        <span class="kw">bool</span> check = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (belong[i] == belong[i + n]) {
+                check = <span class="kw">false</span>;
+                <span class="kw">break</span>;
+            }
+        }
+        cout &lt;&lt; (check ? "Yes" : "No") &lt;&lt; "\n";
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>七、题目3：电台</h2>
+    <p>在 [1, f] 里选一个固定频率 ansx。p 个电台，每个给定频率范围 [l, r]，频率范围包含 ansx 的电台才能签约。签约还要满足 n 条「至少签 u 或 v」的要求、m 条「u 和 v 不能同时签」的限制。</p>
+    <p>变量是「电台 i 是否签约」，节点 i 表示签，i+p 表示不签。要求和限制都是常规子句：u ∨ v 拆成 ¬u → v、¬v → u；u 与 v 不能同时签拆成 u → ¬v、v → ¬u。</p>
+    <p>新东西是频率带来的约束，这里前缀链的含义和前面不一样：辅助点直接表示 ansx 与某个阈值的大小关系。pre(k) 表示「ansx ≤ k」，suf(k) 表示「ansx ≥ k」。</p>
+    <p>两串链负责传递单调性：pre(k−1) → pre(k)（ansx ≤ k−1 则当然 ansx ≤ k），suf(k+1) → suf(k)（ansx ≥ k+1 则 ansx ≥ k）。</p>
+    <p>电台 i 的约束「签了 i，ansx 就得落在 [l_i, r_i]」拆成两条边：i → pre(r_i) 和 i → suf(l_i)。</p>
+    <p>反过来「ansx 落在 [l_i, r_i] 外面就不能签 i」也要建：pre(l_i−1) → ¬i（频率太小，即 ansx ≤ l_i−1），suf(r_i+1) → ¬i（频率太大，即 ansx ≥ r_i+1）。这两条正是「一整段前缀 / 后缀到一个点」，靠链的走法各一条边搞定。</p>
+    <p>最后 ansx 不用显式求。一旦电台 i 入选就要求 ansx ≥ l_i，取所有入选电台 l_i 里的最大值作为 ansx 即可。链和那些通向 ¬i 的边会保证不会有某个入选电台的 r_i 小于这个最大值。</p>
+
+            <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 400001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 2000001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 4000001;
+    <span class="kw">int</span> n, p, f, m, cntt;
+
+    <span class="kw">int</span> l[MAXN];
+    <span class="kw">int</span> r[MAXN];
+
+    <span class="kw">int</span> head[MAXT];
+    <span class="kw">int</span> nxt[MAXM];
+    <span class="kw">int</span> to[MAXM];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dfn[MAXT];
+    <span class="kw">int</span> low[MAXT];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> sta[MAXT];
+    <span class="kw">int</span> top;
+
+    <span class="kw">int</span> belong[MAXT];
+    <span class="kw">int</span> sccCnt;
+
+    <span class="kw">int</span> pre[MAXN];
+    <span class="kw">int</span> suf[MAXN];
+
+    <span class="kw">int</span> ansx;
+    <span class="kw">int</span> pick[MAXN];
+    <span class="kw">int</span> siz;
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">link</span>() {
+        pre[1] = ++cntt;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= f; i++) {
+            pre[i] = ++cntt;
+            addEdge(pre[i - 1], pre[i]);
+        }
+        suf[f] = ++cntt;
+        <span class="kw">for</span> (<span class="kw">int</span> i = f - 1; i &gt;= 1; i--) {
+            suf[i] = ++cntt;
+            addEdge(suf[i + 1], suf[i]);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= p; i++) {
+            addEdge(i, pre[r[i]]);
+            addEdge(i, suf[l[i]]);
+            <span class="kw">if</span> (l[i] - 1 &gt;= 1) {
+                addEdge(pre[l[i] - 1], i + p);
+            }
+            <span class="kw">if</span> (r[i] + 1 &lt;= f) {
+                addEdge(suf[r[i] + 1], i + p);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u) {
+        dfn[u] = low[u] = ++cntd;
+        sta[++top] = u;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            <span class="kw">if</span> (dfn[v] == 0) {
+                tarjan(v);
+                low[u] = min(low[u], low[v]);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (belong[v] == 0) {
+                    low[u] = min(low[u], dfn[v]);
+                }
+            }
+        }
+        <span class="kw">if</span> (dfn[u] == low[u]) {
+            sccCnt++;
+            <span class="kw">int</span> pop;
+            <span class="kw">do</span> {
+                pop = sta[top--];
+                belong[pop] = sccCnt;
+            } <span class="kw">while</span> (pop != u);
+        }
+    }
+
+    <span class="kw">bool</span> <span class="fn">compute</span>() {
+        <span class="kw">bool</span> check = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= p; i++) {
+            <span class="kw">if</span> (belong[i] == belong[i + p]) {
+                check = <span class="kw">false</span>;
+                <span class="kw">break</span>;
+            } <span class="kw">else</span> <span class="kw">if</span> (belong[i] &lt; belong[i + p]) {
+                ansx = max(ansx, l[i]);
+                pick[++siz] = i;
+            }
+        }
+        <span class="kw">return</span> check;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; p &gt;&gt; f &gt;&gt; m;
+        cntt = p &lt;&lt; 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= n; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u + p, v);
+            addEdge(v + p, u);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= p; i++) {
+            cin &gt;&gt; l[i] &gt;&gt; r[i];
+        }
+        link();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt;= m; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v + p);
+            addEdge(v, u + p);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntt; i++) {
+            <span class="kw">if</span> (dfn[i] == 0) {
+                tarjan(i);
+            }
+        }
+        <span class="kw">bool</span> check = compute();
+        <span class="kw">if</span> (check) {
+            cout &lt;&lt; siz &lt;&lt; " " &lt;&lt; ansx &lt;&lt; "\n";
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= siz; i++) {
+                cout &lt;&lt; pick[i] &lt;&lt; " ";
+            }
+        } <span class="kw">else</span> {
+            cout &lt;&lt; -1 &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>八、复杂度分析</h2>
+    <p>设原问题有 N 个 2-SAT 节点、M 条限制，前缀（后缀）链额外引入 O(N) 个辅助点。关键的差别在一次「点 ↔ 前缀」连边的代价。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>做法</th><th>一次「点 ↔ 前缀」连边</th><th>总边数</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>逐个连边</td><td><code class="inline">O(L)</code>（L 为前缀长度）</td><td><code class="inline">O(N²)</code></td></tr>
+        <tr><td>线段树优化建图</td><td><code class="inline">O(log N)</code></td><td><code class="inline">O((N + M) log N)</code></td></tr>
+        <tr><td>前缀 / 后缀优化建图</td><td><code class="inline">O(1)</code></td><td><code class="inline">O(N + M)</code></td></tr>
+      </tbody>
+    </table>
+    <p>朴素做法最坏情况是 O(N²) 条边，N 到 10⁶ 时是 10¹² 条，时间和空间都撑不住。前缀链把它压回 O(N + M)：链本身只搭一次，共约 2N 条边，之后每条限制固定 1 条边。</p>
+    <p>整体流程是：O(N + M) 建图，Tarjan 求强连通分量 O(N + M) 时间、O(N + M) 空间，判定和取解 O(N)。点数变成原节点数加上辅助点数，仍是线性规模。</p>
+    <p>谜语题的辅助点是每个阵营各一串，总数与阵营里点的总数同阶，不超过 N；互质题的辅助点数与总质因子个数同阶；电台题的 pre、suf 各 f 个，f 与 p 同阶。</p>
+
+    <h2>九、最后</h2>
+    <p>前缀优化的卖点是一句话：把「连一整段」换成「连一个入口」。入口就是链头，链负责把一步拆成一路走到底，代价是预先花 O(n) 搭链。</p>
+    <p>和线段树优化建图对照着记：线段树管任意区间，每次 O(log n)；前缀链只管前缀和后缀，但每次 O(1)，代码也更短。</p>
+    <p>三道题的链长得不一样，骨架是同一个。谜语和互质是「集合里至多选一个」，链挂在集合内点的顺序上；电台是「单选的阈值开关」，链挂在频率轴上。看到「一旦选了某个，就要求一整段位置满足条件」，基本就是它。</p>
+    <p>这一节用到的原理在<a href="sat.html">2-SAT</a>那页，更多结合优化建图的题目在<a href="satproblems.html">2-SAT 与优化建图的更多题目</a>里接着讲。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var P = {x:60, y:170};
+  var AUXY = 72, PTY = 272;
+  var XS = [150, 250, 350, 450, 550]; // pre1..pre5 / 点1..点5
+  var STEPS = [
+    {naive:false, chain:false, link:0, reach:0,
+     info:'目标：从 p 出发，能到达前缀 1..5 里的每一个点。先把 5 个点和 p 摆好。'},
+    {naive:true, chain:false, link:0, reach:0,
+     info:'朴素做法：p 逐个连到 1..5，一共 5 条边。前缀越长，边越多。'},
+    {naive:false, chain:true, link:0, reach:0,
+     info:'搭一串辅助点：pre(i) → pre(i−1)，并且 pre(i) → 点 i。链是建图前一次搭好的。'},
+    {naive:false, chain:true, link:5, reach:5,
+     info:'把 5 条边换成一条：p → pre5。pre5 沿链走到 pre1，每个 pre(i) 再连到点 i，1..5 全被覆盖。'},
+    {naive:false, chain:true, link:3, reach:3,
+     info:'只需要前缀 [1, 3] 时，连 p → pre3 即可，同样是 1 条边。链复用，不用重搭。'},
+    {naive:false, chain:true, link:5, reach:5,
+     info:'回头对比：朴素 5 条边，优化 1 条边；前缀长度再大，优化后也还是 1 条。'}
+  ];
+
+  var svg = document.getElementById('preSvg');
+  var info = document.getElementById('preInfo');
+  var prev = document.getElementById('prePrev');
+  var next = document.getElementById('preNext');
+  var reset = document.getElementById('preReset');
+  var at = 0;
+
+  function render(){
+    var st = STEPS[at];
+    var p = [];
+    p.push('<defs>');
+    p.push('<marker id="pa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#9aa0a6"/></marker>');
+    p.push('<marker id="pb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/></marker>');
+    p.push('<marker id="pc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/></marker>');
+    p.push('</defs>');
+
+    p.push('<text x="20" y="24" font-size="11" fill="#6b7280">' + (at === 1 ? '朴素：逐条连边' : (st.chain ? '优化：辅助点链' : '起点')) + '</text>');
+
+    // 朴素连边
+    if (st.naive) {
+      for (var i = 0; i < 5; i++) {
+        p.push('<line x1="' + (P.x + 14) + '" y1="' + (P.y - 4) + '" x2="' + XS[i] + '" y2="' + (PTY - 17) + '" stroke="#ea580c" stroke-width="1.5"/>');
+      }
+    }
+
+    // 辅助点链
+    if (st.chain) {
+      for (var i = 4; i >= 1; i--) {
+        var hl = (st.link && i <= st.link && (i - 1) <= st.link);
+        p.push('<line x1="' + (XS[i] - 21) + '" y1="' + AUXY + '" x2="' + (XS[i-1] + 21) + '" y2="' + AUXY + '" stroke="' + (hl ? '#93c5fd' : '#c9ced4') + '" stroke-width="1.4" marker-end="url(#pa)"/>');
+      }
+      for (var j = 0; j < 5; j++) {
+        var hl2 = st.link && (j + 1) <= st.link;
+        p.push('<line x1="' + XS[j] + '" y1="' + (AUXY + 21) + '" x2="' + XS[j] + '" y2="' + (PTY - 16) + '" stroke="' + (hl2 ? '#93c5fd' : '#c9ced4') + '" stroke-width="1.3" marker-end="url(#pa)"/>');
+      }
+    }
+
+    // p -> pre(link)
+    if (st.link) {
+      var tx = XS[st.link - 1], ty = AUXY;
+      p.push('<line x1="' + (P.x + 15) + '" y1="' + (P.y - 6) + '" x2="' + (tx - 21) + '" y2="' + (ty + 4) + '" stroke="#2563eb" stroke-width="2" marker-end="url(#pc)"/>');
+    }
+
+    // 辅助点
+    if (st.chain) {
+      for (var k = 0; k < 5; k++) {
+        var on = st.link && (k + 1) <= st.link;
+        p.push('<circle cx="' + XS[k] + '" cy="' + AUXY + '" r="20" fill="' + (on ? '#dbeafe' : '#f6f7f9') + '" stroke="' + (on ? '#2563eb' : '#c9ced4') + '" stroke-width="1.4"/>');
+        p.push('<text x="' + XS[k] + '" y="' + (AUXY + 4) + '" font-size="10" fill="#1f2328" text-anchor="middle">pre' + (k + 1) + '</text>');
+      }
+    }
+
+    // 目标点
+    for (var m = 0; m < 5; m++) {
+      var on2 = st.reach && (m + 1) <= st.reach;
+      p.push('<circle cx="' + XS[m] + '" cy="' + PTY + '" r="15" fill="' + (on2 ? '#ffedd5' : '#f6f7f9') + '" stroke="' + (on2 ? '#ea580c' : '#e6e8eb') + '" stroke-width="1.4"/>');
+      p.push('<text x="' + XS[m] + '" y="' + (PTY + 5) + '" font-size="12" fill="#1f2328" text-anchor="middle">' + (m + 1) + '</text>');
+    }
+
+    // p 点
+    p.push('<circle cx="' + P.x + '" cy="' + P.y + '" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>');
+    p.push('<text x="' + P.x + '" y="' + (P.y + 5) + '" font-size="12" fill="#1f2328" text-anchor="middle">p</text>');
+
+    if (st.link) {
+      p.push('<text x="' + P.x + '" y="' + (P.y + 40) + '" font-size="11" fill="#2563eb">1 条边</text>');
+    } else if (st.naive) {
+      p.push('<text x="' + P.x + '" y="' + (P.y + 40) + '" font-size="11" fill="#ea580c">5 条边</text>');
+    }
+
+    svg.innerHTML = p.join('');
+    info.innerHTML = '<div>' + st.info + '</div>';
+    prev.disabled = at === 0;
+    next.disabled = at === STEPS.length - 1;
+  }
+
+  prev.addEventListener('click', function(){ if(at > 0){ at--; render(); } });
+  next.addEventListener('click', function(){ if(at < STEPS.length - 1){ at++; render(); } });
+  reset.addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

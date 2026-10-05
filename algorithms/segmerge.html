@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线段树的合并：开点权值线段树与势能分析 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .smg-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .smg-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .smg-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  #smgMergeSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .smg-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>线段树的合并：开点权值线段树与势能分析</h1>
+    <p class="intro">一个节点配一棵权值线段树，父节点要把所有儿子的信息汇总起来，这是树上统计题反复出现的形状。把儿子的元素逐个插进父亲的树太慢，线段树合并换了个思路：两棵树同位置的节点直接叠在一起。这一页讲合并的三条规则、一次合并的单步过程，以及为什么所有合并加起来的总代价只有 O(n log n)。</p>
+
+    <h2>零、背景</h2>
+    <p>这一讲的前置是开点线段树和可持久化线段树；题目2 还要并查集，题目3、题目4 还要树上倍增求 LCA 和树上差分。</p>
+    <p>下节课讲两件事：用合并加速树形 dp 的转移，以及线段树的分裂。这一页和下一页（五道题目）只覆盖合并本身。</p>
+
+    <h2>一、问题：n 棵小树要合成几棵大树</h2>
+    <p>值域是 1 到 V，一开始有 n 棵权值线段树，每棵里只有很少的元素，用开点的方式存，每棵占 O(log V) 个节点。接下来要按某种顺序把它们两两合并，合并出来的树还要支持查询：区间和、第 k 小、最大词频等等。</p>
+    <p>树上题目里最常见的形状是：原树每个点 u 有一棵权值线段树，要求 u 的答案时，这棵树里必须已经装好 u 整棵子树的全部信息。于是 u 的树 = 自己的元素 + 所有儿子的树合并的结果。</p>
+
+    <h2>二、朴素做法为什么慢</h2>
+    <p>最直接的做法是遍历 t2，把里面的每个元素逐个 add 进 t1。一次插入 O(log V)，t2 里元素数是它代表的元素个数，最坏到 O(n)，于是合并一对是 O(n log V)，n 对下来 O(n² log V)，n = 10⁵ 时完全不能接受。</p>
+    <p>静态的子树统计确实也可以走 dfs 序加主席树，前缀相减就得到子树。但一旦「要汇总的那些元素」不是一个固定的 dfn 区间，比如连通块会随着加边而合并（题目2），或者每个点的信息来自树上差分的四个标记点（题目3、题目4），区间相减这条路就不通了，得换成真正的合并。</p>
+
+    <h2>三、合并的三条规则</h2>
+    <p>设 t1、t2 是同一段值域 [l, r] 上的两个节点，merge(l, r, t1, t2) 返回合并后的节点：</p>
+    <p>1，如果 t1 == 0 或者 t2 == 0，直接返回 t1 + t2。空节点可以忽略，不空的那个就是结果，连递归都不用进。</p>
+    <p>2，如果 t1 和 t2 都不为 0，并且 l == r，说明到了叶子，把 t2 的信息加到 t1 上（计数相加、取最大值……看你维护的是什么），返回 t1。</p>
+    <p>3，剩下的情况：t1、t2 都不为 0 且区间还能再分。t1 接受 t2 的全部信息并由 t1 当总节点，递归合并左右两对儿子，把返回值挂成 t1 的左、右孩子，最后 up(t1) 重新算自己的信息，返回 t1。</p>
+    <p>可以发现合并是「就地」的：结果永远是 t1 那棵树长出来的，t2 的节点只会被丢弃或者被挂到 t1 下面。整个过程一个节点都不新建。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 272" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="两棵开点权值线段树合并前后" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#9aa0a6" stroke-width="1.2" fill="none">
+          <path d="M110 62 L62 104"/><path d="M110 62 L158 104"/>
+          <path d="M62 136 L40 178"/><path d="M158 136 L133 178"/>
+          <path d="M345 62 L297 104"/><path d="M345 62 L393 104"/>
+          <path d="M297 136 L322 178"/><path d="M393 136 L368 178"/>
+          <path d="M578 62 L530 104"/><path d="M578 62 L626 104"/>
+          <path d="M530 136 L508 178"/><path d="M530 136 L555 178"/><path d="M626 136 L601 178"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.3">
+          <rect x="78" y="30" width="64" height="30" rx="6"/>
+          <rect x="34" y="104" width="60" height="30" rx="6"/>
+          <rect x="130" y="104" width="60" height="30" rx="6"/>
+          <rect x="18" y="178" width="44" height="28" rx="6"/>
+          <rect x="111" y="178" width="44" height="28" rx="6"/>
+          <rect x="313" y="30" width="64" height="30" rx="6"/>
+          <rect x="269" y="104" width="60" height="30" rx="6"/>
+          <rect x="365" y="104" width="60" height="30" rx="6"/>
+          <rect x="300" y="178" width="44" height="28" rx="6"/>
+          <rect x="346" y="178" width="44" height="28" rx="6"/>
+          <rect x="546" y="30" width="64" height="30" rx="6"/>
+          <rect x="502" y="104" width="60" height="30" rx="6"/>
+          <rect x="598" y="104" width="60" height="30" rx="6"/>
+          <rect x="486" y="178" width="44" height="28" rx="6"/>
+          <rect x="533" y="178" width="44" height="28" rx="6"/>
+          <rect x="579" y="178" width="44" height="28" rx="6"/>
+        </g>
+        <g fill="#ffedd5" stroke="#ea580c" stroke-width="1.3">
+          <rect x="302" y="178" width="44" height="28" rx="6"/>
+        </g>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="110" y="49">1~4 · 2</text><text x="64" y="123">1~2 · 1</text><text x="160" y="123">3~4 · 1</text>
+          <text x="40" y="196">1 · 1</text><text x="133" y="196">3 · 1</text>
+          <text x="345" y="49">1~4 · 2</text><text x="299" y="123">1~2 · 1</text><text x="395" y="123">3~4 · 1</text>
+          <text x="324" y="196">2 · 1</text><text x="368" y="196">3 · 1</text>
+          <text x="578" y="49">1~4 · 4</text><text x="532" y="123">1~2 · 2</text><text x="628" y="123">3~4 · 2</text>
+          <text x="508" y="196">1 · 1</text><text x="555" y="196">2 · 1</text><text x="601" y="196">3 · 2</text>
+        </g>
+        <g fill="#1f2328" stroke="none">
+          <text x="227" y="112" font-size="18" text-anchor="middle" fill="#ea580c">＋</text>
+          <text x="461" y="112" font-size="18" text-anchor="middle" fill="#2563eb">→</text>
+        </g>
+        <g font-size="11" fill="#374151" text-anchor="middle">
+          <text x="110" y="234">t1 = {1, 3}</text><text x="110" y="250">5 个开点节点</text>
+          <text x="345" y="234">t2 = {2, 3}</text><text x="345" y="250">5 个开点节点</text>
+          <text x="578" y="234">t1 = {1, 2, 3, 3}</text><text x="578" y="250">6 个节点，没新建</text>
+        </g>
+        <text x="340" y="266" font-size="11" fill="#6b7280" text-anchor="middle">区间 3~4 上两棵树都有节点，递归下去把 3 的计数加成 2；区间 1~2 上两边各占一半，直接返回对方的那个节点</text>
+      </svg>
+      <figcaption>合并前后：节点数从 10 降到 6，多出来的 4 个节点是 t2 的根、两个中层节点和那个重复的叶子 3</figcaption>
+    </figure>
+
+    <p>具体到这个例子，t1 = {1, 3}、t2 = {2, 3}，值域 1~4。区间 1~2 这一支上，t1 只有叶子 1、t2 只有叶子 2，两边一合并就是规则 1 的「返回 t1 + t2」，一次比较就完事；区间 3~4 这一支两边都有叶子 3，走到规则 2，计数相加变成 2。</p>
+
+    <h2>四、一次合并的单步过程</h2>
+    <p>下面这个演示把上面那次合并拆成每一步，左边是 t1 当前的树，中间是 t2（被丢弃的节点画成虚线），右边是递归栈和几个计数。点「下一步」跟着走一遍。</p>
+
+    <div class="viz">
+      <div class="viz-title">merge(t1, t2) 单步演示</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">t1 = {1, 3}，t2 = {2, 3}，值域 1~4。橙色节点是从 t2 那边过来的，虚线节点是已经被丢弃的。走完可以看到：4 次「两边都不为空」的调用，正好销毁 4 个节点。</p>
+      <svg id="smgMergeSvg" viewBox="0 0 680 272" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="线段树合并单步演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="breakdown" id="smgMergeInfo"></div>
+      <div class="viz-controls">
+        <button class="smg-btn" id="smgPrev" type="button">上一步</button>
+        <button class="smg-btn" id="smgNext" type="button">下一步</button>
+        <button class="smg-btn" id="smgReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <p>完整实现的骨架就是下面两句话：add 是开点插入，merge 是合并。siz 换成别的信息（最大值、词频）时，只要同步改 up 和叶子上的合并动作，merge 的结构一行都不用动。</p>
+
+            <pre class="code"><span class="cm">// 开点线段树：单点增加，i 为 0 表示空节点，用到才开</span>
+    <span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = i;
+        <span class="kw">if</span> (rt == 0) {
+            rt = ++cntt;
+        }
+        <span class="kw">if</span> (l == r) {
+            siz[rt]++;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                ls[rt] = add(jobi, l, mid, ls[rt]);
+            } <span class="kw">else</span> {
+                rs[rt] = add(jobi, mid + 1, r, rs[rt]);
+            }
+            up(rt);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="cm">// 线段树合并：t1 吸收 t2，返回合并后的根</span>
+    <span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> t1, <span class="kw">int</span> t2) {
+        <span class="kw">if</span> (t1 == 0 || t2 == 0) {
+            <span class="kw">return</span> t1 + t2;
+        }
+        <span class="kw">if</span> (l == r) {
+            siz[t1] += siz[t2];
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            ls[t1] = merge(l, mid, ls[t1], ls[t2]);
+            rs[t1] = merge(mid + 1, r, rs[t1], rs[t2]);
+            up(t1);
+        }
+        <span class="kw">return</span> t1;
+    }</pre>
+
+    <h2>五、树上从叶向根一路合并</h2>
+    <p>合并本身写好了，用起来就是一次后序遍历：递归算完每个儿子，把儿子的树并进自己，然后在这棵汇总好的树上查自己的答案。叶子没有儿子，树里只有自己那一个元素。</p>
+    <p>查询的时机要留意：必须在所有儿子都并进来之后才查，所以 ans[u] 的赋值放在循环之后。这一句顺序写反了，答案就变成「只统计了部分子树」。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 292" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="树上从叶向根一路合并" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#9aa0a6" stroke-width="1.3">
+          <line x1="170" y1="40" x2="100" y2="118"/>
+          <line x1="170" y1="40" x2="240" y2="118"/>
+          <line x1="100" y1="118" x2="55" y2="196"/>
+          <line x1="100" y1="118" x2="145" y2="196"/>
+          <line x1="240" y1="118" x2="195" y2="196"/>
+          <line x1="240" y1="118" x2="285" y2="196"/>
+        </g>
+        <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+          <circle cx="170" cy="40" r="19"/>
+          <circle cx="100" cy="118" r="19"/>
+          <circle cx="240" cy="118" r="19"/>
+        </g>
+        <g fill="#f6f7f9" stroke="#2563eb" stroke-width="1.5">
+          <circle cx="55" cy="196" r="19"/>
+          <circle cx="145" cy="196" r="19"/>
+          <circle cx="195" cy="196" r="19"/>
+          <circle cx="285" cy="196" r="19"/>
+        </g>
+        <g font-size="13" fill="#1f2328" text-anchor="middle">
+          <text x="170" y="45">5</text><text x="100" y="123">2</text><text x="240" y="123">7</text>
+          <text x="55" y="201">1</text><text x="145" y="201">6</text><text x="195" y="201">3</text><text x="285" y="201">4</text>
+        </g>
+        <g font-size="10" fill="#6b7280">
+          <text x="55" y="230" text-anchor="middle">树 {1}</text>
+          <text x="145" y="230" text-anchor="middle">树 {6}</text>
+          <text x="195" y="230" text-anchor="middle">树 {3}</text>
+          <text x="285" y="230" text-anchor="middle">树 {4}</text>
+          <text x="100" y="152" text-anchor="middle">树 {1,2,6}</text>
+          <text x="240" y="152" text-anchor="middle">树 {3,4,7}</text>
+          <text x="170" y="74" text-anchor="middle">树 {1,2,3,4,5,6,7}</text>
+        </g>
+        <text x="24" y="262" font-size="11" fill="#374151">圆里是能力值，下面是这个点合并完之后树里的全部值</text>
+        <line x1="322" y1="30" x2="322" y2="262" stroke="#e6e8eb" stroke-width="1.2"/>
+        <text x="344" y="36" font-size="12" fill="#2563eb">后序：算完儿子，把儿子的树并进来</text>
+        <g font-size="11" fill="#374151">
+          <text x="344" y="66">calc(4)：叶子，树里只有 1</text>
+          <text x="344" y="88">calc(5)：叶子，树里只有 6</text>
+          <text x="344" y="110">calc(2)：并进 4、5 → {1,2,6}</text>
+          <text x="344" y="128" fill="#6b7280">          查 &gt; 2 的个数 → 1</text>
+          <text x="344" y="152">calc(6)：叶子，树里只有 3</text>
+          <text x="344" y="174">calc(7)：叶子，树里只有 4</text>
+          <text x="344" y="196">calc(3)：并进 6、7 → {3,4,7}</text>
+          <text x="344" y="214" fill="#6b7280">          查 &gt; 7 的个数 → 0</text>
+          <text x="344" y="238">calc(1)：并进 2、3 → 全树 7 个数</text>
+          <text x="344" y="256" fill="#6b7280">          查 &gt; 5 的个数 → 2</text>
+        </g>
+        <rect x="336" y="270" width="332" height="0" fill="none"/>
+      </svg>
+      <figcaption>七个人的公司树：线段树只在「儿子 → 父亲」这条边上合并一次，每个点合并完立刻查自己的答案</figcaption>
+    </figure>
+
+    <p>这七个点对应的答案依次是 2 1 0 0 0 0 0，下面题目1 的页面会用同一棵树把细节展开。</p>
+
+    <h2>六、复杂度分析</h2>
+    <p>值域写成 V（离散化之后 V ≤ n）。先看空间：每棵树是单点插入的开点线段树，占 O(log V) 个节点，n 棵一共 O(n log V)；合并只丢弃节点、从不新建，所以峰值也是 O(n log V)。</p>
+    <p>时间用势能分析。取势能 Φ = 当前所有线段树的节点总数。一次 merge 调用里如果 t1、t2 都不为 0，返回的一定是 t1，t2 这个节点从此不再被任何指针引用，Φ 至少减 1。Φ 初始是 O(n log V) 且不会增加，所以这类调用的总次数 ≤ O(n log V)。如果有一个为 0，函数 O(1) 就返回了，而这种调用只可能从上面那类调用里成对派生出来（每次递归最多派生 2 个），数量同样是 O(n log V)。</p>
+    <p>合起来，不管合并的顺序是什么、合并多少对，全部合并行为加起来的总时间是 O(n log V)，加上建树的 O(n log V)，整体 O(n log V)。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 208" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="n 等于 10 万时的实测节点数与调用次数" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="24" y="26" font-size="12" fill="#2563eb">n = 100000 的随机树，题目1 代码实测</text>
+        <g font-size="11" fill="#374151">
+          <text x="24" y="62">建完 n 棵树后的节点数</text>
+          <text x="24" y="102">merge 被调用的总次数</text>
+          <text x="24" y="142">其中「两边都不为空」</text>
+          <text x="24" y="182">全部合并完之后的节点数</text>
+        </g>
+        <g>
+          <rect x="200" y="46" width="240" height="22" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.1"/>
+          <text x="450" y="62" font-size="11" fill="#1f2328">1768925 ≈ 17.7 n</text>
+          <rect x="200" y="86" width="440" height="22" rx="4" fill="#ffedd5" stroke="#ea580c" stroke-width="1.1"/>
+          <text x="650" y="102" font-size="11" fill="#1f2328" text-anchor="end">3237857</text>
+          <rect x="200" y="126" width="214" height="22" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.1"/>
+          <text x="424" y="142" font-size="11" fill="#1f2328">1568932</text>
+          <rect x="200" y="166" width="240" height="22" rx="4" fill="#f6f7f9" stroke="#9aa0a6" stroke-width="1.1"/>
+          <text x="450" y="182" font-size="11" fill="#1f2328">1768925，和合并前一样</text>
+        </g>
+        <text x="24" y="202" font-size="11" fill="#6b7280">「两边都不为空」的次数 1568932 ≤ 节点总数 1768925，正好印证势能分析的那个不等式</text>
+      </svg>
+      <figcaption>实测：调用次数是节点数的常数倍，销毁次数不超过初始节点数，O(n log n) 不是渐进意义上的空话</figcaption>
+    </figure>
+
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>开点单点插入（建一棵树）</td><td><code class="inline">O(log V)</code></td><td><code class="inline">O(log V)</code> 个节点</td></tr>
+        <tr><td>建 n 棵初始树</td><td><code class="inline">O(n log V)</code></td><td><code class="inline">O(n log V)</code></td></tr>
+        <tr><td>单次 merge（有一个为 0）</td><td><code class="inline">O(1)</code></td><td>不新建节点</td></tr>
+        <tr><td>单次 merge（都不为 0）</td><td><code class="inline">O(1)</code> 摊还，递归部分记在势能上</td><td>销毁至少 1 个节点</td></tr>
+        <tr><td>全部合并行为加起来</td><td><code class="inline">O(n log V)</code></td><td>—</td></tr>
+        <tr><td>汇总树上的单点 / 区间 / 第 k 小查询</td><td><code class="inline">O(log V)</code></td><td>—</td></tr>
+      </tbody>
+    </table>
+    <p>V 是值域大小，离散化之后 V ≤ n，所以 O(n log n) 和这里的 O(n log V) 是一回事。数组开多大也从这个数来推：题目1 的 MAXT 取 MAXN * 40，就是给每条根到叶的路径留了足够余量。</p>
+
+    <h2>七、最后</h2>
+    <p>合并这件事本身只有十几行，真正要紧的是两个认识：一是结果永远长在 t1 上、一个节点都不新建，所以空间可以提前算死；二是「两边都不为空」的调用每发生一次就永久销毁一个节点，于是总次数被初始节点数锁住。有了这两条，剩下的问题就变成「每个点上该维护什么信息」。</p>
+    <p>下一页拿这一讲的五道题看五种不同的信息：子树里更大的能力值、连通区第 k 小、最大词频、两种树上差分的计数，以及合并时顺手统计的逆序对。</p>
+    <p>《完》</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var SVG = document.getElementById('smgMergeSvg');
+  var INFO = document.getElementById('smgMergeInfo');
+  var bPrev = document.getElementById('smgPrev');
+  var bNext = document.getElementById('smgNext');
+  var bReset = document.getElementById('smgReset');
+  if(!SVG || !INFO) return;
+
+  // 两棵树：t1 = {1,3}，t2 = {2,3}，值域 1~4
+  var POS_A = {'1,4':[110,40],'1,2':[62,104],'3,4':[158,104],'1,1':[40,178],'2,2':[87,178],'3,3':[133,178],'4,4':[180,178]};
+  var POS_B = {'1,4':[345,40],'1,2':[297,104],'3,4':[393,104],'1,1':[275,178],'2,2':[322,178],'3,3':[368,178],'4,4':[415,178]};
+  var A_EDGES = [['1,4','1,2'],['1,4','3,4'],['1,2','1,1'],['3,4','3,3']];
+  var B_EDGES = [['1,4','1,2'],['1,4','3,4'],['1,2','2,2'],['3,4','3,3']];
+
+  // 每一步：t1 面板上有哪些节点（含从 t2 过来的）、t2 面板上哪些已被丢弃、siz 覆盖值
+  var FRAMES = [
+    {desc:'初始状态。t1 有 5 个节点表示 {1, 3}，t2 有 5 个节点表示 {2, 3}，两边的值域都是 1~4。',
+     a:[['1,4','A1',2],['1,2','A2',1],['3,4','A4',1],['1,1','A3',1],['3,3','A5',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:[], hi:[], stack:[], calls:0, both:0},
+    {desc:'merge(1~4, A1, B1)：两边都不为 0，A1 吸收 B1 的信息，递归合并左右两对儿子。',
+     a:[['1,4','A1',2],['1,2','A2',1],['3,4','A4',1],['1,1','A3',1],['3,3','A5',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:[], hi:['A1','B1'], stack:['1~4'], calls:1, both:1},
+    {desc:'merge(1~2, A2, B2)：两边也都不为 0，继续往下一层递归。',
+     a:[['1,4','A1',2],['1,2','A2',1],['3,4','A4',1],['1,1','A3',1],['3,3','A5',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:[], hi:['A2','B2'], stack:['1~4','1~2'], calls:2, both:2},
+    {desc:'merge(1~1, A3, 0)：t2 是空节点，规则 1 直接返回 A3，一次比较就结束，不递归。',
+     a:[['1,4','A1',2],['1,2','A2',1],['3,4','A4',1],['1,1','A3',1],['3,3','A5',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:[], hi:['A3'], stack:['1~4','1~2','1~1'], calls:3, both:2},
+    {desc:'merge(2~2, 0, B3)：t1 是空节点，返回 0 + B3 = B3，B3 整个挂到 A2 的右孩子上。这一步同样 O(1)。',
+     a:[['1,4','A1',2],['1,2','A2',1],['3,4','A4',1],['1,1','A3',1],['3,3','A5',1],['2,2','B3',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:[], hi:['B3'], stack:['1~4','1~2','2~2'], calls:4, both:2},
+    {desc:'up(A2)：左右孩子都在了，siz = 1 + 1 = 2，返回 A2。B2 这个节点从此没人引用，被销毁。',
+     a:[['1,4','A1',2],['1,2','A2',2],['3,4','A4',1],['1,1','A3',1],['3,3','A5',1],['2,2','B3',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:['B2'], hi:['A2'], stack:['1~4','1~2'], calls:4, both:2},
+    {desc:'回到 1~4 这一层，接着合并右孩子：merge(3~4, A4, B4)，两边都不为 0，再往下递归。',
+     a:[['1,4','A1',2],['1,2','A2',2],['3,4','A4',1],['1,1','A3',1],['3,3','A5',1],['2,2','B3',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:['B2'], hi:['A4','B4'], stack:['1~4','3~4'], calls:5, both:3},
+    {desc:'merge(3~3, A5, B5)：两边都不为 0 且已经到叶子，siz[A5] = 1 + 1 = 2。数字 3 在两边各出现一次，合起来是两次。B5 被销毁。',
+     a:[['1,4','A1',2],['1,2','A2',2],['3,4','A4',1],['1,1','A3',1],['3,3','A5',2],['2,2','B3',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:['B2','B5'], hi:['A5','B5'], stack:['1~4','3~4','3~3'], calls:6, both:4},
+    {desc:'merge(4~4, 0, 0)：两边都是空节点，返回 0。数字 4 谁都没有。',
+     a:[['1,4','A1',2],['1,2','A2',2],['3,4','A4',1],['1,1','A3',1],['3,3','A5',2],['2,2','B3',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:['B2','B5'], hi:[], stack:['1~4','3~4','4~4'], calls:7, both:4},
+    {desc:'up(A4)：siz = 2 + 0 = 2，返回 A4。B4 被销毁。',
+     a:[['1,4','A1',2],['1,2','A2',2],['3,4','A4',2],['1,1','A3',1],['3,3','A5',2],['2,2','B3',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:['B2','B5','B4'], hi:['A4'], stack:['1~4','3~4'], calls:7, both:4},
+    {desc:'up(A1)：siz = 2 + 2 = 4，返回 A1。B1 被销毁。到这里 t2 整棵树只剩 B3 还挂在 t1 上。',
+     a:[['1,4','A1',4],['1,2','A2',2],['3,4','A4',2],['1,1','A3',1],['3,3','A5',2],['2,2','B3',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:['B2','B5','B4','B1'], hi:['A1'], stack:['1~4'], calls:7, both:4},
+    {desc:'合并结束。t1 现在表示 {1, 2, 3, 3}，一共 6 个节点：10 − 4。4 次「两边都不为空」的调用正好销毁 4 个节点，这就是势能分析里那个一一对应。',
+     a:[['1,4','A1',4],['1,2','A2',2],['3,4','A4',2],['1,1','A3',1],['3,3','A5',2],['2,2','B3',1]],
+     b:[['1,4','B1',2],['1,2','B2',1],['3,4','B4',1],['2,2','B3',1],['3,3','B5',1]],
+     dead:['B2','B5','B4','B1'], hi:[], stack:[], calls:7, both:4}
+  ];
+
+  function boxSize(key){
+    if(key === '1,4') return [64,30];
+    if(key === '1,2' || key === '3,4') return [60,30];
+    return [44,28];
+  }
+  function intervalText(key){ return key.replace(',', '~'); }
+
+  function drawNode(pos, key, siz, opt){
+    var wh = boxSize(key);
+    var x = pos[0] - wh[0]/2, y = pos[1] - wh[1]/2;
+    var s = '<rect x="' + x + '" y="' + y + '" width="' + wh[0] + '" height="' + wh[1] + '" rx="6" ';
+    s += 'fill="' + opt.fill + '" stroke="' + opt.stroke + '" stroke-width="' + (opt.hi ? 2.2 : 1.3) + '"';
+    if(opt.dash) s += ' stroke-dasharray="5 4"';
+    s += '/>';
+    s += '<text x="' + pos[0] + '" y="' + (pos[1] + 4) + '" text-anchor="middle" fill="' + opt.text + '">';
+    s += intervalText(key) + ' · ' + siz + '</text>';
+    return s;
+  }
+
+  function render(f){
+    var step = FRAMES[f];
+    var alive = step.a.length;
+    var dead = step.dead.length;
+    var s = '';
+    s += '<text x="110" y="24" text-anchor="middle" fill="#2563eb" font-weight="600">t1（结果长在这） · ' + alive + ' 个节点</text>';
+    s += '<text x="345" y="24" text-anchor="middle" fill="#ea580c" font-weight="600">t2 · ' + (5 - dead) + ' 个还活着</text>';
+    s += '<text x="470" y="24" fill="#2563eb" font-weight="600">递归栈与计数</text>';
+
+    // t1 面板
+    var drawn = {};
+    step.a.forEach(function(n){ drawn[n[0]] = true; });
+    var ae = '';
+    A_EDGES.concat([['1,2','2,2']]).forEach(function(e){
+      if(!drawn[e[0]] || !drawn[e[1]]) return;
+      var p = POS_A[e[0]], q = POS_A[e[1]];
+      var wh = boxSize(e[0]);
+      ae += '<line x1="' + p[0] + '" y1="' + (p[1] + wh[1]/2) + '" x2="' + q[0] + '" y2="' + (q[1] - boxSize(e[1])[1]/2) + '" stroke="#9aa0a6" stroke-width="1.2"/>';
+    });
+    s += ae;
+    step.a.forEach(function(n){
+      var fromB = n[1].charAt(0) === 'B';
+      s += drawNode(POS_A[n[0]], n[0], n[2], {
+        fill: fromB ? '#ffedd5' : '#dbeafe',
+        stroke: fromB ? '#ea580c' : '#2563eb',
+        text: '#1f2328',
+        hi: step.hi.indexOf(n[1]) >= 0
+      });
+    });
+
+    // t2 面板
+    var bdrawn = {};
+    step.b.forEach(function(n){ bdrawn[n[0]] = true; });
+    var be = '';
+    B_EDGES.forEach(function(e){
+      if(!bdrawn[e[0]] || !bdrawn[e[1]]) return;
+      var p = POS_B[e[0]], q = POS_B[e[1]];
+      be += '<line x1="' + p[0] + '" y1="' + (p[1] + boxSize(e[0])[1]/2) + '" x2="' + q[0] + '" y2="' + (q[1] - boxSize(e[1])[1]/2) + '" stroke="#c9ced4" stroke-width="1.2"/>';
+    });
+    s += be;
+    step.b.forEach(function(n){
+      var isDead = step.dead.indexOf(n[1]) >= 0;
+      s += drawNode(POS_B[n[0]], n[0], n[2], {
+        fill: isDead ? '#f6f7f9' : '#ffedd5',
+        stroke: isDead ? '#c9ced4' : '#ea580c',
+        text: isDead ? '#9aa0a6' : '#1f2328',
+        hi: step.hi.indexOf(n[1]) >= 0,
+        dash: isDead
+      });
+    });
+
+    // 右侧面板
+    var y = 48;
+    if(step.stack.length === 0){
+      s += '<text x="470" y="' + y + '" fill="#9aa0a6">（栈空）</text>';
+    } else {
+      step.stack.forEach(function(k){
+        s += '<rect x="466" y="' + (y - 15) + '" width="180" height="26" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.1"/>';
+        s += '<text x="556" y="' + (y + 3) + '" text-anchor="middle" fill="#1f2328">区间 ' + k + '</text>';
+        y += 34;
+      });
+    }
+    s += '<text x="466" y="158" fill="#374151">merge 调用次数：<tspan fill="#2563eb" font-weight="600">' + step.calls + '</tspan></text>';
+    s += '<text x="466" y="180" fill="#374151">两边都不为空：<tspan fill="#2563eb" font-weight="600">' + step.both + '</tspan></text>';
+    s += '<text x="466" y="202" fill="#374151">已销毁的节点：<tspan fill="#ea580c" font-weight="600">' + step.dead.length + '</tspan></text>';
+    s += '<text x="466" y="224" fill="#374151">节点总数：<tspan fill="#2563eb" font-weight="600">' + (10 - step.dead.length) + '</tspan> / 初始 10</text>';
+    s += '<text x="466" y="252" fill="#6b7280">橙框 = 从 t2 过来的节点</text>';
+    s += '<text x="466" y="268" fill="#6b7280">虚线灰框 = 已丢弃</text>';
+
+    SVG.innerHTML = s;
+    INFO.innerHTML = '<div class="row"><b>第 ' + f + ' 步</b>　' + step.desc + '</div>';
+    bPrev.disabled = (f === 0);
+    bNext.disabled = (f === FRAMES.length - 1);
+  }
+
+  var cur = 0;
+  bPrev.addEventListener('click', function(){ if(cur > 0){ cur--; render(cur); } });
+  bNext.addEventListener('click', function(){ if(cur < FRAMES.length - 1){ cur++; render(cur); } });
+  bReset.addEventListener('click', function(){ cur = 0; render(0); });
+  render(0);
+})();
+</script>
+</body>
+</html>

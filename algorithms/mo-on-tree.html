@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>树上莫队 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.row.total{display:flex;flex-wrap:wrap;gap:14px;}
+.tr-cells{display:flex;flex-direction:column;gap:4px;overflow-x:auto;}
+.tr-row{display:flex;gap:4px;align-items:flex-start;}
+.tr-cell{
+  width:34px;height:34px;flex:none;display:flex;align-items:center;justify-content:center;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+  font-size:13px;font-variant-numeric:tabular-nums;transition:background .12s,border-color .12s;
+}
+.tr-cell.full{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.tr-cell.dup{background:var(--bg);border-color:#c9ced4;color:var(--text-dim);}
+.tr-cell.lca{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+.tr-idx{width:34px;height:16px;flex:none;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--text-dim);}
+.tr-idx.now{color:var(--accent);font-weight:600;}
+.tr-btns{display:flex;gap:10px;margin-top:6px;}
+.tr-btn{border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;}
+.tr-btn:hover{border-color:var(--accent);color:var(--accent);}
+.tr-btn:disabled{opacity:.4;cursor:default;}
+.tr-cnt{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 0;}
+.tr-cnt span{border:1px solid var(--border);border-radius:6px;padding:2px 10px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--text-dim);}
+.tr-cnt span.on{border-color:var(--accent);color:var(--accent);font-weight:600;}
+@media(max-width:760px){
+  .tr-cell{width:28px;height:28px;font-size:11px;}
+  .tr-idx{width:28px;}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>树上莫队</h1>
+    <p class="intro">一条路径也能变成一段区间。dfs 时每个点进出各记一次得到括号序，路径对应其中连续一段，段里出现两次的点不算数。</p>
+
+    <h2>零、背景</h2>
+    <p>树上两点之间的路径查询，能合并的信息一般用树链剖分配线段树。碰上「路径上有几种不同的颜色」这类不好合并的询问，那条路就走不通了。</p>
+    <p>这类查询往往是离线的，于是可以把莫队搬上来。要做的事只有一件：把路径变成数组上的一段区间。</p>
+
+    <h2>一、问题</h2>
+    <p>一共有 n 个节点，每个节点给定一个颜色值，给定 n - 1 条边，所有节点连成一棵树。一共 m 条查询 u v，打印点 u 到点 v 的简单路径上有几种不同的颜色。</p>
+    <p>1 &lt;= n &lt;= 4 * 10^4，1 &lt;= m &lt;= 10^5，1 &lt;= 颜色值 &lt;= 2 * 10^9。测试链接：<a href="https://www.luogu.com.cn/problem/SP10707">SP10707</a>。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>每条查询从 u 走一遍到 v，路上用 set 收集颜色。一次最坏 O(n)，m 条就是 O(nm)。n = 4 * 10^4、m = 10^5 时是 4 * 10^9，超时。</p>
+    <p>树链剖分配数据结构这条路也堵着：颜色种类数没法由两段路径的种类数合并出来，除非给每种颜色开一个 bitset 做或运算，那是 O(n / 64) 一次合并，n 大时同样吃力。</p>
+
+    <h2>三、括号序</h2>
+    <p>从根开始 dfs，进入节点 x 时把 x 记一次，离开 x 时再记一次。记下来的序列叫括号序，记为 seg，长度是 2n。进入那次的位置叫 st[x]，离开那次的位置叫 ed[x]。</p>
+    <p>注意这不是欧拉序。欧拉序是每走一条边记一次，括号序是每个点记两次。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>括号序里每个点正好出现两次，两个位置之间的这一段就是它子树的全部访问记录</figcaption>
+    </figure>
+
+    <h2>四、路径变成区间</h2>
+    <p>任取两个点 u、v，不妨设 st[u] &lt; st[v]，记 lca 是它们的最低公共祖先。分两种情况。</p>
+    <p>如果 u 或者 v 本身就是 lca，路径就对应 seg[st[u]..st[v]] 这一段。</p>
+    <p>如果都不是，路径对应 seg[ed[u]..st[v]] 这一段，另外单独把 lca 这个点加上。</p>
+    <p>段里的点可能出现两次，出现两次说明这个点的子树被完整地走完了，它不在路径上，应当忽略；出现一次才算生效。</p>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>同一个括号序上的两种取法：祖先关系取 st 到 st，非祖先关系取 ed 到 st 再补上 lca</figcaption>
+    </figure>
+
+    <p>第二条里的 lca 为什么要单独加，画一遍就清楚：lca 的进入发生在 ed[u] 之前，离开发生在 st[v] 之后，它在这一段里一次都没出现。</p>
+    <p>于是每条路径查询都变成括号序上的一段区间，剩下的事情普通莫队全包了：窗口两端滑动，进来一个节点就把它的状态取反，奇数次算生效、偶数次算无效。</p>
+
+    <h2>五、演示</h2>
+    <p>下面这棵树有 7 个点，括号序长度 14。四条查询按莫队顺序处理，每次先看转化出来的区间，再滑动窗口。</p>
+    <div class="viz">
+      <div class="viz-title">演示　树上莫队：括号序上的窗口滑动（块长 3）</div>
+      <div class="tr-cells" id="trCells"></div>
+      <div class="tr-cnt" id="trCnt"></div>
+      <div class="breakdown" id="trStatus"></div>
+      <div class="tr-btns">
+        <button class="tr-btn" id="trStep">下一步</button>
+        <button class="tr-btn" id="trAuto">自动播放</button>
+        <button class="tr-btn" id="trReset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot full"></span>段里出现一次，生效</span>
+        <span><span class="dot skip"></span>段里出现两次，忽略</span>
+        <span><span class="dot" style="background:var(--partial-bg);border-color:var(--partial);"></span>单独补上的 lca</span>
+      </div>
+    </div>
+
+    <h2>六、题目1 的代码</h2>
+    <p>颜色值到 2 * 10^9，先离散化。括号序用递归 dfs 生成，lca 用倍增表，之后就是普通莫队的 invert：状态取反，计数到 0 减一，从 0 变 1 加一。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Query {
+        <span class="kw">int</span> l, r, lca, id;
+    };
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 40001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 20;
+
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> color[MAXN];
+    <span class="kw">int</span> sorted[MAXN];
+    <span class="kw">int</span> cntv;
+
+    Query query[MAXM];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    <span class="kw">int</span> dep[MAXN];
+    <span class="kw">int</span> seg[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> st[MAXN];
+    <span class="kw">int</span> ed[MAXN];
+    <span class="kw">int</span> stjump[MAXN][MAXP];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> bi[MAXN &lt;&lt; 1];
+
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> cnt[MAXN];
+    <span class="kw">int</span> kind;
+
+    <span class="kw">int</span> ans[MAXM];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">int</span> <span class="fn">kth</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> left = 1, right = cntv, mid, ret = 0;
+        <span class="kw">while</span> (left &lt;= right) {
+            mid = (left + right) &gt;&gt; 1;
+            <span class="kw">if</span> (sorted[mid] &lt;= num) {
+                ret = mid;
+                left = mid + 1;
+            } <span class="kw">else</span> {
+                right = mid - 1;
+            }
+        }
+        <span class="kw">return</span> ret;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        dep[u] = dep[fa] + 1;
+        seg[++cntd] = u;
+        st[u] = cntd;
+        stjump[u][0] = fa;
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt; MAXP; p++) {
+            stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e &gt; 0; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != fa) {
+                dfs(v, u);
+            }
+        }
+        seg[++cntd] = u;
+        ed[u] = cntd;
+    }
+
+    <span class="kw">int</span> <span class="fn">lca</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">if</span> (dep[a] &lt; dep[b]) {
+            swap(a, b);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (dep[stjump[a][p]] &gt;= dep[b]) {
+                a = stjump[a][p];
+            }
+        }
+        <span class="kw">if</span> (a == b) {
+            <span class="kw">return</span> a;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (stjump[a][p] != stjump[b][p]) {
+                a = stjump[a][p];
+                b = stjump[b][p];
+            }
+        }
+        <span class="kw">return</span> stjump[a][0];
+    }
+
+    <span class="kw">bool</span> <span class="fn">QueryCmp</span>(Query &amp;a, Query &amp;b) {
+        <span class="kw">if</span> (bi[a.l] != bi[b.l]) {
+            <span class="kw">return</span> bi[a.l] &lt; bi[b.l];
+        }
+        <span class="kw">return</span> a.r &lt; b.r;
+    }
+
+    <span class="kw">void</span> <span class="fn">invert</span>(<span class="kw">int</span> node) {
+        <span class="kw">int</span> val = color[node];
+        <span class="kw">if</span> (vis[node]) {
+            <span class="kw">if</span> (--cnt[val] == 0) {
+                kind--;
+            }
+        } <span class="kw">else</span> {
+            <span class="kw">if</span> (++cnt[val] == 1) {
+                kind++;
+            }
+        }
+        vis[node] = !vis[node];
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>() {
+        <span class="kw">int</span> winl = 1, winr = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> jobl = query[i].l;
+            <span class="kw">int</span> jobr = query[i].r;
+            <span class="kw">int</span> lca = query[i].lca;
+            <span class="kw">int</span> id = query[i].id;
+            <span class="kw">while</span> (winl &gt; jobl) {
+                invert(seg[--winl]);
+            }
+            <span class="kw">while</span> (winr &lt; jobr) {
+                invert(seg[++winr]);
+            }
+            <span class="kw">while</span> (winl &lt; jobl) {
+                invert(seg[winl++]);
+            }
+            <span class="kw">while</span> (winr &gt; jobr) {
+                invert(seg[winr--]);
+            }
+            <span class="kw">if</span> (lca &gt; 0) {
+                invert(lca);
+            }
+            ans[id] = kind;
+            <span class="kw">if</span> (lca &gt; 0) {
+                invert(lca);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            sorted[i] = color[i];
+        }
+        sort(sorted + 1, sorted + n + 1);
+        cntv = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            <span class="kw">if</span> (sorted[cntv] != sorted[i]) {
+                sorted[++cntv] = sorted[i];
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            color[i] = kth(color[i]);
+        }
+        <span class="kw">int</span> blen = (<span class="kw">int</span>) sqrt(cntd);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntd; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        sort(query + 1, query + m + 1, QueryCmp);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; color[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        dfs(1, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v, uvlca; i &lt;= m; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            <span class="kw">if</span> (st[v] &lt; st[u]) {
+                swap(u, v);
+            }
+            uvlca = lca(u, v);
+            <span class="kw">if</span> (u == uvlca) {
+                query[i].l = st[u];
+                query[i].r = st[v];
+                query[i].lca = 0;
+            } <span class="kw">else</span> {
+                query[i].l = ed[u];
+                query[i].r = st[v];
+                query[i].lca = uvlca;
+            }
+            query[i].id = i;
+        }
+        prepare();
+        compute();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>七、糖果公园：树上带修莫队</h2>
+    <p>一共有 n 个公园，n - 1 条边连成一棵树，c[i] 是 i 号公园的糖果型号。一共有 m 种糖果，v[y] 是 y 号糖果的美味指数，w 是长度为 n 的数组。游客第 x 次遇到 y 号糖果时，愉悦值增加 v[y] * w[x]。接下来 q 条操作。</p>
+    <p>操作 0 x y：把 x 号公园的糖果型号改成 y。操作 1 x y：游客从 x 走到 y，打印最终的愉悦值。1 &lt;= n、m、q &lt;= 10^5，1 &lt;= v[i]、w[i] &lt;= 10^6。测试链接：<a href="https://www.luogu.com.cn/problem/P4074">P4074</a>。</p>
+    <p>路径照样用括号序转成区间，多出来的是修改。带修莫队加一个时间指针 wint，表示窗口处在第几次修改之后；查询带上 t，排序时多一个关键字。</p>
+    <p>排序规则变成三级：先按 l 所在块，再按 r 所在块，最后按 t。块长也不再是 √n，而是 n^(2/3)。</p>
+
+    <figure class="fig">
+      <div id="fig3"></div>
+      <figcaption>带修莫队按 (l 的块、r 的块、t) 三级排序，同一格里 t 单调，时间指针只往一个方向走</figcaption>
+    </figure>
+
+    <p>时间指针的移动用「交换」来做：update[t] 记下位置和要改成的值，前进时把当前值换进去、旧值存回 update[t]，后退时再换一次就回到原样。如果修改的那个点此刻在窗口里，先把它从答案里摘掉，换完颜色再放回去。</p>
+    <p>lca 的处理和上一题一样，答完立刻取反还原。</p>
+    <p>这里有个坑：写 query[++cntq] = {st[x], st[y], cntu, 0, cntq} 时，C++17 起赋值号右边先算，cntq 还是旧值，id 会填成上一个下标。下面拆成两行写。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">struct</span> Query {
+        <span class="kw">int</span> l, r, t, lca, id;
+    };
+
+    <span class="kw">struct</span> Update {
+        <span class="kw">int</span> pos, val;
+    };
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXP = 20;
+    <span class="kw">int</span> n, m, q;
+    <span class="kw">int</span> v[MAXN];
+    <span class="kw">int</span> w[MAXN];
+    <span class="kw">int</span> c[MAXN];
+
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> to[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> nxt[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> cntg;
+
+    Query query[MAXN];
+    Update update[MAXN];
+    <span class="kw">int</span> cntq, cntu;
+
+    <span class="kw">int</span> dep[MAXN];
+    <span class="kw">int</span> seg[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> st[MAXN];
+    <span class="kw">int</span> ed[MAXN];
+    <span class="kw">int</span> stjump[MAXN][MAXP];
+    <span class="kw">int</span> cntd;
+
+    <span class="kw">int</span> bi[MAXN &lt;&lt; 1];
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> cnt[MAXN];
+    <span class="kw">long</span> <span class="kw">long</span> happy;
+    <span class="kw">long</span> <span class="kw">long</span> ans[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[++cntg] = head[u];
+        to[cntg] = v;
+        head[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        dep[u] = dep[fa] + 1;
+        seg[++cntd] = u;
+        st[u] = cntd;
+        stjump[u][0] = fa;
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt; MAXP; p++) {
+            stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e &gt; 0; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != fa) {
+                dfs(v, u);
+            }
+        }
+        seg[++cntd] = u;
+        ed[u] = cntd;
+    }
+
+    <span class="kw">int</span> <span class="fn">lca</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">if</span> (dep[a] &lt; dep[b]) {
+            swap(a, b);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (dep[stjump[a][p]] &gt;= dep[b]) {
+                a = stjump[a][p];
+            }
+        }
+        <span class="kw">if</span> (a == b) {
+            <span class="kw">return</span> a;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (stjump[a][p] != stjump[b][p]) {
+                a = stjump[a][p];
+                b = stjump[b][p];
+            }
+        }
+        <span class="kw">return</span> stjump[a][0];
+    }
+
+    <span class="kw">bool</span> <span class="fn">QueryCmp</span>(Query &amp;a, Query &amp;b) {
+        <span class="kw">if</span> (bi[a.l] != bi[b.l]) {
+            <span class="kw">return</span> bi[a.l] &lt; bi[b.l];
+        }
+        <span class="kw">if</span> (bi[a.r] != bi[b.r]) {
+            <span class="kw">return</span> bi[a.r] &lt; bi[b.r];
+        }
+        <span class="kw">return</span> a.t &lt; b.t;
+    }
+
+    <span class="kw">void</span> <span class="fn">invert</span>(<span class="kw">int</span> node) {
+        <span class="kw">int</span> candy = c[node];
+        <span class="kw">if</span> (vis[node]) {
+            happy -= 1LL * v[candy] * w[cnt[candy]--];
+        } <span class="kw">else</span> {
+            happy += 1LL * v[candy] * w[++cnt[candy]];
+        }
+        vis[node] = !vis[node];
+    }
+
+    <span class="kw">void</span> <span class="fn">moveTime</span>(<span class="kw">int</span> tim) {
+        <span class="kw">int</span> pos = update[tim].pos;
+        <span class="kw">int</span> oldVal = c[pos];
+        <span class="kw">int</span> newVal = update[tim].val;
+        <span class="kw">if</span> (vis[pos]) {
+            invert(pos);
+            c[pos] = newVal;
+            update[tim].val = oldVal;
+            invert(pos);
+        } <span class="kw">else</span> {
+            c[pos] = newVal;
+            update[tim].val = oldVal;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>() {
+        <span class="kw">int</span> winl = 1, winr = 0, wint = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntq; i++) {
+            <span class="kw">int</span> jobl = query[i].l;
+            <span class="kw">int</span> jobr = query[i].r;
+            <span class="kw">int</span> jobt = query[i].t;
+            <span class="kw">int</span> lca = query[i].lca;
+            <span class="kw">int</span> id = query[i].id;
+            <span class="kw">while</span> (winl &gt; jobl) {
+                invert(seg[--winl]);
+            }
+            <span class="kw">while</span> (winr &lt; jobr) {
+                invert(seg[++winr]);
+            }
+            <span class="kw">while</span> (winl &lt; jobl) {
+                invert(seg[winl++]);
+            }
+            <span class="kw">while</span> (winr &gt; jobr) {
+                invert(seg[winr--]);
+            }
+            <span class="kw">while</span> (wint &lt; jobt) {
+                moveTime(++wint);
+            }
+            <span class="kw">while</span> (wint &gt; jobt) {
+                moveTime(wint--);
+            }
+            <span class="kw">if</span> (lca &gt; 0) {
+                invert(lca);
+            }
+            ans[id] = happy;
+            <span class="kw">if</span> (lca &gt; 0) {
+                invert(lca);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prapare</span>() {
+        <span class="kw">int</span> blen = max(1, (<span class="kw">int</span>)pow(cntd, 2.0 / 3.0));
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntd; i++) {
+            bi[i] = (i - 1) / blen + 1;
+        }
+        sort(query + 1, query + cntq + 1, QueryCmp);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; q;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; v[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; w[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v; i &lt; n; i++) {
+            cin &gt;&gt; u &gt;&gt; v;
+            addEdge(u, v);
+            addEdge(v, u);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; c[i];
+        }
+        dfs(1, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x, y; i &lt;= q; i++) {
+            cin &gt;&gt; op &gt;&gt; x &gt;&gt; y;
+            <span class="kw">if</span> (op == 0) {
+                cntu++;
+                update[cntu].pos = x;
+                update[cntu].val = y;
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (st[x] &gt; st[y]) {
+                    swap(x, y);
+                }
+                <span class="kw">int</span> xylca = lca(x, y);
+                <span class="kw">if</span> (x == xylca) {
+                    query[++cntq] = {st[x], st[y], cntu, 0, 0};
+                    query[cntq].id = cntq;
+                } <span class="kw">else</span> {
+                    query[++cntq] = {ed[x], st[y], cntu, xylca, 0};
+                    query[cntq].id = cntq;
+                }
+            }
+        }
+        prapare();
+        compute();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cntq; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+    <h2>八、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>环节</th><th>复杂度</th><th>说明</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>括号序与倍增表</td><td><code class="inline">O(n log n)</code></td><td>一次 dfs 生成 seg、st、ed，顺带填 stjump 表</td></tr>
+        <tr><td>每条查询转区间</td><td><code class="inline">O(log n)</code></td><td>一次 lca</td></tr>
+        <tr><td>树上莫队（无修改）</td><td><code class="inline">O((n + m)√n)</code></td><td>括号序长 2n，与普通莫队同量级</td></tr>
+        <tr><td>树上带修莫队</td><td><code class="inline">O(n^(5/3))</code></td><td>块长取 n^(2/3)，三级排序后指针总移动是这个量级</td></tr>
+        <tr><td>额外空间</td><td><code class="inline">O(n + m)</code></td><td>seg、颜色计数、查询与修改数组</td></tr>
+      </tbody>
+    </table>
+    <p>括号序的长度是 2n，代公式时把 n 换成 2n 即可，量级不变。</p>
+
+    <h2>九、最后</h2>
+    <p>树上莫队能做的事取决于括号序这一段上能维护什么。不同颜色数、路径上的众数、路径上满足某个条件的点对数，都能套进来；带修改就再加一个时间维。</p>
+    <p>回滚莫队同样能搬到树上：括号序也是数组，add 写不出来的就走只增那套，del 写不出来的走只删那套。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  /* 树：1-2, 1-3, 2-4, 2-5, 3-6, 3-7；颜色 1:1 2:2 3:1 4:3 5:2 6:3 7:1 */
+  const SEG = [0, 1, 2, 4, 4, 5, 5, 2, 3, 6, 6, 7, 7, 3, 1];
+  const SN = 14;
+  const ST = {1:1, 2:2, 3:8, 4:3, 5:5, 6:9, 7:11};
+  const ED = {1:14, 2:7, 3:13, 4:4, 5:6, 6:10, 7:12};
+  const COL = {1:1, 2:2, 3:1, 4:3, 5:2, 6:3, 7:1};
+  const QS = [
+    {u:4, v:5, l:4, r:5, lca:2},
+    {u:4, v:6, l:4, r:9, lca:1},
+    {u:2, v:7, l:7, r:11, lca:1},
+    {u:1, v:4, l:1, r:3, lca:0}
+  ];
+
+  /* ---------- 图1：括号序怎么来 ---------- */
+  const f1 = document.getElementById('fig1');
+  {
+    let s = '<svg viewBox="0 0 680 250" xmlns="http://www.w3.org/2000/svg">';
+    const P = {1:[150, 44], 2:[76, 96], 3:[224, 96], 4:[30, 148], 5:[122, 148], 6:[178, 148], 7:[270, 148]};
+    const E = [[1,2],[1,3],[2,4],[2,5],[3,6],[3,7]];
+    E.forEach(function(e){
+      const a = P[e[0]], b = P[e[1]];
+      s += '<line x1="' + a[0] + '" y1="' + a[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke="#c8ccd1" stroke-width="1.5"/>';
+    });
+    for (const k in P) {
+      const p = P[k];
+      s += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="15" fill="#dbeafe" stroke="#2563eb"/>';
+      s += '<text x="' + p[0] + '" y="' + (p[1] + 5) + '" text-anchor="middle" font-size="13" fill="#2563eb">' + k + '</text>';
+    }
+    s += '<text x="300" y="44" font-size="12" fill="#6b7280">进入记一次，离开再记一次</text>';
+    s += '<text x="300" y="64" font-size="12" fill="#6b7280">st[x] 是进入的位置</text>';
+    s += '<text x="300" y="84" font-size="12" fill="#6b7280">ed[x] 是离开的位置</text>';
+    s += '<text x="8" y="190" font-size="12" fill="#6b7280">seg</text>';
+    for (let i = 1; i <= SN; i++) {
+      const x = 40 + (i - 1) * 44;
+      s += '<rect x="' + x + '" y="198" width="38" height="30" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>';
+      s += '<text x="' + (x + 19) + '" y="218" text-anchor="middle" font-size="13" fill="#1f2328">' + SEG[i] + '</text>';
+      s += '<text x="' + (x + 19) + '" y="192" text-anchor="middle" font-size="10" fill="#9aa0a6">' + i + '</text>';
+    }
+    s += '<text x="8" y="244" font-size="11" fill="#6b7280">节点 2：st = 2、ed = 7；中间那一段 seg[2..7] 正好是它子树的全部访问记录</text>';
+    s += '</svg>';
+    f1.innerHTML = s;
+  }
+
+  /* ---------- 图2：两种取法 ---------- */
+  const f2 = document.getElementById('fig2');
+  {
+    let s = '<svg viewBox="0 0 680 214" xmlns="http://www.w3.org/2000/svg">';
+    function strip(y, from, to, lca, title){
+      s += '<text x="8" y="' + (y - 6) + '" font-size="12" fill="#1f2328">' + title + '</text>';
+      for (let i = 1; i <= SN; i++) {
+        const x = 40 + (i - 1) * 44;
+        const inw = (i >= from && i <= to);
+        s += '<rect x="' + x + '" y="' + y + '" width="38" height="30" rx="5" fill="' + (inw ? '#dbeafe' : '#f6f7f9') + '" stroke="' + (inw ? '#2563eb' : '#e6e8eb') + '"/>';
+        s += '<text x="' + (x + 19) + '" y="' + (y + 20) + '" text-anchor="middle" font-size="13" fill="' + (inw ? '#2563eb' : '#9aa0a6') + '">' + SEG[i] + '</text>';
+        s += '<text x="' + (x + 19) + '" y="' + (y + 42) + '" text-anchor="middle" font-size="10" fill="#9aa0a6">' + i + '</text>';
+      }
+    }
+    strip(24, 1, 3, 0, '查询 (1, 4)：1 就是 lca，取 seg[st[1]..st[4]] = seg[1..3]');
+    strip(104, 4, 9, 1, '查询 (4, 6)：lca 是 1，取 seg[ed[4]..st[6]] = seg[4..9]，再补上 lca 1');
+    s += '<text x="8" y="196" font-size="11" fill="#6b7280">第二行段里的 5 出现两次，忽略；剩下 4、2、3、6 加 lca 1，正好是路径 4-2-1-3-6</text>';
+    s += '</svg>';
+    f2.innerHTML = s;
+  }
+
+  /* ---------- 图3：带修莫队的三级排序 ---------- */
+  const f3 = document.getElementById('fig3');
+  {
+    let s = '<svg viewBox="0 0 680 220" xmlns="http://www.w3.org/2000/svg">';
+    s += '<text x="8" y="20" font-size="12" fill="#6b7280">横轴：r 所在块　　纵轴：l 所在块　　每格里的点按 t 从小到大</text>';
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        const x = 60 + j * 140, y = 34 + i * 42;
+        s += '<rect x="' + x + '" y="' + y + '" width="128" height="34" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>';
+        for (let k = 0; k < 3; k++) {
+          s += '<circle cx="' + (x + 24 + k * 34) + '" cy="' + (y + 17) + '" r="4" fill="#2563eb"/>';
+        }
+        s += '<path d="M ' + (x + 34) + ' ' + (y + 17) + ' L ' + (x + 84) + ' ' + (y + 17) + '" stroke="#9aa0a6" stroke-width="1" marker-end="url(#aht)"/>';
+      }
+    }
+    s += '<defs><marker id="aht" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#9aa0a6"/></marker></defs>';
+    s += '<text x="8" y="55" font-size="11" fill="#6b7280">l 块 1</text>';
+    s += '<text x="8" y="97" font-size="11" fill="#6b7280">l 块 2</text>';
+    s += '<text x="8" y="139" font-size="11" fill="#6b7280">l 块 3</text>';
+    s += '<text x="8" y="181" font-size="11" fill="#6b7280">l 块 4</text>';
+    s += '<text x="60" y="212" font-size="11" fill="#6b7280">同一格内 t 单调，时间指针只朝一个方向走；跨格时最多回退 O(n) 次</text>';
+    s += '</svg>';
+    f3.innerHTML = s;
+  }
+
+  /* ---------- 演示 ---------- */
+  const BLEN = 3;
+  const order = QS.map(function(q, i){ return i; }).sort(function(a, b){
+    const ba = Math.floor((QS[a].l - 1) / BLEN), bb = Math.floor((QS[b].l - 1) / BLEN);
+    if (ba !== bb) return ba - bb;
+    return QS[a].r - QS[b].r;
+  });
+
+  function buildSteps(){
+    const steps = [];
+    let winl = 1, winr = 0, kind = 0;
+    const vis = {}, cnt = {};
+    const answers = new Array(QS.length).fill(null);
+    function snap(phase, extra){
+      const v = {}, c = {};
+      for (const k in vis) if (vis[k]) v[k] = 1;
+      for (const k in cnt) if (cnt[k] > 0) c[k] = cnt[k];
+      steps.push({winl: winl, winr: winr, kind: kind, vis: v, cnt: c, answers: answers.slice(), phase: phase, extra: extra || 0});
+    }
+    snap('初始窗口为空');
+    order.forEach(function(qi, pos){
+      const q = QS[qi];
+      snap('莫队顺序第 ' + (pos + 1) + ' 个：查询 (' + q.u + ', ' + q.v + ') 转成 seg[' + q.l + '..' + q.r + ']' + (q.lca ? '，lca = ' + q.lca : '，lca 就是端点'));
+      function invert(node){
+        const c = COL[node];
+        if (vis[node]) { cnt[c]--; if (cnt[c] === 0) kind--; vis[node] = false; }
+        else { if ((cnt[c] || 0) === 0) kind++; cnt[c] = (cnt[c] || 0) + 1; vis[node] = true; }
+      }
+      while (winl > q.l) { winl--; invert(SEG[winl]); snap('左移：seg[' + winl + '] = ' + SEG[winl] + ' 取反'); }
+      while (winr < q.r) { winr++; invert(SEG[winr]); snap('右移：seg[' + winr + '] = ' + SEG[winr] + ' 取反'); }
+      while (winl < q.l) { invert(SEG[winl]); winl++; snap('左移：seg[' + (winl - 1) + '] = ' + SEG[winl - 1] + ' 取反'); }
+      while (winr > q.r) { invert(SEG[winr]); winr--; snap('右移：seg[' + (winr + 1) + '] = ' + SEG[winr + 1] + ' 取反'); }
+      if (q.lca) { invert(q.lca); snap('补上 lca 节点 ' + q.lca); }
+      answers[qi] = kind;
+      snap('生效的颜色一共 ' + kind + ' 种，记下答案', q.lca);
+      if (q.lca) { invert(q.lca); snap('把 lca 节点 ' + q.lca + ' 取反还原'); }
+    });
+    return steps;
+  }
+
+  const steps = buildSteps();
+  let idx = 0, timer = null;
+  const cellsEl = document.getElementById('trCells');
+  const cntEl = document.getElementById('trCnt');
+  const statusEl = document.getElementById('trStatus');
+  const btnStep = document.getElementById('trStep');
+  const btnAuto = document.getElementById('trAuto');
+  const btnReset = document.getElementById('trReset');
+
+  function render(){
+    const s = steps[idx];
+    let h = '<div class="tr-row">';
+    for (let i = 1; i <= SN; i++) {
+      let cls = 'tr-cell';
+      if (i >= s.winl && i <= s.winr) cls += s.vis[SEG[i]] ? ' full' : ' dup';
+      if (s.extra === SEG[i] && i >= s.winl && i <= s.winr && s.vis[SEG[i]]) cls = 'tr-cell lca';
+      h += '<div class="' + cls + '">' + SEG[i] + '</div>';
+    }
+    h += '</div><div class="tr-row">';
+    for (let i = 1; i <= SN; i++) {
+      let cls = 'tr-idx';
+      if (i === s.winl || i === s.winr) cls += ' now';
+      h += '<div class="' + cls + '">' + ((i === s.winl) ? 'winl' : (i === s.winr ? 'winr' : i)) + '</div>';
+    }
+    h += '</div>';
+    cellsEl.innerHTML = h;
+
+    let c = '';
+    [1, 2, 3].forEach(function(v){
+      const n = s.cnt[v] || 0;
+      c += '<span' + (n > 0 ? ' class="on"' : '') + '>颜色 ' + v + ' × ' + n + '</span>';
+    });
+    cntEl.innerHTML = c;
+
+    let chips = '';
+    QS.forEach(function(q, k){
+      chips += '<span>(' + q.u + ', ' + q.v + ') = ' + (s.answers[k] === null ? '?' : s.answers[k]) + '</span>';
+    });
+    statusEl.innerHTML =
+      '<div class="row">' + s.phase + '</div>' +
+      '<div class="row">窗口 seg[' + s.winl + '..' + s.winr + ']　生效的颜色 <strong>' + s.kind + '</strong> 种</div>' +
+      '<div class="row total">' + chips + '</div>';
+    btnStep.disabled = (idx >= steps.length - 1);
+  }
+
+  function step(){ if (idx < steps.length - 1) { idx++; render(); } }
+  function reset(){ idx = 0; render(); }
+  function stopAuto(){ if (timer) { clearInterval(timer); timer = null; btnAuto.textContent = '自动播放'; } }
+  btnStep.addEventListener('click', function(){ stopAuto(); step(); });
+  btnReset.addEventListener('click', function(){ stopAuto(); reset(); });
+  btnAuto.addEventListener('click', function(){
+    if (timer) { stopAuto(); return; }
+    btnAuto.textContent = '暂停';
+    timer = setInterval(function(){
+      if (idx >= steps.length - 1) { stopAuto(); return; }
+      step();
+    }, 900);
+  });
+  render();
+})();
+</script>
+</body>
+</html>

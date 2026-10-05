@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重构树 × 线段树 × 主席树 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .kd-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .kd-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .kd-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  .kd-sel{
+    border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:14px;
+    font-family:inherit;background:var(--bg);color:var(--text);
+  }
+  @media(max-width:760px){
+    .kd-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>重构树接上线段树和主席树</h1>
+    <p class="intro">删边不好做，倒过来变成加边就好做了。给每条边按「删掉的时刻」编个号，重构树就建起来了；叶子按 dfn 排成一列，连通块永远是其中一段，剩下的交给线段树和主席树。</p>
+
+    <h2>零、题目6：删边和查询</h2>
+    <p>图里有 n 个点、m 条无向边，初始时点权都不同，图里可能有若干个连通的部分。一共有 q 条操作，每条操作是如下两种类型中的一种。操作 1 x：点 x 所在的连通区域中，假设点 y 拥有最大的点权，打印 y 的点权，然后把 y 的点权修改为 0。操作 2 x：删掉第 x 条边。1 ≤ n ≤ 2 × 10⁵，1 ≤ m ≤ 3 × 10⁵，1 ≤ q ≤ 5 × 10⁵。测试链接：<a href="https://www.luogu.com.cn/problem/CF1416D" target="_blank" rel="noopener">CF1416D</a>。</p>
+    <p>删边这件事并查集做不了，但反过来加边是可以的。所以先把所有操作读进来，把删边变成「这条边在某一时刻之后才不存在」。</p>
+    <p>具体做法是给每条边分配一个边权：从没被删过的边，按编号从小到大分配 1、2、3……；被删过的边，按删除时刻从晚到早接着分配下去。也就是说，删得越晚的边，分到的边权越小。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 236" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="给边分配边权" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="16" y="16" font-size="11" fill="#6b7280">5 条边，第 2 条操作删边 5，第 4 条操作删边 3</text>
+        <g font-size="11">
+          <text x="30" y="48" fill="#6b7280">边编号</text>
+          <text x="200" y="48" fill="#6b7280">什么时候被删</text>
+          <text x="430" y="48" fill="#6b7280">分到的边权</text>
+        </g>
+        <g font-size="11" fill="#1f2328">
+          <rect x="20" y="60" width="560" height="30" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="46" y="80" text-anchor="middle">1</text>
+          <text x="200" y="80" fill="#6b7280">从不删</text>
+          <text x="446" y="80" text-anchor="middle">1</text>
+
+          <rect x="20" y="94" width="560" height="30" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="46" y="114" text-anchor="middle">2</text>
+          <text x="200" y="114" fill="#6b7280">从不删</text>
+          <text x="446" y="114" text-anchor="middle">2</text>
+
+          <rect x="20" y="128" width="560" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="46" y="148" text-anchor="middle">3</text>
+          <text x="200" y="148">第 4 条操作</text>
+          <text x="446" y="148" text-anchor="middle">4</text>
+
+          <rect x="20" y="162" width="560" height="30" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/>
+          <text x="46" y="182" text-anchor="middle">4</text>
+          <text x="200" y="182" fill="#6b7280">从不删</text>
+          <text x="446" y="182" text-anchor="middle">3</text>
+
+          <rect x="20" y="196" width="560" height="30" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+          <text x="46" y="216" text-anchor="middle">5</text>
+          <text x="200" y="216">第 2 条操作</text>
+          <text x="446" y="216" text-anchor="middle">5</text>
+        </g>
+      </svg>
+      <figcaption>删得越晚边权越小：limit 从 m 一路减到 0，存在的边恰好是边权 ≤ limit 的那些</figcaption>
+    </figure>
+
+    <p>分配完之后，limit 从 m 开始，每遇到一次删边就减 1。任何时刻存在的边，恰好是边权 ≤ limit 的全部边。这就是标准的升序 Kruskal 重构树。</p>
+
+    <h2>一、连通块是 dfn 上的一段</h2>
+    <p>dfs 时只给叶子编号：每遇到一个原始点就发一个 dfn，同时记 leafDfnMin 是子树里最小的 dfn。由于 dfs 是连续访问完一整棵子树的，一个节点的全部叶子必然占据一段连续的 dfn：[leafDfnMin, leafDfnMin + leafsiz - 1]。</p>
+    <p>于是「连通块里点权最大的点」就变成了「一段区间里值最大的位置」。线段树维护区间最大值所在的下标即可，取走之后把它改成 0（单点更新）。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="叶子 dfn 序上子树是连续区间" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="16" y="16" font-size="11" fill="#6b7280">重构树（圈内是边权），下面是叶子的 dfn 序</text>
+        <g stroke="#9aa0a6" stroke-width="1.4" fill="none">
+          <path d="M250 85 L150 168"/>
+          <path d="M250 85 L350 140"/>
+          <path d="M150 168 L110 240"/>
+          <path d="M150 168 L190 240"/>
+          <path d="M350 140 L290 240"/>
+          <path d="M350 140 L410 195"/>
+          <path d="M410 195 L370 240"/>
+          <path d="M410 195 L450 240"/>
+        </g>
+        <g font-size="9" fill="#6b7280">
+          <text x="169" y="160">8</text>
+          <text x="369" y="133">7</text>
+          <text x="429" y="188">6</text>
+          <text x="269" y="78">9</text>
+        </g>
+        <g font-size="11" fill="#1f2328">
+          <circle cx="250" cy="85" r="16" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+          <text x="250" y="89" text-anchor="middle" font-size="11">4</text>
+          <circle cx="350" cy="140" r="16" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+          <text x="350" y="144" text-anchor="middle" font-size="11">2</text>
+          <circle cx="150" cy="168" r="16" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+          <text x="150" y="172" text-anchor="middle" font-size="11">3</text>
+          <circle cx="410" cy="195" r="16" fill="#ffedd5" stroke="#ea580c" stroke-width="1.5"/>
+          <text x="410" y="199" text-anchor="middle" font-size="11">1</text>
+          <circle cx="110" cy="240" r="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+          <text x="110" y="244" text-anchor="middle" font-size="11">5</text>
+          <circle cx="190" cy="240" r="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+          <text x="190" y="244" text-anchor="middle" font-size="11">4</text>
+          <circle cx="290" cy="240" r="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+          <text x="290" y="244" text-anchor="middle" font-size="11">3</text>
+          <circle cx="370" cy="240" r="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+          <text x="370" y="244" text-anchor="middle" font-size="11">2</text>
+          <circle cx="450" cy="240" r="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+          <text x="450" y="244" text-anchor="middle" font-size="11">1</text>
+        </g>
+        <g stroke="#2563eb" stroke-width="1.2" fill="none">
+          <rect x="72" y="266" width="76" height="22" rx="4" stroke="#2563eb"/>
+          <rect x="252" y="266" width="176" height="22" rx="4" stroke="#2563eb"/>
+        </g>
+        <g font-size="10" fill="#2563eb" text-anchor="middle">
+          <text x="110" y="281">子树 8：dfn 1~2</text>
+          <text x="340" y="281">子树 7：dfn 3~5</text>
+        </g>
+      </svg>
+      <figcaption>不管查询落在哪个节点，它管着的叶子总是 dfn 上的一整段</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">6 条操作走一遍</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">点权 1~5 号分别是 30、10、50、20、40。点「下一步」执行下一条操作，看 limit、连通块和线段树里被取走的那个值。</p>
+      <svg id="kdOps" viewBox="0 0 620 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="删边查询演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>本次连通块里的点</span>
+        <span><span class="dot partial"></span>停靠节点</span>
+        <span><span class="dot skip"></span>点权已被取走（为 0）</span>
+      </div>
+      <div class="breakdown" id="kdOpsInfo"></div>
+      <div class="viz-controls">
+        <button class="kd-btn" id="kdOpsPrev" type="button">上一步</button>
+        <button class="kd-btn" id="kdOpsNext" type="button">下一步</button>
+        <button class="kd-btn" id="kdOpsReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>二、题目7：边权上限内第 k 大点权</h2>
+    <p>图里有 n 个点、m 条无向边，点有点权，边有边权，图里可能有若干个连通的部分。一共有 q 条查询，格式如下：查询 u x k，从点 u 开始，只能走过权值 ≤ x 的边，所有能到达的点中，打印第 k 大点权，如果不存在打印 -1。1 ≤ n ≤ 10⁵，0 ≤ m、q ≤ 5 × 10⁵，1 ≤ 点权、边权 ≤ 10⁹，强制在线。测试链接：<a href="https://www.luogu.com.cn/problem/P7834" target="_blank" rel="noopener">P7834</a>。</p>
+    <p>前半段是老样子：按边权升序建树，从 u 往上跳到 nodeKey ≤ x 的最高祖先，得到连通块。新问题只在这块里问第 k 大点权。</p>
+    <p>既然连通块是 dfn 上的一段 [l, r]，第 k 大就变成「数组区间 [l, r] 里第 k 大」。这是主席树的活：把点权离散化，按 dfn 顺序依次插入，建出 n 个前缀版本；查 [l, r] 时拿 root[r] 减 root[l - 1]，在两棵树的差上二分。</p>
+
+    <div class="viz">
+      <div class="viz-title">查一次 (u, x, k)</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">点权 1~5 号分别是 30、10、50、20、40。下面一排是叶子的 dfn 序，蓝色是这次查到的区间。</p>
+      <svg id="kdKth" viewBox="0 0 620 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="第 k 大点权演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>本次连通块里的点</span>
+        <span><span class="dot partial"></span>第 k 大落在哪个点</span>
+        <span><span class="dot skip"></span>到不了的点</span>
+      </div>
+      <div class="breakdown" id="kdKthInfo"></div>
+      <div class="viz-controls">
+        <span>起点 u <select class="kd-sel" id="kdU"></select></span>
+        <span>上限 x <select class="kd-sel" id="kdX"></select></span>
+        <span>k <select class="kd-sel" id="kdK"></select></span>
+        <button class="kd-btn" id="kdKthPrev" type="button">上一步</button>
+        <button class="kd-btn" id="kdKthNext" type="button">下一步</button>
+        <button class="kd-btn" id="kdKthReset" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>三、代码</h2>
+    <p>题目6 的边权分配。先扫一遍删边操作打标记，再正着给没删过的边编号，最后倒着给删掉的边编号。</p>
+        <pre class="code"><span class="kw">void</span> <span class="fn">prepare</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= q; i++) {
+            <span class="kw">if</span> (ques[i][0] == 2) {
+                edge[ques[i][1]].w = -1;
+            }
+        }
+        <span class="kw">int</span> weight = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">if</span> (edge[i].w != -1) {
+                edge[i].w = ++weight;
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = q; i &gt;= 1; i--) {
+            <span class="kw">if</span> (ques[i][0] == 2) {
+                edge[ques[i][1]].w = ++weight;
+            }
+        }
+    }</pre>
+    <p>dfs 里给叶子发 dfn，同时记下子树里最小的 dfn 和叶子个数。</p>
+        <pre class="code"><span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> fa) {
+        stjump[u][0] = fa;
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt; MAXP; p++) {
+            stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            dfs(to[e], u);
+        }
+        <span class="kw">if</span> (u &lt;= n) {
+            leafsiz[u] = 1;
+            leafDfnMin[u] = ++cntd;
+            leafseg[cntd] = u;
+        } <span class="kw">else</span> {
+            leafsiz[u] = 0;
+            leafDfnMin[u] = n + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e &gt; 0; e = nxt[e]) {
+            leafsiz[u] += leafsiz[to[e]];
+            leafDfnMin[u] = min(leafDfnMin[u], leafDfnMin[to[e]]);
+        }
+    }</pre>
+    <p>查询就是「上跳 → 得到区间 → 线段树取最大值 → 单点改成 0」。</p>
+        <pre class="code"><span class="kw">int</span> <span class="fn">queryAndUpdate</span>(<span class="kw">int</span> x, <span class="kw">int</span> limit) {
+        <span class="kw">int</span> anc = getAncestor(x, limit);
+        <span class="kw">int</span> dfn = query(leafDfnMin[anc], leafDfnMin[anc] + leafsiz[anc] - 1, 1, n, 1);
+        <span class="kw">int</span> ans = node[leafseg[dfn]];
+        update(dfn, 0, 1, n, 1);
+        <span class="kw">return</span> ans;
+    }</pre>
+    <p>题目7 的收尾：上跳得到区间，两个前缀版本相减，在值域上二分找第 k 大。</p>
+        <pre class="code"><span class="kw">int</span> <span class="fn">insert</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = ++cntt;
+        ls[rt] = ls[i];
+        rs[rt] = rs[i];
+        numcnt[rt] = numcnt[i] + 1;
+        <span class="kw">if</span> (l &lt; r) {
+            <span class="kw">int</span> mid = (l + r) / 2;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                ls[rt] = insert(jobi, l, mid, ls[rt]);
+            } <span class="kw">else</span> {
+                rs[rt] = insert(jobi, mid + 1, r, rs[rt]);
+            }
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> jobk, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> pre, <span class="kw">int</span> post) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span> l;
+        }
+        <span class="kw">int</span> mid = (l + r) / 2;
+        <span class="kw">int</span> rsize = numcnt[rs[post]] - numcnt[rs[pre]];
+        <span class="kw">if</span> (rsize &gt;= jobk) {
+            <span class="kw">return</span> query(jobk, mid + 1, r, rs[pre], rs[post]);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> query(jobk - rsize, l, mid, ls[pre], ls[post]);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">kthMax</span>(<span class="kw">int</span> u, <span class="kw">int</span> x, <span class="kw">int</span> k) {
+        <span class="kw">for</span> (<span class="kw">int</span> p = MAXP - 1; p &gt;= 0; p--) {
+            <span class="kw">if</span> (stjump[u][p] &gt; 0 &amp;&amp; nodeKey[stjump[u][p]] &lt;= x) {
+                u = stjump[u][p];
+            }
+        }
+        <span class="kw">if</span>(leafsiz[u] &lt; k) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">int</span> idx = query(k, 1, s, root[leafDfnMin[u] - 1], root[leafDfnMin[u] + leafsiz[u] - 1]);
+        <span class="kw">return</span> sorted[idx];</pre>
+
+    <h2>复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>步骤</th><th>时间</th><th>说明</th></tr>
+      <tr><td>题目6 分配边权</td><td>O(m + q)</td><td>扫两遍操作，每边一次赋值</td></tr>
+      <tr><td>边排序 + 建树</td><td>O(m log m)</td><td>按分配出来的边权升序</td></tr>
+      <tr><td>dfs 发 dfn</td><td>O(n log n)</td><td>2n 个节点，填倍增表时顺带统计</td></tr>
+      <tr><td>题目6 建线段树</td><td>O(n)</td><td>n 个叶子的 dfn 位置各存一个点权</td></tr>
+      <tr><td>题目6 单次操作 1</td><td>O(log n)</td><td>一次上跳 + 一次区间查询 + 一次单点更新</td></tr>
+      <tr><td>题目7 建主席树</td><td>O(n log n)</td><td>n 次插入，每次 O(log n) 个节点</td></tr>
+      <tr><td>题目7 单次查询</td><td>O(log n)</td><td>上跳 O(log n) 加主席树上二分 O(log n)</td></tr>
+      <tr><td>空间</td><td>O(n log n)</td><td>题目7 的主席树 n log n 个节点，MAXT 开 40n</td></tr>
+    </table>
+    <p>题目7 的强制在线也是题面规定的解码，重构树部分与在线与否无关。</p>
+
+    <h2>最后</h2>
+    <p>七道题看下来，重构树本身只有那二十几行，变的始终是「往节点上挂什么、怎么把连通块翻译成一次查询」。真正决定难度的，是挂在树上的那个数据结构。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs, txt){
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (txt !== undefined) e.textContent = txt;
+    return e;
+  }
+
+  /* ---------- 题目6 ---------- */
+  var P6 = {5:[110,240],4:[190,240],3:[290,240],2:[370,240],1:[450,240],
+            8:[150,168],6:[410,195],7:[350,140],9:[250,85]};
+  var C6 = {6:[1,2],7:[6,3],8:[4,5],9:[8,7]};
+  var K6 = {6:1,7:2,8:3,9:4};
+  var F6 = {1:6,2:6,3:7,4:8,5:8,6:7,7:9,8:9,9:0};
+  var S6 = {6:2,7:3,8:2,9:5};
+  var M6 = {6:4,7:3,8:1,9:1};
+  var LEAF6 = {6:[2,1],7:[3,2,1],8:[5,4],9:[5,4,3,2,1]};  // 按 dfn 顺序
+  var DFN6 = [5,4,3,2,1];  // dfn 1..5 对应的原始点
+
+  function climb6(u, limit){
+    var v = u;
+    while (F6[v] && K6[F6[v]] <= limit) v = F6[v];
+    return v;
+  }
+  var STEPS = [
+    {op:0, limit:5, vals:[30,10,50,20,40], txt:'初始：limit = 5，边权 ≤ 5 的边全在，图是连通的。'},
+    {op:1, x:1, limit:5, vals:[30,10,50,20,40], out:50, take:3,
+     txt:'操作 1：从点 1 出发，上跳一路到根 9，整块 5 个点。最大值是 50（3 号点），打印并把它的点权改成 0。'},
+    {op:2, del:5, limit:4, vals:[30,10,0,20,40],
+     txt:'操作 2：删掉第 5 条边。limit 从 5 变成 4，边权 5 的那条不在了，但 1-2-3-4-5 这条链还在，图仍然连通。'},
+    {op:1, x:4, limit:4, vals:[30,10,0,20,40], out:40, take:5,
+     txt:'操作 1：从点 4 出发，上跳到根 9，还是整块。最大值是 40（5 号点），打印并清零。'},
+    {op:2, del:3, limit:3, vals:[30,10,0,20,0],
+     txt:'操作 2：删掉第 3 条边（3-4）。limit 从 4 变成 3，边权 4 的那条不在了，图断成 {1,2,3} 和 {4,5} 两块。'},
+    {op:1, x:2, limit:3, vals:[30,10,0,20,0], out:30, take:1,
+     txt:'操作 1：从点 2 出发，上跳停在节点 7（再往上的 9 号边权是 4 &gt; 3），块里只有 {3,2,1}。最大值是 30（1 号点），打印并清零。'},
+    {op:1, x:4, limit:3, vals:[0,10,0,20,0], out:20, take:4,
+     txt:'操作 1：从点 4 出发，上跳停在节点 8，块里是 {5,4}。5 号点已经是 0，最大值是 20（4 号点），打印并清零。'}
+  ];
+  var svgO = document.getElementById('kdOps'), infoO = document.getElementById('kdOpsInfo');
+  var pO = 0;
+
+  function drawO(s){
+    while (svgO.firstChild) svgO.removeChild(svgO.firstChild);
+    var st = STEPS[s];
+    svgO.appendChild(el('text', {x:16, y:16, 'font-size':11, fill:'#6b7280'},
+      '第 ' + s + ' 步 · limit = ' + st.limit));
+    var g = el('g', {stroke:'#c9ced4', 'stroke-width':1.4, fill:'none'});
+    var internals = [6,7,8,9];
+    for (var k = 0; k < internals.length; k++){
+      var p = internals[k], pp = P6[p];
+      for (var t = 0; t < C6[p].length; t++){
+        var c = C6[p][t], q = P6[c];
+        g.appendChild(el('path', {d:'M' + pp[0] + ' ' + pp[1] + ' L' + q[0] + ' ' + q[1]}));
+      }
+    }
+    svgO.appendChild(g);
+    var alive = {};
+    for (var i = 1; i <= 5; i++) if (st.vals[i - 1] > 0) alive[i] = true;
+    var stop = 0, block = {};
+    if (st.op === 1){
+      stop = climb6(st.x, st.limit);
+      var lb = LEAF6[stop];
+      for (var j = 0; j < lb.length; j++) block[lb[j]] = true;
+      var cur = st.x;
+      var hp = el('g', {stroke:'#ea580c', 'stroke-width':3, fill:'none'});
+      while (cur !== stop){
+        var a = P6[cur], b = P6[F6[cur]];
+        hp.appendChild(el('path', {d:'M' + a[0] + ' ' + a[1] + ' L' + b[0] + ' ' + b[1]}));
+        cur = F6[cur];
+      }
+      svgO.appendChild(hp);
+    } else if (st.op === 2){
+      stop = 9;
+    }
+    var nodes = [1,2,3,4,5,6,7,8,9];
+    for (var n = 0; n < nodes.length; n++){
+      var v = nodes[n], pos = P6[v];
+      if (v <= 5){
+        var inB = st.op === 1 ? !!block[v] : true;
+        svgO.appendChild(el('circle', {cx:pos[0], cy:pos[1], r:14,
+          fill:inB ? '#dbeafe' : '#f6f7f9', stroke:inB ? '#2563eb' : '#c9ced4', 'stroke-width':1.5}));
+        svgO.appendChild(el('text', {x:pos[0], y:pos[1] + 4, 'text-anchor':'middle', 'font-size':11,
+          fill:inB ? '#1f2328' : '#9aa0a6'}, String(v)));
+      } else {
+        var hot = st.op === 1 && isAnc(stop, v);
+        svgO.appendChild(el('circle', {cx:pos[0], cy:pos[1], r:16,
+          fill:hot ? '#ffedd5' : '#f6f7f9', stroke:hot ? '#ea580c' : '#c9ced4', 'stroke-width':1.5}));
+        svgO.appendChild(el('text', {x:pos[0], y:pos[1] + 4, 'text-anchor':'middle', 'font-size':11,
+          fill:hot ? '#1f2328' : '#9aa0a6'}, String(K6[v])));
+      }
+    }
+    if (st.op === 1){
+      var sp = P6[stop];
+      svgO.appendChild(el('circle', {cx:sp[0], cy:sp[1], r:21, fill:'none', stroke:'#ea580c', 'stroke-width':1.4, 'stroke-dasharray':'3 3'}));
+    }
+    // dfn 格子
+    svgO.appendChild(el('text', {x:16, y:272, 'font-size':11, fill:'#6b7280'}, '叶子的 dfn 序，格子里是点权'));
+    for (var d = 1; d <= 5; d++){
+      var xx = 20 + (d - 1) * 78, node = DFN6[d - 1];
+      var val = st.vals[node - 1];
+      var inB2 = st.op === 1 ? !!block[node] : true;
+      var isTake = (st.op === 1 && st.take === node);
+      svgO.appendChild(el('rect', {x:xx, y:282, width:66, height:38, rx:5,
+        fill:val > 0 ? (inB2 ? '#dbeafe' : '#f6f7f9') : '#f6f7f9',
+        stroke:isTake ? '#ea580c' : (inB2 && val > 0 ? '#2563eb' : '#e6e8eb'), 'stroke-width':1.4}));
+      svgO.appendChild(el('text', {x:xx + 33, y:297, 'text-anchor':'middle', 'font-size':10,
+        fill:'#6b7280'}, 'dfn ' + d + ' · 点' + node));
+      svgO.appendChild(el('text', {x:xx + 33, y:313, 'text-anchor':'middle', 'font-size':12,
+        fill:val > 0 ? '#1f2328' : '#9aa0a6', 'font-weight':val > 0 ? '400' : '400'}, String(val)));
+    }
+    infoO.innerHTML = st.txt + (st.op === 1 ? ' 本步输出 <b>' + st.out + '</b>。' : '');
+    document.getElementById('kdOpsPrev').disabled = (s === 0);
+    document.getElementById('kdOpsNext').disabled = (s === STEPS.length - 1);
+  }
+  function isAnc(stop, v){
+    var cur = stop;
+    while (cur){ if (cur === v) return true; cur = F6[cur]; }
+    return false;
+  }
+  document.getElementById('kdOpsNext').onclick = function(){ if (pO < STEPS.length - 1){ pO++; drawO(pO); } };
+  document.getElementById('kdOpsPrev').onclick = function(){ if (pO > 0){ pO--; drawO(pO); } };
+  document.getElementById('kdOpsReset').onclick = function(){ pO = 0; drawO(0); };
+  drawO(0);
+
+  /* ---------- 题目7 ---------- */
+  var P7 = {4:[110,240],3:[190,240],5:[290,240],2:[370,240],1:[450,240],
+            6:[150,168],7:[410,195],8:[350,140],9:[250,85]};
+  var C7 = {6:[3,4],7:[1,2],8:[7,5],9:[8,6]};
+  var K7 = {6:2,7:3,8:4,9:5};
+  var F7 = {1:7,2:7,3:6,4:6,5:8,6:9,7:8,8:9,9:0};
+  var S7 = {6:2,7:2,8:3,9:5};
+  var DM7 = {6:1,7:4,8:3,9:1};
+  var LEAF7 = {6:[4,3],7:[2,1],8:[5,2,1],9:[4,3,5,2,1]};
+  var DFN7 = [4,3,5,2,1];
+  var VAL = {1:30,2:10,3:50,4:20,5:40};
+
+  function climb7(u, x){
+    var v = u;
+    while (F7[v] && K7[F7[v]] <= x) v = F7[v];
+    return v;
+  }
+  var svgK = document.getElementById('kdKth'), infoK = document.getElementById('kdKthInfo');
+  var selU = document.getElementById('kdU'), selX = document.getElementById('kdX'), selK = document.getElementById('kdK');
+  for (var i = 1; i <= 5; i++) selU.appendChild(new Option(String(i), String(i)));
+  [1,2,3,4,5,6,7].forEach(function(v){ selX.appendChild(new Option(String(v), String(v))); });
+  for (var k2 = 1; k2 <= 5; k2++) selK.appendChild(new Option(String(k2), String(k2)));
+  selU.value = '1'; selX.value = '4'; selK.value = '2';
+  var KP = [[1,4,2],[3,5,1],[3,2,1],[5,4,3]];
+  var pK = 0;
+
+  function drawK(u, x, k){
+    while (svgK.firstChild) svgK.removeChild(svgK.firstChild);
+    var stop = climb7(u, x);
+    var lb = LEAF7[stop];
+    var block = {};
+    for (var i = 0; i < lb.length; i++) block[lb[i]] = true;
+    var g = el('g', {stroke:'#c9ced4', 'stroke-width':1.4, fill:'none'});
+    var internals = [6,7,8,9];
+    for (var t = 0; t < internals.length; t++){
+      var p = internals[t], pp = P7[p];
+      for (var j = 0; j < C7[p].length; j++){
+        var c = C7[p][j], q = P7[c];
+        g.appendChild(el('path', {d:'M' + pp[0] + ' ' + pp[1] + ' L' + q[0] + ' ' + q[1]}));
+      }
+    }
+    svgK.appendChild(g);
+    var cur = u;
+    var hp = el('g', {stroke:'#ea580c', 'stroke-width':3, fill:'none'});
+    while (cur !== stop){
+      var a = P7[cur], b = P7[F7[cur]];
+      hp.appendChild(el('path', {d:'M' + a[0] + ' ' + a[1] + ' L' + b[0] + ' ' + b[1]}));
+      cur = F7[cur];
+    }
+    svgK.appendChild(hp);
+    var vals = lb.map(function(v){ return VAL[v]; }).sort(function(a,b){ return b - a; });
+    var ans = k <= vals.length ? vals[k - 1] : -1;
+    var hit = {};
+    if (ans > 0){
+      for (var v2 in VAL) if (VAL[v2] === ans && block[v2]) hit[v2] = true;
+    }
+    var nodes = [1,2,3,4,5,6,7,8,9];
+    for (var n = 0; n < nodes.length; n++){
+      var v = nodes[n], pos = P7[v];
+      if (v <= 5){
+        var inB = !!block[v];
+        svgK.appendChild(el('circle', {cx:pos[0], cy:pos[1], r:14,
+          fill:inB ? (hit[v] ? '#ffedd5' : '#dbeafe') : '#f6f7f9',
+          stroke:inB ? (hit[v] ? '#ea580c' : '#2563eb') : '#c9ced4', 'stroke-width':1.5}));
+        svgK.appendChild(el('text', {x:pos[0], y:pos[1] + 4, 'text-anchor':'middle', 'font-size':11,
+          fill:inB ? '#1f2328' : '#9aa0a6'}, String(v)));
+      } else {
+        var hot = isAnc7(stop, v);
+        svgK.appendChild(el('circle', {cx:pos[0], cy:pos[1], r:16,
+          fill:hot ? '#ffedd5' : '#f6f7f9', stroke:hot ? '#ea580c' : '#c9ced4', 'stroke-width':1.5}));
+        svgK.appendChild(el('text', {x:pos[0], y:pos[1] + 4, 'text-anchor':'middle', 'font-size':11,
+          fill:hot ? '#1f2328' : '#9aa0a6'}, String(K7[v])));
+      }
+    }
+    var sp = P7[stop];
+    svgK.appendChild(el('circle', {cx:sp[0], cy:sp[1], r:21, fill:'none', stroke:'#ea580c', 'stroke-width':1.4, 'stroke-dasharray':'3 3'}));
+    svgK.appendChild(el('text', {x:16, y:272, 'font-size':11, fill:'#6b7280'}, '叶子的 dfn 序，格子里是点权'));
+    var lo = DM7[stop], hi = DM7[stop] + S7[stop] - 1;
+    for (var d = 1; d <= 5; d++){
+      var xx = 20 + (d - 1) * 78, node = DFN7[d - 1];
+      var inR = (d >= lo && d <= hi);
+      svgK.appendChild(el('rect', {x:xx, y:282, width:66, height:38, rx:5,
+        fill:inR ? '#dbeafe' : '#f6f7f9',
+        stroke:(inR && hit[node]) ? '#ea580c' : (inR ? '#2563eb' : '#e6e8eb'), 'stroke-width':1.4}));
+      svgK.appendChild(el('text', {x:xx + 33, y:297, 'text-anchor':'middle', 'font-size':10,
+        fill:'#6b7280'}, 'dfn ' + d + ' · 点' + node));
+      svgK.appendChild(el('text', {x:xx + 33, y:313, 'text-anchor':'middle', 'font-size':12,
+        fill:inR ? '#1f2328' : '#9aa0a6'}, String(VAL[node])));
+    }
+    if (ans > 0){
+      infoK.innerHTML = '从点 ' + u + ' 出发只走边权 ≤ ' + x + ' 的边，上跳停在节点 <b>' + stop +
+        '</b>，连通块是 {' + lb.slice().sort(function(a,b){return a-b;}).join('、') + '}，对应 dfn 区间 [' + lo + ', ' + hi + ']。' +
+        '块内点权从大到小是 ' + vals.join('、') + '，第 ' + k + ' 大是 <b>' + ans + '</b>。';
+    } else {
+      infoK.innerHTML = '从点 ' + u + ' 出发只走边权 ≤ ' + x + ' 的边，上跳停在节点 <b>' + stop +
+        '</b>，连通块只有 ' + lb.length + ' 个点，不够 ' + k + ' 个，答案是 <b>-1</b>。';
+    }
+  }
+  function isAnc7(stop, v){
+    var cur = stop;
+    while (cur){ if (cur === v) return true; cur = F7[cur]; }
+    return false;
+  }
+  function applyK(){
+    drawK(parseInt(selU.value, 10), parseInt(selX.value, 10), parseInt(selK.value, 10));
+  }
+  document.getElementById('kdKthNext').onclick = function(){
+    pK = (pK + 1) % KP.length;
+    selU.value = String(KP[pK][0]); selX.value = String(KP[pK][1]); selK.value = String(KP[pK][2]); applyK();
+  };
+  document.getElementById('kdKthPrev').onclick = function(){
+    pK = (pK + KP.length - 1) % KP.length;
+    selU.value = String(KP[pK][0]); selX.value = String(KP[pK][1]); selK.value = String(KP[pK][2]); applyK();
+  };
+  document.getElementById('kdKthReset').onclick = function(){
+    pK = 0; selU.value = '1'; selX.value = '4'; selK.value = '2'; applyK();
+  };
+  selU.onchange = applyK; selX.onchange = applyK; selK.onchange = applyK;
+  applyK();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K-D 树 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .kd-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .kd-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .kd-btn:disabled{opacity:.4;cursor:default;}
+  .kd-btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;}
+  .kd-svg{display:block;width:100%;height:auto;margin:0 auto;}
+  @media(max-width:760px){
+    .kd-btn{font-size:13px;padding:5px 11px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>K-D 树</h1>
+    <p class="intro">点铺在平面上，一维的套路就都用不上了。K-D 树的办法是按某个维度找中位点把点集切成两半，左右各自再换一个维度切下去，每个节点额外记下整棵子树的包围盒。查询时拿包围盒做一次粗略估计，估计都拼不过当前答案，整棵子树就不用看了。</p>
+
+    <h2>零、背景</h2>
+    <p>前面那些结构基本都只管一维：树状数组管前缀和，线段树管区间，平衡树管大小顺序。换成平面上的点，问「离这个点最近的点有多远」「矩形里有多少个点」「点权加起来是多少」，一维的做法全都套不上。</p>
+    <p>K-D 树是给二维以及更高维准备的二叉搜索树。K 是维度数，竞赛里 K 常常是 2 或 3，二维最常见，这一节也主要在二维上讲。更高维的写法只是在维数下标上循环，没有本质区别。</p>
+    <p>前半段讲静态部分：点一次性给全，之后只查询。后半段讲点会一路插进来的动态写法，两种实现都给出，再配上几道形状各异的题目。</p>
+
+    <h2>一、问题</h2>
+    <p>平面最近点对。一共 n 个点，每个点给定坐标 (x, y)，输出距离最近的两个点之间的距离，保留四位小数。2 ≤ n ≤ 2 × 10⁵，0 ≤ x、y ≤ 10⁹。</p>
+    <p>下面一直用这 8 个点当例子：</p>
+
+    <table class="complexity">
+      <thead><tr><th>编号</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th></tr></thead>
+      <tbody>
+        <tr><td>坐标 (x, y)</td><td>(2, 3)</td><td>(5, 8)</td><td>(9, 1)</td><td>(4, 2)</td><td>(7, 9)</td><td>(1, 6)</td><td>(8, 4)</td><td>(3, 7)</td></tr>
+      </tbody>
+    </table>
+
+    <p>手算几个距离就能找到答案：6 号到 8 号是 √5，1 号到 4 号也是 √5，2 号到 5 号还是 √5。再没有更近的了，答案就是 √5，约 2.2361。</p>
+
+    <h2>二、朴素做法</h2>
+    <p>两两算一遍，取最小，O(n²)。n = 2 × 10⁵ 时要比 2 × 10¹⁰ 次，肯定超时。</p>
+    <p>换个问法：对每个点求「除它自己之外最近的点」，一共 n 次查询，答案取最小。问题就落到「一次最近邻查询要多久」上。K-D 树把这一次查询压到平均 O(log n)，整个问题就跟着变成 O(n log n)。</p>
+
+    <h2>三、交替选维度，把点切成一棵树</h2>
+    <p>先按 x 找中位点，让它当根；x 比它小的进左子树，其余的进右子树。左右两侧各自按 y 找中位点当根，再下一层又回到 x。每一层换一个维度，这就是名字里那个 K。</p>
+    <p>「找中位点」这一步直接交给 <code class="inline">nth_element</code>：<code class="inline">nth_element(arr + l, arr + mid, arr + r + 1, Cmp{dimension})</code> 一次调用就把第 mid 小的那个放到 <code class="inline">arr[mid]</code>，摊还 O(n)。没有现成函数的环境里用随机选择算法手写，期望也是 O(n)。</p>
+    <p>也可以每个节点都算一下两维各自的方差，取方差大的那一维来切。空间分裂更接近方块，剪枝更狠，但每建一层都要把所有点扫两遍，实际很少用。</p>
+    <p>建一层的代价和这一层的点数成正比，递归深度 log n，整体 O(n log n)。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="K-D 树交替选维度的切分过程与对应的树" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="16" font-size="12" fill="#6b7280">平面上的划分</text>
+        <rect x="30" y="26" width="260" height="260" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <g stroke="#2563eb" stroke-width="1.6" fill="none">
+          <line x1="134" y1="26" x2="134" y2="286"/>
+          <line x1="160" y1="176" x2="160" y2="26"/>
+        </g>
+        <g stroke="#ea580c" stroke-width="1.6" fill="none">
+          <line x1="30" y1="124" x2="134" y2="124"/>
+          <line x1="134" y1="176" x2="290" y2="176"/>
+        </g>
+        <g font-size="11">
+          <text x="138" y="108" fill="#2563eb">x = 4</text>
+          <text x="34" y="120" fill="#ea580c">y = 6</text>
+          <text x="136" y="192" fill="#ea580c">y = 4</text>
+          <text x="164" y="142" fill="#2563eb">x = 5</text>
+        </g>
+        <g font-size="10" fill="#6b7280" text-anchor="middle">
+          <circle cx="134" cy="228" r="13" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="134" y="232" fill="#1f2328" font-size="11" font-weight="600">4</text>
+          <circle cx="56" cy="124" r="13" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="56" y="128" fill="#1f2328" font-size="11" font-weight="600">6</text>
+          <circle cx="238" cy="176" r="13" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="238" y="180" fill="#1f2328" font-size="11" font-weight="600">7</text>
+          <circle cx="160" cy="72" r="13" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="160" y="76" fill="#1f2328" font-size="11">2</text>
+          <circle cx="212" cy="46" r="13" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="212" y="50" fill="#1f2328" font-size="11">5</text>
+          <circle cx="264" cy="254" r="13" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="264" y="258" fill="#1f2328" font-size="11">3</text>
+          <circle cx="82" cy="202" r="13" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="82" y="206" fill="#1f2328" font-size="11">1</text>
+          <circle cx="108" cy="98" r="13" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="108" y="102" fill="#1f2328" font-size="11">8</text>
+        </g>
+
+        <text x="330" y="16" font-size="12" fill="#6b7280">切出来的树</text>
+        <g stroke="#9aa0a6" stroke-width="1.2" fill="none">
+          <line x1="460" y1="55" x2="385" y2="97"/>
+          <line x1="460" y1="55" x2="530" y2="97"/>
+          <line x1="385" y1="127" x2="348" y2="170"/>
+          <line x1="385" y1="127" x2="420" y2="170"/>
+          <line x1="530" y1="127" x2="495" y2="170"/>
+          <line x1="530" y1="127" x2="570" y2="170"/>
+          <line x1="570" y1="200" x2="590" y2="235"/>
+        </g>
+        <g font-size="11" text-anchor="middle">
+          <circle cx="460" cy="40" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="460" y="44" fill="#1f2328" font-weight="600">4</text>
+          <text x="460" y="72" font-size="10" fill="#2563eb">切 x</text>
+          <circle cx="385" cy="112" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="385" y="116" fill="#1f2328" font-weight="600">6</text>
+          <text x="385" y="144" font-size="10" fill="#ea580c">切 y</text>
+          <circle cx="530" cy="112" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="530" y="116" fill="#1f2328" font-weight="600">7</text>
+          <text x="530" y="144" font-size="10" fill="#ea580c">切 y</text>
+          <circle cx="348" cy="185" r="13" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="348" y="189" fill="#1f2328">1</text>
+          <circle cx="420" cy="185" r="13" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="420" y="189" fill="#1f2328">8</text>
+          <circle cx="495" cy="185" r="13" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="495" y="189" fill="#1f2328">3</text>
+          <circle cx="570" cy="185" r="13" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="570" y="189" fill="#1f2328">2</text>
+          <text x="570" y="212" font-size="10" fill="#2563eb">切 x</text>
+          <circle cx="590" cy="250" r="13" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="590" y="254" fill="#1f2328">5</text>
+        </g>
+        <text x="30" y="298" font-size="11" fill="#6b7280">蓝线按 x 切、橙线按 y 切，逐层轮转；每个内部节点负责把自己那一片再切一刀</text>
+      </svg>
+      <figcaption>每一层换一个维度：根按 x 切成左右，下一层按 y 切，再下一层回到 x；树上的每个节点对应平面上的一个区域</figcaption>
+    </figure>
+
+    <p>上面那 8 个点切完之后，根是 4 号 (4, 2)；左子树根是 6 号 (1, 6)，它的两个儿子是 1 号与 8 号；右子树根是 7 号 (8, 4)，左边挂着 3 号，右边挂着 2 号，2 号下面还有一个 5 号。</p>
+
+    <h2>四、节点上记什么</h2>
+    <p>除了自己的坐标和左右儿子，每个节点还要记 <code class="inline">xmin</code>、<code class="inline">xmax</code>、<code class="inline">ymin</code>、<code class="inline">ymax</code>，也就是能把整棵子树框起来的那个矩形，通常叫包围盒。查询时能不能剪枝，全看它。</p>
+    <p>还要不要别的，取决于题目问什么：数个数就存 <code class="inline">siz</code>，求点权和就存 <code class="inline">sum</code>，问最近/最远则只要包围盒就够了。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="节点维护包围盒与聚合值" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="16" font-size="12" fill="#6b7280">6 号节点的那棵子树</text>
+        <rect x="30" y="26" width="260" height="200" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <rect x="56" y="98" width="52" height="78" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2" stroke-dasharray="4 3"/>
+        <text x="82" y="92" font-size="11" fill="#ea580c" text-anchor="middle">包围盒 [1,3] × [3,7]</text>
+        <g font-size="11" text-anchor="middle">
+          <circle cx="56" cy="124" r="12" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="56" y="128" fill="#1f2328" font-weight="600">6</text>
+          <circle cx="82" cy="202" r="12" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="82" y="206" fill="#1f2328">1</text>
+          <circle cx="108" cy="98" r="12" fill="#ffffff" stroke="#9aa0a6" stroke-width="1.2"/>
+          <text x="108" y="102" fill="#1f2328">8</text>
+        </g>
+        <text x="30" y="242" font-size="11" fill="#6b7280">虚线框住的是这三个点，也就是 6 号节点要维护的范围</text>
+
+        <text x="330" y="16" font-size="12" fill="#6b7280">节点要记的东西</text>
+        <g font-size="13" text-anchor="middle">
+          <rect x="330" y="28" width="260" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="460" y="50" fill="#2563eb">自己的坐标 x、y（以及左右儿子）</text>
+          <rect x="330" y="70" width="260" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="460" y="92" fill="#2563eb">子树包围盒 xmin xmax ymin ymax</text>
+          <rect x="330" y="112" width="260" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="460" y="134" fill="#2563eb">聚合值：siz 或 sum，看题目要什么</text>
+        </g>
+        <rect x="330" y="160" width="260" height="76" rx="8" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <text x="346" y="182" font-size="12" fill="#1f2328">从下往上汇总（maintain）</text>
+        <text x="346" y="202" font-size="12" fill="#6b7280">xmin = min(x, xmin[ls], xmin[rs])</text>
+        <text x="346" y="222" font-size="12" fill="#6b7280">sum = v + sum[ls] + sum[rs]</text>
+      </svg>
+      <figcaption>包围盒是整棵树的关键：能不能一次剪掉一片，全看查询的框和这个框有没有交集</figcaption>
+    </figure>
+
+    <p>0 号节点代表空树，它的初值必须设成 <code class="inline">xmin[0] = ymin[0] = +INF</code>、<code class="inline">xmax[0] = ymax[0] = -INF</code>，否则 min 和 max 会把 0 掺和进来，包围盒算错。这一步在建树和第一次插入之前做，很容易漏。</p>
+
+    <h2>五、粗略估计</h2>
+    <p>有了包围盒，就能回答一个问题：查询点到这棵子树里「任何一个点」的距离，最少可能是多少。答案就是把查询点到这个矩形的距离算出来。查询点已经被套在矩形里，这个距离就是 0。</p>
+    <p>这个值是「子树里所有点到查询点距离」的下界，也是后面所有剪枝唯一的依据。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="查询点到包围盒的最小距离的三种情况" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="20" y="20" width="180" height="180" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <rect x="52" y="52" width="86" height="86" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+        <circle cx="95" cy="95" r="5" fill="#2563eb"/>
+        <text x="110" y="222" font-size="12" fill="#1f2328" text-anchor="middle">点在盒子里</text>
+        <text x="110" y="240" font-size="12" fill="#2563eb" text-anchor="middle">估计值 = 0</text>
+
+        <rect x="220" y="20" width="180" height="180" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <rect x="252" y="52" width="86" height="86" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+        <circle cx="230" cy="180" r="5" fill="#2563eb"/>
+        <g stroke="#9aa0a6" stroke-width="1" stroke-dasharray="3 2">
+          <line x1="230" y1="180" x2="252" y2="180"/>
+          <line x1="252" y1="180" x2="252" y2="138"/>
+        </g>
+        <text x="310" y="222" font-size="12" fill="#1f2328" text-anchor="middle">在左下外侧</text>
+        <text x="310" y="240" font-size="12" fill="#2563eb" text-anchor="middle">dx² + dy²</text>
+
+        <rect x="420" y="20" width="180" height="180" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <rect x="452" y="52" width="86" height="86" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+        <circle cx="510" cy="30" r="5" fill="#2563eb"/>
+        <g stroke="#9aa0a6" stroke-width="1" stroke-dasharray="3 2">
+          <line x1="510" y1="30" x2="510" y2="52"/>
+        </g>
+        <text x="510" y="222" font-size="12" fill="#1f2328" text-anchor="middle">正上方</text>
+        <text x="510" y="240" font-size="12" fill="#2563eb" text-anchor="middle">dy²</text>
+
+        <text x="20" y="12" font-size="11" fill="#6b7280">橙框是子树包围盒，蓝点是查询点，灰色虚线是两个方向上的间隙</text>
+      </svg>
+      <figcaption>间隙只在查询点越过某条边时才出现，两个方向各取一次，合起来就是「子树里最好情况能到多近」</figcaption>
+    </figure>
+
+    <p>写成代码只有几行。横向的间隙先在 xmin、xmax 之间比一次，纵向同理，最后两个间隙各自平方加起来。</p>
+
+    <h2>六、用估计剪枝</h2>
+    <p>查询从根往下走，每到一个节点做三件事。</p>
+    <ol>
+      <li>算查询点到当前节点的真实距离，更新答案 ans。</li>
+      <li>对左右两个儿子各算一次估计值 gl、gr。</li>
+      <li>只有估计值严格小于 ans 时才递归进去，并且先走估计值更小的那边。</li>
+    </ol>
+    <p>第 3 条的两个细节都有讲究。先走小的那一边，是为了尽早把 ans 压小，ans 越小后面的剪枝越狠；用严格小于而非小于等于，是因为等于表示这棵子树里最好的情况也只能和当前答案打平，不会让答案变得更好，那就没有必要进去。</p>
+    <p>单次查询最差是 O(n)，也就是一路走进每个节点。但估计值只有在查询点离盒子很近时才可能小，实际通常走不了几层就停住。</p>
+
+    <h2>七、演示</h2>
+    <p>点「下一步」走一遍：前六步是建树，看它在平面上怎么一层一层把区域切开；后面是拿 (6, 5) 做一次最近邻查询，看哪些子树被估计值直接剪掉。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示　8 个点建树 + 一次最近邻查询</div>
+      <div class="kd-svg" id="kdSvg"></div>
+      <div class="breakdown" id="kdStatus"></div>
+      <div class="kd-btns">
+        <button class="kd-btn" id="kdStep">下一步</button>
+        <button class="kd-btn" id="kdAuto">自动播放</button>
+        <button class="kd-btn" id="kdReset">重置</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot full"></span>本步访问到的节点</span>
+        <span><span class="dot partial"></span>本步考察的区域</span>
+        <span><span class="dot" style="background:#f6f7f9;border:1px solid #9aa0a6;"></span>被剪掉的子树</span>
+      </div>
+    </div>
+
+    <h2>八、平面最近点对</h2>
+    <p>回到第一道题。答案初始化为 <code class="inline">dist(1, 2)</code>，然后对每个点跑一次第六节那套查询，全局取最小。有两个地方要留意。</p>
+    <p>一是查询里要跳过自己，也就是<code class="inline">if (qi != i)</code> 才更新答案，否则自己到自己的距离 0 会把答案直接钉死。二是答案为 0 时可以直接跳出循环，点重合了就不会有更近的。</p>
+    <p>不过这题 K-D 树不是正解。单次查询最差 O(n)，刻意构造的数据能让每个盒子的估计值都刚好卡在答案上、一棵子树也剪不掉，复杂度正确的做法是分治，计算几何专题会讲。</p>
+
+    <h2>九、矩形查询为什么是 O(√n)</h2>
+    <p>换一类问题：查矩形里有多少个点、点权之和是多少。这类查询不依赖答案好不好修剪，它有确定的上界。</p>
+    <p>走到节点时仍然是三种情况，按顺序判断：包围盒和查询矩形没交集，返回 0；包围盒被查询矩形整个包住，直接返回节点上存好的 sum 或 siz；否则看当前节点自己是否落在矩形里，再往两个儿子递归。</p>
+    <p>代价出在第三种情况上，也就是那些被查询矩形的边界「横穿」的区域。下面数一数这样的区域有多少。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="按组切分后竖刀穿过的单元格数量" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="40" y="24" font-size="12" fill="#6b7280">每往下走一组（先按 x 切、再按 y 切），区域数 ×4</text>
+
+        <rect x="40" y="40" width="120" height="120" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <line x1="100" y1="40" x2="100" y2="160" stroke="#ea580c" stroke-width="1.6"/>
+        <text x="100" y="180" font-size="12" fill="#1f2328" text-anchor="middle">第 0 组 · 1 个</text>
+        <text x="100" y="198" font-size="11" fill="#6b7280" text-anchor="middle">竖刀穿过 1 个</text>
+
+        <rect x="200" y="40" width="150" height="150" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <g stroke="#2563eb" stroke-width="1.4" fill="none">
+          <line x1="275" y1="40" x2="275" y2="190"/>
+          <line x1="200" y1="115" x2="350" y2="115"/>
+        </g>
+        <rect x="200" y="40" width="75" height="75" fill="#ffedd5" stroke="none"/>
+        <rect x="200" y="115" width="75" height="75" fill="#ffedd5" stroke="none"/>
+        <line x1="250" y1="40" x2="250" y2="190" stroke="#ea580c" stroke-width="1.6"/>
+        <text x="275" y="212" font-size="12" fill="#1f2328" text-anchor="middle">第 1 组 · 4 个</text>
+        <text x="275" y="230" font-size="11" fill="#6b7280" text-anchor="middle">穿过 2 个（一列）</text>
+
+        <rect x="390" y="40" width="200" height="200" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <g stroke="#2563eb" stroke-width="1.2" fill="none">
+          <line x1="490" y1="40" x2="490" y2="240"/>
+          <line x1="390" y1="140" x2="590" y2="140"/>
+          <line x1="390" y1="90" x2="590" y2="90"/>
+          <line x1="390" y1="190" x2="590" y2="190"/>
+          <line x1="440" y1="40" x2="440" y2="240"/>
+          <line x1="540" y1="40" x2="540" y2="240"/>
+        </g>
+        <rect x="390" y="40" width="50" height="50" fill="#ffedd5" stroke="none"/>
+        <rect x="390" y="90" width="50" height="50" fill="#ffedd5" stroke="none"/>
+        <rect x="390" y="140" width="50" height="50" fill="#ffedd5" stroke="none"/>
+        <rect x="390" y="190" width="50" height="50" fill="#ffedd5" stroke="none"/>
+        <line x1="415" y1="40" x2="415" y2="240" stroke="#ea580c" stroke-width="1.6"/>
+        <text x="490" y="262" font-size="12" fill="#1f2328" text-anchor="middle">第 2 组 · 16 个</text>
+        <text x="490" y="280" font-size="11" fill="#6b7280" text-anchor="middle">穿过 4 个（一列）</text>
+
+        <rect x="40" y="230" width="120" height="52" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1"/>
+        <text x="100" y="252" font-size="12" fill="#2563eb" text-anchor="middle">T(n) = 2 · T(n/4) + O(1)</text>
+        <text x="100" y="270" font-size="12" fill="#2563eb" text-anchor="middle">→ O(n^(log₄2)) = O(√n)</text>
+      </svg>
+      <figcaption>橙色是查询的一条边界；每加一组，区域数翻两番，而这条边界只会落进其中一列</figcaption>
+    </figure>
+
+    <p>把推导写完整。一个装着 n 个点的方块，往下走一组（先按 x 切、再按 y 切）之后变成 4 个方块，每个装 n / 4 个点。一条竖直的边界只会落进其中一列，也就是 2 个小方块。于是格子数满足递归式 T(n) = 2 · T(n/4) + O(1)，用 Master 公式算出来 T(n) = O(n^(log₄ 2)) = O(√n)。</p>
+    <p>换个写法也行：设最深的一组编号为 h，那时候有 4ʰ 个方块、每条边界穿过 2ʰ 个。方块里的点降到一个时停止拆分，也就是 4ʰ = n，于是 2ʰ = √n。各层加起来是 1 + 2 + 4 + ⋯ + 2ʰ，一个等比数列，被最后一项卡住，总共 O(√n)。</p>
+    <p>推广到 K 维，每 K 层算一组，一组之后区域数变成 2ᴷ 份，单次正交范围查询是 O(n^(1 − 1/K))。</p>
+
+    <h2>十、点会插进来</h2>
+    <p>建好的树不会永远够用。点一路插进来，树会往一侧长偏，包围盒跟着变大，框住的空白越来越多，剪枝渐渐失效。所以要维持它的形状。</p>
+    <p>有人会问能不能像普通平衡树那样转一圈。不行：平衡树能旋转，是因为所有节点共用同一个排序标准，转完之后中序还是有序的。K-D 树每层换维度，排序标准不统一，旋转会把节点挪到别的深度上，它原本承担的那个维度的划分关系就没了。替罪羊树不靠旋转，失衡就把整棵子树收集起来重建一次，正好合适。</p>
+    <p>于是有两种维持办法。</p>
+    <p>替罪羊树的方式是最推荐的那一版。始终只维护一棵树，只有一个根，查询只在一棵树上剪枝，效果稳定，也容易往下扩展出删除操作和树套树。代价是实现稍复杂，而且平衡因子允许左右存在一定比例的不平衡，理论上不严格保证矩形查询的 O(√n)，但一般够用。</p>
+    <p>二进制分组的方式另有一套思路：把总的点数按二进制拆成若干组，每组节点数是 2 的幂，每组单独一棵静态 K-D 树。新来的点自成一个大小为 1 的组，然后像二进制进位一样不断把相邻组合并。单次插入摊还 O(log² n)。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="二进制分组插入时的合并过程" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="20" font-size="12" fill="#6b7280">插入第 14 个节点时的合并</text>
+        <text x="30" y="46" font-size="12" fill="#1f2328">合并前　1 + 4 + 8 = 13</text>
+        <g font-size="12" text-anchor="middle">
+          <rect x="30" y="56" width="70" height="34" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="65" y="78" fill="#ea580c">组 0 · 1 个</text>
+          <rect x="110" y="56" width="70" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="145" y="78" fill="#2563eb">组 2 · 4 个</text>
+          <rect x="190" y="56" width="70" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="225" y="78" fill="#2563eb">组 3 · 8 个</text>
+        </g>
+        <text x="280" y="78" font-size="12" fill="#6b7280">＋ 新来的第 14 个点</text>
+
+        <g stroke="#9aa0a6" stroke-width="1.2" fill="none" marker-end="url(#kdArrow)">
+          <path d="M65 100 L65 128" stroke-dasharray="4 3"/>
+          <path d="M420 100 L420 128" stroke-dasharray="4 3"/>
+        </g>
+        <defs>
+          <marker id="kdArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 z" fill="#9aa0a6"/>
+          </marker>
+        </defs>
+
+        <text x="30" y="152" font-size="12" fill="#1f2328">合并后　2 + 4 + 8 = 14</text>
+        <g font-size="12" text-anchor="middle">
+          <rect x="110" y="162" width="70" height="34" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="145" y="184" fill="#ea580c">组 1 · 2 个</text>
+          <rect x="190" y="162" width="70" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="225" y="184" fill="#2563eb">组 2 · 4 个</text>
+          <rect x="270" y="162" width="70" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="305" y="184" fill="#2563eb">组 3 · 8 个</text>
+        </g>
+
+        <rect x="30" y="212" width="560" height="24" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <text x="44" y="228" font-size="12" fill="#1f2328">查询时要挨个访问每一组，答案是所有组的和：O(log n) 棵树，各自 O(√k)</text>
+      </svg>
+      <figcaption>每组的节点数恒为 2 的幂，分裂严格均衡，理论上确实守得住矩形查询的 O(√n)</figcaption>
+    </figure>
+
+    <p>二进制分组的优点是每组都用静态建树一次成型，实现简单，适合「一棵动态 K-D 树、只有插入」的场景。缺点也清楚：一棵树被拆成好几棵，查询要挨个访问，剪枝不能跨组，常数比替罪羊树差；要做删除、要做树套树就很难受了。此外还有根号重构的路子，复杂度更高，这里不再展开。</p>
+
+    <h2>十一、替罪羊树方式的插入与重建</h2>
+    <p>插入的形状和普通二叉搜索树一样：拿新节点从根往下比，按当前层的维度决定往左还是往右，走到空位就挂上去，回溯时逐个 maintain。</p>
+    <p>回溯的每一步都检查一下当前节点是否失衡，判据是 <code class="inline">ALPHA * siz[i] &gt;= max(siz[ls[i]], siz[rs[i]])</code>，ALPHA 一般取 0.7。失衡就记下这棵子树的根 <code class="inline">top</code>、它的父亲 <code class="inline">topFather</code>、它挂在父亲的哪一侧 <code class="inline">topSide</code>，以及它这一层该用哪个维度 <code class="inline">topDimension</code>。</p>
+    <p>这个记录是覆盖式的，而回溯是从叶子往根走的，所以最后留下的是最高的那个失衡节点。重建它，就能一次性把这一整条路径上的失衡都解决掉。</p>
+    <p>重建本身很简单：对 <code class="inline">top</code> 做一次 dfs 把节点收集进临时数组，用静态建树那套流程重出一棵子树，再按 <code class="inline">topFather</code> 和 <code class="inline">topSide</code> 接回去。<code class="inline">topFather</code> 为 0 说明重建的是整棵树，直接换根。</p>
+    <p>重建的代价是「子树节点数 × log」，比普通替罪羊树的重构多一个 log，摊到一次插入上是 O(log² n)。</p>
+
+    <h2>十二、半平面也是区域</h2>
+    <p>范围不一定非得是与坐标轴平行的矩形。巧克力王国这道题给的是 a · x + b · y &lt; c，一条斜线把平面劈成两半。</p>
+    <p>思路完全一样，只要能回答「这棵子树里 a · x + b · y 最小可能是多少、最大可能是多少」。做法是分别算四个分量：<code class="inline">minv = min(a·xmin, a·xmax) + min(b·ymin, b·ymax)</code>，<code class="inline">maxv = max(a·xmin, a·xmax) + max(b·ymin, b·ymax)</code>。minv ≥ c 说明这一整棵都不可能满足，返回 0；maxv &lt; c 说明全都满足，直接返回存好的 sum。</p>
+    <p>a、b 可能为负，这时候 min(a·xmin, a·xmax) 对应的不再是 xmin 那个角。所以必须用 min/max 把四种组合都算一遍，不能图省事固定取左下角。</p>
+
+    <h2>十三、三维偏序</h2>
+    <p>n 个对象，每个有 a、b、c 三个属性。f(i) 是满足 aⱼ ≤ aᵢ 且 bⱼ ≤ bᵢ 且 cⱼ ≤ cᵢ 且 j ≠ i 的 j 的个数，最后统计 f(i) = d 的 i 有多少个。</p>
+    <p>先把所有对象按 a 从小到大排一遍。排完之后，位置靠前的对象它的 a 一定不大于靠后的，于是 a 这一维可以不管了，剩下 b、c 两维正是 K-D 树熟悉的东西。</p>
+    <p>a 相等的那几个要当成一组处理：先把整组都插进 K-D 树，然后再逐个查询。如果插一个查一个，组内的对象之间就互相漏掉了。查询返回的是 ≤ 的个数，里面包含对象自己，减 1 才是 f(i)。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="按 a 分组后逐组处理" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <text x="30" y="18" font-size="12" fill="#6b7280">按 a 排序后的一维序列，相同 a 的聚在一起</text>
+        <g font-size="12" text-anchor="middle">
+          <rect x="30" y="30" width="70" height="36" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="65" y="54" fill="#ea580c">a = 1</text>
+          <rect x="108" y="30" width="110" height="36" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="163" y="54" fill="#ea580c">a = 2（三个）</text>
+          <rect x="226" y="30" width="70" height="36" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="261" y="54" fill="#2563eb">a = 3</text>
+          <rect x="304" y="30" width="70" height="36" rx="6" fill="#ffffff" stroke="#e6e8eb" stroke-width="1.2"/>
+          <text x="339" y="54" fill="#6b7280">a = 4</text>
+          <text x="400" y="54" fill="#6b7280" font-size="13">⋯ 后面还没进树 ⋯</text>
+        </g>
+        <text x="30" y="98" font-size="12" fill="#1f2328">处理 a = 2 这一组的顺序</text>
+        <g font-size="12">
+          <rect x="30" y="112" width="240" height="34" rx="6" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+          <text x="150" y="134" fill="#2563eb" text-anchor="middle">① 把组内三个 (b, c) 全部插入</text>
+          <rect x="290" y="112" width="290" height="34" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+          <text x="435" y="134" fill="#ea580c" text-anchor="middle">② 再逐个查 b ≤ bᵢ 且 c ≤ cᵢ 有几个</text>
+        </g>
+        <rect x="30" y="164" width="550" height="32" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <text x="44" y="185" font-size="12" fill="#1f2328">查的结果含自己 → 减 1 得到 f(i)；已经进过树的各组 a 都比它小</text>
+      </svg>
+      <figcaption>先全插再全查，同组之间才能互相贡献；两组之间则由 a 的大小顺序保证只算一次</figcaption>
+    </figure>
+
+    <h2>十四、换个度量：曼哈顿距离</h2>
+    <p>前面的例子都用欧氏距离。天使玩偶这道题规定的距离是 |x₁ − x₂| + |y₁ − y₂|，其余都一样：动态加点，查最近。</p>
+    <p>要改的只有两处。真实距离改成两个差的绝对值之和，估计函数也要跟着改成同一度量的下界：横向间隙就是 |qx − xmin| 与 |qx − xmax| 里较大的那个，纵向同理，两个加起来。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 620 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="曼哈顿距离下的估计函数" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="30" y="20" width="230" height="150" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>
+        <rect x="80" y="60" width="100" height="70" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+        <circle cx="60" cy="140" r="5" fill="#2563eb"/>
+        <g stroke="#9aa0a6" stroke-width="1" stroke-dasharray="3 2">
+          <line x1="60" y1="140" x2="80" y2="140"/>
+          <line x1="60" y1="140" x2="60" y2="130"/>
+        </g>
+        <text x="145" y="184" font-size="12" fill="#1f2328" text-anchor="middle">横向间隙 + 纵向间隙</text>
+        <text x="30" y="14" font-size="11" fill="#6b7280">橙框是包围盒，蓝点是查询点</text>
+
+        <rect x="290" y="30" width="300" height="60" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
+        <text x="306" y="54" font-size="12" fill="#2563eb">猜测 dx = max(|qx − xmin|, |qx − xmax|)</text>
+        <text x="306" y="76" font-size="12" fill="#2563eb">dy 同理，估计值 = dx + dy</text>
+
+        <rect x="290" y="104" width="300" height="48" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>
+        <text x="306" y="126" font-size="12" fill="#ea580c">欧氏距离猜的是 dx² + dy²，这里不能沿用；</text>
+        <text x="306" y="144" font-size="12" fill="#ea580c">度量换了，估计函数必须同步换成新度量的下界</text>
+      </svg>
+      <figcaption>估计函数只要保证是「真实距离的下界」就能用来剪枝，但换度量时一定要重新推一遍</figcaption>
+    </figure>
+
+    <h2>十五、代码</h2>
+    <p>下面是静态 K-D 树配上最近点对那道题的完整实现。建树有两份，build1 是交替选维度，build2 是按方差选维度，主函数里用 build1。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">using</span> ll = <span class="kw">long</span> <span class="kw">long</span>;
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+<span class="kw">const</span> ll INF = 1LL &lt;&lt; 60;
+<span class="kw">int</span> n;
+
+ll x[MAXN];
+ll y[MAXN];
+<span class="kw">int</span> arr[MAXN];
+
+<span class="kw">int</span> root;
+<span class="kw">int</span> ls[MAXN];
+<span class="kw">int</span> rs[MAXN];
+ll xmin[MAXN];
+ll xmax[MAXN];
+ll ymin[MAXN];
+ll ymax[MAXN];
+
+ll ans;
+
+<span class="kw">int</span> <span class="fn">compareNode</span>(<span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> dimension) {
+    ll v1 = dimension == 0 ? x[i] : y[i];
+    ll v2 = dimension == 0 ? x[j] : y[j];
+    <span class="kw">return</span> v1 == v2 ? 0 : v1 &lt; v2 ? -1 : 1;
+}
+
+<span class="kw">struct</span> Cmp {
+    <span class="kw">int</span> dimension;
+
+    <span class="kw">bool</span> <span class="kw">operator</span>()(<span class="kw">int</span> a, <span class="kw">int</span> b) <span class="kw">const</span> {
+        <span class="kw">return</span> compareNode(a, b, dimension) &lt; 0;
+    }
+};
+
+<span class="kw">void</span> <span class="fn">maintain</span>(<span class="kw">int</span> i) {
+    xmin[i] = min(x[i], min(xmin[ls[i]], xmin[rs[i]]));
+    xmax[i] = max(x[i], max(xmax[ls[i]], xmax[rs[i]]));
+    ymin[i] = min(y[i], min(ymin[ls[i]], ymin[rs[i]]));
+    ymax[i] = max(y[i], max(ymax[ls[i]], ymax[rs[i]]));
+}
+
+<span class="kw">int</span> <span class="fn">build1</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> dimension) {
+    <span class="kw">if</span> (l &gt; r) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+    nth_element(arr + l, arr + mid, arr + r + 1, Cmp{dimension});
+    <span class="kw">int</span> rt = arr[mid];
+    ls[rt] = build1(l, mid - 1, dimension ^ 1);
+    rs[rt] = build1(mid + 1, r, dimension ^ 1);
+    maintain(rt);
+    <span class="kw">return</span> rt;
+}
+
+<span class="kw">double</span> <span class="fn">variance</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> dimension) {
+    <span class="kw">double</span> siz = r - l + 1, sum = 0, avg = 0, dif = 0;
+    <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+        sum += dimension == 0 ? x[arr[i]] : y[arr[i]];
+    }
+    avg = sum / siz;
+    sum = 0;
+    <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+        dif = (dimension == 0 ? x[arr[i]] : y[arr[i]]) - avg;
+        sum += dif * dif;
+    }
+    <span class="kw">return</span> sum / siz;
+}
+
+<span class="kw">int</span> <span class="fn">build2</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+    <span class="kw">if</span> (l &gt; r) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+    <span class="kw">int</span> dimension = variance(l, r, 0) &gt;= variance(l, r, 1) ? 0 : 1;
+    nth_element(arr + l, arr + mid, arr + r + 1, Cmp{dimension});
+    <span class="kw">int</span> rt = arr[mid];
+    ls[rt] = build2(l, mid - 1);
+    rs[rt] = build2(mid + 1, r);
+    maintain(rt);
+    <span class="kw">return</span> rt;
+}
+
+ll dist(<span class="kw">int</span> qi, <span class="kw">int</span> i) {
+    ll dx = x[qi] - x[i];
+    ll dy = y[qi] - y[i];
+    <span class="kw">return</span> dx * dx + dy * dy;
+}
+
+ll guess(<span class="kw">int</span> qi, <span class="kw">int</span> i) {
+    <span class="kw">if</span> (i == 0) {
+        <span class="kw">return</span> INF;
+    }
+    ll qx = x[qi];
+    ll qy = y[qi];
+    ll dx = qx &lt; xmin[i] ? (xmin[i] - qx) : (qx &gt; xmax[i] ? (qx - xmax[i]) : 0);
+    ll dy = qy &lt; ymin[i] ? (ymin[i] - qy) : (qy &gt; ymax[i] ? (qy - ymax[i]) : 0);
+    <span class="kw">return</span> dx * dx + dy * dy;
+}
+
+<span class="kw">void</span> <span class="fn">updateAns</span>(<span class="kw">int</span> qi, <span class="kw">int</span> i) {
+    <span class="kw">if</span> (i == 0) {
+        <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (qi != i) {
+        ans = min(ans, dist(qi, i));
+    }
+    ll gl = guess(qi, ls[i]);
+    ll gr = guess(qi, rs[i]);
+    <span class="kw">if</span> (gl &lt; gr) {
+        <span class="kw">if</span> (gl &lt; ans) {
+            updateAns(qi, ls[i]);
+        }
+        <span class="kw">if</span> (gr &lt; ans) {
+            updateAns(qi, rs[i]);
+        }
+    } <span class="kw">else</span> {
+        <span class="kw">if</span> (gr &lt; ans) {
+            updateAns(qi, rs[i]);
+        }
+        <span class="kw">if</span> (gl &lt; ans) {
+            updateAns(qi, ls[i]);
+        }
+    }
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    scanf("%d", &amp;n);
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        scanf("%lld%lld", &amp;x[i], &amp;y[i]);
+        arr[i] = i;
+    }
+    xmin[0] = ymin[0] = INF;
+    xmax[0] = ymax[0] = -INF;
+    root = build1(1, n, 0);
+    <span class="cm">// root = build2(1, n);</span>
+    ans = dist(1, 2);
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        updateAns(i, root);
+        <span class="kw">if</span> (ans == 0) {
+            <span class="kw">break</span>;
+        }
+    }
+    printf("%.4f\n", sqrt((<span class="kw">double</span>) ans));
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <p>巧克力王国那题的结构完全一样，只是把「无交集 / 被包住」的两个判断换成了对 a · x + b · y 的极值比较。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">using</span> ll = <span class="kw">long</span> <span class="kw">long</span>;
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 50001;
+<span class="kw">const</span> ll INF = 1LL &lt;&lt; 60;
+<span class="kw">int</span> n, m;
+
+ll x[MAXN];
+ll y[MAXN];
+ll v[MAXN];
+<span class="kw">int</span> arr[MAXN];
+
+<span class="kw">int</span> root;
+<span class="kw">int</span> ls[MAXN];
+<span class="kw">int</span> rs[MAXN];
+
+ll sum[MAXN];
+ll xmin[MAXN];
+ll xmax[MAXN];
+ll ymin[MAXN];
+ll ymax[MAXN];
+
+<span class="kw">int</span> <span class="fn">compareNode</span>(<span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> dimension) {
+    ll v1 = dimension == 0 ? x[i] : y[i];
+    ll v2 = dimension == 0 ? x[j] : y[j];
+    <span class="kw">return</span> v1 == v2 ? 0 : v1 &lt; v2 ? -1 : 1;
+}
+
+<span class="kw">struct</span> Cmp {
+    <span class="kw">int</span> dimension;
+
+    <span class="kw">bool</span> <span class="kw">operator</span>()(<span class="kw">int</span> a, <span class="kw">int</span> b) <span class="kw">const</span> {
+        <span class="kw">return</span> compareNode(a, b, dimension) &lt; 0;
+    }
+};
+
+<span class="kw">void</span> <span class="fn">maintain</span>(<span class="kw">int</span> i) {
+    sum[i] = v[i] + sum[ls[i]] + sum[rs[i]];
+    xmin[i] = min(x[i], min(xmin[ls[i]], xmin[rs[i]]));
+    xmax[i] = max(x[i], max(xmax[ls[i]], xmax[rs[i]]));
+    ymin[i] = min(y[i], min(ymin[ls[i]], ymin[rs[i]]));
+    ymax[i] = max(y[i], max(ymax[ls[i]], ymax[rs[i]]));
+}
+
+<span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> dimension) {
+    <span class="kw">if</span> (l &gt; r) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+    nth_element(arr + l, arr + mid, arr + r + 1, Cmp{dimension});
+    <span class="kw">int</span> rt = arr[mid];
+    ls[rt] = build(l, mid - 1, dimension ^ 1);
+    rs[rt] = build(mid + 1, r, dimension ^ 1);
+    maintain(rt);
+    <span class="kw">return</span> rt;
+}
+
+ll query(ll a, ll b, ll c, <span class="kw">int</span> i) {
+    <span class="kw">if</span> (i == 0) {
+        <span class="kw">return</span> 0;
+    }
+    ll ax1 = xmin[i] * a;
+    ll ax2 = xmax[i] * a;
+    ll by1 = ymin[i] * b;
+    ll by2 = ymax[i] * b;
+    ll minv = min(ax1, ax2) + min(by1, by2);
+    ll maxv = max(ax1, ax2) + max(by1, by2);
+    <span class="kw">if</span> (minv &gt;= c) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">if</span> (maxv &lt; c) {
+        <span class="kw">return</span> sum[i];
+    }
+    ll ans = 0;
+    <span class="kw">if</span> (a * x[i] + b * y[i] &lt; c) {
+        ans += v[i];
+    }
+    ans += query(a, b, c, ls[i]);
+    ans += query(a, b, c, rs[i]);
+    <span class="kw">return</span> ans;
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    ios::sync_with_stdio(<span class="kw">false</span>);
+    cin.tie(<span class="kw">nullptr</span>);
+    cin &gt;&gt; n &gt;&gt; m;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        cin &gt;&gt; x[i] &gt;&gt; y[i] &gt;&gt; v[i];
+        arr[i] = i;
+    }
+    xmin[0] = ymin[0] = INF;
+    xmax[0] = ymax[0] = -INF;
+    root = build(1, n, 0);
+    ll a, b, c;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+        cin &gt;&gt; a &gt;&gt; b &gt;&gt; c;
+        cout &lt;&lt; query(a, b, c, root) &lt;&lt; "\n";
+    }
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <p>下面是动态版本，用的是替罪羊树的方式，对应强制在线的那道矩形求和。插入沿路径走，回溯检查失衡，插完重建一次。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+<span class="kw">using</span> <span class="kw">namespace</span> std;
+
+<span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+<span class="kw">const</span> <span class="kw">int</span> INF = 1 &lt;&lt; 30;
+<span class="kw">int</span> n;
+
+<span class="kw">int</span> x[MAXN];
+<span class="kw">int</span> y[MAXN];
+<span class="kw">int</span> v[MAXN];
+
+<span class="kw">int</span> cntkdt;
+<span class="kw">int</span> root;
+<span class="kw">int</span> ls[MAXN];
+<span class="kw">int</span> rs[MAXN];
+
+<span class="kw">int</span> siz[MAXN];
+<span class="kw">int</span> sum[MAXN];
+<span class="kw">int</span> xmin[MAXN];
+<span class="kw">int</span> xmax[MAXN];
+<span class="kw">int</span> ymin[MAXN];
+<span class="kw">int</span> ymax[MAXN];
+
+<span class="kw">double</span> ALPHA = 0.7;
+<span class="kw">int</span> top;
+<span class="kw">int</span> topFather;
+<span class="kw">int</span> topSide;
+<span class="kw">int</span> topDimension;
+
+<span class="kw">int</span> arr[MAXN];
+<span class="kw">int</span> treeSiz;
+
+<span class="kw">int</span> <span class="fn">init</span>(<span class="kw">int</span> qx, <span class="kw">int</span> qy, <span class="kw">int</span> qv) {
+    cntkdt++;
+    x[cntkdt] = qx;
+    y[cntkdt] = qy;
+    v[cntkdt] = qv;
+    ls[cntkdt] = rs[cntkdt] = 0;
+    siz[cntkdt] = 1;
+    sum[cntkdt] = qv;
+    xmin[cntkdt] = xmax[cntkdt] = qx;
+    ymin[cntkdt] = ymax[cntkdt] = qy;
+    <span class="kw">return</span> cntkdt;
+}
+
+<span class="kw">void</span> <span class="fn">maintain</span>(<span class="kw">int</span> i) {
+    siz[i] = 1 + siz[ls[i]] + siz[rs[i]];
+    sum[i] = v[i] + sum[ls[i]] + sum[rs[i]];
+    xmin[i] = min(x[i], min(xmin[ls[i]], xmin[rs[i]]));
+    xmax[i] = max(x[i], max(xmax[ls[i]], xmax[rs[i]]));
+    ymin[i] = min(y[i], min(ymin[ls[i]], ymin[rs[i]]));
+    ymax[i] = max(y[i], max(ymax[ls[i]], ymax[rs[i]]));
+}
+
+<span class="kw">int</span> <span class="fn">compareNode</span>(<span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> dimension) {
+    <span class="kw">int</span> v1 = dimension == 0 ? x[i] : y[i];
+    <span class="kw">int</span> v2 = dimension == 0 ? x[j] : y[j];
+    <span class="kw">return</span> v1 == v2 ? 0 : v1 &lt; v2 ? -1 : 1;
+}
+
+<span class="kw">struct</span> Cmp {
+    <span class="kw">int</span> dimension;
+
+    <span class="kw">bool</span> <span class="kw">operator</span>()(<span class="kw">int</span> a, <span class="kw">int</span> b) <span class="kw">const</span> {
+        <span class="kw">return</span> compareNode(a, b, dimension) &lt; 0;
+    }
+};
+
+<span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> dimension) {
+    <span class="kw">if</span> (l &gt; r) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+    nth_element(arr + l, arr + mid, arr + r + 1, Cmp{dimension});
+    <span class="kw">int</span> rt = arr[mid];
+    ls[rt] = build(l, mid - 1, dimension ^ 1);
+    rs[rt] = build(mid + 1, r, dimension ^ 1);
+    maintain(rt);
+    <span class="kw">return</span> rt;
+}
+
+<span class="kw">bool</span> <span class="fn">balance</span>(<span class="kw">int</span> i) {
+    <span class="kw">return</span> ALPHA * siz[i] &gt;= max(siz[ls[i]], siz[rs[i]]);
+}
+
+<span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> i) {
+    <span class="kw">if</span> (i != 0) {
+        arr[++treeSiz] = i;
+        dfs(ls[i]);
+        dfs(rs[i]);
+    }
+}
+
+<span class="kw">void</span> <span class="fn">rebuild</span>() {
+    <span class="kw">if</span> (top != 0) {
+        treeSiz = 0;
+        dfs(top);
+        <span class="kw">int</span> newRoot = build(1, treeSiz, topDimension);
+        <span class="kw">if</span> (topFather == 0) {
+            root = newRoot;
+        } <span class="kw">else</span> <span class="kw">if</span> (topSide == 1) {
+            ls[topFather] = newRoot;
+        } <span class="kw">else</span> {
+            rs[topFather] = newRoot;
+        }
+    }
+}
+
+<span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> insertNode, <span class="kw">int</span> u, <span class="kw">int</span> fa, <span class="kw">int</span> side, <span class="kw">int</span> dimension) {
+    <span class="kw">if</span> (u == 0) {
+        <span class="kw">return</span> insertNode;
+    }
+    <span class="kw">if</span> (compareNode(insertNode, u, dimension) &lt;= 0) {
+        ls[u] = add(insertNode, ls[u], u, 1, dimension ^ 1);
+    } <span class="kw">else</span> {
+        rs[u] = add(insertNode, rs[u], u, 2, dimension ^ 1);
+    }
+    maintain(u);
+    <span class="kw">if</span> (!balance(u)) {
+        top = u;
+        topFather = fa;
+        topSide = side;
+        topDimension = dimension;
+    }
+    <span class="kw">return</span> u;
+}
+
+<span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> qx, <span class="kw">int</span> qy, <span class="kw">int</span> qv) {
+    top = topFather = topSide = topDimension = 0;
+    <span class="kw">int</span> insertNode = init(qx, qy, qv);
+    root = add(insertNode, root, 0, 0, 0);
+    rebuild();
+}
+
+<span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> x1, <span class="kw">int</span> y1, <span class="kw">int</span> x2, <span class="kw">int</span> y2, <span class="kw">int</span> i) {
+    <span class="kw">if</span> (i == 0) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">if</span> (xmax[i] &lt; x1 || x2 &lt; xmin[i] || ymax[i] &lt; y1 || y2 &lt; ymin[i]) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">if</span> (x1 &lt;= xmin[i] &amp;&amp; xmax[i] &lt;= x2 &amp;&amp; y1 &lt;= ymin[i] &amp;&amp; ymax[i] &lt;= y2) {
+        <span class="kw">return</span> sum[i];
+    }
+    <span class="kw">int</span> ans = 0;
+    <span class="kw">if</span> (x1 &lt;= x[i] &amp;&amp; x[i] &lt;= x2 &amp;&amp; y1 &lt;= y[i] &amp;&amp; y[i] &lt;= y2) {
+        ans += v[i];
+    }
+    ans += query(x1, y1, x2, y2, ls[i]);
+    ans += query(x1, y1, x2, y2, rs[i]);
+    <span class="kw">return</span> ans;
+}
+
+<span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> x1, <span class="kw">int</span> y1, <span class="kw">int</span> x2, <span class="kw">int</span> y2) {
+    <span class="kw">return</span> query(x1, y1, x2, y2, root);
+}
+
+<span class="kw">int</span> <span class="fn">main</span>() {
+    ios::sync_with_stdio(<span class="kw">false</span>);
+    cin.tie(<span class="kw">nullptr</span>);
+    cin &gt;&gt; n;
+    xmin[0] = ymin[0] = INF;
+    xmax[0] = ymax[0] = -INF;
+    <span class="kw">int</span> op, a, b, c, d, lastAns;
+    cin &gt;&gt; op;
+    lastAns = 0;
+    <span class="kw">while</span> (op != 3) {
+        cin &gt;&gt; a &gt;&gt; b &gt;&gt; c;
+        a ^= lastAns;
+        b ^= lastAns;
+        c ^= lastAns;
+        <span class="kw">if</span> (op == 1) {
+            add(a, b, c);
+        } <span class="kw">else</span> {
+            cin &gt;&gt; d;
+            d ^= lastAns;
+            lastAns = query(a, b, c, d);
+            cout &lt;&lt; lastAns &lt;&lt; "\n";
+        }
+        cin &gt;&gt; op;
+    }
+    <span class="kw">return</span> 0;
+}</pre>
+
+    <p>换成二进制分组只需要改增删两处：add 的时候把前面的组合掉重出，query 的时候挨棵访问。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> qx, <span class="kw">int</span> qy, <span class="kw">int</span> qv) {
+    cntkdt++;
+    x[cntkdt] = qx;
+    y[cntkdt] = qy;
+    v[cntkdt] = qv;
+    arr[cntkdt] = cntkdt;
+    <span class="kw">int</span> p = 0;
+    <span class="kw">while</span> (root[p] != 0) {
+        root[p++] = 0;
+    }
+    root[p] = build(cntkdt - (1 &lt;&lt; p) + 1, cntkdt, 0);
+}
+
+<span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> x1, <span class="kw">int</span> y1, <span class="kw">int</span> x2, <span class="kw">int</span> y2, <span class="kw">int</span> i) {
+    <span class="kw">if</span> (i == 0) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">if</span> (xmax[i] &lt; x1 || x2 &lt; xmin[i] || ymax[i] &lt; y1 || y2 &lt; ymin[i]) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">if</span> (x1 &lt;= xmin[i] &amp;&amp; xmax[i] &lt;= x2 &amp;&amp; y1 &lt;= ymin[i] &amp;&amp; ymax[i] &lt;= y2) {
+        <span class="kw">return</span> sum[i];
+    }
+    <span class="kw">int</span> ans = 0;
+    <span class="kw">if</span> (x1 &lt;= x[i] &amp;&amp; x[i] &lt;= x2 &amp;&amp; y1 &lt;= y[i] &amp;&amp; y[i] &lt;= y2) {
+        ans += v[i];
+    }
+    ans += query(x1, y1, x2, y2, ls[i]);
+    ans += query(x1, y1, x2, y2, rs[i]);
+    <span class="kw">return</span> ans;
+}
+
+<span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> x1, <span class="kw">int</span> y1, <span class="kw">int</span> x2, <span class="kw">int</span> y2) {
+    <span class="kw">int</span> ans = 0;
+    <span class="kw">for</span> (<span class="kw">int</span> p = 0; p &lt; MAXP; p++) {
+        ans += query(x1, y1, x2, y2, root[p]);
+    }
+    <span class="kw">return</span> ans;
+}</pre>
+
+    <p>最后是 K 维加上懒更新的核心几段。区域整体被包住时不往下下发，只在节点上打一个标记；往下走之前必须先 down 一次。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, ll v) {
+    <span class="kw">if</span> (i != 0) {
+        val[i] += v;
+        sum[i] += v * siz[i];
+        addTag[i] += v;
+    }
+}
+
+<span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+    <span class="kw">if</span> (addTag[i] != 0) {
+        lazy(ls[i], addTag[i]);
+        lazy(rs[i], addTag[i]);
+        addTag[i] = 0;
+    }
+}
+
+<span class="kw">bool</span> <span class="fn">outside</span>(<span class="kw">int</span> i) {
+    <span class="kw">for</span> (<span class="kw">int</span> d = 0; d &lt; k; d++) {
+        <span class="kw">if</span> (maxv[i][d] &lt; qx[d] || qy[d] &lt; minv[i][d]) {
+            <span class="kw">return</span> <span class="kw">true</span>;
+        }
+    }
+    <span class="kw">return</span> <span class="kw">false</span>;
+}
+
+<span class="kw">bool</span> <span class="fn">covered</span>(<span class="kw">int</span> i) {
+    <span class="kw">for</span> (<span class="kw">int</span> d = 0; d &lt; k; d++) {
+        <span class="kw">if</span> (qx[d] &gt; minv[i][d] || qy[d] &lt; maxv[i][d]) {
+            <span class="kw">return</span> <span class="kw">false</span>;
+        }
+    }
+    <span class="kw">return</span> <span class="kw">true</span>;
+}
+
+<span class="kw">bool</span> <span class="fn">pointIn</span>(<span class="kw">int</span> i) {
+    <span class="kw">for</span> (<span class="kw">int</span> d = 0; d &lt; k; d++) {
+        <span class="kw">if</span> (qx[d] &gt; pos[i][d] || qy[d] &lt; pos[i][d]) {
+            <span class="kw">return</span> <span class="kw">false</span>;
+        }
+    }
+    <span class="kw">return</span> <span class="kw">true</span>;
+}
+
+<span class="kw">void</span> <span class="fn">addValue</span>(<span class="kw">int</span> i) {
+    <span class="kw">if</span> (i == 0) {
+        <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (outside(i)) {
+        <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (covered(i)) {
+        lazy(i, qv);
+        <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (pointIn(i)) {
+        val[i] += qv;
+    }
+    down(i);
+    addValue(ls[i]);
+    addValue(rs[i]);
+    maintain(i);
+}
+
+ll querySum(<span class="kw">int</span> i) {
+    <span class="kw">if</span> (i == 0) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">if</span> (outside(i)) {
+        <span class="kw">return</span> 0;
+    }
+    <span class="kw">if</span> (covered(i)) {
+        <span class="kw">return</span> sum[i];
+    }
+    ll ans = 0;
+    <span class="kw">if</span> (pointIn(i)) {
+        ans += val[i];
+    }
+    down(i);
+    ans += querySum(ls[i]);
+    ans += querySum(rs[i]);
+    <span class="kw">return</span> ans;
+}</pre>
+
+    <h2>十六、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>操作</th><th>时间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>静态建树（交替选维度）</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>静态建树（按方差选维度）</td><td><code class="inline">O(n log² n)</code></td></tr>
+        <tr><td>单次最近 / 第 k 远查询</td><td><code class="inline">O(log n)</code> 平均，<code class="inline">O(n)</code> 最差</td></tr>
+        <tr><td>二维矩形范围查询（严格均衡）</td><td><code class="inline">O(√n)</code></td></tr>
+        <tr><td>K 维正交范围查询</td><td><code class="inline">O(n^(1 − 1/K))</code></td></tr>
+        <tr><td>替罪羊树方式单次插入</td><td><code class="inline">O(log² n)</code> 摊还</td></tr>
+        <tr><td>替罪羊树方式单次重构</td><td><code class="inline">O(k log k)</code>，k 是子树大小</td></tr>
+        <tr><td>二进制分组单次插入</td><td><code class="inline">O(log² n)</code> 摊还</td></tr>
+        <tr><td>二进制分组单次查询</td><td><code class="inline">O(√n)</code></td></tr>
+        <tr><td>朴素做法（两两枚举对照）</td><td><code class="inline">O(n²)</code></td></tr>
+        <tr><td>静态 K-D 树额外空间</td><td><code class="inline">O(n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>最近查询那一行要稍微说一句。O(log n) 说的是数据分布正常时的表现，它依赖剪枝；对手可以针对某个查询点构造一批框得很扁的节点，让估计值全都绕不过答案，那时就是 O(n)。所以这一条不能当复杂度保证来用。</p>
+    <p>矩形查询那一行是有保证的，前提是树本身足够均衡，也就是每层都严格按中位点切开。二进制分组每组都用静态方式一次建成，这个前提天然成立；替罪羊树方式允许左右存在一定比例的不平衡，严格说这个上界不成立，实际很少出问题。</p>
+    <p>空间上，静态 K-D 树只有 n 个节点，每个节点存自己的坐标、左右儿子、四个包围盒边界，外加一个聚合值，十个左右的 int，n = 2 × 10⁵ 时不到十兆。动态版本也是 n 个节点，重建是复用原节点而不是新建，不会增长。</p>
+
+    <h2>十七、容易写错的地方</h2>
+    <ul>
+      <li>0 号节点的初值必须设成 <code class="inline">xmin[0] = ymin[0] = +INF</code>、<code class="inline">xmax[0] = ymax[0] = -INF</code>，而且要在建树或第一次插入之前做。忘了设，maintain 里的 min、max 会把 0 掺进来，包围盒算错，剪枝跟着全线失准。</li>
+      <li>估计函数和真实距离必须是同一个度量。曼哈顿距离的题目不能直接沿用欧氏版本那套 dx² + dy²，看起来只差一个平方，猜出来的数根本不是下界，答案会偏大。</li>
+      <li>剪枝的方向要看需求。求最近用 <code class="inline">guess &lt; ans</code> 才继续；求第 k 远要反过来，堆满之后只在 <code class="inline">guess &gt;= heap.top().dist</code> 时才敢进去。方向搞反，不是答案错就是退化成遍历整棵树。</li>
+      <li>最近点对里 <code class="inline">updateAns</code> 记得跳过自己。查询 i 号点的时候一定会走到节点 i 本身，不跳过它，它到自己的距离 0 会立刻把答案钉死。</li>
+      <li>重建前要把懒标记下发。<code class="inline">dfs</code> 收集节点的那个地方必须先 <code class="inline">down(i)</code>，否则收上来的 val 是还没下发下去的旧值，重建出来的树从一开始就是错的。</li>
+      <li>替罪羊树的 <code class="inline">top</code> 系列变量在每次插入开头要清零。它们是覆盖式赋值，如果插入路径上没有节点失衡，上一次留下的值会把一棵好端端的子树重建掉。</li>
+      <li>三维偏序里同一组 a 必须「先全插再全查」。一个个插查交替，组内之间会互相漏掉；查询的结果还要减 1，去掉自己。</li>
+      <li>坐标到 10⁹ 时，欧氏距离的平方会到 10¹⁸ 量级，要用 long long。写 <code class="inline">int</code> 会在读入阶段就溢出。</li>
+    </ul>
+
+    <h2>十八、最后</h2>
+    <p>K-D 树做的事情说穿了就两步：把空间一刀一刀切成盒，让每个节点报告自己那个盒的范围；查询时先估一个下界，估都估不过当前答案就整棵跳过。</p>
+    <p>它的强项和弱项是一回事。数据分布好、空间特征明显，一次剪枝能砍掉一大片，跑得比很多「复杂度正确」的做法还快；反过来，对手能设计出让你每一片都得进去看的结构，这时候它就是骗分技巧而不是正解。做题时先看清时限和题面有没有强调复杂度。</p>
+    <p>再往后，它的用法还有两个方向。给每个区域配一个虚点，可以把「一条边连向一片区域内的所有点」压成 O(m√n) 条边；把维度拆开，外层挂树状数组管第一维、每个下标背后一棵 K-D 树管剩下两维，就是树套树。这两件事分别在<a href="kdtree-graph.html">K-D 树优化建图</a>和<a href="kdtree-of-tree.html">树套树</a>里讲。</p>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var POINTS = [
+    {id:1, x:2, y:3}, {id:2, x:5, y:8}, {id:3, x:9, y:1}, {id:4, x:4, y:2},
+    {id:5, x:7, y:9}, {id:6, x:1, y:6}, {id:7, x:8, y:4}, {id:8, x:3, y:7}
+  ];
+  var TREE = {
+    4:{d:'x', l:6, r:7}, 6:{d:'y', l:1, r:8}, 7:{d:'y', l:3, r:2},
+    1:{d:null}, 8:{d:null}, 3:{d:null}, 2:{d:'x', l:0, r:5}, 5:{d:null}
+  };
+  var TP = {4:[460,40], 6:[385,112], 7:[530,112], 1:[348,185], 8:[420,185], 3:[495,185], 2:[570,185], 5:[590,250]};
+  var CHILD = {4:[6,7], 6:[1,8], 7:[3,2], 2:[5]};
+
+  function X(v) { return 30 + 26 * v; }
+  function Y(v) { return 280 - 26 * v; }
+
+  var LINES = {
+    rx:  function () { return '<line x1="' + X(4) + '" y1="' + Y(0) + '" x2="' + X(4) + '" y2="' + Y(10) + '" stroke="#2563eb" stroke-width="1.6"/>'; },
+    ly6: function () { return '<line x1="' + X(0) + '" y1="' + Y(6) + '" x2="' + X(4) + '" y2="' + Y(6) + '" stroke="#ea580c" stroke-width="1.6"/>'; },
+    ry4: function () { return '<line x1="' + X(4) + '" y1="' + Y(4) + '" x2="' + X(10) + '" y2="' + Y(4) + '" stroke="#ea580c" stroke-width="1.6"/>'; },
+    rx5: function () { return '<line x1="' + X(5) + '" y1="' + Y(4) + '" x2="' + X(5) + '" y2="' + Y(10) + '" stroke="#2563eb" stroke-width="1.6"/>'; }
+  };
+
+  function rect(x1, y1, x2, y2, color) {
+    var x = X(x1), y = Y(y2);
+    return '<rect x="' + x + '" y="' + y + '" width="' + (X(x2) - x) + '" height="' + (Y(y1) - y) +
+           '" fill="none" stroke="' + color + '" stroke-width="1.4" stroke-dasharray="4 3"/>';
+  }
+
+  var ALL = [4, 6, 1, 8, 7, 3, 2, 5];
+
+  var frames = [
+    {a:{n:[], l:[]}, t:'平面上有 8 个点。先把它们整体看成一块区域，接下来按某个维度找中位点切开。'},
+    {a:{n:[4], l:['rx'], c:4}, t:'按 x 找中位点，排第 4 的是 4 号 (4, 2)，它当根。x 小于 4 的进左子树，其余进右子树，这一步用 nth_element 一次就能定下来。'},
+    {a:{n:[4,6,1,8], l:['rx','ly6'], c:6}, t:'左半那边改按 y 找中位点，排第 2 的是 6 号 (1, 6)。y 小于 6 的 1 号进左，8 号进右。'},
+    {a:{n:[4,6,1,8,7], l:['rx','ly6','ry4'], c:7}, t:'右半同样按 y，中位是 7 号 (8, 4)。它左右各有一批点，还没排定。'},
+    {a:{n:ALL, l:['rx','ly6','ry4','rx5'], c:2}, t:'7 号的孩子改按 x：左边 3 号 (9, 1)，右边 2 号 (5, 8)。2 号再往下按 y 分出 5 号 (7, 9)。'},
+    {a:{n:ALL, l:['rx','ly6','ry4','rx5']}, t:'切完了。现在从叶子往上 maintain，每个节点都算出自己那棵子树的包围盒，叶子就是自己这一个点。'},
+
+    {a:{n:ALL, l:['rx','ly6','ry4','rx5'], q:1}, t:'接下来做一次最近邻查询：查询点 (6, 5)，图上那个橙色的方块。答案 ans 先无限大。'},
+    {a:{n:ALL, l:['rx','ly6','ry4','rx5'], q:1, v:[4], c:4}, t:'从根 4 号 (4, 2) 开始。它到 (6, 5) 的距离平方是 4 + 9 = 13，ans 更新成 13。'},
+    {a:{n:ALL, l:['rx','ly6','ry4','rx5'], q:1, v:[4], c:4, b:[[1,3,3,7,'#9aa0a6'],[5,1,9,9,'#ea580c']]}, t:'现在估计两边儿子。左子树（虚线灰框，包围盒 [1,3] × [3,7]）最近也得是 3² = 9；右子树（橙框，包围盒 [5,9] × [1,9]）把查询点整个套住了，估计值是 0。'},
+    {a:{n:ALL, l:['rx','ly6','ry4','rx5'], q:1, v:[4,7], c:7}, t:'先走估计值更小的右边，来到 7 号 (8, 4)。它到 (6, 5) 的距离平方是 4 + 1 = 5，ans 从 13 压到 5。'},
+    {a:{n:ALL, l:['rx','ly6','ry4','rx5'], q:1, v:[4,7], c:7, p:[3,2,5], b:[[9,1,9,1,'#9aa0a6'],[5,8,7,9,'#9aa0a6']]}, t:'再看 7 号的两个儿子。左边 3 号那个盒子最小是 3² + 4² = 25，右边 2 号管的那一片最小是 0 + 3² = 9。两个都 ≥ ans = 5，进去了也不会更好，整棵剪掉。'},
+    {a:{n:ALL, l:['rx','ly6','ry4','rx5'], q:1, v:[4,7], p:[3,2,5,6,1,8], b:[[1,3,3,7,'#9aa0a6']]}, t:'回到根，左边那一片的估计值是 9，同样 ≥ 5，也剪掉。8 个点只访问了 2 个，答案是 √5，约 2.2361。'}
+  ];
+
+  function buildSvg(a) {
+    var s = '<svg viewBox="0 0 620 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="K-D 树建树与最近邻查询演示" ' +
+            'font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+    s += '<text x="30" y="14" font-size="11" fill="#6b7280">平面</text>';
+    s += '<rect x="30" y="20" width="260" height="260" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1"/>';
+
+    (a.l || []).forEach(function (k) { s += LINES[k](); });
+    (a.b || []).forEach(function (b) { s += rect(b[0], b[1], b[2], b[3], b[4]); });
+
+    var visit = a.v || [], pruned = a.p || [], shown = a.n || [];
+    var set = {};
+    ALL.forEach(function (id) { set[id] = 'hidden'; });
+    shown.forEach(function (id) { set[id] = 'tree'; });
+    visit.forEach(function (id) { set[id] = 'visit'; });
+    pruned.forEach(function (id) { set[id] = 'pruned'; });
+
+    ALL.forEach(function (id) {
+      var p = null;
+      for (var i = 0; i < POINTS.length; i++) { if (POINTS[i].id === id) { p = POINTS[i]; } }
+      if (id === 4) { return; }
+      var st = set[id];
+      if (st === 'hidden') { return; }
+      var fill = '#ffffff', stroke = '#9aa0a6', tx = '#1f2328';
+      if (st === 'visit') { fill = '#dbeafe'; stroke = '#2563eb'; }
+      if (st === 'pruned') { fill = '#f6f7f9'; stroke = '#9aa0a6'; tx = '#9aa0a6'; }
+      if (id === a.c) { fill = '#ffedd5'; stroke = '#ea580c'; tx = '#1f2328'; }
+      s += '<circle cx="' + X(p.x) + '" cy="' + Y(p.y) + '" r="12" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.2"/>';
+      s += '<text x="' + X(p.x) + '" y="' + (Y(p.y) + 4) + '" font-size="11" text-anchor="middle" fill="' + tx + '">' + id + '</text>';
+    });
+
+    if ((a.n || []).indexOf(4) >= 0) {
+      var st4 = set[4];
+      var f4 = '#dbeafe', s4 = '#2563eb';
+      if (st4 === 'pruned') { f4 = '#f6f7f9'; s4 = '#9aa0a6'; }
+      if (4 === a.c) { f4 = '#ffedd5'; s4 = '#ea580c'; }
+      s += '<circle cx="' + X(4) + '" cy="' + Y(2) + '" r="12" fill="' + f4 + '" stroke="' + s4 + '" stroke-width="1.4"/>';
+      s += '<text x="' + X(4) + '" y="' + (Y(2) + 4) + '" font-size="11" text-anchor="middle" fill="#1f2328">4</text>';
+    }
+
+    if (a.q) {
+      s += '<rect x="' + (X(6) - 6) + '" y="' + (Y(5) - 6) + '" width="12" height="12" rx="2" fill="#ea580c"/>';
+      s += '<text x="' + (X(6) + 10) + '" y="' + (Y(5) + 4) + '" font-size="11" fill="#ea580c">查询点 (6, 5)</text>';
+    }
+
+    s += '<text x="330" y="14" font-size="11" fill="#6b7280">建出来的树</text>';
+    Object.keys(CHILD).forEach(function (par) {
+      if (set[par] === 'hidden') { return; }
+      CHILD[par].forEach(function (ch) {
+        if (set[ch] === 'hidden') { return; }
+        s += '<line x1="' + TP[par][0] + '" y1="' + (TP[par][1] + 14) + '" x2="' + TP[ch][0] + '" y2="' + (TP[ch][1] - 13) +
+             '" stroke="#9aa0a6" stroke-width="1.2"/>';
+      });
+    });
+    ALL.forEach(function (id) {
+      var st = set[id];
+      if (st === 'hidden') { return; }
+      var f = '#ffffff', k = '#9aa0a6', tx = '#1f2328';
+      if (st === 'visit') { f = '#dbeafe'; k = '#2563eb'; }
+      if (st === 'pruned') { f = '#f6f7f9'; k = '#9aa0a6'; tx = '#9aa0a6'; }
+      if (id === a.c) { f = '#ffedd5'; k = '#ea580c'; tx = '#1f2328'; }
+      var r = (id === 4) ? 15 : 13;
+      s += '<circle cx="' + TP[id][0] + '" cy="' + TP[id][1] + '" r="' + r + '" fill="' + f + '" stroke="' + k + '" stroke-width="1.2"/>';
+      s += '<text x="' + TP[id][0] + '" y="' + (TP[id][1] + 4) + '" font-size="11" text-anchor="middle" fill="' + tx + '">' + id + '</text>';
+      var d = TREE[id].d;
+      if (d) {
+        s += '<text x="' + TP[id][0] + '" y="' + (TP[id][1] + r + 12) + '" font-size="10" text-anchor="middle" fill="' +
+             (d === 'x' ? '#2563eb' : '#ea580c') + '">切 ' + d + '</text>';
+      }
+      if (st === 'pruned') {
+        s += '<line x1="' + (TP[id][0] - 9) + '" y1="' + (TP[id][1] + 9) + '" x2="' + (TP[id][0] + 9) + '" y2="' + (TP[id][1] - 9) +
+             '" stroke="#9aa0a6" stroke-width="1"/>';
+      }
+    });
+
+    s += '</svg>';
+    return s;
+  }
+
+  var svgEl = document.getElementById('kdSvg');
+  var statusEl = document.getElementById('kdStatus');
+  var btnStep = document.getElementById('kdStep');
+  var btnAuto = document.getElementById('kdAuto');
+  var btnReset = document.getElementById('kdReset');
+
+  var cur = 0;
+  var timer = null;
+
+  function render() {
+    var f = frames[cur];
+    svgEl.innerHTML = buildSvg(f.a);
+    statusEl.innerHTML = '<div class="row">第 ' + cur + ' / ' + (frames.length - 1) + ' 步' +
+                         (cur < 6 ? '（建树）' : '（查询）') + '</div>' +
+                         '<div class="row" style="margin-top:4px;">' + f.t + '</div>';
+    btnStep.disabled = (cur >= frames.length - 1);
+  }
+  function step() {
+    if (cur >= frames.length - 1) { render(); return; }
+    cur++;
+    render();
+  }
+  function stopAuto() {
+    if (timer) { clearInterval(timer); timer = null; }
+    btnAuto.textContent = '自动播放';
+  }
+  function toggleAuto() {
+    if (timer) { stopAuto(); return; }
+    btnAuto.textContent = '暂停';
+    timer = setInterval(function () {
+      if (cur >= frames.length - 1) { stopAuto(); return; }
+      cur++;
+      render();
+    }, 2600);
+  }
+  function reset() {
+    stopAuto();
+    cur = 0;
+    render();
+  }
+
+  btnStep.addEventListener('click', function () { stopAuto(); step(); });
+  btnAuto.addEventListener('click', toggleAuto);
+  btnReset.addEventListener('click', reset);
+  render();
+})();
+</script>
+</body>
+</html>
