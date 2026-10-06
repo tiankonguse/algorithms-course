@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>嵌套类问题：递归解析套路与表达式求值</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+#vizCalcStrip { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15px; margin: 6px 0 10px; }
+#vizCalcStrip .cell { display: inline-block; min-width: 26px; padding: 3px 5px; margin: 0 2px; text-align: center; border-radius: 4px; background: var(--bg); border: 1px solid var(--bd); }
+#vizCalcStrip .cell.cur { background: #dbeafe; border-color: #2563eb; color: #1e40af; }
+#vizCalcStrip .cell.stop { background: #ffedd5; border-color: #ea580c; color: #9a3412; }
+.viz-tables { display: flex; gap: 24px; flex-wrap: wrap; margin: 8px 0; }
+.viz-col { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.viz-chip { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; padding: 2px 8px; border-radius: 4px; background: #fff; border: 1px solid var(--bd); }
+.viz-chip.num { background: #dbeafe; border-color: #93c5fd; }
+.viz-chip.op { background: #ffedd5; border-color: #fdba74; }
+.viz-note { margin: 8px 0 4px; font-size: 13px; color: var(--fg); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; }
+.viz-answer .bad { color: #dc2626; }
+.viz-answer .ok { color: #16a34a; }
+.viz-ctl { margin: 8px 0 4px; }
+.viz-ctl label { font-size: 13px; margin-right: 6px; color: var(--fg2); }
+.viz-ctl select { font-size: 13px; padding: 2px 6px; border: 1px solid var(--bd); border-radius: 4px; background: #fff; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>嵌套类问题：递归解析套路与表达式求值</h1>
+      <p class="intro">一类题长一个样：一层套一层，每一层的规则相同。这一页先把「f(i) + where」的递归套路抽出来，再用带括号的表达式求值走一遍。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>「2*(3+4)」要先算括号；「3[a2[c]]」要先展开内层；「K4(ON(SO3)2)2」要先数清括号里的原子。它们长同一个形状：外层的结果，依赖内层先算出来的东西。</p>
+      <p>真正卡人的是边界：括号里的内容有多长，解析外层的人没法预知。递归正好解决：内层自己解析自己，返回结果的同时把「我停在哪了」告诉外层。</p>
+
+      <h2 id="routine">一、递归解析套路</h2>
+      <p>四样东西凑一套：全局变量 where 记录当前这一段解析停在哪；递归函数 f(i) 从 i 出发解析，遇到字符串结尾或嵌套的终止符就停；f 返回这一段的结果，返回前更新 where，让上层知道从哪继续；f 遇到嵌套开始就调下级 f，下级返回后从 where + 1 继续。</p>
+      <p>每一层的局部数据（数字表、字符串、有序表）都是这一层自己的，跨层共享的只有 where。这样「解析到哪了」能传出去，各层的结果又不互相污染。</p>
+      <figure class="fig" id="figRoutine"></figure>
+      <p>终止符随题目变：表达式是 ')'，字符串解码是 ']'，分子式是 ')'。框架一模一样。</p>
+
+      <h2 id="q1">二、表达式求值</h2>
+      <p>给一个含 + - * / 和括号的表达式，求值。优先级：括号最高，* / 其次，+ - 最低，同级从左到右。</p>
+      <p>段内维护两张表：numbers 存数，ops 存运算符。每读到一个运算符，把 cur 连同它一起交给 push：表空或表尾是 + - 就直接追加；表尾是 * /，说明 cur 要先和表尾那个数合并，合并完把新运算符放回表尾。</p>
+      <p>为什么 * / 要当场合并：它们优先级高，绑定的是「左边那个数」。拖到最后再处理就得先处理优先级，当场合并之后表里只剩 + -，最后从头到尾带符号累加就行。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 全局 where：记录当前这一段的解析停在哪，返回前更新，供上层继续</span>
+    <span class="kw">int</span> where = 0;
+
+    <span class="kw">void</span> <span class="fn">push</span>(vector&lt;<span class="kw">int</span>&gt;&amp; numbers, vector&lt;<span class="kw">char</span>&gt;&amp; ops, <span class="kw">int</span> cur, <span class="kw">char</span> op);
+    <span class="kw">int</span> <span class="fn">compute</span>(<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; numbers, <span class="kw">const</span> vector&lt;<span class="kw">char</span>&gt;&amp; ops);
+
+    <span class="cm">// s[i..] 开始解析，遇到字符串结尾或 ')' 停止</span>
+    <span class="cm">// 返回自己负责的这一段的计算结果</span>
+    <span class="kw">int</span> <span class="fn">f</span>(<span class="kw">const</span> <span class="kw">string</span>&amp; s, <span class="kw">int</span> i) {
+        <span class="kw">int</span> cur = 0;
+        vector&lt;<span class="kw">int</span>&gt; numbers;
+        vector&lt;<span class="kw">char</span>&gt; ops;
+        <span class="kw">while</span> (i &lt; (<span class="kw">int</span>)s.length() &amp;&amp; s[i] != ')') {
+            <span class="kw">if</span> (s[i] &gt;= '0' &amp;&amp; s[i] &lt;= '9') {
+                cur = cur * 10 + s[i++] - '0';
+            } <span class="kw">else</span> <span class="kw">if</span> (s[i] != '(') {
+                <span class="cm">// 遇到运算符 + - * /</span>
+                push(numbers, ops, cur, s[i++]);
+                cur = 0;
+            } <span class="kw">else</span> {
+                <span class="cm">// 遇到左括号，递归处理括号里的那段</span>
+                cur = f(s, i + 1);
+                i = where + 1;
+            }
+        }
+        push(numbers, ops, cur, '+');
+        where = i;
+        <span class="kw">return</span> compute(numbers, ops);
+    }
+
+    <span class="cm">// 把 cur 连同前面的运算符 op 一起记进两张表</span>
+    <span class="cm">// + - 直接追加；* / 和表里最后那个数当场合并</span>
+    <span class="kw">void</span> <span class="fn">push</span>(vector&lt;<span class="kw">int</span>&gt;&amp; numbers, vector&lt;<span class="kw">char</span>&gt;&amp; ops, <span class="kw">int</span> cur, <span class="kw">char</span> op) {
+        <span class="kw">int</span> n = numbers.size();
+        <span class="kw">if</span> (n == 0 || ops[n - 1] == '+' || ops[n - 1] == '-') {
+            numbers.push_back(cur);
+            ops.push_back(op);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> topNumber = numbers[n - 1];
+            <span class="kw">char</span> topOp = ops[n - 1];
+            <span class="kw">if</span> (topOp == '*') numbers[n - 1] = topNumber * cur;
+            <span class="kw">else</span> numbers[n - 1] = topNumber / cur;
+            ops[n - 1] = op;
+        }
+    }
+
+    <span class="cm">// 合并之后表里只剩 + -，从头到尾带符号加起来</span>
+    <span class="kw">int</span> <span class="fn">compute</span>(<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; numbers, <span class="kw">const</span> vector&lt;<span class="kw">char</span>&gt;&amp; ops) {
+        <span class="kw">int</span> ans = numbers[0];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; (<span class="kw">int</span>)numbers.size(); i++) {
+            ans += ops[i - 1] == '+' ? numbers[i] : -numbers[i];
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">calculate</span>(<span class="kw">const</span> <span class="kw">string</span>&amp; str) {
+        where = 0;
+        <span class="kw">return</span> f(str, 0);
+    }</pre>
+      <figure class="fig" id="figDualList"></figure>
+      <p>遇到 '(' 就调 f(i + 1)，返回的 cur 就是括号里的值；然后 i = where + 1，跳过整个括号段。</p>
+      <figure class="fig" id="figTrace"></figure>
+      <p>每字符恰好访问一次：数字、运算符各被处理一次，递归只是把一段的解析交给下级，没有重复扫描。实测 n = 145 万字符的表达式（50 万个数加运算符）2.76ms。</p>
+      <p>除法向零取整。4 万层括号时递归 40001 层，1.86ms。时间没问题，深度才是要留意的：递归深度 = 括号层数 + 1，一串套一串能把栈打穿。</p>
+
+      <h2 id="bugs">三、两个常写错的地方</h2>
+      <p>错法一：括号返回后写成 i = where，忘了 +1。where 停的位置是 ')'，外层从这里继续，循环条件 s[i] != ')' 立刻不满足，')' 后面的整段被丢掉。「1+(2+3)+4」会算成 6，应 10。2 万组随机表达式实测错 66.70%。</p>
+      <p>错法二：push 合并分支忘了更新表尾运算符。「2*3+4」会算成 24，应 10。表尾还挂着 '*'，'+4' 被当成 '*4'。2 万组随机实测错 64.20%，但像「1+2*3」这种表尾 '*' 最后没被读到的会碰巧算对。</p>
+
+      <h2 id="viz1">演示一：表达式求值操作台</h2>
+      <div class="viz" id="vizCalc">
+        <p class="viz-title">双表合并：* / 当场合并，表里只剩 + -。选错版能看到从哪一步开始偏</p>
+        <div id="vizCalcBody"></div>
+        <div class="viz-controls" id="vizCalcCtl"></div>
+      </div>
+
+      <h2 id="comp">四、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>时间</th><th>额外空间</th><th>说明</th></tr>
+        <tr><td>表达式求值</td><td>O(n)</td><td>O(n)</td><td>每字符一次；numbers/ops 表 + 递归栈，栈深 = 嵌套层数 + 1</td></tr>
+      </table>
+      <p>时间由 n 决定，嵌套再深也只是栈的问题，不增加访问次数。</p>
+
+      <h2 id="sum">五、总结</h2>
+      <p>套路四句话：where 全局、f(i) 到终止符停、返回前更新 where、遇到嵌套就递归。</p>
+      <p>表达式求值靠双表：* / 当场合并，表里只剩 + -，compute 带符号累加。</p>
+      <p>下一篇用同一套 where 框架解字符串解码和分子式。内层结果一个是拼、一个是乘倍并表，差别只在这。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>含有嵌套的字符串解码</td><td><a href="https://leetcode.cn/problems/decode-string/" target="_blank">leetcode.cn/problems/decode-string</a></td></tr>
+        <tr><td>LeetCode</td><td>含有嵌套的分子式求原子数量</td><td><a href="https://leetcode.cn/problems/number-of-atoms/" target="_blank">leetcode.cn/problems/number-of-atoms</a></td></tr>
+        <tr><td>LeetCode</td><td>含有嵌套的表达式求值</td><td><a href="https://leetcode.cn/problems/basic-calculator-iii/" target="_blank">leetcode.cn/problems/basic-calculator-iii</a></td></tr>
+        <tr><td>牛客</td><td>含有嵌套的表达式求值</td><td><a href="https://www.nowcoder.com/practice/c215ba61c8b1443b996351df929dc4d4" target="_blank">www.nowcoder.com/practice/c215ba61c8b1443b996351df929dc4d4</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解039【必备】嵌套类问题的递归解题套路</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function C(cls, s){ return '<span class="'+cls+'">'+esc(s)+'</span>'; }
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function box(x,y,w,h,r){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(r||4)+'" fill="#fff" stroke="#cbd5e1"/>'; }
+function txt(x,y,s,opt){ var o=opt||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||"#1f2937")+'" text-anchor="'+(o.an||"middle")+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+
+// ===== 图 1：套路总览 =====
+(function(){
+  var chars = ['2','*','(','3','+','4',')','+','1'];
+  var cx = 152, cw = 48, cy = 66, chh = 34;
+  var body = '';
+  body += '<text x="380" y="30" font-size="14" text-anchor="middle" fill="#1f2937">「2*(3+4)+1」的段划分</text>';
+  chars.forEach(function(c,i){
+    body += box(cx+i*cw, cy, cw-6, chh, 5);
+    body += txt(cx+i*cw+(cw-6)/2, cy+chh/2+4, c, {fs:15, fill: i===6? '#9a3412' : '#1f2937'});
+  });
+  // 外层段 f(0)
+  body += '<rect x="150" y="120" width="'+ (7*cw-4) +'" height="26" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-dasharray="4 3"/>';
+  body += '<text x="156" y="138" font-size="12" fill="#1e40af">f(0)：从 0 解析到第一个 )，这一段是 [0,7)</text>';
+  // 内层段 f(2)
+  body += '<rect x="'+(150+2*cw)+'" y="164" width="'+(4*cw-4)+'" height="26" rx="6" fill="#ffedd5" stroke="#ea580c" stroke-dasharray="4 3"/>';
+  body += '<text x="'+(150+2*cw+4)+'" y="182" font-size="12" fill="#9a3412">f(2)：处理 (3+4)，返回 7，where=6</text>';
+  // where 标注
+  body += '<line x1="'+(cx+6*cw+20)+'" y1="66" x2="'+(cx+6*cw+20)+'" y2="214" stroke="#ea580c" stroke-width="2" stroke-dasharray="3 3"/>';
+  body += '<text x="'+(cx+6*cw+28)+'" y="96" font-size="12" fill="#ea580c" text-anchor="start">where=6</text>';
+  // 尾部 +1
+  body += '<line x1="'+(cx+7*cw+16)+'" y1="66" x2="'+(cx+7*cw+16)+'" y2="214" stroke="#2563eb" stroke-width="2" stroke-dasharray="3 3"/>';
+  body += '<text x="'+(cx+7*cw+24)+'" y="96" font-size="12" fill="#2563eb" text-anchor="start">i=7 继续</text>';
+  body += '<text x="380" text-anchor="middle" y="228" font-size="13" fill="#1f2937">f(2) 返回前把 where 写成 6；f(0) 从 where+1=7 接着处理 '+'+1'+'</text>';
+  body += '<text x="380" text-anchor="middle" y="252" font-size="13" fill="#1f2937">每一层的 numbers/ops 是这一层自己的，只有 where 是全局的</text>';
+  body += '<text x="380" text-anchor="middle" y="276" font-size="13" fill="#1f2937">嵌套一层多一层递归：递归深度 = 括号层数 + 1</text>';
+  document.getElementById('figRoutine').innerHTML = svg(760, 296, body);
+})();
+
+// ===== 图 2：双表合并规则 =====
+(function(){
+  var body = '';
+  body += '<rect x="20" y="40" width="350" height="210" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>';
+  body += txt(195, 66, '+ -：直接追加', {fs:14});
+  // numbers [1][2][3]
+  [1,2,3].forEach(function(v,i){
+    body += box(70+i*80, 90, 56, 32, 6);
+    body += txt(98+i*80, 112, String(v), {fs:14});
+  });
+  // ops [+][-]
+  ['+','-'].forEach(function(v,i){
+    body += box(110+i*80, 140, 40, 30, 6);
+    body += txt(130+i*80, 161, v, {fs:14, fill:'#ea580c'});
+  });
+  body += txt(195, 196, '表尾 + - → cur 直接追加', {fs:12});
+  body += txt(195, 220, 'compute：1 + 2 − 3 = 0', {fs:12});
+  body += '<rect x="390" y="40" width="350" height="210" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>';
+  body += txt(565, 66, '* /：当场合并（2*3+4）', {fs:14});
+  // 状态 1
+  body += txt(440, 96, '读到 3 前：', {fs:12, an:'start'});
+  body += box(440, 106, 56, 30, 6); body += txt(468, 127, '2', {fs:14});
+  body += box(500, 106, 40, 30, 6); body += txt(520, 127, '*', {fs:14, fill:'#ea580c'});
+  // 状态 2
+  body += txt(440, 172, '读到 +：2*3=6 写回，ops 换成 +', {fs:12, an:'start'});
+  body += box(440, 182, 56, 30, 6); body += txt(468, 203, '6', {fs:14, fill:'#1e40af'});
+  body += box(500, 182, 40, 30, 6); body += txt(520, 203, '+', {fs:14, fill:'#ea580c'});
+  body += '<line x1="576" y1="112" x2="576" y2="188" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar1)"/>';
+  body += '<defs><marker id="ar1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#94a3b8"/></marker></defs>';
+  body += txt(565, 236, '追加 4 后：numbers [6,4] ops [+] → 6+4=10', {fs:12});
+  body += '<text x="380" text-anchor="middle" y="280" font-size="13" fill="#1f2937">* / 全部当场合并，最后表里只剩 + -</text>';
+  document.getElementById('figDualList').innerHTML = svg(760, 300, body);
+})();
+
+// ===== 图 3：分步表 =====
+(function(){
+  var rows = [
+    ['0','0','2','读数字，cur=2','[]','[]'],
+    ['1','1','*','push(2,*)：表空直接追加','[2]','[*]'],
+    ['2','2','(','调 f(3)，括号内交给下级','—','—'],
+    ['3','6',')','内层返回 7，where=6；外层从 7 继续','(内层 [3,4])','(内层 [+,+])'],
+    ['4','7','-','push(7,-)：表尾 *，2*7=14 写回','[14]','[-]'],
+    ['5','8','5','读数字，cur=5','[14]','[-]'],
+    ['6','9','/','push(5,/)：表尾 -，追加','[14,5]','[-,/]'],
+    ['7','10','2','读数字，cur=2','[14,5]','[-,/]'],
+    ['8','11','结尾','push(2,+)：表尾 /，5/2=2 写回','[14,2]','[-,+]']
+  ];
+  var xs = [64, 108, 158, 268, 470, 620];
+  var labels = ['步','i','字符','动作','numbers','ops'];
+  var body = '';
+  body += '<text x="380" y="26" font-size="14" text-anchor="middle" fill="#1f2937">「2*(3+4)-5/2」分步执行 → 14 − 2 = 12</text>';
+  labels.forEach(function(l,i){ body += txt(xs[i], 52, l, {fs:12, fill:'#64748b', an:'start'}); });
+  rows.forEach(function(r,ri){
+    var y = 66 + ri*30;
+    if (ri % 2 === 0) body += '<rect x="40" y="'+(y-16)+'" width="700" height="28" rx="4" fill="#f8fafc"/>';
+    r.forEach(function(v,ci){ body += txt(xs[ci], y, v, {fs:12, an:'start'}); });
+  });
+  body += '<text x="380" text-anchor="middle" y="'+(66+rows.length*30+24)+'" font-size="13" fill="#1f2937">每字符恰好访问一次；递归把 (3+4) 的解析整段交给 f(3)，没有重复扫描</text>';
+  document.getElementById('figTrace').innerHTML = svg(760, 66+rows.length*30+44, body);
+})();
+
+// ===== 演示一：表达式求值操作台 =====
+(function(){
+  var PRESETS = ['1+2*3','2*(3+4)','1+(2+3)+4','6/3*2','2*3+4','3+4*2-5/2'];
+  var VERS = ['正确','错：忘了 +1','错：忘了更新 ops'];
+  var correct = {};
+  PRESETS.forEach(function(p){ correct[p] = simCalc(p,0).pop().answer; });
+
+  function simCalc(expr, ver){
+    var steps = [], where = 0, s = expr;
+    function rec(i, depth){
+      var cur = 0, numbers = [], ops = [];
+      function pushNum(c, op){
+        var n = numbers.length;
+        if (n === 0 || ops[n-1] === '+' || ops[n-1] === '-'){ numbers.push(c); ops.push(op); }
+        else {
+          var top = numbers[n-1];
+          numbers[n-1] = ops[n-1] === '*' ? top*c : Math.trunc(top/c);
+          if (ver !== 2) ops[n-1] = op;
+        }
+      }
+      while (i < s.length && s[i] !== ')'){
+        if (s[i] >= '0' && s[i] <= '9'){
+          cur = cur*10 + (s.charCodeAt(i)-48);
+          steps.push({i:i, cur:cur, numbers:numbers.slice(), ops:ops.slice(), note:'读数字，cur='+cur});
+          i++;
+        } else if (s[i] !== '('){
+          var op = s[i];
+          var n0 = numbers.length, pv = cur;
+          var lastOp = n0 ? ops[n0-1] : '';
+          var oldTop = n0 ? numbers[n0-1] : 0;
+          pushNum(cur, op);
+          var note = 'push('+pv+','+op+')';
+          if (lastOp === '*' || lastOp === '/'){
+            note = 'push('+pv+','+op+')：表尾 '+lastOp+'，'+(lastOp==='*'?oldTop+'×'+pv:oldTop+'/'+pv)+'='+numbers[n0-1]+' 写回'+(ver===2?'（ops 忘了换）':'，ops 换成 '+op);
+          }
+          steps.push({i:i, cur:0, numbers:numbers.slice(), ops:ops.slice(), note:note});
+          i++; cur = 0;
+        } else {
+          steps.push({i:i, cur:cur, numbers:numbers.slice(), ops:ops.slice(), note:(depth?'遇到 (：调下级 f('+(i+1)+')':'遇到 (：调 f('+(i+1)+')')});
+          cur = rec(i+1, depth+1);
+          i = ver === 1 ? where : where+1;
+          steps.push({i:i, cur:cur, numbers:numbers.slice(), ops:ops.slice(), note:'内层返回 '+cur+'，where='+where+'，从 i='+i+' 继续'+(ver===1?'（i 停在 ) 上，循环将直接结束）':'')});
+        }
+      }
+      pushNum(cur, '+');
+      var ans = numbers[0];
+      for (var k=1;k<numbers.length;k++) ans += ops[k-1]==='+' ? numbers[k] : -numbers[k];
+      steps.push({i:i, cur:cur, numbers:numbers.slice(), ops:ops.slice(), note:depth?'段结束：push('+cur+',+)，返回 '+ans:'段结束：push('+cur+',+)，compute 带符号累加 = '+ans, ans:ans});
+      where = i;
+      return ans;
+    }
+    var real = rec(0, 0);
+    var good = correct[expr];
+    var extra = '';
+    if (ver === 1 && real !== good) extra = '错：i=where 忘 +1，) 后面的尾巴被整段丢掉';
+    if (ver === 2 && real !== good) extra = '错：合并时没更新表尾 ops，后面的 + 被当成 * /';
+    if (ver > 0 && real === good) extra = '这组碰巧算对了，错法不保证每次都错';
+    steps.push({done:true, answer:real, good:good, extra:extra});
+    return steps;
+  }
+
+  var step = 0, preset = 0, ver = 0, steps = [];
+  function setSteps(){ steps = simCalc(PRESETS[preset], ver); step = 0; render(); }
+  function render(){
+    var st = steps[Math.min(step, steps.length-1)];
+    var body = '';
+    var s = PRESETS[preset];
+    var strip = '<div id="vizCalcStrip">';
+    for (var i=0;i<s.length;i++){
+      var cls = 'cell' + (i===st.i ? ' cur' : '') + (st.stopAt === i ? ' stop' : '');
+      strip += '<span class="'+cls+'">'+esc(s[i])+'</span>';
+    }
+    strip += '</div>';
+    body += strip;
+    body += '<div class="viz-tables">';
+    body += '<div class="viz-col">'+ (st.numbers&&st.numbers.length ? st.numbers.map(function(v){return '<span class="viz-chip num">'+v+'</span>';}).join('') : '<span class="viz-chip">（空表）</span>') +'</div>';
+    body += '<div class="viz-col">'+ (st.ops&&st.ops.length ? st.ops.map(function(v){return '<span class="viz-chip op">'+v+'</span>';}).join('') : '<span class="viz-chip">（空表）</span>') +'</div>';
+    body += '<div class="viz-col"><span class="viz-chip">cur='+(st.cur===undefined?'':st.cur)+'</span></div>';
+    body += '</div>';
+    body += '<p class="viz-note">'+ (st.note||'') +'</p>';
+    if (st.done){
+      var bad = st.answer !== st.good;
+      body += '<p class="viz-answer">答案：<span class="'+(bad?'bad':'ok')+'">'+st.answer+'</span>（正确应为 '+st.good+'）'+(bad?' ':' ')+esc(st.extra||'')+'</p>';
+    }
+    body += '<p class="viz-note" style="color:#64748b">第 '+(Math.min(step,steps.length-1)+1)+' / '+steps.length+' 步</p>';
+    document.getElementById('vizCalcBody').innerHTML = body;
+  }
+  var ctl = document.getElementById('vizCalcCtl');
+  ctl.innerHTML = '<div class="viz-ctl"><label>表达式</label><select id="vizCalcPreset"></select><label style="margin-left:12px">版本</label><select id="vizCalcVer"></select></div>';
+  PRESETS.forEach(function(p,i){
+    var o = document.createElement('option'); o.value = i; o.text = p;
+    document.getElementById('vizCalcPreset').appendChild(o);
+  });
+  VERS.forEach(function(v,i){
+    var o = document.createElement('option'); o.value = i; o.text = v;
+    document.getElementById('vizCalcVer').appendChild(o);
+  });
+  document.getElementById('vizCalcPreset').addEventListener('change', function(){ preset = +this.value; setSteps(); });
+  document.getElementById('vizCalcVer').addEventListener('change', function(){ ver = +this.value; setSteps(); });
+  var b1 = document.createElement('button'); b1.textContent = '上一步';
+  b1.addEventListener('click', function(){ step = Math.max(0, step-1); render(); });
+  var b2 = document.createElement('button'); b2.textContent = '下一步';
+  b2.addEventListener('click', function(){ step = Math.min(steps.length-1, step+1); render(); });
+  var b3 = document.createElement('button'); b3.textContent = '重置';
+  b3.addEventListener('click', function(){ setSteps(); });
+  ctl.appendChild(b1); ctl.appendChild(b2); ctl.appendChild(b3);
+  setSteps();
+})();
+})();
+</script>
+</body>
+</html>

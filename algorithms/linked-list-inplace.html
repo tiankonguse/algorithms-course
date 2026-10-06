@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>链表的原地改造：k 组反转、复制随机指针、链表排序 - algorithms-course</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .li-wrap { margin:2px 0 8px; }
+  .li-note { font-size:13px; color:#374151; margin:6px 0 4px; min-height:22px; }
+  .li-kv { display:flex; gap:16px; flex-wrap:wrap; margin:6px 0 8px; }
+  .li-kv span { font-size:12px; color:#374151; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .li-kv b { color:#2563eb; }
+  .li-hit { color:#ea580c; font-weight:600; }
+  .li-bad { color:#dc2626; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>链表的原地改造：k 组反转、复制随机指针、链表排序</h1>
+      <p class="intro">上一讲的三个题只在指针速度上做文章，这一讲的三道题要动结构：把一段一段的链翻过来、把副本穿进原链再拆出来、把相邻有序段两两合并。全程不借容器，节点一个都不新建（复制题除外）。</p>
+
+      <h2>零、背景</h2>
+      <p>这三道题有个共同点：用容器都能解，而且都很短。k 组反转可以收进数组再重建，复制随机指针可以开哈希表，排序可以把值收进数组排完写回。</p>
+      <p>题目真正的要求是额外空间 O(1)。链表能做到这一点，靠的是它的结构本身就是可以拆装的：改一个 next 指针就能把一段链翻过来，数组上做不到这种事。</p>
+
+      <h2>一、每 k 个节点一组反转</h2>
+      <p>给一条链和一个 k，从头开始每 k 个节点一组反转，最后剩下不足 k 个的那截保持原样。</p>
+      <p>拆成两个动作。teamEnd 从 s 往下数 k 个节点，返回这一组的尾巴；不够 k 个就返回空。reverse 负责把 [s, e] 这一段原地翻转。</p>
+      <p>reverse 的写法值得看一遍：先把 e 往后挪一格（<code>e = e-&gt;next</code>），再从 s 开始走标准的三指针反转，循环条件是 cur != e。反转结束时 s 变成了这一组的尾巴，把它接到 e 上，也就是接到下一组的开头。</p>
+      <p>第一组要单独处理，因为它的尾巴决定整条链的新头：head = end。之后的每组都是同样的收尾动作：反转完把上一组的尾巴 lastTeamEnd 接到这一组的新头 end 上。</p>
+
+      <figure class="fig" id="fig-kg"></figure>
+
+      <p>代价很好估：每个节点一次 <code>cur-&gt;next = pre</code>，每组一次 <code>s-&gt;next = e</code>。n = 10、k = 3 时是 12 次赋值（9 + 3）。n = 100 万实测 k = 2 用 2.51ms、k = 3 用 2.07ms、k = 100 用 2.00ms，几乎不随 k 变。</p>
+      <p>两个写错的地方，我都试过。</p>
+      <p>1）最后不足 k 个的那截也反转。n = 10、k = 4 时的正确结果是 [4,3,2,1,8,7,6,5,9,10]，错版给出 [4,3,2,1,8,7,6,5,10,9]。随机 3000 组（k 从 2 到 6）里有 35.07% 能抓到这个差别。</p>
+      <p>2）reverse 里漏掉 <code>s-&gt;next = e</code>。这一组的尾巴悬空，n = 10、k = 3 时整条链只剩 [3,2,1]，后面 7 个节点全丢了。这个错反而好，一眼看得出来。</p>
+
+      <figure class="fig" id="fig-kgbad"></figure>
+
+    <pre class="code"><span class="kw">struct</span> ListNode {
+        <span class="kw">int</span> val;
+        ListNode* next;
+    };
+
+    <span class="cm">// 当前组的开始节点是 s，往下数 k 个找到当前组的结束节点返回</span>
+    ListNode* teamEnd(ListNode* s, <span class="kw">int</span> k) {
+        <span class="kw">while</span> (--k != 0 &amp;&amp; s != <span class="kw">nullptr</span>) s = s-&gt;next;
+        <span class="kw">return</span> s;
+    }
+
+    <span class="cm">// s -&gt; a -&gt; b -&gt; c -&gt; e -&gt; 下一组的开头</span>
+    <span class="cm">// 调整成 : e -&gt; c -&gt; b -&gt; a -&gt; s -&gt; 下一组的开头</span>
+    <span class="kw">void</span> <span class="fn">reverse</span>(ListNode* s, ListNode* e) {
+        e = e-&gt;next;
+        ListNode* pre = <span class="kw">nullptr</span>;
+        ListNode* cur = s;
+        ListNode* next = <span class="kw">nullptr</span>;
+        <span class="kw">while</span> (cur != e) {
+            next = cur-&gt;next;
+            cur-&gt;next = pre;
+            pre = cur;
+            cur = next;
+        }
+        s-&gt;next = e;                          <span class="cm">// 原来的头接上下一组</span>
+    }
+
+    ListNode* reverseKGroup(ListNode* head, <span class="kw">int</span> k) {
+        ListNode* start = head;
+        ListNode* end = teamEnd(start, k);
+        <span class="kw">if</span> (end == <span class="kw">nullptr</span>) <span class="kw">return</span> head;      <span class="cm">// 第一组就不够 k 个</span>
+        head = end;                           <span class="cm">// 第一组要换头</span>
+        reverse(start, end);
+        ListNode* lastTeamEnd = start;        <span class="cm">// 翻转后 start 成了这一组的尾</span>
+        <span class="kw">while</span> (lastTeamEnd-&gt;next != <span class="kw">nullptr</span>) {
+            start = lastTeamEnd-&gt;next;
+            end = teamEnd(start, k);
+            <span class="kw">if</span> (end == <span class="kw">nullptr</span>) <span class="kw">return</span> head;  <span class="cm">// 剩下不足 k 个，保持原样</span>
+            reverse(start, end);
+            lastTeamEnd-&gt;next = end;          <span class="cm">// 上一组的尾接这一组的新头</span>
+            lastTeamEnd = start;
+        }
+        <span class="kw">return</span> head;
+    }</pre>
+
+      <div class="viz" id="viz-kg"></div>
+
+      <h2>二、复制带随机指针的链表</h2>
+      <p>每个节点除了 next 还有一个 random，指向链上任意一个节点或者空。要复制出一条结构完全相同的新链，新节点必须是新申请的。</p>
+      <p>哈希版最直接：第一遍建「老节点 → 新节点」的映射，第二遍连 next 和 random。额外空间 O(n)。</p>
+      <p>穿插版三步走，一步都不需要额外结构。</p>
+      <p>1）在每个老节点后面插一个同值副本，链表变成 1 → 1' → 2 → 2' → …</p>
+      <p>2）借这个位置关系设 random：老节点 cur 的 random 往后走一个就是它的副本，所以 <code>copy-&gt;random = cur-&gt;random-&gt;next</code>。</p>
+      <p>3）拆成两条链：老节点接老节点，副本接副本。</p>
+
+      <figure class="fig" id="fig-copy"></figure>
+
+      <p>实测 n = 100 万：穿插法 22.5ms，哈希法 382.9ms，差 17 倍。哈希表的桶数组单独占 12.6 MB，副本本身 22.9 MB（sizeof 是 24 字节，一个 int 加两个指针）。</p>
+      <p>穿插法的代价是它临时改了原链表。别的线程正在读这条链时不能用；单线程里用完拆回去，调用方看不出区别。5000 组随机数据里两法结果一致，拆分之后原链表也完好。</p>
+
+    <pre class="code"><span class="kw">struct</span> Node {
+        <span class="kw">int</span> val;
+        Node* next;
+        Node* random;
+    };
+
+    <span class="cm">// 三步：穿插副本 -&gt; 借位置关系设 random -&gt; 拆开</span>
+    Node* copyRandomList(Node* head) {
+        <span class="kw">if</span> (head == <span class="kw">nullptr</span>) <span class="kw">return</span> <span class="kw">nullptr</span>;
+        Node* cur = head;
+        Node* next = <span class="kw">nullptr</span>;
+        <span class="kw">while</span> (cur != <span class="kw">nullptr</span>) {                          <span class="cm">// 1) 1 -&gt; 1' -&gt; 2 -&gt; 2' -&gt; ...</span>
+            next = cur-&gt;next;
+            cur-&gt;next = <span class="kw">new</span> Node(cur-&gt;val);
+            cur-&gt;next-&gt;next = next;
+            cur = next;
+        }
+        cur = head;
+        Node* copy = <span class="kw">nullptr</span>;
+        <span class="kw">while</span> (cur != <span class="kw">nullptr</span>) {                          <span class="cm">// 2) 老节点的 random 的下一个就是副本的 random</span>
+            next = cur-&gt;next-&gt;next;
+            copy = cur-&gt;next;
+            copy-&gt;random = cur-&gt;random != <span class="kw">nullptr</span> ? cur-&gt;random-&gt;next : <span class="kw">nullptr</span>;
+            cur = next;
+        }
+        Node* ans = head-&gt;next;
+        cur = head;
+        <span class="kw">while</span> (cur != <span class="kw">nullptr</span>) {                          <span class="cm">// 3) 拆成两条链</span>
+            next = cur-&gt;next-&gt;next;
+            copy = cur-&gt;next;
+            cur-&gt;next = next;                             <span class="cm">// 老链恢复</span>
+            copy-&gt;next = next != <span class="kw">nullptr</span> ? next-&gt;next : <span class="kw">nullptr</span>;
+            cur = next;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+    <pre class="code"><span class="cm">// 用哈希表：一遍建映射，二遍连指针，额外空间 O(n)</span>
+    Node* copyRandomListHash(Node* head) {
+        unordered_map&lt;Node*, Node*&gt; mp;
+        mp[<span class="kw">nullptr</span>] = <span class="kw">nullptr</span>;
+        Node* cur = head;
+        <span class="kw">while</span> (cur != <span class="kw">nullptr</span>) {
+            mp[cur] = <span class="kw">new</span> Node(cur-&gt;val);
+            cur = cur-&gt;next;
+        }
+        cur = head;
+        <span class="kw">while</span> (cur != <span class="kw">nullptr</span>) {
+            mp[cur]-&gt;next = mp[cur-&gt;next];
+            mp[cur]-&gt;random = mp[cur-&gt;random];
+            cur = cur-&gt;next;
+        }
+        <span class="kw">return</span> mp[head];
+    }</pre>
+
+      <div class="viz" id="viz-copy"></div>
+
+      <h2>三、在链表上排序</h2>
+      <p>要求三条：时间 O(n log n)，额外空间 O(1)，还要稳定。数组上凑不齐这三条：归并要 O(n) 的辅助数组，快排不稳定而且最坏是 O(n²)。链表上可以，因为合并两段有序链只需要改指针。</p>
+      <p>自底向上归并：step 从 1 开始每轮翻倍，每轮把相邻的两个长为 step 的有序段合并成 2·step。n = 100 时走 7 轮，n = 10 万时 17 轮，也就是 ⌈log₂ n⌉。</p>
+      <p>递归版不能用。递归归并要 O(log n) 的栈，正卡在空间要求上。</p>
+
+      <figure class="fig" id="fig-sort"></figure>
+
+      <p>merge 的过程就是归并排序那个 merge：先挑小的当头，之后每次比较取小的接上，一侧耗尽就把另一侧整段接上去。稳定性全在那个等号上：相等时取左边的，原始的先后顺序就保住了。</p>
+      <p>等号写成 <code>&lt;</code> 会怎样？实测 3000 组随机数据，值域 V = 2 时 2962 组顺序被打乱，V = 3 时 2935 组，V = 5 时 2902 组。写成 <code>&lt;=</code> 时 0 组。</p>
+
+      <figure class="fig" id="fig-merge"></figure>
+
+      <p>主循环里第一组单独处理，因为合并出来的头就是整条链的新头；后面每组的头都要靠 <code>lastTeamEnd-&gt;next</code> 接上。某轮最后剩下一截凑不成一组时，直接接在末尾就完事。</p>
+      <p>比较次数实测：n = 10 万 1466427 次，约 0.86·n·log₂n。</p>
+      <p>时间（n = 100 万）量了三档：自底向上 157.5ms，递归版 91.1ms，收集进数组用 std::sort 排完再写回 44.9ms。数组版最快，但它用了 O(n) 的数组；自底向上比递归版慢 1.7 倍，慢在每轮都要从头扫一遍找分组边界，还要反复断开重连。省下的那 O(log n) 栈，是拿常数换的。</p>
+
+    <pre class="code">ListNode* start;   <span class="cm">// merge 之后整段的头</span>
+    ListNode* end;     <span class="cm">// merge 之后整段的尾</span>
+
+    <span class="cm">// 包括 s 在内往下数 k 个节点返回，不够就返回最后数到的非空节点</span>
+    ListNode* findEnd(ListNode* s, <span class="kw">int</span> k) {
+        <span class="kw">while</span> (s-&gt;next != <span class="kw">nullptr</span> &amp;&amp; --k != 0) s = s-&gt;next;
+        <span class="kw">return</span> s;
+    }
+
+    <span class="cm">// l1...r1 与 l2...r2 是两段有序链，原地合并，头尾写进 start / end</span>
+    <span class="kw">void</span> <span class="fn">merge</span>(ListNode* l1, ListNode* r1, ListNode* l2, ListNode* r2) {
+        ListNode* pre;
+        <span class="kw">if</span> (l1-&gt;val &lt;= l2-&gt;val) {             <span class="cm">// 取等号，相等时先拿左边，稳定</span>
+            start = l1; pre = l1; l1 = l1-&gt;next;
+        } <span class="kw">else</span> {
+            start = l2; pre = l2; l2 = l2-&gt;next;
+        }
+        <span class="kw">while</span> (l1 != <span class="kw">nullptr</span> &amp;&amp; l2 != <span class="kw">nullptr</span>) {
+            <span class="kw">if</span> (l1-&gt;val &lt;= l2-&gt;val) { pre-&gt;next = l1; pre = l1; l1 = l1-&gt;next; }
+            <span class="kw">else</span> { pre-&gt;next = l2; pre = l2; l2 = l2-&gt;next; }
+        }
+        <span class="kw">if</span> (l1 != <span class="kw">nullptr</span>) { pre-&gt;next = l1; end = r1; }
+        <span class="kw">else</span> { pre-&gt;next = l2; end = r2; }
+    }
+
+    ListNode* sortList(ListNode* head) {
+        <span class="kw">int</span> n = 0;
+        ListNode* cur = head;
+        <span class="kw">while</span> (cur != <span class="kw">nullptr</span>) { n++; cur = cur-&gt;next; }
+        ListNode *l1, *r1, *l2, *r2, *next, *lastTeamEnd;
+        <span class="kw">for</span> (<span class="kw">int</span> step = 1; step &lt; n; step &lt;&lt;= 1) {
+            l1 = head;                        <span class="cm">// 第一组要决定整条链的头，单独处理</span>
+            r1 = findEnd(l1, step);
+            l2 = r1-&gt;next;
+            r2 = findEnd(l2, step);
+            next = r2-&gt;next;
+            r1-&gt;next = <span class="kw">nullptr</span>;
+            r2-&gt;next = <span class="kw">nullptr</span>;
+            merge(l1, r1, l2, r2);
+            head = start;
+            lastTeamEnd = end;
+            <span class="kw">while</span> (next != <span class="kw">nullptr</span>) {
+                l1 = next;
+                r1 = findEnd(l1, step);
+                l2 = r1-&gt;next;
+                <span class="kw">if</span> (l2 == <span class="kw">nullptr</span>) { lastTeamEnd-&gt;next = l1; <span class="kw">break</span>; }   <span class="cm">// 不足一组直接接</span>
+                r2 = findEnd(l2, step);
+                next = r2-&gt;next;
+                r1-&gt;next = <span class="kw">nullptr</span>;
+                r2-&gt;next = <span class="kw">nullptr</span>;
+                merge(l1, r1, l2, r2);
+                lastTeamEnd-&gt;next = start;
+                lastTeamEnd = end;
+            }
+        }
+        <span class="kw">return</span> head;
+    }</pre>
+
+      <div class="viz" id="viz-sort"></div>
+
+      <h2>四、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>时间</th><th>额外空间</th><th>说明</th></tr>
+        <tr><td>每 k 个一组反转</td><td>O(n)</td><td>O(1)</td><td>赋值 n + ⌊n/k⌋ 次；n = 100 万约 2ms，与 k 无关</td></tr>
+        <tr><td>复制随机指针（穿插）</td><td>O(n)</td><td>O(1)</td><td>三趟扫描；n = 100 万 22.5ms</td></tr>
+        <tr><td>复制随机指针（哈希）</td><td>O(n)</td><td>O(n)</td><td>两趟扫描；n = 100 万 382.9ms，桶数组 12.6 MB</td></tr>
+        <tr><td>链表排序（自底向上）</td><td>O(n log n)</td><td>O(1)</td><td>⌈log₂ n⌋ 轮，每轮扫一遍；n = 100 万 157.5ms</td></tr>
+        <tr><td>链表排序（递归归并）</td><td>O(n log n)</td><td>O(log n)</td><td>栈深度 log₂ n；n = 100 万 91.1ms，比自底向上快</td></tr>
+        <tr><td>链表排序（数组辅助）</td><td>O(n log n)</td><td>O(n)</td><td>std::sort；n = 100 万 44.9ms，最快但不满足要求</td></tr>
+      </table>
+      <p>三个题的时间都是线性的或者 n log n，要记的是空间那一列。O(1) 的写法要求你把每一组、每一个副本的位置关系都想清楚。</p>
+
+      <figure class="fig" id="fig-speed2"></figure>
+
+      <h2>五、总结</h2>
+      <p>k 组反转：teamEnd 找组尾，reverse 翻转后把这一组的老尾巴接到下一组开头。第一组要换头，最后不足 k 个的那截不动。</p>
+      <p>复制随机指针：把副本插在老节点后面，random 就变成了「老 random 的下一个」，拆开时两链各自还原。比哈希法快 17 倍，代价是临时改原链表。</p>
+      <p>链表排序：自底向上归并，step 翻倍，merge 里取 <code>&lt;=</code> 保证稳定。这是数组上做不到、链表上能做到的一个例子。</p>
+      <p>链表类的问题就到这里。快慢指针这套手法后面在数组和图上还会再见到，比如判环推广到判重复、找中点推广到分治。</p>
+
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>判断链表是否是回文结构</td><td><a href="https://leetcode.cn/problems/palindrome-linked-list/" target="_blank">leetcode.cn/problems/palindrome-linked-list</a></td></tr>
+        <tr><td>LeetCode</td><td>返回链表的第一个入环节点</td><td><a href="https://leetcode.cn/problems/linked-list-cycle-ii/" target="_blank">leetcode.cn/problems/linked-list-cycle-ii</a></td></tr>
+        <tr><td>LeetCode</td><td>复制带随机指针的链表</td><td><a href="https://leetcode.cn/problems/copy-list-with-random-pointer/" target="_blank">leetcode.cn/problems/copy-list-with-random-pointer</a></td></tr>
+        <tr><td>LeetCode</td><td>返回两个无环链表相交的第一个节点</td><td><a href="https://leetcode.cn/problems/intersection-of-two-linked-lists/" target="_blank">leetcode.cn/problems/intersection-of-two-linked-lists</a></td></tr>
+        <tr><td>LeetCode</td><td>排序链表</td><td><a href="https://leetcode.cn/problems/sort-list/" target="_blank">leetcode.cn/problems/sort-list</a></td></tr>
+        <tr><td>LeetCode</td><td>每k个节点一组翻转链表</td><td><a href="https://leetcode.cn/problems/reverse-nodes-in-k-group/" target="_blank">leetcode.cn/problems/reverse-nodes-in-k-group</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解034【必备】链表高频题目和必备技巧</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function mk(tag, a){ var e = document.createElementNS(NS, tag); for (var k in a) e.setAttribute(k, a[k]); return e; }
+  function T(x, y, s, a){ var e = mk('text', a || {}); e.setAttribute('x', x); e.setAttribute('y', y); e.textContent = s; return e; }
+  function R(x, y, w, h, fill, stroke){ return mk('rect', {x:x, y:y, width:w, height:h, fill:fill, 'stroke':stroke || '#e6e8eb', rx:3}); }
+  function svgOf(host, w, h){ var s = mk('svg', {viewBox:'0 0 ' + w + ' ' + h, width:'100%', 'font-family':'ui-monospace,SFMono-Regular,Menlo,monospace'}); host.appendChild(s); return s; }
+  function cap(host, t){ var c = document.createElement('figcaption'); c.textContent = t; host.appendChild(c); }
+  function defs(svg){
+    var d = mk('defs', {});
+    var m = mk('marker', {id:'ah2', viewBox:'0 0 10 10', refX:9, refY:5, markerWidth:6, markerHeight:6, orient:'auto-start-reverse'});
+    m.appendChild(mk('path', {d:'M 0 0 L 10 5 L 0 10 z', fill:'#9aa0a6'}));
+    d.appendChild(m);
+    var m2 = mk('marker', {id:'ah2b', viewBox:'0 0 10 10', refX:9, refY:5, markerWidth:6, markerHeight:6, orient:'auto-start-reverse'});
+    m2.appendChild(mk('path', {d:'M 0 0 L 10 5 L 0 10 z', fill:'#2563eb'}));
+    d.appendChild(m2);
+    svg.appendChild(d);
+  }
+  var BLUE = '#2563eb', BLUEB = '#dbeafe', OR = '#ea580c', ORB = '#ffedd5', GRAY = '#9aa0a6', BG = '#f6f7f9', BD = '#e6e8eb';
+  function node(svg, x, y, r, label, fill, stroke){
+    svg.appendChild(mk('circle', {cx:x, cy:y, r:r, fill:fill || '#ffffff', 'stroke':stroke || BD, 'stroke-width':1.4}));
+    svg.appendChild(T(x, y + 4, label, {'text-anchor':'middle', 'font-size':11, fill:'#111827'}));
+  }
+
+  // ============ 图 1：一组反转的四步 ============
+  (function(){
+    var host = document.getElementById('fig-kg');
+    var svg = svgOf(host, 660, 240); defs(svg);
+    var rows = [
+      {lab:'① teamEnd', seq:['1','2','3','4','5'], hi:[1,2,3], dir:1, note:'start=2，end=4（k=3）'},
+      {lab:'② reverse', seq:['1','4','3','2','5'], hi:[1,2,3], dir:-1, note:'三指针走完，2 成了这组尾巴'},
+      {lab:'③ s→e', seq:['1','4','3','2','5'], hi:[3], dir:0, note:'2 的 next 接到 5'},
+      {lab:'④ 接上一组', seq:['1','4','3','2','5'], hi:[0], dir:0, note:'lastTeamEnd 与新头'}
+    ];
+    var gap = 70, r = 16;
+    for (var ri = 0; ri < rows.length; ri++){
+      var row = rows[ri], y = 38 + ri * 54;
+      svg.appendChild(T(24, y + 4, row.lab, {'font-size':11, fill:'#6b7280'}));
+      var x0 = 130;
+      for (var i = 0; i < row.seq.length; i++){
+        var x = x0 + i * gap;
+        var fill = '#ffffff', stroke = BD;
+        if (row.hi.indexOf(i) >= 0){ fill = (i === row.hi[row.hi.length-1] && row.lab === '① teamEnd') ? ORB : BLUEB; stroke = (i === row.hi[row.hi.length-1] && row.lab === '① teamEnd') ? OR : BLUE; }
+        if (row.lab === '③ s→e' && i === 3){ fill = BLUEB; stroke = BLUE; }
+        if (row.lab === '④ 接上一组' && i === 0){ fill = ORB; stroke = OR; }
+        node(svg, x, y, r, row.seq[i], fill, stroke);
+      }
+      for (var i = 0; i < row.seq.length - 1; i++){
+        var x1 = x0 + i * gap, x2 = x0 + (i + 1) * gap;
+        if (row.dir === 1) svg.appendChild(mk('line', {x1:x1 + r + 2, y1:y, x2:x2 - r - 2, y2:y, stroke:'#9aa0a6', 'stroke-width':1.4, 'marker-end':'url(#ah2)'}));
+        else if (row.dir === -1){
+          if (i < 1) svg.appendChild(mk('line', {x1:x1 + r + 2, y1:y, x2:x2 - r - 2, y2:y, stroke:'#9aa0a6', 'stroke-width':1.4, 'marker-end':'url(#ah2)'}));
+          else if (i < 3) svg.appendChild(mk('line', {x1:x2 - r - 2, y1:y - 24, x2:x1 + r + 2, y2:y - 24, stroke:BLUE, 'stroke-width':1.4, 'marker-end':'url(#ah2b)'}));
+          else svg.appendChild(mk('line', {x1:x1 + r + 2, y1:y, x2:x2 - r - 2, y2:y, stroke:'#9aa0a6', 'stroke-width':1.4, 'marker-end':'url(#ah2)'}));
+        } else {
+          svg.appendChild(mk('line', {x1:x1 + r + 2, y1:y, x2:x2 - r - 2, y2:y, stroke: (row.lab === '③ s→e' && i === 3) ? BLUE : '#9aa0a6', 'stroke-width':1.4, 'marker-end':'url(#ah2)'}));
+        }
+      }
+      svg.appendChild(T(x0 + row.seq.length * gap - 24, y + 4, row.note, {'font-size':11, fill:'#374151'}));
+    }
+    cap(host, 'k = 3 时第一组的四个动作：定组尾 → 组内翻转 → 老尾巴接下一组 → 上一组接新头');
+  })();
+
+  // ============ 图 2：两个错版 ============
+  (function(){
+    var host = document.getElementById('fig-kgbad');
+    var svg = svgOf(host, 660, 170);
+    var rows = [
+      {lab:'不足 k 个也反转', v:['4','3','2','1','8','7','6','5','10','9'], bad:[8,9], tag:'尾部 9,10 反了'},
+      {lab:'漏掉 s→e', v:['3','2','1'], bad:[0,1,2], tag:'后面 7 个全丢'}
+    ];
+    var gap = 44, r = 13;
+    for (var ri = 0; ri < rows.length; ri++){
+      var row = rows[ri], y = 44 + ri * 74;
+      svg.appendChild(T(24, y + 4, row.lab, {'font-size':11, fill:'#6b7280'}));
+      var x0 = 100;
+      for (var i = 0; i < row.v.length; i++){
+        var x = x0 + i * gap;
+        var bad = row.bad.indexOf(i) >= 0;
+        node(svg, x, y, r, row.v[i], bad ? '#fee2e2' : '#ffffff', bad ? '#dc2626' : BD);
+        if (i) svg.appendChild(mk('line', {x1:x - gap + r + 2, y1:y, x2:x - r - 2, y2:y, stroke:'#9aa0a6', 'stroke-width':1.3, 'marker-end':'url(#ah2)'}));
+      }
+      if (row.v.length < 10) svg.appendChild(T(x0 + row.v.length * gap + 8, y + 4, '链表到此为止', {'font-size':11, fill:'#dc2626'}));
+      svg.appendChild(T(x0 + 10 * gap + 8, y + 4, row.tag, {'font-size':11, fill:'#374151'}));
+    }
+    cap(host, '两种写错的结果：n = 10、k = 4 与 k = 3');
+  })();
+
+  // ============ 图 3：复制随机指针的三步 ============
+  (function(){
+    var host = document.getElementById('fig-copy');
+    var svg = svgOf(host, 660, 345); defs(svg);
+    var gap = 58, r = 14;
+    var stages = [
+      {t:'① 穿插副本', old:['1','2','3'], cp:['1','2','3'], rd:false},
+      {t:'② 借位置设 random', old:['1','2','3'], cp:['1','2','3'], rd:true},
+      {t:'③ 拆开两条链', old:['1','2','3'], cp:['1','2','3'], rd:false, split:true}
+    ];
+    // random: 老节点 0 -> 老节点 2，老节点 1 -> 空
+    var rnd = [2, -1, 0];
+    for (var si = 0; si < stages.length; si++){
+      var st = stages[si], y = 50 + si * 92;
+      svg.appendChild(T(24, (st.split ? y - 20 : y + 4), st.t, {'font-size':11, fill:'#6b7280'}));
+      var x0 = 190;
+      for (var i = 0; i < 3; i++){
+        var xo = x0 + i * gap * 2;
+        if (st.split){
+          node(svg, xo, y - 24, r, st.old[i]);
+          node(svg, xo, y + 24, r, st.cp[i], ORB, OR);
+          if (i < 2){
+            svg.appendChild(mk('line', {x1:xo + r + 2, y1:y - 24, x2:xo + gap * 2 - r - 2, y2:y - 24, stroke:'#9aa0a6', 'stroke-width':1.4, 'marker-end':'url(#ah2)'}));
+            svg.appendChild(mk('line', {x1:xo + r + 2, y1:y + 24, x2:xo + gap * 2 - r - 2, y2:y + 24, stroke:OR, 'stroke-width':1.4, 'marker-end':'url(#ah2)'}));
+          }
+          if (rnd[i] >= 0){
+            var xt = x0 + rnd[i] * gap * 2;
+            svg.appendChild(mk('path', {d:'M ' + xo + ' ' + (y - 24 - r - 4) + ' C ' + (xo + 30) + ' ' + (y - 78) + ', ' + (xt - 30) + ' ' + (y - 78) + ', ' + xt + ' ' + (y - 24 - r - 4),
+              fill:'none', stroke:BLUE, 'stroke-width':1.2, 'stroke-dasharray':'4 3'}));
+            svg.appendChild(mk('path', {d:'M ' + xo + ' ' + (y + 24 + r + 4) + ' C ' + (xo + 30) + ' ' + (y + 78) + ', ' + (xt - 30) + ' ' + (y + 78) + ', ' + xt + ' ' + (y + 24 + r + 4),
+              fill:'none', stroke:OR, 'stroke-width':1.2, 'stroke-dasharray':'4 3'}));
+          }
+          continue;
+        }
+        node(svg, xo, y, r, st.old[i]);
+        var xc = xo + gap;
+        node(svg, xc, y, r, st.cp[i], ORB, OR);
+        if (!st.split){
+          svg.appendChild(mk('line', {x1:xo + r + 2, y1:y - 8, x2:xc - r - 2, y2:y - 8, stroke:'#9aa0a6', 'stroke-width':1.3, 'marker-end':'url(#ah2)'}));
+          if (i < 2) svg.appendChild(mk('line', {x1:xc + r + 2, y1:y + 8, x2:xo + gap * 2 - r - 2, y2:y + 8, stroke:'#9aa0a6', 'stroke-width':1.3, 'marker-end':'url(#ah2)'}));
+        } else {
+          if (i < 2){ svg.appendChild(mk('line', {x1:xo + r + 2, y1:y - 12, x2:xo + gap * 2 - r - 2, y2:y - 12, stroke:'#9aa0a6', 'stroke-width':1.3, 'marker-end':'url(#ah2)'}));
+                      svg.appendChild(mk('line', {x1:xc + r + 2, y1:y + 12, x2:xc + gap * 2 - r - 2, y2:y + 12, stroke:OR, 'stroke-width':1.3, 'marker-end':'url(#ah2)'})); }
+        }
+        if (st.rd && rnd[i] >= 0){
+          var xt = x0 + rnd[i] * gap * 2;
+          svg.appendChild(mk('path', {d:'M ' + (xo + r) + ' ' + (y + 10) + ' C ' + (xo + 20) + ' ' + (y + 44) + ', ' + (xt - 20) + ' ' + (y + 44) + ', ' + xt + ' ' + (y + r + 6),
+            fill:'none', stroke:BLUE, 'stroke-width':1.2, 'stroke-dasharray':'4 3', 'marker-end':'url(#ah2b)'}));
+          if (i === 0) svg.appendChild(mk('path', {d:'M ' + (xc + r) + ' ' + (y + 6) + ' C ' + (xc + 16) + ' ' + (y + 30) + ', ' + (xt + gap - 16) + ' ' + (y + 30) + ', ' + (xt + gap) + ' ' + (y + r + 4),
+            fill:'none', stroke:OR, 'stroke-width':1.2, 'stroke-dasharray':'4 3'}));
+        }
+      }
+      if (si === 0) svg.appendChild(T(x0 + gap + 4, y - r - 18, '1 → 1\' → 2 → 2\' → 3 → 3\'', {'font-size':11, fill:'#374151'}));
+      if (si === 1) svg.appendChild(T(x0 + 5 * gap + 16, y + 4, '老 random 的下一个', {'font-size':11, fill:'#374151'}));
+      if (si === 2) svg.appendChild(T(x0 + 5 * gap + 16, y + 4, '上：老链　下：新链', {'font-size':11, fill:'#374151'}));
+    }
+    svg.appendChild(T(24, 22, '蓝线是老节点的 random，橙虚线是副本的', {'font-size':11, fill:'#6b7280'}));
+    cap(host, '副本贴在老节点后面时，random 的目标也就跟着确定了');
+  })();
+
+  // ============ 图 4：自底向上的 step 翻倍 ============
+  (function(){
+    var host = document.getElementById('fig-sort');
+    var svg = svgOf(host, 660, 210);
+    var a = [7,3,8,2,6,4,1,5];
+    var rounds = [
+      {step:1, seg:[[0,0],[1,1],[2,2],[3,3],[4,4],[5,5],[6,6],[7,7]], arr:[3,7,2,8,4,6,1,5]},
+      {step:2, seg:[[0,1],[2,3],[4,5],[6,7]], arr:[2,3,7,8,1,4,5,6]},
+      {step:4, seg:[[0,3],[4,7]], arr:[1,2,3,4,5,6,7,8]}
+    ];
+    var gap = 56, r = 14;
+    for (var ri = 0; ri < rounds.length; ri++){
+      var rd = rounds[ri], y = 40 + ri * 58;
+      svg.appendChild(T(24, y + 4, 'step = ' + rd.step, {'font-size':11, fill:'#6b7280'}));
+      var x0 = 110;
+      for (var i = 0; i < a.length; i++){
+        var x = x0 + i * gap;
+        var inA = false;
+        for (var k = 0; k < rd.seg.length; k++) if (rd.seg[k][0] === i) inA = true;
+        node(svg, x, y, r, String(rd.arr[i]), inA ? BLUEB : '#ffffff', inA ? BLUE : BD);
+        if (i && !(rd.seg.length && i % (rd.step * 2) === 0)) svg.appendChild(mk('line', {x1:x - gap + r + 2, y1:y, x2:x - r - 2, y2:y, stroke:'#9aa0a6', 'stroke-width':1.3, 'marker-end':'url(#ah2)'}));
+      }
+      svg.appendChild(T(x0 + a.length * gap + 6, y + 4, ri === rounds.length - 1 ? '排好' : '⌈log₂ 8⌉ = 3 轮', {'font-size':11, fill:'#374151'}));
+    }
+    cap(host, '每轮把相邻的两段合并，段长翻倍；第一轮段长是 1，也就是单个节点天然有序');
+  })();
+
+  // ============ 图 5：merge 的等号 ============
+  (function(){
+    var host = document.getElementById('fig-merge');
+    var svg = svgOf(host, 660, 200);
+    var Lft = [2,5,7], Rgt = [2,3,9];
+    var gap = 46, r = 14;
+    var y1 = 44, y2 = 106;
+    svg.appendChild(T(24, y1 + 4, '左段', {'font-size':11, fill:BLUE}));
+    svg.appendChild(T(24, y2 + 4, '右段', {'font-size':11, fill:OR}));
+    var i, x;
+    for (i = 0; i < Lft.length; i++){ x = 90 + i * gap; node(svg, x, y1, r, String(Lft[i]), BLUEB, BLUE); if (i) svg.appendChild(mk('line', {x1:x - gap + r + 2, y1:y1, x2:x - r - 2, y2:y1, stroke:'#9aa0a6', 'stroke-width':1.3, 'marker-end':'url(#ah2)'})); }
+    for (i = 0; i < Rgt.length; i++){ x = 90 + i * gap; node(svg, x, y2, r, String(Rgt[i]), ORB, OR); if (i) svg.appendChild(mk('line', {x1:x - gap + r + 2, y1:y2, x2:x - r - 2, y2:y2, stroke:'#9aa0a6', 'stroke-width':1.3, 'marker-end':'url(#ah2)'})); }
+    // 合并结果
+    var out = [2,2,3,5,7,9];
+    svg.appendChild(T(24, 166, '合并后', {'font-size':11, fill:'#6b7280'}));
+    for (i = 0; i < out.length; i++){ x = 90 + i * gap; node(svg, x, 166, r, String(out[i])); if (i) svg.appendChild(mk('line', {x1:x - gap + r + 2, y1:166, x2:x - r - 2, y2:166, stroke:'#9aa0a6', 'stroke-width':1.3, 'marker-end':'url(#ah2)'})); }
+    svg.appendChild(T(90 + out.length * gap + 8, 170, '第一个 2 来自左段', {'font-size':11, fill:'#374151'}));
+    // 右侧说明
+    svg.appendChild(R(430, 24, 212, 130, BG, BD));
+    svg.appendChild(T(442, 46, '判据：l1->val <= l2->val', {'font-size':11, fill:'#374151'}));
+    svg.appendChild(T(442, 68, '相等时取左边，先来后到保住', {'font-size':11, fill:'#374151'}));
+    svg.appendChild(T(442, 96, '写成 < 则相等时取右边', {'font-size':11, fill:'#374151'}));
+    svg.appendChild(T(442, 118, '实测 3000 组里约 97% 被打乱', {'font-size':11, fill:'#dc2626'}));
+    svg.appendChild(T(442, 140, '值域越小越容易撞上', {'font-size':11, fill:'#6b7280'}));
+    cap(host, '稳定性全在 merge 的那个等号上');
+  })();
+
+  // ============ 图 6：三种排序耗时 ============
+  (function(){
+    var host = document.getElementById('fig-speed2');
+    var svg = svgOf(host, 660, 200);
+    var data = [{n:'自底向上（O(1)）', v:157.5, c:BLUE}, {n:'递归归并（O(log n)）', v:91.1, c:BLUE}, {n:'数组辅助（O(n)）', v:44.9, c:OR}];
+    var x0 = 60, y0 = 160, maxV = 200;
+    svg.appendChild(mk('line', {x1:x0 - 10, y1:y0, x2:640, y2:y0, stroke:BD, 'stroke-width':1}));
+    var i, bw = 130;
+    for (i = 0; i < data.length; i++){
+      var h = data[i].v / maxV * 130;
+      var x = x0 + 24 + i * 190;
+      svg.appendChild(R(x, y0 - h, bw, h, data[i].c === OR ? ORB : BLUEB, data[i].c));
+      svg.appendChild(T(x + bw/2, y0 - h - 8, String(data[i].v) + ' ms', {'text-anchor':'middle', 'font-size':11, fill:'#374151'}));
+      svg.appendChild(T(x + bw/2, y0 + 20, data[i].n, {'text-anchor':'middle', 'font-size':11, fill:'#374151'}));
+    }
+    svg.appendChild(T(x0 - 10, 22, 'n = 100 万节点排序（线性刻度）', {'font-size':11, fill:'#6b7280'}));
+    cap(host, '空间要求越松反而越快：O(1) 空间是拿常数换的');
+  })();
+
+  // ================= 演示一：k 个一组反转 =================
+  (function(){
+    var host = document.getElementById('viz-kg');
+    if (!host) return;
+    var presets = [{n:10, k:3}, {n:10, k:2}, {n:10, k:4}, {n:9, k:3}, {n:8, k:5}];
+    var sel = document.createElement('select');
+    host.appendChild(sel);
+    for (var i = 0; i < presets.length; i++){ var o = document.createElement('option');
+      o.textContent = 'n = ' + presets[i].n + '，k = ' + presets[i].k; o.value = String(i); sel.appendChild(o); }
+    var note = document.createElement('p'); note.className = 'li-note'; host.appendChild(note);
+    var kv = document.createElement('div'); kv.className = 'li-kv'; host.appendChild(kv);
+    var box = document.createElement('div'); host.appendChild(box);
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls'; host.appendChild(ctl);
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; ctl.appendChild(bNext);
+    var bRun = document.createElement('button'); bRun.textContent = '直接跑完'; ctl.appendChild(bRun);
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; ctl.appendChild(bReset);
+
+    var st = {steps:[], step:0};
+    function build(){
+      var p = presets[parseInt(sel.value, 10)], n = p.n, k = p.k;
+      var a = []; for (var i = 0; i < n; i++) a.push(i + 1);
+      var steps = [];
+      steps.push({a:a.slice(), msg:'初始链表 1 → ' + n + '，k = ' + k, grp:null, asg:0});
+      var arr = a.slice(), asg = 0, pos = 0, first = true;
+      while (true){
+        if (pos + k > arr.length) { steps.push({a:arr.slice(), msg:'剩下 ' + (arr.length - pos) + ' 个不足 ' + k + ' 个，保持原样', grp:null, tail:pos, asg:asg}); break; }
+        var seg = []; for (var i = pos; i < pos + k; i++) seg.push(i);
+        steps.push({a:arr.slice(), msg:'定位这一组：第 ' + (pos+1) + ' 到第 ' + (pos+k) + ' 个', grp:seg, asg:asg});
+        // 逐节点翻转
+        for (var i = 0; i < k; i++){
+          asg++;
+          var tmp = arr.slice();
+          if (i < k - 1) steps.push({a:tmp, msg:'翻转中：第 ' + (pos+i+1) + ' 个节点的 next 指向前一个（第 ' + (pos+i) + ' 个）', grp:seg, cur:pos+i, asg:asg});
+        }
+        for (var i = 0; i < k; i++) arr[pos+i] = a[pos + k - 1 - i];
+        asg++;
+        steps.push({a:arr.slice(), msg:'这一组翻转完，老尾巴（' + a[pos] + '）接回下一组的开头', grp:seg, link:pos, asg:asg});
+        pos += k;
+        first = false;
+      }
+      steps.push({a:arr.slice(), msg:'完成：' + arr.join(',') + '，一共 ' + asg + ' 次赋值', grp:null, asg:asg, done:true});
+      st.steps = steps; st.step = 0;
+    }
+    function render(){
+      var s = st.steps[st.step], a = s.a, n = a.length;
+      var gap = 50, r = 16;
+      var W = Math.min(660, 60 + n * gap), H = 110;
+      var g = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="font-family:ui-monospace,Menlo,monospace">';
+      g += '<defs><marker id="ahk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa0a6"/></marker></defs>';
+      var x0 = 34, y = 52;
+      var i, x;
+      for (i = 0; i < n; i++){
+        x = x0 + i * gap;
+        var fill = '#ffffff', stroke = '#e6e8eb';
+        if (s.grp && s.grp.indexOf(i) >= 0){ fill = '#dbeafe'; stroke = '#2563eb'; }
+        if (s.cur != null && i === s.cur){ fill = '#ffedd5'; stroke = '#ea580c'; }
+        if (s.link != null && i === s.link){ fill = '#ffedd5'; stroke = '#ea580c'; }
+        g += '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.5"/>';
+        g += '<text x="' + x + '" y="' + (y + 4) + '" text-anchor="middle" font-size="12" fill="#111827">' + a[i] + '</text>';
+      }
+      for (i = 0; i < n - 1; i++){
+        g += '<line x1="' + (x0 + i * gap + r + 2) + '" y1="' + y + '" x2="' + (x0 + (i+1) * gap - r - 2) + '" y2="' + y + '" stroke="#9aa0a6" stroke-width="1.4" marker-end="url(#ahk)"/>';
+      }
+      if (s.tail != null){
+        g += '<text x="' + (x0 + s.tail * gap + gap/2) + '" y="' + (y + r + 22) + '" text-anchor="middle" font-size="10" fill="#9aa0a6">不动</text>';
+      }
+      g += '</svg>';
+      box.innerHTML = g;
+      note.innerHTML = '第 ' + (st.step + 1) + ' / ' + st.steps.length + ' 步：' + s.msg;
+      kv.innerHTML = '<span>赋值次数 = <b>' + s.asg + '</b></span><span>结果 = <b>' + a.join(',') + '</b></span>';
+    }
+    bNext.addEventListener('click', function(){ if (st.step < st.steps.length - 1){ st.step++; render(); } });
+    bRun.addEventListener('click', function(){ st.step = st.steps.length - 1; render(); });
+    bReset.addEventListener('click', function(){ build(); render(); });
+    sel.addEventListener('change', function(){ build(); render(); });
+    build(); render();
+  })();
+
+  // ================= 演示二：复制带随机指针 =================
+  (function(){
+    var host = document.getElementById('viz-copy');
+    if (!host) return;
+    var presets = [
+      {name:'3 个节点，random 交叉', v:['1','2','3'], r:[2,-1,0]},
+      {name:'4 个节点，random 自指', v:['1','2','3','4'], r:[0,3,1,-1]},
+      {name:'2 个节点，random 全空', v:['1','2'], r:[-1,-1]}
+    ];
+    var sel = document.createElement('select');
+    host.appendChild(sel);
+    for (var i = 0; i < presets.length; i++){ var o = document.createElement('option'); o.textContent = presets[i].name; o.value = String(i); sel.appendChild(o); }
+    var note = document.createElement('p'); note.className = 'li-note'; host.appendChild(note);
+    var kv = document.createElement('div'); kv.className = 'li-kv'; host.appendChild(kv);
+    var box = document.createElement('div'); host.appendChild(box);
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls'; host.appendChild(ctl);
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; ctl.appendChild(bNext);
+    var bRun = document.createElement('button'); bRun.textContent = '直接跑完'; ctl.appendChild(bRun);
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; ctl.appendChild(bReset);
+
+    var st = {steps:[], step:0};
+    function build(){
+      var p = presets[parseInt(sel.value, 10)], v = p.v, rp = p.r, n = v.length;
+      var steps = [];
+      steps.push({phase:'init', v:v, r:rp, msg:'原链表：' + v.join(' → ') + '，random 分别指向 ' + rp.map(function(x){ return x < 0 ? '空' : '第 ' + (x+1) + ' 个'; }).join('、')});
+      // 1) 穿插
+      for (var i = 0; i < n; i++){
+        steps.push({phase:'weave', v:v, r:rp, upto:i, msg:'穿插：在第 ' + (i+1) + ' 个老节点后面插入同值副本'});
+      }
+      steps.push({phase:'weaved', v:v, r:rp, msg:'穿插完成，现在是 1 → 1\' → 2 → 2\' → …'});
+      // 2) 设 random
+      for (var i = 0; i < n; i++){
+        steps.push({phase:'rand', v:v, r:rp, ri:i, msg:'设 random：老节点 ' + (i+1) + ' 的 random ' + (rp[i] < 0 ? '为空，副本也为空' : '指向老节点 ' + (rp[i]+1) + '，副本就指向它的下一个（' + v[rp[i]] + '\'）')});
+      }
+      steps.push({phase:'randed', v:v, r:rp, msg:'所有 random 设置完毕'});
+      // 3) 拆
+      for (var i = 0; i < n; i++){
+        steps.push({phase:'split', v:v, r:rp, si:i, msg:'拆分：把第 ' + (i+1) + ' 组的新老节点各自连回自己的链'});
+      }
+      steps.push({phase:'done', v:v, r:rp, msg:'拆完，上面是原链表（完好无损），下面是新链表', done:true});
+      st.steps = steps; st.step = 0;
+    }
+    function render(){
+      var s = st.steps[st.step], v = s.v, rp = s.r, n = v.length;
+      var gap = 68, r = 15;
+      var showCopy = s.phase !== 'init';
+      var splitMode = s.phase === 'split' || s.phase === 'done';
+      var W = Math.min(660, splitMode ? (46 + (n - 1) * gap * 1.6 + 2 * r + 30) : (70 + n * gap * 1.72)), H = 206;
+      var g = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="font-family:ui-monospace,Menlo,monospace">';
+      g += '<defs><marker id="ahp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa0a6"/></marker>'
+         + '<marker id="ahp2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c"/></marker></defs>';
+      var x0 = 72, y = 60, cw = gap;
+      var i, xo, xc;
+      for (i = 0; i < n; i++){
+        xo = x0 + i * gap * (splitMode ? 1.6 : 1.72);
+        var isOldHi = (s.phase === 'weave' && s.upto === i) || (s.phase === 'rand' && s.ri === i) || (s.phase === 'split' && s.si === i);
+        g += '<circle cx="' + xo + '" cy="' + y + '" r="' + r + '" fill="' + (isOldHi ? '#dbeafe' : '#ffffff') + '" stroke="' + (isOldHi ? '#2563eb' : '#e6e8eb') + '" stroke-width="1.5"/>';
+        g += '<text x="' + xo + '" y="' + (y + 4) + '" text-anchor="middle" font-size="12" fill="#111827">' + v[i] + '</text>';
+        if (showCopy){
+          xc = xo + (splitMode ? 0 : cw);
+          g += '<circle cx="' + xc + '" cy="' + (splitMode ? y + 70 : y) + '" r="' + r + '" fill="' + (isOldHi ? '#ffedd5' : '#fff7ed') + '" stroke="#ea580c" stroke-width="1.5"/>';
+          g += '<text x="' + xc + '" y="' + (splitMode ? y + 74 : y + 4) + '" text-anchor="middle" font-size="12" fill="#111827">' + v[i] + '</text>';
+        }
+      }
+      // 连线
+      for (i = 0; i < n; i++){
+        xo = x0 + i * gap * (splitMode ? 1.6 : 1.72);
+        if (!showCopy){ if (i < n - 1) g += '<line x1="' + (xo + r + 2) + '" y1="' + y + '" x2="' + (x0 + (i+1) * gap * 1.72 - r - 2) + '" y2="' + y + '" stroke="#9aa0a6" stroke-width="1.4" marker-end="url(#ahp)"/>'; }
+        else if (!splitMode){
+          xc = xo + cw;
+          g += '<line x1="' + (xo + r + 2) + '" y1="' + (y - 9) + '" x2="' + (xc - r - 2) + '" y2="' + (y - 9) + '" stroke="#9aa0a6" stroke-width="1.3" marker-end="url(#ahp)"/>';
+          if (i < n - 1) g += '<line x1="' + (xc + r + 2) + '" y1="' + (y + 9) + '" x2="' + (x0 + (i+1) * gap * 1.72 - r - 2) + '" y2="' + (y + 9) + '" stroke="#ea580c" stroke-width="1.3" marker-end="url(#ahp2)"/>';
+          // random
+          if (rp[i] >= 0 && (s.phase === 'rand' || s.phase === 'randed' || s.phase === 'weaved')){
+            var xt = x0 + rp[i] * gap * 1.72;
+            g += '<path d="M ' + (xo + r) + ' ' + (y + 12) + ' C ' + (xo + 24) + ' ' + (y + 52) + ', ' + (xt - 24) + ' ' + (y + 52) + ', ' + xt + ' ' + (y + r + 8) + '" fill="none" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="4 3"/>';
+            if (s.phase === 'rand' && s.ri === i) g += '<path d="M ' + (xc + r) + ' ' + (y + 8) + ' C ' + (xc + 20) + ' ' + (y + 40) + ', ' + (xt + cw - 20) + ' ' + (y + 40) + ', ' + (xt + cw) + ' ' + (y + r + 6) + '" fill="none" stroke="#ea580c" stroke-width="1.2" stroke-dasharray="4 3"/>';
+            else if (s.phase === 'randed') g += '<path d="M ' + (xc + r) + ' ' + (y + 8) + ' C ' + (xc + 20) + ' ' + (y + 36) + ', ' + (xt + cw - 20) + ' ' + (y + 36) + ', ' + (xt + cw) + ' ' + (y + r + 6) + '" fill="none" stroke="#ea580c" stroke-width="1.2" stroke-dasharray="4 3"/>';
+          }
+        } else {
+          if (i < n - 1) g += '<line x1="' + (xo + r + 2) + '" y1="' + y + '" x2="' + (x0 + (i+1) * gap * 1.6 - r - 2) + '" y2="' + y + '" stroke="#9aa0a6" stroke-width="1.4" marker-end="url(#ahp)"/>';
+          if (i < n - 1) g += '<line x1="' + (xo + r + 2) + '" y1="' + (y + 70) + '" x2="' + (x0 + (i+1) * gap * 1.6 - r - 2) + '" y2="' + (y + 70) + '" stroke="#ea580c" stroke-width="1.4" marker-end="url(#ahp2)"/>';
+          if (rp[i] >= 0){
+            var xt2 = x0 + rp[i] * gap * 1.6;
+            g += '<path d="M ' + (xo + r) + ' ' + (y + 12) + ' C ' + (xo + 24) + ' ' + (y + 44) + ', ' + (xt2 - 24) + ' ' + (y + 44) + ', ' + xt2 + ' ' + (y + r + 8) + '" fill="none" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="4 3"/>';
+            g += '<path d="M ' + (xo + r) + ' ' + (y + 82) + ' C ' + (xo + 24) + ' ' + (y + 112) + ', ' + (xt2 - 24) + ' ' + (y + 112) + ', ' + xt2 + ' ' + (y + 70 + r + 8) + '" fill="none" stroke="#ea580c" stroke-width="1.2" stroke-dasharray="4 3"/>';
+          }
+        }
+      }
+      if (splitMode){
+        var xc0 = x0;
+        g += '<text x="' + (x0 - 20) + '" y="' + (y + 4) + '" text-anchor="end" font-size="10" fill="#6b7280">老</text>';
+        g += '<text x="' + (xc0 - 20) + '" y="' + (y + 74) + '" text-anchor="end" font-size="10" fill="#ea580c">新</text>';
+      }
+      g += '</svg>';
+      box.innerHTML = g;
+      note.innerHTML = '第 ' + (st.step + 1) + ' / ' + st.steps.length + ' 步：' + s.msg;
+      kv.innerHTML = '<span>节点数 = <b>' + n + '</b></span><span>当前阶段 = <b>' +
+        ({init:'原链表', weave:'穿插副本', weaved:'穿插完成', rand:'设 random', randed:'random 完成', split:'拆分', done:'完成'}[s.phase]) + '</b></span>';
+    }
+    bNext.addEventListener('click', function(){ if (st.step < st.steps.length - 1){ st.step++; render(); } });
+    bRun.addEventListener('click', function(){ st.step = st.steps.length - 1; render(); });
+    bReset.addEventListener('click', function(){ build(); render(); });
+    sel.addEventListener('change', function(){ build(); render(); });
+    build(); render();
+  })();
+
+  // ================= 演示三：自底向上归并排序 =================
+  (function(){
+    var host = document.getElementById('viz-sort');
+    if (!host) return;
+    var presets = [
+      {name:'7,3,8,2,6,4,1,5', a:[7,3,8,2,6,4,1,5]},
+      {name:'5,5,2,2,9（含相等）', a:[5,5,2,2,9]},
+      {name:'1,2,3,4（已排好）', a:[1,2,3,4]},
+      {name:'8,7,6,5（逆序）', a:[8,7,6,5]},
+      {name:'随机（固定种子）', a:null}
+    ];
+    function mulberry32(seed){ return function(){ seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+    var sel = document.createElement('select');
+    host.appendChild(sel);
+    for (var i = 0; i < presets.length; i++){ var o = document.createElement('option'); o.textContent = presets[i].name; o.value = String(i); sel.appendChild(o); }
+    var note = document.createElement('p'); note.className = 'li-note'; host.appendChild(note);
+    var kv = document.createElement('div'); kv.className = 'li-kv'; host.appendChild(kv);
+    var box = document.createElement('div'); host.appendChild(box);
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls'; host.appendChild(ctl);
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; ctl.appendChild(bNext);
+    var bRun = document.createElement('button'); bRun.textContent = '直接跑完'; ctl.appendChild(bRun);
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; ctl.appendChild(bReset);
+
+    var st = {steps:[], step:0};
+    function build(){
+      var pi = parseInt(sel.value, 10);
+      var a = presets[pi].a;
+      if (!a){ var rnd = mulberry32(20261006); var n = 8; a = []; for (var i = 0; i < n; i++) a.push(1 + Math.floor(rnd() * 9)); }
+      var arr = a.slice(), n = arr.length;
+      var steps = [], cmp = 0;
+      steps.push({a:arr.slice(), msg:'初始：' + arr.join(',') + '，每个节点自成一段', step:1, cmp:0});
+      for (var step = 1; step < n; step <<= 1){
+        var out = [], i = 0, roundStart = true;
+        while (i < n){
+          var l = arr.slice(i, Math.min(i + step, n));
+          var r = arr.slice(i + step, Math.min(i + 2 * step, n));
+          if (r.length === 0){ out = out.concat(l); break; }
+          var merged = [], p = 0, q = 0;
+          while (p < l.length && q < r.length){
+            cmp++;
+            if (l[p] <= r[q]) merged.push(l[p++]); else merged.push(r[q++]);
+          }
+          while (p < l.length) merged.push(l[p++]);
+          while (q < r.length) merged.push(r[q++]);
+          var tmp = out.concat(merged).concat(arr.slice(i + 2 * step));
+          steps.push({a:tmp, grp:[i, Math.min(i + 2 * step - 1, n - 1)], msg:'step = ' + step + '：第 ' + (i+1) + ' 到第 ' + Math.min(i + 2 * step, n) + ' 个合并 → ' + merged.join(','), step:step, cmp:cmp});
+          out = out.concat(merged);
+          i += 2 * step;
+        }
+        arr = out.concat(arr.slice(i));
+        steps.push({a:arr.slice(), msg:'第 ' + Math.log2(step + step) + ' 轮结束（step = ' + step + '）：' + arr.join(','), step:step, cmp:cmp, round:true});
+      }
+      steps.push({a:arr.slice(), msg:'排好：' + arr.join(',') + '，一共 ' + cmp + ' 次比较', step:0, cmp:cmp, done:true});
+      st.steps = steps; st.step = 0;
+    }
+    function render(){
+      var s = st.steps[st.step], a = s.a, n = a.length;
+      var gap = 52, r = 16;
+      var W = Math.min(660, 50 + n * gap), H = 100;
+      var g = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="font-family:ui-monospace,Menlo,monospace">';
+      var x0 = 34, y = 50;
+      for (var i = 0; i < n; i++){
+        var x = x0 + i * gap;
+        var fill = '#ffffff', stroke = '#e6e8eb';
+        if (s.grp && i >= s.grp[0] && i <= s.grp[1]){ fill = '#dbeafe'; stroke = '#2563eb'; }
+        if (s.done){ fill = '#f0fdf4'; stroke = '#16a34a'; }
+        g += '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.5"/>';
+        g += '<text x="' + x + '" y="' + (y + 4) + '" text-anchor="middle" font-size="12" fill="#111827">' + a[i] + '</text>';
+        if (i) g += '<line x1="' + (x - gap + r + 2) + '" y1="' + y + '" x2="' + (x - r - 2) + '" y2="' + y + '" stroke="#9aa0a6" stroke-width="1.3"/>';
+      }
+      if (s.grp){
+        var gx1 = x0 + s.grp[0] * gap - 12, gx2 = x0 + s.grp[1] * gap + 12;
+        g += '<rect x="' + gx1 + '" y="' + (y - r - 8) + '" width="' + (gx2 - gx1) + '" height="' + (2 * r + 16) + '" fill="none" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="4 3" rx="6"/>';
+      }
+      g += '</svg>';
+      box.innerHTML = g;
+      note.innerHTML = '第 ' + (st.step + 1) + ' / ' + st.steps.length + ' 步：' + s.msg;
+      kv.innerHTML = '<span>step = <b>' + (s.step || '—') + '</b></span><span>比较次数 = <b>' + s.cmp + '</b></span><span>当前 = <b>' + a.join(',') + '</b></span>';
+    }
+    bNext.addEventListener('click', function(){ if (st.step < st.steps.length - 1){ st.step++; render(); } });
+    bRun.addEventListener('click', function(){ st.step = st.steps.length - 1; render(); });
+    bReset.addEventListener('click', function(){ build(); render(); });
+    sel.addEventListener('change', function(){ build(); render(); });
+    build(); render();
+  })();
+
+})();</script>
+</body>
+</html>

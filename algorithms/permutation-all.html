@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全排列：交换回溯与同层去重</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz { margin: 16px 0; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
+  .viz-title { margin: 0 0 8px; font-size: 14px; color: #374151; }
+  .viz-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .cb-sel { font-size: 13px; padding: 3px 8px; }
+  .cb-btn { font-size: 13px; padding: 4px 12px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>全排列：交换回溯与同层去重</h1>
+      <p class="intro">排列不回答「挑哪些」，回答「按什么顺序放」。n 个元素排进 n 个位置，叶子数从 2ⁿ 跳到 n!。做法也不是逐位取或不取，而是直接在数组上交换，换完再换回来。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>子序列和组合是选子集，全排列是排顺序。决策树的形状跟着变了：子序列每个位置两个分支，排列的第 i 层有 n − i + 1 个分支。第 0 层挑谁来占第 0 位，第 1 层从剩下的里挑谁来占第 1 位，一路排完。</p>
+      <p>量级差距先摆出来：n = 10 时，子序列 2^10 = 1024 个，排列 10! = 3628800 个，差了三千多倍。所以排列题的数据规模总是很小，n 超过 12 就得换思路。</p>
+
+      <h2 id="q1">一、没有重复项的全排列</h2>
+      <p>做法一句话：位置 i 从 i 到 n−1 里挑一个元素放到 i 位，然后递归排 i+1 位以后。挑的过程直接在原数组上交换完成。</p>
+      <figure class="fig" id="figPermTree"></figure>
+      <p>交换法的关键在换完要换回来。递归进入下一层前，把 nums[i] 和 nums[j] 交换；递归返回后，再把它们交换回去，数组恢复成进入前的样子。这一步漏了，上一层的选择会被下一层改掉，回溯树就串了味。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 没有重复项数字的全排列</span>
+    <span class="cm">// 测试链接 : https://leetcode.cn/problems/permutations/</span>
+
+    <span class="kw">void</span> <span class="fn">f</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> i, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; ans) {
+        <span class="kw">if</span> (i == (<span class="kw">int</span>)nums.size()) {
+            ans.push_back(nums);
+        } <span class="kw">else</span> {
+            <span class="kw">for</span> (<span class="kw">int</span> j = i; j &lt; (<span class="kw">int</span>)nums.size(); j++) {
+                swap(nums[i], nums[j]);
+                f(nums, i + 1, ans);
+                swap(nums[i], nums[j]);   <span class="cm">// 恢复现场，特别重要</span>
+            }
+        }
+    }
+
+    vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">permute</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums) {
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; ans;
+        f(nums, 0, ans);
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>为什么新开一个 path 数组不行？可以，但每层得拷贝。交换法连拷贝都省了：叶子时数组本身就是当前排列，直接收。</p>
+      <p>递归调用的次数比叶子多。实测 n = 8：叶子 40320 个（8!），递归调用 109601 次，等于 sum_{i=0..8} P(8, i)。第 i 层有 n! / (n−i)! 个节点，每一层都在往上叠。n = 3 时叶子 6 个、调用 16 次，树画在图 1 里。</p>
+      <p>复杂度 O(n! · n)：叶子 n! 个，每个叶子把数组拷进答案 O(n)。</p>
+
+      <h2 id="q2">二、有重复项的去重全排列</h2>
+      <p>数组可能有重复值，要输出不重复的排列。[1, 1, 2] 的答案 3 个：[1, 1, 2]、[1, 2, 1]、[2, 1, 1]。直接套上一节的交换法会得到 6 个，两个 1 被当成两个元素。</p>
+      <p>去重的做法叫同层去重：第 i 位的值只尝试一次。循环到 j 时，如果 nums[j] 的值已经在这一层放过，跳过。用集合 used 记「值有没有来过 i 位置」。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 有重复项数组的去重全排列</span>
+    <span class="cm">// 测试链接 : https://leetcode.cn/problems/permutations-ii/</span>
+
+    <span class="kw">void</span> <span class="fn">f</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> i, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; ans) {
+        <span class="kw">if</span> (i == (<span class="kw">int</span>)nums.size()) {
+            ans.push_back(nums);
+        } <span class="kw">else</span> {
+            unordered_set&lt;<span class="kw">int</span>&gt; used;
+            <span class="kw">for</span> (<span class="kw">int</span> j = i; j &lt; (<span class="kw">int</span>)nums.size(); j++) {
+                <span class="cm">// nums[j] 没有来过 i 位置，才去尝试</span>
+                <span class="kw">if</span> (used.find(nums[j]) == used.end()) {
+                    used.insert(nums[j]);
+                    swap(nums[i], nums[j]);
+                    f(nums, i + 1, ans);
+                    swap(nums[i], nums[j]);
+                }
+            }
+        }
+    }
+
+    vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">permuteUnique</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums) {
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; ans;
+        f(nums, 0, ans);
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>为什么同层去重就够？重复排列的唯一来源是同一个值在同一位置重复出现。第 0 位放第一个 1 和放第二个 1，得到的排列集合完全一样；把第二个 1 的整棵子树剪掉，一个不漏。不同层的重复是合法的：第 0 位放 1、第 1 位也放 1，这是排列的一部分，不是重复。</p>
+      <figure class="fig" id="figPermUniqTree"></figure>
+      <p>省了多少实测看得到：[1, 1, 1, 2, 2] 无剪枝要先生成 5! = 120 个再滤，同层去重直接输出 10 个（= 5! / 3! / 2!），递归调用 34 次。</p>
+      <p>复杂度 O(n! · n)，与无重复同阶，剪枝只去掉重复分支。</p>
+
+      <h2 id="viz1">演示一：全排列逐帧</h2>
+      <div class="viz" id="vizPerm">
+        <p class="viz-title">交换回溯：把元素换到第 i 位，递归，再换回来</p>
+        <div id="vizPermBody"></div>
+        <div class="viz-controls" id="vizPermCtl"></div>
+      </div>
+
+      <h2 id="viz2">演示二：去重排列逐帧</h2>
+      <div class="viz" id="vizPermUniq">
+        <p class="viz-title">同层去重：第 i 位的值只放一次，重复值的分支整棵剪掉</p>
+        <div id="vizPermUniqBody"></div>
+        <div class="viz-controls" id="vizPermUniqCtl"></div>
+      </div>
+
+      <h2 id="sum">三、总结</h2>
+      <p>全排列用交换回溯：换到位置、递归、换回，叶子 n! 个，调用 sum P(n, i) 次，复杂度 O(n! · n)。</p>
+      <p>去重发生在同层：第 i 位同值只放一次，集合 used 记下放过的值。它剪掉的是「同一个值在同一位置」的重复分支，不同层重复属于合法排列。</p>
+      <p>这三题（子序列、组合、排列）把带路径的递归和回溯的姿势都过了一遍。下一节换一种用法：递归不再枚举，而是当数据搬运工，用系统栈逆序栈、排序栈，最后是汉诺塔。</p>
+
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>有重复项数组的去重全排列</td><td><a href="https://leetcode.cn/problems/permutations-ii/" target="_blank">leetcode.cn/problems/permutations-ii</a></td></tr>
+        <tr><td>牛客</td><td>字符串的全部子序列</td><td><a href="https://www.nowcoder.com/practice/92e6247998294f2c933906fdedbc6e6a" target="_blank">www.nowcoder.com/practice/92e6247998294f2c933906fdedbc6e6a</a></td></tr>
+        <tr><td>LeetCode</td><td>给你一个整数数组 nums ，其中可能包含重复元素，请你返回该数组所有可能的组合</td><td><a href="https://leetcode.cn/problems/subsets-ii/" target="_blank">leetcode.cn/problems/subsets-ii</a></td></tr>
+        <tr><td>LeetCode</td><td>没有重复项数字的全排列</td><td><a href="https://leetcode.cn/problems/permutations/" target="_blank">leetcode.cn/problems/permutations</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解038【必备】常见经典递归过程解析</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5', gray: '#9aa0a6', text: '#1f2937', dim: '#6b7280', line: '#cbd5e1', bg: '#f6f7f9' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function box(x, y, w, h, o) { o = o || {}; return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx || 4) + '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.line) + '" stroke-width="' + (o.sw || 1.2) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>'; }
+  function txt(x, y, s, o) { o = o || {}; return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 13) + '" fill="' + (o.fill || C.text) + '" font-weight="' + (o.weight || 'normal') + '" text-anchor="' + (o.anchor || 'middle') + '" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">' + esc(s) + '</text>'; }
+  function line(x1, y1, x2, y2, o) { o = o || {}; return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.line) + '" stroke-width="' + (o.w || 1.2) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + ' stroke-linecap="round"/>'; }
+  function svg(g, w, h) { return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" width="100%" role="img">' + g + '</svg>'; }
+
+  // ============ 图 1：全排列回溯树（[1,2,3]） ============
+  (function () {
+    var W = 760, H = 330, g = '';
+    g += txt(380, 24, '交换回溯树：第 i 层把第 j 个元素换到第 i 位，返回时换回', { size: 15, weight: 600 });
+    // 根
+    g += box(330, 44, 100, 28, { fill: C.blue, stroke: C.blue }); g += txt(380, 62, 'i=0 [1,2,3]', { size: 12, fill: '#fff', weight: 600 });
+    // 层2：进入 f(1) 时的数组
+    var l2 = [
+      { x: 130, s: '[1,2,3]', lb: '换 1（j=0）' },
+      { x: 380, s: '[2,1,3]', lb: '换 2（j=1）' },
+      { x: 630, s: '[3,2,1]', lb: '换 3（j=2）' }
+    ];
+    // 叶子：进入 f(2) 即收答案
+    var leaves = [
+      { x: 70, s: '[1,2,3]' }, { x: 190, s: '[1,3,2]' },
+      { x: 310, s: '[2,1,3]' }, { x: 450, s: '[2,3,1]' },
+      { x: 570, s: '[3,2,1]' }, { x: 690, s: '[3,1,2]' }
+    ];
+    var i;
+    for (i = 0; i < 3; i++) g += line(380, 72, l2[i].x, 116);
+    var pairs = [[0, 1], [2, 3], [4, 5]];
+    for (i = 0; i < 3; i++) {
+      for (var j = 0; j < 2; j++) g += line(l2[i].x, 148, leaves[pairs[i][j]].x, 216);
+    }
+    for (i = 0; i < 3; i++) {
+      g += box(l2[i].x - 55, 104, 110, 28, { fill: C.blueBg, stroke: C.blue });
+      g += txt(l2[i].x, 122, l2[i].s, { size: 11, fill: C.blue, weight: 600 });
+      g += txt(l2[i].x, 96, l2[i].lb, { size: 11, fill: C.dim });
+    }
+    for (i = 0; i < 6; i++) {
+      g += box(leaves[i].x - 55, 204, 110, 28, { fill: C.orangeBg, stroke: C.orange });
+      g += txt(leaves[i].x, 222, leaves[i].s, { size: 11, fill: C.orange, weight: 600 });
+    }
+    g += txt(380, 262, '第 0 层 1 个节点、第 1 层 3 个、第 2 层 6 个（叶子 6 个 = 3!），调用总数 1 + 3 + 6 + 6 = 16', { size: 12, fill: C.dim });
+    g += txt(380, 296, '叶子 = 进入最后一层时的数组，直接收；返回时把 nums[i] 与 nums[j] 换回来，树才不走样', { size: 12, fill: C.dim });
+    document.getElementById('figPermTree').innerHTML = '<figcaption>交换后数组本身就是当前排列，叶子直接收；返回时换回。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 图 2：同层去重树（[1,1,2]） ============
+  (function () {
+    var W = 760, H = 340, g = '';
+    g += txt(380, 24, '同层去重：第 0 位放过值 1，第二个 1 的整棵子树剪掉', { size: 15, weight: 600 });
+    // 根
+    g += box(330, 44, 100, 28, { fill: C.blue, stroke: C.blue }); g += txt(380, 62, 'i=0  [1,1,2]', { size: 12, fill: '#fff', weight: 600 });
+    // 层2（放 1 / 放 2）
+    g += line(380, 72, 210, 128); g += line(380, 72, 550, 128);
+    g += box(140, 116, 140, 28, { fill: C.blueBg, stroke: C.blue }); g += txt(210, 134, '放 1（j=0）', { size: 12, fill: C.blue, weight: 600 });
+    g += box(480, 116, 140, 28, { fill: C.blueBg, stroke: C.blue }); g += txt(550, 134, '放 2（j=2）', { size: 12, fill: C.blue, weight: 600 });
+    // 虚线：j=1 的 1 被跳过
+    g += line(380, 72, 380, 160, { stroke: C.gray, dash: '4 3' });
+    g += txt(392, 100, 'j=1：值 1 已放过，跳过', { size: 11, fill: C.gray, anchor: 'start' });
+    // 层3
+    g += line(210, 144, 90, 200); g += line(210, 144, 250, 200);
+    g += line(550, 144, 430, 200);
+    g += box(20, 188, 140, 28, { fill: C.bg, stroke: C.line }); g += txt(90, 206, '放 1（j=1）', { size: 11, fill: C.text });
+    g += box(180, 188, 140, 28, { fill: C.bg, stroke: C.line }); g += txt(250, 206, '放 2（j=2）', { size: 11, fill: C.text });
+    g += box(360, 188, 140, 28, { fill: C.bg, stroke: C.line }); g += txt(430, 206, '放 1（j=1）', { size: 11, fill: C.text });
+    // 虚线：j=2 的 1 跳过
+    g += line(550, 144, 620, 200, { stroke: C.gray, dash: '4 3' });
+    g += txt(560, 176, 'j=2：值 1 已放过，跳过', { size: 11, fill: C.gray, anchor: 'start' });
+    // 叶子
+    g += line(90, 216, 90, 262); g += line(250, 216, 250, 262); g += line(430, 216, 430, 262);
+    var res = [['[1,1,2]'], ['[1,2,1]'], ['[2,1,1]']];
+    var rx = [90, 250, 430];
+    for (var i = 0; i < 3; i++) {
+      g += box(rx[i] - 55, 250, 110, 28, { fill: C.orangeBg, stroke: C.orange });
+      g += txt(rx[i], 268, res[i][0], { size: 11, fill: C.orange, weight: 600 });
+    }
+    // 右侧对照：无剪枝会多出的排列
+    g += box(600, 250, 140, 44, { fill: C.bg, stroke: '#c9ced4' });
+    g += txt(670, 270, '不剪枝会多出', { size: 11, fill: C.dim });
+    g += txt(670, 286, '[1,1,2] 和 [2,1,1] 各一遍', { size: 11, fill: C.dim });
+    g += txt(380, 318, '叶子 3 个 = 3! / 2!；同值在第一层只放一次，重复排列从根上消失', { size: 12, fill: C.dim });
+    document.getElementById('figPermUniqTree').innerHTML = '<figcaption>虚线分支是同层重复，直接剪；不同层重复（第 0 位 1、第 1 位 1）合法保留。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 演示一：全排列逐帧 ============
+  (function () {
+    var body = document.getElementById('vizPermBody');
+    var ctl = document.getElementById('vizPermCtl');
+    var PRESETS = [[1, 2, 3], [1, 2, 3, 4]];
+    var sel = document.createElement('select'); sel.className = 'cb-sel';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var op = document.createElement('option'); op.value = i; op.text = 'nums = [' + PRESETS[i].join(',') + ']'; sel.appendChild(op);
+    }
+    var bPrev = document.createElement('button'); bPrev.className = 'cb-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'cb-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'cb-btn'; bReset.textContent = '重置';
+    ctl.appendChild(sel); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+
+    function genSteps(nums) {
+      var steps = [], n = nums.length, a = nums.slice();
+      (function dfs(i, swapInfo) {
+        steps.push({ i: i, arr: a.slice(), swapInfo: swapInfo, leaf: i === n });
+        if (i === n) return;
+        var j, tmp;
+        for (j = i; j < n; j++) {
+          tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+          dfs(i + 1, { from: i, to: j });
+          tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+        }
+      })(0, null);
+      return steps;
+    }
+    var cur = 0, steps = genSteps(PRESETS[0]);
+
+    function render() {
+      var W = 740, H = 320, g = '';
+      var nums = PRESETS[parseInt(sel.value, 10)];
+      var n = nums.length, st = steps[cur];
+      g += txt(370, 22, 'nums = [' + nums.join(', ') + ']　第 ' + (cur + 1) + ' / ' + steps.length + ' 步', { size: 14, weight: 600 });
+      // 数组格
+      for (var i = 0; i < n; i++) {
+        var isSwap = st.swapInfo && (i === st.swapInfo.from || i === st.swapInfo.to);
+        var isI = i === st.i && !st.leaf;
+        g += box(180 + i * 66, 56, 52, 44, { fill: isSwap ? C.orangeBg : isI ? C.blueBg : C.bg, stroke: isSwap ? C.orange : isI ? C.blue : '#c9ced4', sw: isSwap ? 2 : 1.2 });
+        g += txt(206 + i * 66, 83, st.arr[i], { size: 16, fill: isSwap ? C.orange : isI ? C.blue : C.gray, weight: isSwap || isI ? 600 : 'normal' });
+      }
+      g += txt(206 + n * 66 + 40, 83, 'i=' + (st.leaf ? '到底' : st.i), { size: 12, fill: C.dim, anchor: 'start' });
+      // 决策文本
+      var note;
+      if (st.leaf) {
+        note = '到底了：把 [' + st.arr.join(', ') + '] 收进答案';
+      } else if (st.swapInfo) {
+        note = '进入第 ' + st.i + ' 层：交换 nums[' + st.swapInfo.from + '] 与 nums[' + st.swapInfo.to + ']（返回时会换回来）';
+      } else {
+        note = '从初始数组 [1,2,3] 出发，根节点还没做交换';
+      }
+      g += txt(370, 150, note, { size: 12, fill: st.leaf ? C.orange : C.text });
+      // 已收集
+      var got = [];
+      for (var k = 0; k <= cur; k++) if (steps[k].leaf) got.push('[' + steps[k].arr.join(', ') + ']');
+      g += txt(370, 190, '已收集 ' + got.length + ' 个：' + (got.length ? got.join('　') : '还没有'), { size: 12 });
+      var total = 1; for (var f = 1; f <= n; f++) total *= f;
+      g += txt(370, 230, '共 ' + total + ' 个排列（' + n + '!），递归调用 ' + steps.length + ' 次', { size: 12, fill: C.blue });
+      body.innerHTML = svg(g, W, H);
+    }
+    sel.addEventListener('change', function () { steps = genSteps(PRESETS[parseInt(sel.value, 10)]); cur = 0; render(); });
+    bPrev.addEventListener('click', function () { if (cur > 0) cur--; render(); });
+    bNext.addEventListener('click', function () { if (cur < steps.length - 1) cur++; render(); });
+    bReset.addEventListener('click', function () { cur = 0; render(); });
+    render();
+  })();
+
+  // ============ 演示二：去重排列逐帧 ============
+  (function () {
+    var body = document.getElementById('vizPermUniqBody');
+    var ctl = document.getElementById('vizPermUniqCtl');
+    var PRESETS = [[1, 1, 2], [1, 1, 1, 2], [1, 2, 3]];
+    var sel = document.createElement('select'); sel.className = 'cb-sel';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var op = document.createElement('option'); op.value = i; op.text = 'nums = [' + PRESETS[i].join(',') + ']'; sel.appendChild(op);
+    }
+    var bPrev = document.createElement('button'); bPrev.className = 'cb-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'cb-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'cb-btn'; bReset.textContent = '重置';
+    ctl.appendChild(sel); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+
+    function genSteps(nums) {
+      var steps = [], n = nums.length, a = nums.slice();
+      (function dfs(i, used) {
+        steps.push({ i: i, arr: a.slice(), used: used || [], leaf: i === n });
+        if (i === n) return;
+        var seen = {}, j, tmp;
+        for (j = i; j < n; j++) {
+          if (seen[a[j]] !== undefined) continue;
+          seen[a[j]] = true;
+          tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+          dfs(i + 1, []);
+          tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+        }
+      })(0, []);
+      return steps;
+    }
+    var cur = 0, steps = genSteps(PRESETS[0]);
+
+    function skippedVals(arr, i) {
+      var seen = {}, out = [], j;
+      for (j = i; j < arr.length; j++) {
+        if (seen[arr[j]] !== undefined) { if (out.indexOf(arr[j]) < 0) out.push(arr[j]); }
+        seen[arr[j]] = true;
+      }
+      return out;
+    }
+
+    function render() {
+      var W = 740, H = 320, g = '';
+      var nums = PRESETS[parseInt(sel.value, 10)];
+      var n = nums.length, st = steps[cur];
+      g += txt(370, 22, 'nums = [' + nums.join(', ') + ']　第 ' + (cur + 1) + ' / ' + steps.length + ' 步', { size: 14, weight: 600 });
+      for (var i = 0; i < n; i++) {
+        var isI = i === st.i && !st.leaf;
+        g += box(180 + i * 66, 56, 52, 44, { fill: isI ? C.blueBg : C.bg, stroke: isI ? C.blue : '#c9ced4', sw: isI ? 2 : 1.2 });
+        g += txt(206 + i * 66, 83, st.arr[i], { size: 16, fill: isI ? C.blue : C.gray, weight: isI ? 600 : 'normal' });
+      }
+      g += txt(206 + n * 66 + 40, 83, 'i=' + (st.leaf ? '到底' : st.i), { size: 12, fill: C.dim, anchor: 'start' });
+      var note;
+      if (st.leaf) {
+        note = '到底了：把 [' + st.arr.join(', ') + '] 收进答案';
+      } else {
+        var sv2 = skippedVals(st.arr, st.i);
+        var seenList = [];
+        var seen2 = {}, j;
+        for (j = st.i; j < n; j++) { if (seen2[st.arr[j]] === undefined) { seen2[st.arr[j]] = true; seenList.push(st.arr[j]); } }
+        note = '第 ' + st.i + ' 位尝试值：' + seenList.join('、') + (sv2.length ? '（跳过重复值：' + sv2.join('、') + '）' : '，无重复');
+      }
+      g += txt(370, 150, note, { size: 12, fill: st.leaf ? C.orange : C.text });
+      var got = [];
+      for (var k = 0; k <= cur; k++) if (steps[k].leaf) got.push('[' + steps[k].arr.join(', ') + ']');
+      g += txt(370, 190, '已收集 ' + got.length + ' 个：' + (got.length ? got.join('　') : '还没有'), { size: 12 });
+      // 期望总数 n!/mult
+      var cnt = {};
+      for (var f2 = 0; f2 < n; f2++) cnt[nums[f2]] = (cnt[nums[f2]] || 0) + 1;
+      var den = 1; for (var v in cnt) { var kk; for (kk = 2; kk <= cnt[v]; kk++) den *= kk; }
+      var factN = 1, f3; for (f3 = 2; f3 <= n; f3++) factN *= f3;
+      g += txt(370, 230, '去重后 ' + factN / den + ' 个，无剪枝要生成 ' + factN + ' 个再滤', { size: 12, fill: C.blue });
+      body.innerHTML = svg(g, W, H);
+    }
+    sel.addEventListener('change', function () { steps = genSteps(PRESETS[parseInt(sel.value, 10)]); cur = 0; render(); });
+    bPrev.addEventListener('click', function () { if (cur > 0) cur--; render(); });
+    bNext.addEventListener('click', function () { if (cur < steps.length - 1) cur++; render(); });
+    bReset.addEventListener('click', function () { cur = 0; render(); });
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

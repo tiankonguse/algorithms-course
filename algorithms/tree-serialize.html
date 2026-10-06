@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>二叉树的序列化与重建 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.sr-sel,.sr-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.sr-sel:focus{outline:none;border-color:var(--accent);}
+.sr-btn{cursor:pointer;}
+.sr-btn:hover{border-color:var(--accent);color:var(--accent);}
+.sr-btn:disabled{opacity:.4;cursor:default;}
+.sr-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.sr-ctl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>二叉树的序列化与重建</h1>
+      <p class="intro">把一棵树存成字符串，再从字符串把树原样读回来。LeetCode 297 的序列化反序列化，加上用先序和中序两段序列重建整棵树。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>序列化的场景很具体：树要跨进程传、要存盘、要进缓存，指针没法带走，得先变成一串字符。反序列化就是把这串字符还原成一棵一模一样的树。</p>
+      <p>难点不在「把节点值拼成串」，在「空位怎么记」。先序、后序、按层三种顺序都行，唯独中序不行，这一节会专门解释为什么。</p>
+      <p>节点定义沿用前面的课，这次带构造器，方便反序列化时直接 <code class="inline">new TreeNode(v)</code>。</p>
+
+        <pre class="code"><span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode* left;
+        TreeNode* right;
+        TreeNode(<span class="kw">int</span> v) : val(v), left(<span class="kw">nullptr</span>), right(<span class="kw">nullptr</span>) {}
+    };</pre>
+
+      <h2 id="q1">一、先序序列化与反序列化（LeetCode 297）</h2>
+      <p>先序序列化：根 → 左子树 → 右子树，空节点写 <code class="inline">#</code>，每个值后面跟一个逗号。一棵 <code class="inline">1</code> 左 <code class="inline">2</code>、右 <code class="inline">3</code> 的树，序列是 <code class="inline">1,2,#,#,3,#,#,</code>。</p>
+
+        <pre class="code"><span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode* left;
+        TreeNode* right;
+        TreeNode(<span class="kw">int</span> v) : val(v), left(<span class="kw">nullptr</span>), right(<span class="kw">nullptr</span>) {}
+    };
+
+    <span class="cm">// 二叉树先序序列化和反序列化（LeetCode 297）</span>
+    <span class="cm">// 空节点记 "#"，节点之间用 "," 隔开</span>
+    <span class="cm">// 先序 / 后序 / 按层都能序列化；中序不行：</span>
+    <span class="cm">// 1 只有右孩子 2 和 2 只有左孩子 1 这两棵树，</span>
+    <span class="cm">// 补上空位后的中序序列都是 {null, 1, null, 2, null}，无法区分</span>
+
+    <span class="kw">string</span> Serialize(TreeNode* root) {
+        <span class="kw">string</span> builder;
+        F(root, builder);
+        <span class="kw">return</span> builder;
+    }
+
+    <span class="kw">void</span> <span class="fn">F</span>(TreeNode* root, <span class="kw">string</span>&amp; builder) {
+        <span class="kw">if</span> (root == <span class="kw">nullptr</span>) {
+            builder += "#,";
+        } <span class="kw">else</span> {
+            builder += to_string(root-&gt;val) + ",";
+            F(root-&gt;left, builder);
+            F(root-&gt;right, builder);
+        }
+    }
+
+    <span class="cm">// 反序列化：游标 cnt 从数组里依次取，取到 "#" 返回空，否则建节点后递归左右</span>
+    <span class="kw">int</span> cnt;
+
+    TreeNode* Deserialize(<span class="kw">string</span> data) {
+        vector&lt;<span class="kw">string</span>&gt; vals;
+        <span class="kw">string</span> cur;
+        <span class="kw">for</span> (<span class="kw">char</span> c : data) {
+            <span class="kw">if</span> (c == ',') {
+                vals.push_back(cur);
+                cur.clear();
+            } <span class="kw">else</span> {
+                cur += c;
+            }
+        }
+        cnt = 0;
+        <span class="kw">return</span> G(vals);
+    }
+
+    TreeNode* G(vector&lt;<span class="kw">string</span>&gt;&amp; vals) {
+        <span class="kw">string</span> cur = vals[cnt++];
+        <span class="kw">if</span> (cur == "#") {
+            <span class="kw">return</span> <span class="kw">nullptr</span>;
+        }
+        TreeNode* head = <span class="kw">new</span> TreeNode(stoi(cur));
+        head-&gt;left = G(vals);
+        head-&gt;right = G(vals);
+        <span class="kw">return</span> head;
+    }</pre>
+
+      <p>为什么 <code class="inline">#</code> 必须写全？因为先序本身分不清「左孩子为空」和「左孩子已经遍历完」。写全空位，反序列化才知道往哪一层、哪个位置放节点。</p>
+      <p>反序列化用一个游标 <code class="inline">cnt</code> 从头扫：取到 <code class="inline">#</code> 返回空，否则建节点、递归建左子树、再递归建右子树。先序里「根在左子树之前」这个顺序保证游标扫到的顺序正好是建树的顺序。</p>
+      <p>时间 O(n)、空间 O(n)，递归深度等于树高。</p>
+
+      <h2 id="q2">二、中序为什么不行</h2>
+      <p>先序、后序、按层都能序列化，中序不能。原因是两棵不同的树可能得到同一个中序序列，补上空位也一样。</p>
+      <p>看这两棵树：<code class="inline">1</code> 只有右孩子 <code class="inline">2</code>，和 <code class="inline">2</code> 只有左孩子 <code class="inline">1</code>。补足空位后，两者的中序序列都是 <code class="inline">#,1,#,2,#</code>。</p>
+      <p>中序把根夹在中间，光看序列不知道哪个是根、左右子树各多长。先序和后序的「根在最前/最后」把这个信息带出来了。</p>
+
+      <figure class="fig" id="figInorder"></figure>
+
+      <h2 id="q3">三、按层序列化与反序列化（LeetCode 297）</h2>
+      <p>按层序列化就是层序 BFS：根先写，然后一层层从左往右写，空节点写 <code class="inline">#</code>。上面那棵树写成 <code class="inline">1,2,3,#,#,#,#,</code>。</p>
+
+        <pre class="code"><span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode* left;
+        TreeNode* right;
+        TreeNode(<span class="kw">int</span> v) : val(v), left(<span class="kw">nullptr</span>), right(<span class="kw">nullptr</span>) {}
+    };
+
+    <span class="cm">// 二叉树按层序列化和反序列化（LeetCode 297）</span>
+    <span class="cm">// 空节点记 "#"，节点之间用 "," 隔开</span>
+    <span class="cm">// 序列化时 BFS 一层层走，孩子为空的直接写 "#"</span>
+
+    <span class="kw">string</span> Serialize(TreeNode* root) {
+        <span class="kw">string</span> builder;
+        <span class="kw">if</span> (root != <span class="kw">nullptr</span>) {
+            builder += to_string(root-&gt;val) + ",";
+            vector&lt;TreeNode*&gt; q;
+            q.push_back(root);
+            <span class="kw">for</span> (<span class="kw">int</span> l = 0, r = 1; l &lt; r;) {
+                TreeNode* cur = q[l++];
+                <span class="kw">if</span> (cur-&gt;left != <span class="kw">nullptr</span>) {
+                    builder += to_string(cur-&gt;left-&gt;val) + ",";
+                    q.push_back(cur-&gt;left);
+                    r++;
+                } <span class="kw">else</span> {
+                    builder += "#,";
+                }
+                <span class="kw">if</span> (cur-&gt;right != <span class="kw">nullptr</span>) {
+                    builder += to_string(cur-&gt;right-&gt;val) + ",";
+                    q.push_back(cur-&gt;right);
+                    r++;
+                } <span class="kw">else</span> {
+                    builder += "#,";
+                }
+            }
+        }
+        <span class="kw">return</span> builder;
+    }
+
+    <span class="cm">// 反序列化：也是 BFS。</span>
+    <span class="cm">// 每个出队节点从数组里取两个孩子，孩子非空就入队继续取它的孩子</span>
+    TreeNode* Deserialize(<span class="kw">string</span> data) {
+        <span class="kw">if</span> (data.empty()) {
+            <span class="kw">return</span> <span class="kw">nullptr</span>;
+        }
+        vector&lt;<span class="kw">string</span>&gt; nodes;
+        <span class="kw">string</span> cur;
+        <span class="kw">for</span> (<span class="kw">char</span> c : data) {
+            <span class="kw">if</span> (c == ',') {
+                nodes.push_back(cur);
+                cur.clear();
+            } <span class="kw">else</span> {
+                cur += c;
+            }
+        }
+        <span class="kw">int</span> index = 0;
+        TreeNode* root = Generate(nodes[index++]);
+        vector&lt;TreeNode*&gt; q;
+        q.push_back(root);
+        <span class="kw">for</span> (<span class="kw">int</span> l = 0, r = 1; l &lt; r;) {
+            TreeNode* node = q[l++];
+            node-&gt;left = Generate(nodes[index++]);
+            node-&gt;right = Generate(nodes[index++]);
+            <span class="kw">if</span> (node-&gt;left != <span class="kw">nullptr</span>) {
+                q.push_back(node-&gt;left);
+                r++;
+            }
+            <span class="kw">if</span> (node-&gt;right != <span class="kw">nullptr</span>) {
+                q.push_back(node-&gt;right);
+                r++;
+            }
+        }
+        <span class="kw">return</span> root;
+    }
+
+    TreeNode* Generate(<span class="kw">string</span>&amp; val) {
+        <span class="kw">return</span> val == "#" ? <span class="kw">nullptr</span> : <span class="kw">new</span> TreeNode(stoi(val));
+    }</pre>
+
+      <p>反序列化也按层来：队列里装「待补孩子的节点」，每出一个节点，从数组里取两个孩子补上；补上的孩子非空就入队，继续给它补孩子。层序的「父亲先于儿子出现」保证了这个顺序成立。</p>
+      <p>按层序列化对斜树不友好：一棵 10000 层的右偏链，序列长度是 2 万个 token，先序也一样。两种写法没有绝对优劣，看树的形状。</p>
+
+      <figure class="fig" id="figLevelSer"></figure>
+
+      <h2 id="q4">四、用先序和中序重建二叉树（LeetCode 105）</h2>
+      <p>这一题给两段序列：先序 <code class="inline">preorder</code> 和中序 <code class="inline">inorder</code>，要重建原树。先序的第一个元素一定是根；中序里，根把序列切成左子树区间和右子树区间。</p>
+      <p>有了根在中序里的位置 <code class="inline">k</code>，两棵子树的范围就全定了：中序左子树是 <code class="inline">l2..k-1</code>，长度 <code class="inline">k-l2</code>；先序里根后面 <code class="inline">k-l2</code> 个就是左子树，剩下的是右子树。递归下去即可。</p>
+
+        <pre class="code"><span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode* left;
+        TreeNode* right;
+        TreeNode(<span class="kw">int</span> v) : val(v), left(<span class="kw">nullptr</span>), right(<span class="kw">nullptr</span>) {}
+    };
+
+    <span class="cm">// 利用先序与中序遍历序列构造二叉树（LeetCode 105）</span>
+    <span class="cm">// 先序的第一个元素是根；中序里根把序列切成左右两半</span>
+    <span class="cm">// 先用哈希表记下每个值在中序里的下标，递归时 O(1) 找根</span>
+    TreeNode* BuildTree(vector&lt;<span class="kw">int</span>&gt;&amp; pre, vector&lt;<span class="kw">int</span>&gt;&amp; in) {
+        unordered_map&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt; map;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; (<span class="kw">int</span>)in.size(); i++) {
+            map[in[i]] = i;
+        }
+        <span class="kw">return</span> F(pre, 0, pre.size() - 1, in, 0, in.size() - 1, map);
+    }
+
+    <span class="cm">// l1..r1 是先序区间，l2..r2 是中序区间</span>
+    TreeNode* F(vector&lt;<span class="kw">int</span>&gt;&amp; pre, <span class="kw">int</span> l1, <span class="kw">int</span> r1, vector&lt;<span class="kw">int</span>&gt;&amp; in, <span class="kw">int</span> l2, <span class="kw">int</span> r2,
+                unordered_map&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&amp; map) {
+        <span class="kw">if</span> (l1 &gt; r1) {
+            <span class="kw">return</span> <span class="kw">nullptr</span>;
+        }
+        TreeNode* head = <span class="kw">new</span> TreeNode(pre[l1]);
+        <span class="kw">if</span> (l1 == r1) {
+            <span class="kw">return</span> head;
+        }
+        <span class="kw">int</span> k = map[pre[l1]];   <span class="cm">// 根在中序里的位置</span>
+        <span class="cm">// 中序左树区间是 l2..k-1，长度 k-l2，对应先序的 l1+1..l1+k-l2</span>
+        <span class="cm">// 中序右树区间是 k+1..r2，对应先序的 l1+k-l2+1..r1</span>
+        head-&gt;left = F(pre, l1 + 1, l1 + k - l2, in, l2, k - 1, map);
+        head-&gt;right = F(pre, l1 + k - l2 + 1, r1, in, k + 1, r2, map);
+        <span class="kw">return</span> head;
+    }</pre>
+
+      <p>先序里找根是 O(1)（第一个元素），麻烦的是中序里找根的位置。每次都线性扫一遍，总代价 O(n²)。用一张哈希表预先把「值 → 中序下标」存下来，递归里查表 O(1)，整题 O(n)。</p>
+      <p>下标计算是最容易写错的地方：左子树先序区间 <code class="inline">l1+1 .. l1+k-l2</code>，右子树 <code class="inline">l1+k-l2+1 .. r1</code>。区间长度必须和对应中序区间一致，可以顺手数一遍再写。</p>
+
+      <figure class="fig" id="figBuild"></figure>
+
+      <h2 id="comp">五、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>时间</th><th>额外空间</th><th>说明</th></tr>
+        <tr><td>先序序列化/反序列化</td><td>O(n)</td><td>O(h)</td><td>递归栈深度等于树高</td></tr>
+        <tr><td>按层序列化/反序列化</td><td>O(n)</td><td>O(n)</td><td>队列最多装一层</td></tr>
+        <tr><td>先序 + 中序重建</td><td>O(n)</td><td>O(n)</td><td>哈希表存中序下标，递归栈 O(h)</td></tr>
+      </table>
+      <p>三个题的规模都是「每个节点处理常数次」，所以时间 O(n)。重建题如果不加哈希表直接在中序里扫根，最坏退化到 O(n²)。</p>
+
+      <h2 id="viz1">演示一：序列化操作台</h2>
+      <div class="viz" id="vizSer">
+        <p class="viz-title">先序 / 按层序列化逐帧：这一笔写进字符串的是什么</p>
+        <div id="vizSerBody"></div>
+        <div class="viz-controls" id="vizSerCtl"></div>
+      </div>
+
+      <h2 id="viz2">演示二：重建操作台</h2>
+      <div class="viz" id="vizBuild">
+        <p class="viz-title">先序 + 中序重建：每步确定一个根，把区间切成左右两半</p>
+        <div id="vizBuildBody"></div>
+        <div class="viz-controls" id="vizBuildCtl"></div>
+      </div>
+
+      <h2 id="sum">六、总结</h2>
+      <p>序列化三题的内核是同一个：先序、后序、按层都能序列化，因为它们把「根在哪」这个信息带在序列结构里；中序把根夹在中间，信息丢了。</p>
+      <p>反序列化分别是「游标递归」和「队列补孩子」两种姿势，都靠「父亲先于孩子出现」这个顺序保证。</p>
+      <p>重建题记一句：先序定根、中序切区间、哈希表把找根压到 O(1)。下标区间写的时候数一遍长度。</p>
+      <p>下一节讲完全二叉树：怎么验证一棵树是完全的，以及如何在低于 O(n) 的时间里数出完全二叉树的节点数。</p>
+
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>二叉树先序序列化和反序列化</td><td><a href="https://leetcode.cn/problems/serialize-and-deserialize-binary-tree/" target="_blank">leetcode.cn/problems/serialize-and-deserialize-binary-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>二叉树的最大特殊宽度</td><td><a href="https://leetcode.cn/problems/maximum-width-of-binary-tree/" target="_blank">leetcode.cn/problems/maximum-width-of-binary-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>求二叉树的最大、最小深度</td><td><a href="https://leetcode.cn/problems/maximum-depth-of-binary-tree/" target="_blank">leetcode.cn/problems/maximum-depth-of-binary-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>求二叉树的最大、最小深度</td><td><a href="https://leetcode.cn/problems/minimum-depth-of-binary-tree/" target="_blank">leetcode.cn/problems/minimum-depth-of-binary-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>二叉树的层序遍历</td><td><a href="https://leetcode.cn/problems/binary-tree-level-order-traversal/" target="_blank">leetcode.cn/problems/binary-tree-level-order-traversal</a></td></tr>
+        <tr><td>LeetCode</td><td>验证完全二叉树</td><td><a href="https://leetcode.cn/problems/check-completeness-of-a-binary-tree/" target="_blank">leetcode.cn/problems/check-completeness-of-a-binary-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>求完全二叉树的节点个数</td><td><a href="https://leetcode.cn/problems/count-complete-tree-nodes/" target="_blank">leetcode.cn/problems/count-complete-tree-nodes</a></td></tr>
+        <tr><td>LeetCode</td><td>利用先序与中序遍历序列构造二叉树</td><td><a href="https://leetcode.cn/problems/construct-binary-tree-from-preorder-and-inorder-traversal/" target="_blank">leetcode.cn/problems/construct-binary-tree-from-preorder-and-inorder-traversal</a></td></tr>
+        <tr><td>LeetCode</td><td>二叉树的锯齿形层序遍历</td><td><a href="https://leetcode.cn/problems/binary-tree-zigzag-level-order-traversal/" target="_blank">leetcode.cn/problems/binary-tree-zigzag-level-order-traversal</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解036【必备】二叉树高频题目-上-不含树型dp</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5', gray: '#9aa0a6', text: '#1f2937', dim: '#6b7280', line: '#cbd5e1', bg: '#f6f7f9' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function box(x, y, w, h, o) { o = o || {}; return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx || 4) + '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.line) + '" stroke-width="1.2"/>'; }
+  function txt(x, y, s, o) { o = o || {}; return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 13) + '" fill="' + (o.fill || C.text) + '" font-weight="' + (o.weight || 'normal') + '" text-anchor="' + (o.anchor || 'middle') + '" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">' + esc(s) + '</text>'; }
+  function line(x1, y1, x2, y2, o) { o = o || {}; return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.line) + '" stroke-width="' + (o.w || 1.2) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + ' stroke-linecap="round"/>'; }
+  function svg(g, w, h) { return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" width="100%" role="img">' + g + '</svg>'; }
+
+  // ============ 图 1：中序为什么不行 ============
+  (function () {
+    var W = 700, H = 290, g = '';
+    g += txt(190, 24, '树 A：1 只有右孩子 2', { size: 13, weight: 600 });
+    g += txt(510, 24, '树 B：2 只有左孩子 1', { size: 13, weight: 600 });
+    // A: 1 -> 2（右）
+    g += line(190, 62, 190, 116);
+    g += box(175, 30, 30, 30, { fill: C.blueBg, stroke: C.blue }); g += txt(190, 50, '1', { fill: C.blue, weight: 600 });
+    g += box(175, 122, 30, 30, { fill: C.blueBg, stroke: C.blue }); g += txt(190, 142, '2', { fill: C.blue, weight: 600 });
+    // B: 2 -> 1（左）
+    g += line(510, 62, 510, 116);
+    g += box(495, 30, 30, 30, { fill: C.orangeBg, stroke: C.orange }); g += txt(510, 50, '2', { fill: C.orange, weight: 600 });
+    g += box(495, 122, 30, 30, { fill: C.orangeBg, stroke: C.orange }); g += txt(510, 142, '1', { fill: C.orange, weight: 600 });
+    // 中序
+    g += box(60, 200, 116, 34, { fill: C.bg, stroke: C.line }); g += txt(118, 223, '#', { size: 12, fill: C.dim });
+    g += box(184, 200, 40, 34, { fill: C.bg, stroke: C.line }); g += txt(204, 223, '1', { size: 12, fill: C.text });
+    g += box(232, 200, 40, 34, { fill: C.bg, stroke: C.line }); g += txt(252, 223, '#', { size: 12, fill: C.dim });
+    g += box(280, 200, 40, 34, { fill: C.bg, stroke: C.line }); g += txt(300, 223, '2', { size: 12, fill: C.text });
+    g += box(328, 200, 40, 34, { fill: C.bg, stroke: C.line }); g += txt(348, 223, '#', { size: 12, fill: C.dim });
+    g += txt(350, 262, '两棵树补足空位后的中序序列都是 {#, 1, #, 2, #}，无法区分', { size: 12, fill: C.dim });
+    document.getElementById('figInorder').innerHTML = '<figcaption>中序序列化失效：不同的树得到同一段中序，补了空位也一样。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 图 2：按层序列化 ============
+  (function () {
+    var W = 700, H = 300, g = '';
+    g += txt(350, 24, '按层序列化：1,2,3,#,#,#,#,', { size: 14, weight: 600 });
+    var nodes = { '1': [350, 64], '2': [210, 134], '3': [490, 134], '#1': [140, 204], '#2': [280, 204], '#3': [420, 204], '#4': [560, 204] };
+    var edges = [['1', '2'], ['1', '3'], ['2', '#1'], ['2', '#2'], ['3', '#3'], ['3', '#4']];
+    for (var i = 0; i < edges.length; i++) {
+      var a = nodes[edges[i][0]], b = nodes[edges[i][1]];
+      g += line(a[0], a[1] + 16, b[0], b[1] - 14);
+    }
+    for (var k in nodes) {
+      var p = nodes[k];
+      var isNull = k.charAt(0) === '#';
+      g += box(p[0] - 14, p[1] - 14, 28, 28, { fill: isNull ? C.bg : C.blueBg, stroke: isNull ? C.line : C.blue });
+      g += txt(p[0], p[1] + 5, isNull ? '#' : k, { size: 12, fill: isNull ? C.dim : C.blue, weight: isNull ? 'normal' : 600 });
+    }
+    g += txt(350, 258, '队列按层扫，空孩子写 # 但不再入队', { size: 12, fill: C.dim });
+    g += txt(350, 282, '反序列化：队列里装「待补孩子的节点」，每出一个补两个孩子', { size: 12, fill: C.dim });
+    document.getElementById('figLevelSer').innerHTML = '<figcaption>按层序列化：空位写 #，非空孩子才入队继续写。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 图 3：重建区间 ============
+  (function () {
+    var W = 700, H = 320, g = '';
+    g += txt(350, 24, '先序定根，中序切区间', { size: 14, weight: 600 });
+    // pre: 1,2,4,5,3  in: 4,2,5,1,3
+    g += txt(100, 60, '先序', { anchor: 'start', size: 12, fill: C.dim });
+    var pre = [1, 2, 4, 5, 3];
+    var preColors = [C.blue, '#fff', '#fff', '#fff', '#fff'];
+    var px = 100;
+    for (var i = 0; i < pre.length; i++) {
+      g += box(px, 72, 36, 30, { fill: preColors[i], stroke: preColors[i] === C.blue ? C.blue : C.line });
+      g += txt(px + 18, 91, pre[i], { size: 12, fill: preColors[i] === C.blue ? C.blue : C.text, weight: preColors[i] === C.blue ? 600 : 'normal' });
+      px += 44;
+    }
+    g += txt(100, 140, '中序', { anchor: 'start', size: 12, fill: C.dim });
+    var ino = [4, 2, 5, 1, 3];
+    var inColors = ['#fff', '#fff', '#fff', C.blue, '#fff'];
+    px = 100;
+    for (var j = 0; j < ino.length; j++) {
+      g += box(px, 152, 36, 30, { fill: inColors[j], stroke: inColors[j] === C.blue ? C.blue : C.line });
+      g += txt(px + 18, 171, ino[j], { size: 12, fill: inColors[j] === C.blue ? C.blue : C.text, weight: inColors[j] === C.blue ? 600 : 'normal' });
+      px += 44;
+    }
+    g += txt(350, 226, '根 = 先序第 1 个 = 1，在中序里的位置 k = 3（从 0 数）', { size: 12, fill: C.text });
+    g += txt(350, 252, '左子树：中序 [0..2] = {4,2,5}，先序 [1..3] = {2,4,5}', { size: 12, fill: C.text });
+    g += txt(350, 278, '右子树：中序 [4..4] = {3}，先序 [4..4] = {3}', { size: 12, fill: C.text });
+    g += txt(350, 304, '区间长度必须一致：先序左区间长度 = k − l2', { size: 12, fill: C.orange });
+    document.getElementById('figBuild').innerHTML = '<figcaption>重建的每一步：先序第一个元素是根，中序里它把区间切成左右两半。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 演示一：序列化操作台 ============
+  (function () {
+    var TREES = [
+      { name: '小树 3 节点', nodes: { 1: [2, 3], 2: [null, null], 3: [null, null] }, root: 1 },
+      { name: '满二叉树 7 节点', nodes: { 1: [2, 3], 2: [4, 5], 3: [6, 7], 4: [null, null], 5: [null, null], 6: [null, null], 7: [null, null] }, root: 1 },
+      { name: '缺右子树 5 节点', nodes: { 1: [2, null], 2: [3, 4], 3: [null, null], 4: [5, null], 5: [null, null] }, root: 1 }
+    ];
+    var body = document.getElementById('vizSerBody');
+    var ctl = document.getElementById('vizSerCtl');
+    var selT = document.createElement('select');
+    selT.className = 'sr-sel';
+    TREES.forEach(function (t, i) { var o = document.createElement('option'); o.value = i; o.textContent = t.name; selT.appendChild(o); });
+    var selM = document.createElement('select');
+    selM.className = 'sr-sel';
+    [['先序', 'pre'], ['按层', 'level']].forEach(function (m) { var o = document.createElement('option'); o.value = m[1]; o.textContent = m[0]; selM.appendChild(o); });
+    var bPrev = document.createElement('button'); bPrev.className = 'sr-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'sr-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'sr-btn'; bReset.textContent = '重置';
+    ctl.appendChild(selT); ctl.appendChild(selM); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var state = null;
+
+    function layout(nodes, root) {
+      var depth = {}, pos = {}, maxD = 0;
+      (function dfs(u, d, left, right) {
+        depth[u] = d; if (d > maxD) maxD = d;
+        var ch = [];
+        if (nodes[u][0]) ch.push(nodes[u][0]);
+        if (nodes[u][1]) ch.push(nodes[u][1]);
+        pos[u] = (left + right) / 2;
+        if (nodes[u][0]) dfs(nodes[u][0], d + 1, left, pos[u]);
+        if (nodes[u][1]) dfs(nodes[u][1], d + 1, pos[u], right);
+      })(root, 0, 60, 640);
+      return { nodes: nodes, root: root, depth: depth, pos: pos, maxD: maxD };
+    }
+
+    function preFrames(t) {
+      var frames = [], order = [];
+      (function go(u) {
+        if (u === null) { order.push('#'); frames.push({ order: order.slice(), step: '空节点，写 #' }); return; }
+        order.push(u);
+        frames.push({ order: order.slice(), step: '写节点 ' + u });
+        go(t.nodes[u][0]);
+        go(t.nodes[u][1]);
+      })(t.root);
+      frames[frames.length - 1].done = true;
+      return frames;
+    }
+
+    function levelFrames(t) {
+      var frames = [], q = [], l = 0, r = 0, order = [];
+      q.push(t.root); r++;
+      while (l < r) {
+        var u = q[l++];
+        if (u === null) { order.push('#'); frames.push({ order: order.slice(), step: '空节点，写 #' }); continue; }
+        order.push(u);
+        frames.push({ order: order.slice(), step: '写节点 ' + u });
+        q.push(t.nodes[u][0]); r++;
+        q.push(t.nodes[u][1]); r++;
+      }
+      frames[frames.length - 1].done = true;
+      return frames;
+    }
+
+    function render() {
+      var t = TREES[parseInt(selT.value, 10)];
+      var tree = layout(t.nodes, t.root);
+      var mode = selM.value;
+      var frames = mode === 'pre' ? preFrames(t) : levelFrames(t);
+      var idx = state ? state.idx : 0;
+      if (idx >= frames.length) idx = frames.length - 1;
+      var f = frames[idx];
+      var W = 700, H = 300, g = '';
+      for (var u in tree.nodes) {
+        if (!tree.nodes[u]) continue;
+        var children = tree.nodes[u];
+        if (children[0]) { var p1 = [tree.pos[u], 50 + tree.depth[u] * 52], p2 = [tree.pos[children[0]], 50 + tree.depth[children[0]] * 52]; g += line(p1[0], p1[1] + 15, p2[0], p2[1] - 15); }
+        if (children[1]) { var p1b = [tree.pos[u], 50 + tree.depth[u] * 52], p2b = [tree.pos[children[1]], 50 + tree.depth[children[1]] * 52]; g += line(p1b[0], p1b[1] + 15, p2b[0], p2b[1] - 15); }
+      }
+      for (var u2 in tree.nodes) {
+        if (!tree.nodes[u2]) continue;
+        var p = [tree.pos[u2], 50 + tree.depth[u2] * 52];
+        g += box(p[0] - 14, p[1] - 14, 28, 28, { fill: C.blueBg, stroke: C.blue });
+        g += txt(p[0], p[1] + 5, u2, { fill: C.blue, weight: 600 });
+      }
+      // 序列输出
+      var y = 232;
+      g += txt(350, y - 8, '序列：', { size: 12, fill: C.dim });
+      var cw = 30, cx = 80;
+      f.order.forEach(function (v, i) {
+        g += box(cx + i * (cw + 4), y, cw, 26, { fill: i === f.order.length - 1 && !f.done ? C.orangeBg : C.bg, stroke: i === f.order.length - 1 && !f.done ? C.orange : C.line });
+        g += txt(cx + i * (cw + 4) + cw / 2, y + 18, v, { size: 12, fill: i === f.order.length - 1 && !f.done ? C.orange : C.text });
+      });
+      var msg = f.done ? '序列化完成：' + f.order.join(',') : '第 ' + (idx + 1) + ' 步：' + f.step;
+      body.innerHTML = svg(g, W, H) +
+        '<div class="breakdown"><div class="row">' + esc(msg) + '</div></div>';
+      bPrev.disabled = (idx === 0);
+      bNext.disabled = (idx === frames.length - 1);
+    }
+    bNext.addEventListener('click', function () {
+      var idx = state ? state.idx : 0;
+      state = { idx: idx + 1 };
+      render();
+    });
+    bPrev.addEventListener('click', function () {
+      var idx = state ? state.idx : 0;
+      state = { idx: Math.max(idx - 1, 0) };
+      render();
+    });
+    bReset.addEventListener('click', function () { state = { idx: 0 }; render(); });
+    selT.addEventListener('change', function () { state = { idx: 0 }; render(); });
+    selM.addEventListener('change', function () { state = { idx: 0 }; render(); });
+    render();
+  })();
+
+  // ============ 演示二：重建操作台 ============
+  (function () {
+    var CASES = [
+      { pre: [1, 2, 4, 5, 3], in: [4, 2, 5, 1, 3], name: '5 节点' },
+      { pre: [1, 2, 4, 3, 5], in: [4, 2, 1, 3, 5], name: '缺右子树' },
+      { pre: [3, 9, 20, 15, 7], in: [9, 3, 15, 20, 7], name: 'LeetCode 例' }
+    ];
+    var body = document.getElementById('vizBuildBody');
+    var ctl = document.getElementById('vizBuildCtl');
+    var selT = document.createElement('select');
+    selT.className = 'sr-sel';
+    CASES.forEach(function (c, i) { var o = document.createElement('option'); o.value = i; o.textContent = c.name; selT.appendChild(o); });
+    var bPrev = document.createElement('button'); bPrev.className = 'sr-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'sr-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'sr-btn'; bReset.textContent = '重置';
+    ctl.appendChild(selT); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var state = null;
+
+    // 每帧记录：当前处理的区间、确定的节点、左右区间
+    function buildFrames(c) {
+      var idxMap = {};
+      c.in.forEach(function (v, i) { idxMap[v] = i; });
+      var frames = [];
+      var built = {};
+      (function go(l1, r1, l2, r2, parent, side) {
+        if (l1 > r1) return;
+        var rootVal = c.pre[l1];
+        var k = idxMap[rootVal];
+        frames.push({
+          pre: [l1, r1], in: [l2, r2], rootVal: rootVal, k: k, built: JSON.parse(JSON.stringify(built)),
+          step: '先序 [' + l1 + '..' + r1 + ']，中序 [' + l2 + '..' + r2 + ']，根 = ' + rootVal + '（中序位置 ' + k + '）',
+          lPre: [l1 + 1, l1 + k - l2], lIn: [l2, k - 1], rPre: [l1 + k - l2 + 1, r1], rIn: [k + 1, r2],
+          leftLen: k - l2, rightLen: r1 - (l1 + k - l2)
+        });
+        built[rootVal] = { l: (l1 + k - l2) >= l1 ? null : null, node: rootVal };
+        go(l1 + 1, l1 + k - l2, l2, k - 1, rootVal, 'l');
+        go(l1 + k - l2 + 1, r1, k + 1, r2, rootVal, 'r');
+      })(0, c.pre.length - 1, 0, c.in.length - 1, null, '');
+      frames[frames.length - 1].done = true;
+      return frames;
+    }
+
+    function render() {
+      var c = CASES[parseInt(selT.value, 10)];
+      var frames = buildFrames(c);
+      var idx = state ? state.idx : 0;
+      if (idx >= frames.length) idx = frames.length - 1;
+      var f = frames[idx];
+      var W = 700, H = 300, g = '';
+      // 先序
+      g += txt(100, 30, '先序', { anchor: 'start', size: 12, fill: C.dim });
+      var px = 100;
+      for (var i = 0; i < c.pre.length; i++) {
+        var inRange = i >= f.pre[0] && i <= f.pre[1];
+        var isRoot = i === f.pre[0];
+        g += box(px, 42, 36, 30, { fill: isRoot ? C.blue : (inRange ? C.blueBg : '#fff'), stroke: isRoot ? C.blue : (inRange ? C.blue : C.line) });
+        g += txt(px + 18, 61, c.pre[i], { size: 12, fill: isRoot ? C.blue : C.text, weight: isRoot ? 600 : 'normal' });
+        px += 44;
+      }
+      // 中序
+      g += txt(100, 110, '中序', { anchor: 'start', size: 12, fill: C.dim });
+      px = 100;
+      for (var j = 0; j < c.in.length; j++) {
+        var inRange2 = j >= f.in[0] && j <= f.in[1];
+        var isK = j === f.k;
+        g += box(px, 122, 36, 30, { fill: isK ? C.orange : (inRange2 ? C.orangeBg : '#fff'), stroke: isK ? C.orange : (inRange2 ? C.orange : C.line) });
+        g += txt(px + 18, 141, c.in[j], { size: 12, fill: isK ? C.orange : C.text, weight: isK ? 600 : 'normal' });
+        px += 44;
+      }
+      // 切分说明
+      var y = 190;
+      g += txt(350, y, '左子树：先序 [' + f.lPre[0] + '..' + f.lPre[1] + ']，中序 [' + f.lIn[0] + '..' + f.lIn[1] + ']（长度 ' + f.leftLen + '）', { size: 12, fill: C.text });
+      g += txt(350, y + 26, '右子树：先序 [' + f.rPre[0] + '..' + f.rPre[1] + ']，中序 [' + f.rIn[0] + '..' + f.rIn[1] + ']（长度 ' + f.rightLen + '）', { size: 12, fill: C.text });
+      g += txt(350, y + 52, '第 ' + (idx + 1) + ' / ' + frames.length + ' 步：' + f.step, { size: 12, fill: C.dim });
+      if (f.done) g += txt(350, y + 80, '重建完成', { size: 13, weight: 600, fill: C.blue });
+      body.innerHTML = svg(g, W, H) +
+        '<div class="breakdown"><div class="row">' + esc(f.step) + (f.done ? '，重建完成' : '') + '</div></div>';
+      bPrev.disabled = (idx === 0);
+      bNext.disabled = (idx === frames.length - 1);
+    }
+    bNext.addEventListener('click', function () {
+      var idx = state ? state.idx : 0;
+      state = { idx: idx + 1 };
+      render();
+    });
+    bPrev.addEventListener('click', function () {
+      var idx = state ? state.idx : 0;
+      state = { idx: Math.max(idx - 1, 0) };
+      render();
+    });
+    bReset.addEventListener('click', function () { state = { idx: 0 }; render(); });
+    selT.addEventListener('change', function () { state = { idx: 0 }; render(); });
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

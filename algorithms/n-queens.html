@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>N 皇后问题：位运算剪枝</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-ctl { margin: 8px 0 4px; }
+.viz-ctl label { font-size: 13px; margin-right: 6px; color: var(--fg2); }
+.viz-ctl select { font-size: 13px; padding: 2px 6px; border: 1px solid var(--bd); border-radius: 4px; background: #fff; }
+.viz-note { margin: 10px 0 4px; font-size: 13px; color: var(--fg); }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.legend .dot.queen { background: #1e293b; border-color: #1e293b; }
+/* 演示一：棋盘与位串 */
+.dfs-body { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+.dfs-board { display: grid; gap: 1px; background: #e6e8eb; padding: 1px; border: 1px solid #e6e8eb; }
+.dfs-cell { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: #fff; font-size: 13px; line-height: 1; }
+.dfs-cell.q { background: #dbeafe; }
+.dfs-cell.q::after { content: '●'; color: #1e293b; font-size: 13px; }
+.dfs-cell.col { background: #dbeafe; }
+.dfs-cell.dia { background: #ffedd5; }
+.dfs-cell.rowcur { outline: 2px solid #2563eb; outline-offset: -1px; }
+.dfs-bits { display: flex; flex-direction: column; gap: 5px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.dfs-bitrow { display: flex; align-items: center; gap: 4px; }
+.dfs-bitrow .lab { width: 78px; color: var(--fg2); text-align: right; font-size: 12px; }
+.dfs-bit { width: 20px; height: 20px; border: 1px solid var(--bd); border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #9aa0a6; background: #fff; }
+.dfs-bit.on { background: #dbeafe; border-color: #2563eb; color: #1e40af; }
+.dfs-bit.pl { background: #ffedd5; border-color: #ea580c; color: #9a3412; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>N 皇后问题：位运算剪枝</h1>
+      <p class="intro">数组版把每行皇后的位置记在 path 里，位运算版把「哪些列还能放」压进三个 int。两版探索同一棵搜索树，常数差近 19 倍。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>8 皇后有多少种摆法？92 种。n=16 是 14,772,512 种。n=14 也有 365,596 种，到 n=15 跳到 2,279,184。</p>
+      <p>问题一句话：n×n 棋盘上放 n 个皇后，任意两个不能互相攻击。皇后走直线和斜线，所以任意两个皇后不能同列，也不能在同一条 45° 斜线上。同一行的限制不用管，一行放一个就消掉了。</p>
+      <p>LeetCode 52 只问摆法数，答案是一个整数。这题的经典解是回溯：一行一行放，放完前 i 行再看第 i+1 行能放哪。框架谁都会写，差别全在「判断当前行能放哪些列」这一步。这一页先写数组版，再换成三个 int 的位运算版，量一量两者差多少。</p>
+
+      <h2 id="q1">一、数组路径版</h2>
+      <p>path[i] 记第 i 行皇后放在第几列。来到第 i 行，0..i-1 的皇后都摆在 path 里，对要试的列 j 做 check：跟每个已有皇后比两件事，同列（j == path[k]），或者行差等于列差（|i-k| == |j-path[k]|），后者说明两个点在同一条斜线上。</p>
+      <figure class="fig" id="figArray"></figure>
+      <p>每到一个节点要干的活是：对 0..n-1 全部 n 列各做一次 check，每次 check 从第 0 行扫到第 i-1 行。n=16 时，数组版累计做了 180 亿次 check 调用（实测计数）。这些工作大部分是白做的，多数列跟最近几行的皇后一碰就冲突，可 check 还是要从头扫一遍才肯放弃。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// path[i] 记录第 i 行皇后放在哪一列，0..i-1 已定，正在试第 i 行第 j 列</span>
+    <span class="kw">bool</span> <span class="fn">check</span>(<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; path, <span class="kw">int</span> i, <span class="kw">int</span> j) {
+        <span class="kw">for</span> (<span class="kw">int</span> k = 0; k &lt; i; k++) {
+            <span class="cm">// 同列，或行差 == 列差（同在一条斜线上）</span>
+            <span class="kw">if</span> (j == path[k] || abs(i - k) == abs(j - path[k])) <span class="kw">return</span> <span class="kw">false</span>;
+        }
+        <span class="kw">return</span> <span class="kw">true</span>;
+    }
+
+    <span class="cm">// i 当前行，n 总行数；返回 0..i-1 已放好的前提下还能找到几种摆法</span>
+    <span class="kw">int</span> <span class="fn">f1</span>(<span class="kw">int</span> i, vector&lt;<span class="kw">int</span>&gt;&amp; path, <span class="kw">int</span> n) {
+        <span class="kw">if</span> (i == n) <span class="kw">return</span> 1;           <span class="cm">// n 行都放完，找到一种摆法</span>
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; n; j++) {   <span class="cm">// 0..n-1 列逐个试</span>
+            <span class="kw">if</span> (check(path, i, j)) {
+                path[i] = j;
+                ans += f1(i + 1, path, n);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>回溯本身没问题，慢的是每步的判断。能不能把「扫已有行」这件事变成 O(1)？能，把每行的位置信息换成三个数字。</p>
+
+      <h2 id="q2">二、位运算版</h2>
+      <p>三个 unsigned 各用一个位代表一列：col 记正下方被占的列，left 记被左下斜线占的列，right 记被右下斜线占的列。皇后在 (i, j)，正下方向占住 (i+1, j)、(i+2, j)……所以 col 从放下去那一刻起不变；斜线会随行数下移而平移一格，左下那条每下一行偏左一格，右下那条每下一行偏右一格。</p>
+      <figure class="fig" id="figBoard"></figure>
+      <p>limit = (1u << n) - 1u，低 n 位是 1，之后每次 & limit 把候选范围锁死在 n 列里。</p>
+      <p>到一个节点，先把三条线的位合起来：ban = col | left | right。limit & ~ban 就是还没被占的列，记成 candidate。接下来逐位取候选：place = candidate & -candidate，取的是最右侧那个 1（031 讲过的 lowbit 写法），取完 candidate ^= place 消掉它，带着新状态递归下一行。</p>
+      <p>col == limit 的时候每一列都有皇后了，找到一种摆法，返回 1。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// col 正下、left 左下斜线、right 右下斜线：一个位代表一列被占</span>
+    <span class="cm">// limit 的低 n 位是 1，把候选列限制在 n 列棋盘内</span>
+    <span class="kw">int</span> <span class="fn">f2</span>(<span class="kw">unsigned</span> limit, <span class="kw">unsigned</span> col, <span class="kw">unsigned</span> left, <span class="kw">unsigned</span> right) {
+        <span class="kw">if</span> (col == limit) <span class="kw">return</span> 1;          <span class="cm">// 每一列都有皇后了，找到一种摆法</span>
+        <span class="kw">unsigned</span> ban = col | left | right;   <span class="cm">// 三条线合起来占掉的列</span>
+        <span class="kw">unsigned</span> candidate = limit &amp; (~ban); <span class="cm">// 剩下的就是还能放的列</span>
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">while</span> (candidate != 0) {
+            <span class="kw">unsigned</span> place = candidate &amp; (-candidate); <span class="cm">// 取最右侧的 1</span>
+            candidate ^= place;                        <span class="cm">// 这个候选列用掉了</span>
+            ans += f2(limit, col | place,
+                      (left | place) &gt;&gt; 1,   <span class="cm">// 左下斜线到下一行偏左一格</span>
+                      (right | place) &lt;&lt; 1); <span class="cm">// 右下斜线到下一行偏右一格</span>
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <figure class="fig" id="figBits"></figure>
+      <figure class="fig" id="figShift"></figure>
+      <div class="viz" id="vizDfs">
+        <p class="viz-title">位运算版搜索逐帧：三个 int 陪着递归走完整棵树</p>
+        <div class="viz-ctl">
+          <label>n：<select id="dfsN">
+            <option value="4" selected>4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+          </select></label>
+        </div>
+        <div class="dfs-body">
+          <div class="dfs-board" id="dfsBoard"></div>
+          <div class="dfs-bits" id="dfsBits"></div>
+        </div>
+        <p class="viz-note" id="dfsNote"></p>
+        <p class="viz-answer" id="dfsAns"></p>
+        <div class="viz-controls">
+          <button id="dfsNext">下一步</button>
+          <button id="dfsReset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="q3">三、两个版本差在哪</h2>
+      <p>先说结论：两个版本探索的是同一棵搜索树。它们都只深入合法的放置，节点数完全一样，n=16 都是 1,141,190,303 个节点。差别在常数，数组版每个节点 O(n·i)，位版 O(1)。</p>
+      <p>实测（本机 g++ -O2）：n=14 数组版 2.29s、位版 0.13s，快 17.7 倍；n=16 数组版 105.2s、位版 5.65s，快 18.6 倍。16 皇后用位运算版能在 10 秒内跑完，这台机器上 5.65s 就跑完了。</p>
+      <p>倍数还随 n 变大：n=8 约 10 倍，n=14 起稳定在 18 倍上下。原因在数组版每节点的代价随深度 i 增长，n 越大深层节点占的比例越高。</p>
+      <p>还有一个被低估的好处：位版枚举候选列只走能放的列，数组版却要对全部 n 列都做一次 check。n=16 实测每个节点平均候选列只有 1.01 个，绝大多数节点只剩一个可放列，数组版为了试那一列，先要在 n 列里逐个试、每试一次还从头扫 i 行。</p>
+      <p>剪枝力度可以量化：完全不判冲突，16 皇后要试 16! ≈ 2.1×10¹³ 种排列；剪枝后只探 1.14×10⁹ 个节点，缩到约 1/18000。</p>
+      <figure class="fig" id="figPerf"></figure>
+      <div class="viz" id="vizCost">
+        <p class="viz-title">答案与代价对照：n 从 6 涨到 16，两个版本差多少</p>
+        <div class="viz-ctl">
+          <label>n：<select id="costN"></select></label>
+        </div>
+        <div id="costChart"></div>
+        <p class="viz-note" id="costNote"></p>
+        <p class="viz-answer" id="costAns"></p>
+      </div>
+
+      <h2 id="comp">四、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>版本</th><th>时间（最坏）</th><th>额外空间</th><th>说明</th></tr>
+        <tr><td>数组路径版</td><td>O(n!·n²)</td><td>O(n)</td><td>path 数组 + 递归栈；每节点对 n 列 check、每列扫 i 行</td></tr>
+        <tr><td>位运算版</td><td>O(n!)</td><td>O(n)</td><td>三个 int 是 O(1)，空间全在递归栈；每节点 O(1)</td></tr>
+      </table>
+      <p>两版搜索树相同，节点数上界按最坏口径是 O(n!)。实际运行远小于这个上界，剪枝把搜索空间压到约 1/18000（n=16）。</p>
+
+      <h2 id="sum">五、总结</h2>
+      <p>三件套：col、left、right 各一个 int，一个位代表一列被哪条线占住；ban = col|left|right 合并，limit & ~ban 得到候选列。</p>
+      <p>取候选：place = candidate & -candidate 取最右 1，candidate ^= place 消掉，循环里逐个试。</p>
+      <p>斜线平移：传下一层时 (left|place)&gt;&gt;1、(right|place)&lt;&lt;1，新皇后的两条斜线一起带下去。</p>
+      <p>两版同树，差的是常数：n=16 数组版 105 秒、位版 5.6 秒。位运算把「n 列的状态」压进一个 int，这套手法在后面的状态压缩 dp、子集枚举里会整个搬走。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>N 皇后 II</td><td><a href="https://leetcode.cn/problems/n-queens-ii/" target="_blank">leetcode.cn/problems/n-queens-ii</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解040【必备】N皇后问题-重点是位运算的版本</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function box(x,y,w,h,r){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(r||3)+'" fill="#fff" stroke="#cbd5e1"/>'; }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function circ(cx,cy,r,fill){ return '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="'+(fill||'#1e293b')+'"/>'; }
+function bitVal(v,j){ return ((v>>>j)&1)?1:0; }
+
+// ===== 图 1：数组版 check 判据 =====
+(function(){
+  var cell = 36, ox = 130, oy = 42, n = 4;
+  var body = '';
+  body += txt(200, 26, '第 2 行试 j=1：撞在斜线上', {fs:13});
+  for (var c = 0; c < n; c++) body += txt(ox + c*cell + cell/2, oy - 8, String(c), {fs:11, fill:'#9aa0a6'});
+  for (var r = 0; r < n; r++) body += txt(ox - 10, oy + r*cell + cell/2 + 4, String(r), {fs:11, fill:'#9aa0a6'});
+  for (var r = 0; r < n; r++) for (var c = 0; c < n; c++) body += box(ox + c*cell, oy + r*cell, cell, cell, 0);
+  body += circ(ox + 0*cell + cell/2, oy + 0*cell + cell/2, 8);
+  body += circ(ox + 2*cell + cell/2, oy + 1*cell + cell/2, 8);
+  body += '<rect x="'+(ox+1*cell)+'" y="'+(oy+2*cell)+'" width="'+cell+'" height="'+cell+'" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>';
+  body += txt(ox + 1*cell + cell/2, oy + 2*cell + cell/2 + 4, '?', {fs:15, fill:'#9a3412'});
+  body += '<line x1="'+(ox+2*cell+cell/2)+'" y1="'+(oy+1*cell+cell/2)+'" x2="'+(ox+1*cell+cell/2)+'" y2="'+(oy+2*cell+cell/2)+'" stroke="#dc2626" stroke-width="2" stroke-dasharray="5 3"/>';
+  var by1 = oy + cell*n + 26;
+  function cmp(y, t1, ok){
+    return '<rect x="50" y="'+y+'" width="300" height="40" rx="6" fill="'+(ok?'#f0fdf4':'#fef2f2')+'" stroke="'+(ok?'#86efac':'#fca5a5')+'"/>'
+      + txt(200, y + 25, t1, {fs:12, fill: ok ? '#166534' : '#991b1b'});
+  }
+  body += cmp(by1, 'k=0 行0 列0：列不同，|2-0|≠|1-0|，通过', true);
+  body += cmp(by1 + 50, 'k=1 行1 列2：|2-1|=|1-2|=1，斜线冲突，放弃', false);
+  body += txt(200, by1 + 102, 'check 要扫完 0..i-1 每一行才敢下结论', {fs:12});
+  var py = by1 + 118;
+  body += txt(60, py + 16, 'path', {fs:12, an:'start'});
+  var vals = [0, 2, '?', '?'];
+  for (var c = 0; c < n; c++){
+    body += '<rect x="'+(90 + c*34)+'" y="'+py+'" width="30" height="26" rx="4" fill="#fff" stroke="#cbd5e1"/>';
+    body += txt(90 + c*34 + 15, py + 18, String(vals[c]), {fs:13});
+    body += txt(90 + c*34 + 15, py + 38, '行'+c, {fs:10, fill:'#9aa0a6'});
+  }
+  document.getElementById('figArray').innerHTML = '<figcaption>第 2 行试 j=1：与 (1,2) 行差 1、列差 1，撞在斜线上。check 要扫完前面每一行才肯下结论。</figcaption>'
+    + svg(400, py + 52, body)
+    + '<div class="legend"><span><span class="dot full"></span>皇后</span><span><span class="dot"></span>正下 / 斜线攻击列</span><span><span class="dot partial"></span>正在试的候选格</span><span><span class="dot skip"></span>冲突判定</span></div>';
+})();
+
+// ===== 图 2：一个皇后的三条攻击线 =====
+(function(){
+  var cell = 30, ox = 46, oy = 34, n = 8, qr = 2, qc = 3;
+  var body = '';
+  body += txt(ox + cell*n/2, 26, '皇后在 (2,3) 的三条攻击线', {fs:14});
+  for (var c = 0; c < n; c++) body += txt(ox + c*cell + cell/2, oy - 8, String(c), {fs:11, fill:'#9aa0a6'});
+  for (var r = 0; r < n; r++) body += txt(ox - 10, oy + r*cell + cell/2 + 4, String(r), {fs:11, fill:'#9aa0a6'});
+  var colCells = [], leftCells = [], rightCells = [];
+  for (var r = 0; r < n; r++) for (var c = 0; c < n; c++) {
+    if (c === qc && r > qr) colCells.push([r, c]);
+    if (r - qr === qc - c && r > qr) leftCells.push([r, c]);   // 左下：列差 = -(行差)
+    if (r - qr === c - qc && r > qr) rightCells.push([r, c]);  // 右下：列差 = +(行差)
+  }
+  for (var r = 0; r < n; r++) for (var c = 0; c < n; c++) body += box(ox + c*cell, oy + r*cell, cell, cell, 0);
+  colCells.forEach(function(p){ body += '<rect x="'+(ox+p[1]*cell)+'" y="'+(oy+p[0]*cell)+'" width="'+cell+'" height="'+cell+'" fill="#dbeafe"/>'; });
+  leftCells.forEach(function(p){ body += '<rect x="'+(ox+p[1]*cell)+'" y="'+(oy+p[0]*cell)+'" width="'+cell+'" height="'+cell+'" fill="#ffedd5"/>'; });
+  rightCells.forEach(function(p){ body += '<rect x="'+(ox+p[1]*cell)+'" y="'+(oy+p[0]*cell)+'" width="'+cell+'" height="'+cell+'" fill="#ffedd5"/>'; });
+  body += circ(ox + qc*cell + cell/2, oy + qr*cell + cell/2, 9);
+  document.getElementById('figBoard').innerHTML = '<figcaption>皇后在 (2,3)：正下占列 3（col），左下斜线占 2、1、0（left），右下斜线占 4、5、6、7（right）。三个方向就是三个位的来源。</figcaption>'
+    + svg(ox + cell*n + 12, oy + cell*n + 18, body)
+    + '<div class="legend"><span><span class="dot queen"></span>皇后</span><span><span class="dot"></span>正下（col）</span><span><span class="dot partial"></span>斜线（left / right）</span></div>';
+})();
+
+// ===== 图 3：n=8 的位串状态 =====
+(function(){
+  var rows = [
+    ['limit    ', '11111111', ''],
+    ['col      ', '00000101', '0、2 列'],
+    ['left     ', '00000010', '1 列'],
+    ['right    ', '00001100', '2、3 列'],
+    ['ban      ', '00001111', '三者或'],
+    ['candidate', '11110000', '4~7 列'],
+    ['place    ', '00010000', '最右的 1']
+  ];
+  var cell = 22, x0 = 96, y0 = 44, rh = 27;
+  var body = '';
+  body += txt(x0 + 4*cell, 26, '已放 (0,0)、(1,2)，第 2 行的位串', {fs:14});
+  for (var i = 0; i < rows.length; i++){
+    var y = y0 + i*rh;
+    body += txt(x0 - 8, y + 15, rows[i][0], {fs:12, an:'end'});
+    for (var j = 0; j < 8; j++){
+      var on = rows[i][1][j] === '1';
+      var x = x0 + j*cell;
+      var cls = i === 6 && on ? 'pl' : (on ? 'on' : '');
+      body += '<rect x="'+x+'" y="'+y+'" width="'+cell+'" height="'+cell+'" rx="3" fill="'+(on ? (i===6 ? '#ffedd5' : '#dbeafe') : '#fff')+'" stroke="'+(on ? (i===6 ? '#ea580c' : '#2563eb') : '#cbd5e1')+'"/>';
+      body += txt(x + cell/2, y + 15, rows[i][1][j], {fs:12});
+      if (i === 6 && j === 4) body += '<text x="'+(x+cell/2)+'" y="'+(y+cell+14)+'" font-size="11" fill="#ea580c" text-anchor="middle" font-family="ui-monospace,Menlo,Consolas,monospace">最右 1</text>';
+    }
+    body += txt(x0 + 8*cell + 10, y + 15, rows[i][2], {fs:11, fill:'#64748b', an:'start'});
+  }
+  // 右侧小棋盘（只画三行）
+  var cs = 15, bx = x0 + 8*cell + 90, by = 44;
+  body += txt(bx + 3.5*cs, by - 10, '对应棋盘（第 2 行）', {fs:11, fill:'#64748b'});
+  for (var r = 0; r < 3; r++) for (var c = 0; c < 8; c++){
+    body += box(bx + c*cs, by + r*cs, cs, cs, 0);
+  }
+  body += circ(bx + 0*cs + cs/2, by + 0*cs + cs/2, 5);
+  body += circ(bx + 2*cs + cs/2, by + 1*cs + cs/2, 5);
+  // 第 2 行按位串上色：col 蓝、left/right 橙
+  for (var c = 0; c < 8; c++){
+    if (bitVal(5, c)) body += '<rect x="'+(bx+c*cs)+'" y="'+(by+2*cs)+'" width="'+cs+'" height="'+cs+'" fill="#dbeafe"/>';
+    if (bitVal(2, c) || bitVal(12, c)) body += '<rect x="'+(bx+c*cs)+'" y="'+(by+2*cs)+'" width="'+cs+'" height="'+cs+'" fill="#ffedd5"/>';
+  }
+  document.getElementById('figBits').innerHTML = '<figcaption>已放 (0,0)、(1,2) 后第 2 行的位串：ban = 00001111，能放的列 candidate = 11110000，place 取最右的 1（第 4 列）。</figcaption>'
+    + svg(bx + 8*cs + 20, y0 + rows.length*rh + 22, body);
+})();
+
+// ===== 图 4：斜线随行平移一格 =====
+(function(){
+  var cell = 34, ox = 40, oy = 48, n = 8, qr = 0, qc = 3;
+  var body = '';
+  body += txt(ox + cell*n/2, 28, '斜线到下一行平移一格', {fs:14});
+  for (var c = 0; c < n; c++) body += txt(ox + c*cell + cell/2, oy - 8, String(c), {fs:11, fill:'#9aa0a6'});
+  for (var r = 0; r < 2; r++) body += txt(ox - 10, oy + r*cell + cell/2 + 4, '行'+r, {fs:11, fill:'#9aa0a6'});
+  for (var r = 0; r < 2; r++) for (var c = 0; c < n; c++) body += box(ox + c*cell, oy + r*cell, cell, cell, 0);
+  body += circ(ox + qc*cell + cell/2, oy + qr*cell + cell/2, 9);
+  var lx = ox + 2*cell + cell/2, ly = oy + 1*cell + cell/2;
+  var rx2 = ox + 4*cell + cell/2;
+  body += '<rect x="'+(ox+2*cell)+'" y="'+(oy+1*cell)+'" width="'+cell+'" height="'+cell+'" fill="#ffedd5"/>';
+  body += '<rect x="'+(ox+4*cell)+'" y="'+(oy+1*cell)+'" width="'+cell+'" height="'+cell+'" fill="#ffedd5"/>';
+  body += '<line x1="'+(ox+qc*cell+cell/2)+'" y1="'+(oy+cell/2)+'" x2="'+lx+'" y2="'+(ly-4)+'" stroke="#ea580c" stroke-width="2"/>';
+  body += '<line x1="'+(ox+qc*cell+cell/2)+'" y1="'+(oy+cell/2)+'" x2="'+rx2+'" y2="'+(ly-4)+'" stroke="#ea580c" stroke-width="2"/>';
+  body += txt(lx, ly + cell/2 + 4, 'col 2', {fs:11, fill:'#9a3412'});
+  body += txt(rx2, ly + cell/2 + 4, 'col 4', {fs:11, fill:'#9a3412'});
+  body += txt(ox + cell*n/2, oy + 2*cell + 30, '(left | place) &gt;&gt; 1：左下线的位右移一格', {fs:11.5});
+  body += txt(ox + cell*n/2, oy + 2*cell + 50, '(right | place) &lt;&lt; 1：右下线的位左移一格', {fs:11.5});
+  body += txt(ox + cell*n/2, oy + 2*cell + 76, 'col 直接继承：正下方不随行移动', {fs:12, fill:'#64748b'});
+  document.getElementById('figShift').innerHTML = '<figcaption>皇后放到 (i,3)，下一行左下斜线移到第 2 列（位右移 1 格）、右下移到第 4 列（位左移 1 格）。</figcaption>'
+    + svg(ox + cell*n + 52, oy + 2*cell + 92, body);
+})();
+
+// ===== 图 5：耗时对数柱图 =====
+(function(){
+  var ns = [10,11,12,13,14,15,16];
+  var t1 = [2.535, 11.986, 64.434, 371.071, 2289.220, 15553.580, 105186.138];
+  var t2 = [0.194, 0.780, 4.061, 22.174, 129.577, 829.360, 5651.605];
+  var minL = -3, maxL = 5.5;
+  function yFor(v){ return yTop + plotH * (1 - (Math.log10(v) - minL) / (maxL - minL)); }
+  var x0 = 62, yTop = 40, plotH = 205, plotW = 7*58;
+  var body = '';
+  body += txt(x0 + plotW/2, 24, '两版耗时（对数刻度，ms）', {fs:14});
+  // 网格与刻度
+  for (var L = -3; L <= 5; L++){
+    var v = Math.pow(10, L), y = yFor(v);
+    body += '<line x1="'+x0+'" y1="'+y+'" x2="'+(x0+plotW)+'" y2="'+y+'" stroke="#e6e8eb" stroke-width="1"/>';
+    var label = v >= 1000 ? (v/1000)+'s' : v + 'ms';
+    body += txt(x0 - 8, y + 4, label, {fs:10, fill:'#9aa0a6', an:'end'});
+  }
+  for (var i = 0; i < ns.length; i++){
+    var gx = x0 + i*58 + 8;
+    var h1 = yFor(t1[i]), h2 = yFor(t2[i]);
+    body += '<rect x="'+gx+'" y="'+h1+'" width="16" height="'+(yFor(0.001)-h1)+'" fill="#2563eb"/>';
+    body += '<rect x="'+(gx+20)+'" y="'+h2+'" width="16" height="'+(yFor(0.001)-h2)+'" fill="#ea580c"/>';
+    body += txt(gx + 8, h1 - 5, t1[i] >= 1000 ? (t1[i]/1000).toFixed(1)+'s' : Math.round(t1[i])+'ms', {fs:9.5, fill:'#2563eb'});
+    body += txt(gx + 28, h2 - 5, t2[i] >= 1000 ? (t2[i]/1000).toFixed(2)+'s' : t2[i].toFixed(1)+'ms', {fs:9.5, fill:'#ea580c'});
+    body += txt(gx + 18, yFor(0.001) + 14, 'n='+ns[i], {fs:11});
+  }
+  document.getElementById('figPerf').innerHTML = '<figcaption>两版耗时（对数刻度）。n=16 数组版 105.2s、位版 5.65s，约 18.6 倍；倍数随 n 变大。</figcaption>'
+    + svg(x0 + plotW + 16, yTop + plotH + 32, body)
+    + '<div class="legend"><span><span class="dot full"></span>数组路径版</span><span><span class="dot partial"></span>位运算版</span></div>';
+})();
+
+// ===== 演示一：位版 DFS 逐帧 =====
+(function(){
+  var boardEl = document.getElementById('dfsBoard');
+  var bitsEl = document.getElementById('dfsBits');
+  var noteEl = document.getElementById('dfsNote');
+  var ansEl = document.getElementById('dfsAns');
+  var n = 4, steps = [], idx = 0, limit = 0, lastFound = null;
+
+  function genDfs(N){
+    limit = (1 << N) - 1; var st = [], found = 0, nodes = 0;
+    var stack = [];
+    function enter(col, left, right, row, pCol, pLeft, pRight){
+      nodes++;
+      var ban = col | left | right, cand = limit & ~ban;
+      st.push({t:'in', row:row, col:col, left:left, right:right, ban:ban, cand:cand, place:0,
+               queens:stack.map(function(s){return s.place;}), found:found});
+      if (col === limit){
+        found++;
+        lastFound = {row:row, col:col, left:left, right:right, ban:ban, cand:cand, place:0,
+                     queens:stack.map(function(s){return s.place;}), found:found};
+        st.push({t:'found', row:row, col:col, left:left, right:right, ban:ban, cand:cand, place:0,
+                 queens:stack.map(function(s){return s.place;}), found:found});
+        return;
+      }
+      var c = cand;
+      while (c){
+        var place = c & -c; c ^= place;
+        var ncol = col | place, nleft = (left | place) >> 1, nright = (right | place) << 1;
+        st.push({t:'put', row:row, col:ncol, left:nleft, right:nright, ban:ban, cand:cand, place:place,
+                 queens:stack.map(function(s){return s.place;}).concat([place]), found:found});
+        stack.push({place:place});
+        enter(ncol, nleft, nright, row + 1, col, left, right);
+        stack.pop();
+      }
+      st.push({t:'out', row:row, col:pCol, left:pLeft, right:pRight, ban:ban, cand:cand, place:0,
+               queens:stack.map(function(s){return s.place;}), found:found});
+    }
+    enter(0, 0, 0, 0, 0, 0, 0);
+    return {steps:st, found:found, nodes:nodes};
+  }
+
+  function bitIdx(p){ var c = 0; while (p > 1){ p >>= 1; c++; } return c; }
+
+  function render(){
+    var s = steps[Math.min(idx, steps.length - 1)];
+    var i;
+    // 棋盘
+    var b = '';
+    for (var r = 0; r < n; r++){
+      for (var c = 0; c < n; c++){
+        var cls = 'dfs-cell';
+        var q = -1;
+        for (i = 0; i < s.queens.length; i++) if (i === r) q = bitIdx(s.queens[i]);
+        if (q === c) cls += ' q';
+        else if (s.t === 'in' && r === s.row){
+          if (bitVal(s.col, c)) cls += ' col';
+          if (bitVal(s.left, c) || bitVal(s.right, c)) cls += ' dia';
+          cls += ' rowcur';
+        } else if (s.t === 'put' && r === s.row) {
+          cls += ' rowcur';
+        }
+        b += '<div class="'+cls+'"></div>';
+      }
+    }
+    boardEl.innerHTML = b;
+    // 位串
+    var rows = [
+      ['limit', limit, 0],
+      ['col', s.col, 0],
+      ['left', s.left, 0],
+      ['right', s.right, 0],
+      ['ban', s.ban, 0],
+      ['candidate', s.cand, 0],
+      ['place', s.place, 1]
+    ];
+    var bits = '';
+    for (i = 0; i < rows.length; i++){
+      bits += '<div class="dfs-bitrow"><span class="lab">'+rows[i][0]+'</span>';
+      for (var j = n - 1; j >= 0; j--){
+        var on = bitVal(rows[i][1], j);
+        var cls = 'dfs-bit' + (on ? (rows[i][2] ? ' pl' : ' on') : '');
+        bits += '<span class="'+cls+'">'+(on ? 1 : 0)+'</span>';
+      }
+      bits += '</div>';
+    }
+    bitsEl.innerHTML = bits;
+    // 说明
+    var total = steps.length;
+    var note = '第 ' + (idx + 1) + ' / ' + total + ' 步';
+    if (s.t === 'in') note += '：进入第 ' + s.row + ' 行，ban = ' + esc((s.ban>>>0).toString(2).padStart(n,'0').slice(-n)) + '，候选列还剩 ' + (s.cand>>>0).toString(2).padStart(n,'0').slice(-n);
+    else if (s.t === 'put') note += '：放第 ' + s.row + ' 行，place = ' + esc((s.place>>>0).toString(2).padStart(n,'0').slice(-n)) + '（最右 1，第 ' + bitIdx(s.place) + ' 列）';
+    else if (s.t === 'found') note += '：第 ' + s.row + ' 行 col == limit，找到第 ' + s.found + ' 个解';
+    else if (s.t === 'done') note += '：搜索结束，整棵树走完，共 ' + s.found + ' 个解';
+    else note += '：第 ' + s.row + ' 行候选用完，回到上一行继续';
+    noteEl.textContent = note;
+    var done = idx >= steps.length - 1;
+    ansEl.textContent = done ? ('答案：' + s.found + ' 个解，搜索树共 ' + steps.filter(function(x){return x.t==='in';}).length + ' 个节点')
+                             : ('已找到 ' + s.found + ' 个解（答案 ' + steps[steps.length-1].found + '）');
+  }
+
+  function rebuild(){
+    var g = genDfs(n);
+    steps = g.steps;
+    if (lastFound){
+      steps[steps.length - 1] = {t:'done', row:0, col:lastFound.col, left:lastFound.left, right:lastFound.right,
+                                 ban:lastFound.ban, cand:lastFound.cand, place:0,
+                                 queens:lastFound.queens, found:lastFound.found};
+    }
+    idx = 0;
+    render();
+  }
+  document.getElementById('dfsN').addEventListener('change', function(){
+    n = parseInt(this.value, 10);
+    rebuild();
+  });
+  document.getElementById('dfsNext').addEventListener('click', function(){
+    if (idx < steps.length - 1) idx++;
+    render();
+  });
+  document.getElementById('dfsReset').addEventListener('click', function(){ idx = 0; render(); });
+  rebuild();
+})();
+
+// ===== 演示二：答案与代价对照 =====
+(function(){
+  var D = [
+    {n:6,  ans:4,         nodes:153,         t1:0.007,  t2:0.002},
+    {n:7,  ans:40,        nodes:552,         t1:0.029,  t2:0.005},
+    {n:8,  ans:92,        nodes:2057,        t1:0.123,  t2:0.012},
+    {n:9,  ans:352,       nodes:8394,        t1:0.516,  t2:0.044},
+    {n:10, ans:724,       nodes:35539,       t1:2.535,  t2:0.194},
+    {n:11, ans:2680,      nodes:166926,      t1:11.986, t2:0.780},
+    {n:12, ans:14200,     nodes:856189,      t1:64.434, t2:4.061},
+    {n:13, ans:73712,     nodes:4674890,     t1:371.071,t2:22.174},
+    {n:14, ans:365596,    nodes:27358553,    t1:2289.220,t2:129.577},
+    {n:15, ans:2279184,   nodes:171129072,   t1:15553.580,t2:829.360},
+    {n:16, ans:14772512,  nodes:1141190303,  t1:105186.138,t2:5651.605}
+  ];
+  var sel = document.getElementById('costN');
+  D.forEach(function(d){ var o = document.createElement('option'); o.value = d.n; o.textContent = d.n; sel.appendChild(o); });
+  function fmt(t){
+    if (t >= 1000) return (t/1000).toFixed(2) + 's';
+    if (t < 0.01) return t.toFixed(3) + 'ms';
+    return t.toFixed(2) + 'ms';
+  }
+  var minL = -3, maxL = 5.5;
+  function yFor(v, yTop, plotH){ return yTop + plotH * (1 - (Math.log10(v) - minL) / (maxL - minL)); }
+  function draw(){
+    var cur = parseInt(sel.value, 10);
+    var x0 = 52, yTop = 34, plotH = 190, plotW = D.length * 44;
+    var body = '';
+    for (var L = -3; L <= 5; L++){
+      var v = Math.pow(10, L), y = yFor(v, yTop, plotH);
+      body += '<line x1="'+x0+'" y1="'+y+'" x2="'+(x0+plotW)+'" y2="'+y+'" stroke="#e6e8eb"/>';
+      body += txt(x0 - 6, y + 4, v >= 1000 ? (v/1000)+'s' : v+'ms', {fs:9.5, fill:'#9aa0a6', an:'end'});
+    }
+    D.forEach(function(d, i){
+      var gx = x0 + i*44 + 6;
+      var selN = d.n === cur;
+      var h1 = yFor(d.t1, yTop, plotH), h2 = yFor(d.t2, yTop, plotH);
+      body += '<rect x="'+gx+'" y="'+h1+'" width="15" height="'+(yFor(0.001, yTop, plotH)-h1)+'" fill="'+(selN?'#1d4ed8':'#93c5fd')+'"/>';
+      body += '<rect x="'+(gx+19)+'" y="'+h2+'" width="15" height="'+(yFor(0.001, yTop, plotH)-h2)+'" fill="'+(selN?'#c2410c':'#fdba74')+'"/>';
+      body += txt(gx + 17, yTop + plotH + 14, String(d.n), {fs:11, fill: selN ? '#1e293b' : '#94a3b8'});
+      if (selN){
+        body += txt(gx + 7, h1 - 5, fmt(d.t1), {fs:9.5, fill:'#1d4ed8'});
+        body += txt(gx + 26, h2 - 5, fmt(d.t2), {fs:9.5, fill:'#c2410c'});
+      }
+    });
+    document.getElementById('costChart').innerHTML = svg(x0 + plotW + 14, yTop + plotH + 30, body);
+    var d = D.filter(function(x){ return x.n === cur; })[0];
+    var ratio = d.t1 / d.t2;
+    note.textContent = 'n=' + d.n + '：答案 ' + d.ans + '，搜索树 ' + d.nodes.toLocaleString('en-US') + ' 个节点；数组版 ' + fmt(d.t1) + '，位版 ' + fmt(d.t2) + '，快 ' + ratio.toFixed(1) + ' 倍';
+    ans.textContent = d.n === 16 ? ('n=16 数组版 105.2s vs 位版 5.65s，约 18.6 倍；剪枝后只探 11.4 亿个节点，是全排列 16! 的约 1/18000')
+                                  : ('位版快 ' + ratio.toFixed(1) + ' 倍（两版搜索树相同，节点数一样，差在每个节点的常数）');
+  }
+  var note = document.getElementById('costNote');
+  var ans = document.getElementById('costAns');
+  sel.addEventListener('change', draw);
+  draw();
+})();
+})();</script>
+</body>
+</html>

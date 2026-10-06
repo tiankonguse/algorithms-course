@@ -19,3 +19,11 @@
 - 5 图 2 演示；自写 `/tmp/br015.js`（WebSocket 版）跑 15 分支逐帧查标红，a×bug 帧 7 现形、c×bug 弹空、正确版 0 误报；CDP 全 PASS（figs 5/5、nav 160、toc 9、viz 2、code 4、pager 链 队列和栈→栈和队列相互实现→最小栈→离散化）、verify_home 160 卡片 PASS。
 - 技术坑：`/json/runtime/evaluate` 不是 CDP HTTP 端点，自写脚本要照 shot_element.js 走 WebSocket + Target.attachToTarget(flatten)；shot_element 的点击参数传字符串 "0" 也是 truthy 会点第一个按钮。
 - 下一课：016。
+
+## 2026-10-05 23:00
+- 取 prompt.md 的「下一课」= **031**（位运算的常见技巧），完成；「下一课」已推进到 **032**。
+- 产出 1 页：`algorithms/bit-tricks.html`（level 2），并入已有「入门」组、插在 `xor-tricks.html` 之后（030 结尾「下一讲继续在位运算上做文章」接得住），json 175 → 176 条，六字段齐全。
+- 六个问题：判 2 的幂、判 3 的幂、最小 2 的幂、区间全体按位与、逆序 32 位、数 1 的个数（+ 汉明距离）。低号课只有一份 Java，页面代码自己改写成 C++（统一 unsigned）。
+- 核心实测结论（/tmp/cpp031）：clang 把 BK 的 `while(n){n&=n-1;}` 识别成 popcount 编成 NEON `cnt`，-O2 下 0.53ms 比手写 SWAR 3.16ms 快 6 倍；-O0 下 SWAR 恒 36.59ms、BK 32.15→235.08ms。全部实现与暴力对拍 0 mismatch。
+- 6 SVG + 3 演示；自写 /tmp/br031/branches.js 跑 6+4+8 分支 ALL PASS，全站 verify_pages PASS、verify_home 176 卡片 PASS、pager 链正确。
+- 技能补三条（course-site-page/SKILL.md）：演示 note 必须带「第 k / n 步」（逐帧脚本按文本变化 break，会提前退出）、图里框内两行文字要加高框与行距、性能数字要连 -O0 一起量并 `-S` grep 指令名确认编译期识别。

@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>递归当工具：逆序栈、排序栈、汉诺塔</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz { margin: 16px 0; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
+  .viz-title { margin: 0 0 8px; font-size: 14px; color: #374151; }
+  .viz-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .cb-sel { font-size: 13px; padding: 3px 8px; }
+  .cb-btn { font-size: 13px; padding: 4px 12px; cursor: pointer; }
+  .peg { fill: none; stroke: #cbd5e1; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>递归当工具：逆序栈、排序栈、汉诺塔</h1>
+      <p class="intro">前面几题递归用来枚举，这一页递归当数据搬运工。题目把辅助容器全禁了，只准用系统栈：逆序栈把栈底捞出来，排序栈把最大值沉底，汉诺塔把移动轨迹摊平。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>这三题的共同约束：只能用栈的 push、pop、isEmpty 三个方法和递归函数，返回值最多单个整数，数组、vector、链表一律不许用。系统栈是唯一的辅助空间。</p>
+      <p>递归在这里扮演「先到底再回程」的搬运工：下去时一路取数，回来时一路放回。取数的方式决定了它拿回什么，放回的方式决定了数据怎么挪。逆序栈和排序栈都建立在同一个动作上：把栈里某个位置的值取出来，其余顺序不动。</p>
+
+      <h2 id="q1">一、递归逆序一个栈</h2>
+      <p>目标是把栈整个倒过来。先解决一个子问题：取出栈底元素，上面的元素盖下来。这个动作叫 bottomOut。</p>
+      <figure class="fig" id="figBottomOut"></figure>
+      <p>bottomOut 递归地弹：弹出栈顶，如果栈空了，弹出来的就是栈底，直接返回；没空，先递归取下面的栈底，返回前把当前这个压回去。整个动作把栈底捞出来，沿途元素一个不少地落回原位。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 用递归函数逆序一个栈（不能用额外容器）</span>
+    <span class="cm">// 栈底元素移除掉，上面的元素盖下来，返回移除掉的栈底元素</span>
+    <span class="kw">int</span> <span class="fn">bottomOut</span>(stack&lt;<span class="kw">int</span>&gt;&amp; st) {
+        <span class="kw">int</span> ans = st.top(); st.pop();
+        <span class="kw">if</span> (st.empty()) <span class="kw">return</span> ans;
+        <span class="kw">int</span> last = bottomOut(st);
+        st.push(ans);
+        <span class="kw">return</span> last;
+    }
+
+    <span class="kw">void</span> <span class="fn">reverse</span>(stack&lt;<span class="kw">int</span>&gt;&amp; st) {
+        <span class="kw">if</span> (st.empty()) <span class="kw">return</span>;
+        <span class="kw">int</span> num = bottomOut(st);
+        reverse(st);
+        st.push(num);
+    }</pre>
+      <p>逆序就三步：bottomOut 取出栈底 num，递归逆序剩下的栈，把 num 压回栈顶。栈底元素最后压，正好落在新栈的顶部。</p>
+      <p>代价是每次 bottomOut 都要走完整个栈：弹到栈底再压回来。实测 n = 1000 时 pop 和 push 各约 50 万次（各 n(n+1)/2），合计约 100 万次，用时 6.7 毫秒。复杂度 O(n²)，多出来的 n 就是反复走完栈的那份。</p>
+
+      <h2 id="q2">二、递归排序一个栈</h2>
+      <p>目标是从栈顶到栈底从小到大，约束照旧：返回值最多单个整数，不许用任何容器。不能像逆序那样一把梭，得把「遍历栈」拆成几个只返回单个整数的递归函数。</p>
+      <p>四个函数凑一套：deep 数栈的深度；max 从栈顶往下数 deep 层找最大值；times 数这个最大值出现了 k 次；down 把这 k 个最大值沉到底，其余元素顺序不变。前三个函数都是弹一遍、记结果、再压回，遍历完栈还是原来的栈。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 用递归函数排序栈：排完序后，从栈顶到栈底从小到大</span>
+    <span class="cm">// 只能使用栈的 push、pop、isEmpty 三个方法和递归函数，</span>
+    <span class="cm">// 除此之外不能使用任何容器，返回值最多为单个整数</span>
+
+    <span class="cm">// 返回栈的深度，不改变栈的数据状况</span>
+    <span class="kw">int</span> <span class="fn">deep</span>(stack&lt;<span class="kw">int</span>&gt;&amp; st) {
+        <span class="kw">if</span> (st.empty()) <span class="kw">return</span> 0;
+        <span class="kw">int</span> num = st.top(); st.pop();
+        <span class="kw">int</span> d = deep(st) + 1;
+        st.push(num);
+        <span class="kw">return</span> d;
+    }
+
+    <span class="cm">// 从栈顶开始往下数 deep 层，返回这 deep 层里的最大值</span>
+    <span class="kw">int</span> <span class="fn">maxNum</span>(stack&lt;<span class="kw">int</span>&gt;&amp; st, <span class="kw">int</span> deep) {
+        <span class="kw">if</span> (deep == 0) <span class="kw">return</span> INT_MIN;
+        <span class="kw">int</span> num = st.top(); st.pop();
+        <span class="kw">int</span> rest = maxNum(st, deep - 1);
+        <span class="kw">int</span> m = max(num, rest);
+        st.push(num);
+        <span class="kw">return</span> m;
+    }
+
+    <span class="cm">// 已知最大值是 m，返回它在栈顶往下 deep 层里出现了几次</span>
+    <span class="kw">int</span> <span class="fn">times</span>(stack&lt;<span class="kw">int</span>&gt;&amp; st, <span class="kw">int</span> deep, <span class="kw">int</span> m) {
+        <span class="kw">if</span> (deep == 0) <span class="kw">return</span> 0;
+        <span class="kw">int</span> num = st.top(); st.pop();
+        <span class="kw">int</span> rest = times(st, deep - 1, m);
+        <span class="kw">int</span> t = rest + (num == m ? 1 : 0);
+        st.push(num);
+        <span class="kw">return</span> t;
+    }
+
+    <span class="cm">// 把这 k 个最大值沉底，剩下元素的数据状况不变</span>
+    <span class="kw">void</span> <span class="fn">down</span>(stack&lt;<span class="kw">int</span>&gt;&amp; st, <span class="kw">int</span> deep, <span class="kw">int</span> m, <span class="kw">int</span> k) {
+        <span class="kw">if</span> (deep == 0) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; k; i++) st.push(m);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> num = st.top(); st.pop();
+            down(st, deep - 1, m, k);
+            <span class="kw">if</span> (num != m) st.push(num);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">sortStack</span>(stack&lt;<span class="kw">int</span>&gt;&amp; st) {
+        <span class="kw">int</span> d = deep(st);
+        <span class="kw">while</span> (d &gt; 0) {
+            <span class="kw">int</span> m = maxNum(st, d);
+            <span class="kw">int</span> k = times(st, d, m);
+            down(st, d, m, k);
+            d -= k;
+        }
+    }</pre>
+      <p>主循环每轮干一件事：当前未排序区（栈顶往下 deep 层）的最大值，全部沉到这一区底部。沉完这一轮，未排序区从底部缩进去 k 个位置，deep 减 k。轮数正好等于栈里不同值的个数。</p>
+      <figure class="fig" id="figSink"></figure>
+      <p>实测一个顶到底为 [1,5,4,5,3,2,3,1,4,2] 的栈，5 轮排完（值 1、2、3、4、5 各一轮），弹压合计 220 次。随机 100 个元素、值域 20，20 轮、弹压约 6900 次；全相等的栈 1 轮就完。复杂度 O(n²)。</p>
+
+      <h2 id="q3">三、汉诺塔</h2>
+      <p>n 层圆盘从「左」柱搬到「右」柱，一次只能动一个，大盘不能压小盘，打印最优移动轨迹。递归式子一句话：把上面 i−1 层从 from 挪到 other，第 i 层从 from 挪到 to，再把 i−1 层从 other 挪到 to。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 打印 n 层汉诺塔问题的最优移动轨迹</span>
+    <span class="cm">// from 是起点柱，to 是终点柱，other 是第三根柱</span>
+
+    <span class="kw">void</span> <span class="fn">f</span>(<span class="kw">int</span> i, <span class="kw">const</span> <span class="kw">string</span>&amp; from, <span class="kw">const</span> <span class="kw">string</span>&amp; to, <span class="kw">const</span> <span class="kw">string</span>&amp; other) {
+        <span class="kw">if</span> (i == 1) {
+            cout &lt;&lt; "移动圆盘 1 从 " &lt;&lt; from &lt;&lt; " 到 " &lt;&lt; to &lt;&lt; "\n";
+        } <span class="kw">else</span> {
+            f(i - 1, from, other, to);
+            cout &lt;&lt; "移动圆盘 " &lt;&lt; i &lt;&lt; " 从 " &lt;&lt; from &lt;&lt; " 到 " &lt;&lt; to &lt;&lt; "\n";
+            f(i - 1, other, to, from);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">hanoi</span>(<span class="kw">int</span> n) {
+        <span class="kw">if</span> (n &gt; 0) f(n, "左", "右", "中");
+    }</pre>
+      <p>这个式子为什么是最优：第 n 层大圆盘从 from 到 to 只动一次，动之前上面 n−1 层必须整体挪到 other（唯一的合法去向），动之后还得整体挪回 to。于是 T(n) = 2T(n−1) + 1，T(1) = 1，解出来 T(n) = 2ⁿ − 1。</p>
+      <figure class="fig" id="figHanoiTree"></figure>
+      <p>步数与递归调用次数是同一个小数：调用总数恰好也等于 2ⁿ − 1。n = 3 是 7 步，n = 10 是 1023 步，n = 20 是 1048575 步。n 每加 1，步数翻倍再减一。</p>
+
+      <h2 id="viz1">演示一：逆序栈逐帧</h2>
+      <div class="viz" id="vizRev">
+        <p class="viz-title">bottomOut 取栈底，reverse 递归，栈底元素最后压回顶部</p>
+        <div id="vizRevBody"></div>
+        <div class="viz-controls" id="vizRevCtl"></div>
+      </div>
+
+      <h2 id="viz2">演示二：排序栈逐帧</h2>
+      <div class="viz" id="vizSort">
+        <p class="viz-title">每轮找当前范围最大值，数出 k 次，一次沉底，范围缩短 k</p>
+        <div id="vizSortBody"></div>
+        <div class="viz-controls" id="vizSortCtl"></div>
+      </div>
+
+      <h2 id="viz3">演示三：汉诺塔逐帧</h2>
+      <div class="viz" id="vizHanoi">
+        <p class="viz-title">三柱动画：每步动一个盘，大盘永远不压小盘</p>
+        <div id="vizHanoiBody"></div>
+        <div class="viz-controls" id="vizHanoiCtl"></div>
+      </div>
+
+      <h2 id="sum">四、总结</h2>
+      <p>逆序栈靠 bottomOut 取底加 reverse 递归，弹压次数约 n²，O(n²)。</p>
+      <p>排序栈把「遍历栈」拆成 deep、max、times、down 四个单返回值的递归函数，每轮把一种最大值沉底，轮数等于不同值个数，O(n²)。</p>
+      <p>汉诺塔是纯分治：T(n) = 2T(n−1) + 1，步数 2ⁿ − 1，n 每加一层就翻倍。</p>
+      <p>三题的共同点是递归栈当容器：系统栈既是调用载体，也是唯一辅助空间。后面做树、图的递归题，同样的「到底取数、回程放回」姿势会一直出现。</p>
+
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>有重复项数组的去重全排列</td><td><a href="https://leetcode.cn/problems/permutations-ii/" target="_blank">leetcode.cn/problems/permutations-ii</a></td></tr>
+        <tr><td>牛客</td><td>字符串的全部子序列</td><td><a href="https://www.nowcoder.com/practice/92e6247998294f2c933906fdedbc6e6a" target="_blank">www.nowcoder.com/practice/92e6247998294f2c933906fdedbc6e6a</a></td></tr>
+        <tr><td>LeetCode</td><td>给你一个整数数组 nums ，其中可能包含重复元素，请你返回该数组所有可能的组合</td><td><a href="https://leetcode.cn/problems/subsets-ii/" target="_blank">leetcode.cn/problems/subsets-ii</a></td></tr>
+        <tr><td>LeetCode</td><td>没有重复项数字的全排列</td><td><a href="https://leetcode.cn/problems/permutations/" target="_blank">leetcode.cn/problems/permutations</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解038【必备】常见经典递归过程解析</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5', gray: '#9aa0a6', text: '#1f2937', dim: '#6b7280', line: '#cbd5e1', bg: '#f6f7f9' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function box(x, y, w, h, o) { o = o || {}; return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx || 4) + '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.line) + '" stroke-width="' + (o.sw || 1.2) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>'; }
+  function txt(x, y, s, o) { o = o || {}; return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 13) + '" fill="' + (o.fill || C.text) + '" font-weight="' + (o.weight || 'normal') + '" text-anchor="' + (o.anchor || 'middle') + '" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">' + esc(s) + '</text>'; }
+  function line(x1, y1, x2, y2, o) { o = o || {}; return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.line) + '" stroke-width="' + (o.w || 1.2) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + ' stroke-linecap="round"/>'; }
+  function svg(g, w, h) { return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" width="100%" role="img">' + g + '</svg>'; }
+  function mulberry32(a) { return function () { a = (a + 0x6D2B79F5) | 0; var t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+  // ============ 图 1：bottomOut 三阶段 ============
+  (function () {
+    var W = 760, H = 360, g = '';
+    g += txt(380, 26, 'bottomOut：弹到底拿栈底，回程把沿途的压回', { size: 15, weight: 600 });
+    function drawStack(cx, topY, arr, label, L) {
+      g += txt(cx, topY - 10, label, { size: 12, fill: C.dim });
+      for (var i = 0; i < arr.length; i++) {
+        var y = topY + i * 34;
+        var isOut = L.out !== undefined && arr.length - 1 - i === L.out;
+        g += box(cx - 30, y, 60, 28, { fill: isOut ? C.orangeBg : C.bg, stroke: isOut ? C.orange : C.line });
+        g += txt(cx, y + 19, arr[i], { size: 13, fill: isOut ? C.orange : C.text, weight: isOut ? 600 : 'normal' });
+      }
+      return topY + arr.length * 34;
+    }
+    // 左：调用前
+    var y1 = drawStack(120, 60, [1, 2, 3, 4, 5], '调用前（1 在栈底）', {});
+    g += txt(120, y1 + 20, '顶 → 底', { size: 11, fill: C.dim });
+    // 中：递归弹到底
+    g += box(240, 70, 250, 130, { fill: C.blueBg, stroke: C.blue, sw: 1.5 });
+    g += txt(365, 96, '递归下去', { size: 13, weight: 600, fill: C.blue });
+    g += txt(365, 124, '弹 5 → 弹 4 → 弹 3 → 弹 2 → 弹 1', { size: 12 });
+    g += txt(365, 148, '栈空，返回 1', { size: 12, fill: C.orange, weight: 600 });
+    g += txt(365, 176, '1 是栈底，被取出', { size: 12 });
+    // 右：回程
+    var y2 = drawStack(610, 60, [2, 3, 4, 5], '回程压回（栈底取出后）', {});
+    g += txt(610, y2 + 20, '顶 → 底', { size: 11, fill: C.dim });
+    g += txt(365, 262, '回程：每个非栈底元素压回原位', { size: 12, fill: C.text });
+    g += box(240, 280, 250, 44, { fill: C.orangeBg, stroke: C.orange });
+    g += txt(365, 308, '结果：1 被取出，其余顺序不动', { size: 12, fill: C.orange, weight: 600 });
+    g += txt(380, 342, '每次 bottomOut 都弹到底再压回，所以逆序整体是 O(n²)', { size: 12, fill: C.dim });
+    document.getElementById('figBottomOut').innerHTML = '<figcaption>bottomOut 一趟走完整个栈，把栈底元素带回来。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 图 2：排序栈沉底 ============
+  (function () {
+    var W = 760, H = 330, g = '';
+    g += txt(380, 26, '排序栈：每轮把最大值沉到未排序区底部', { size: 15, weight: 600 });
+    // 三列：初始 / 第一轮沉 5 / 第二轮沉 4 ...
+    var states = [
+      { title: '初始（顶→底）', arr: [5, 1, 4, 2], note: 'deep=4，max=5，k=1', top: 56 },
+      { title: '沉 5', arr: [1, 4, 2, 5], note: '5 到底，deep→3', top: 56 },
+      { title: '沉 4', arr: [1, 2, 4, 5], note: '4 到底，deep→2', top: 56 },
+      { title: '沉 2、沉 1', arr: [1, 2, 4, 5], note: 'deep→0，排完', top: 56 }
+    ];
+    for (var s = 0; s < states.length; s++) {
+      var st = states[s], cx = 120 + s * 170;
+      g += txt(cx, 46, st.title, { size: 12, fill: C.dim });
+      for (var i = 0; i < st.arr.length; i++) {
+        var y = st.top + i * 30;
+        var isSorted = s >= 3 ? true : (s >= 1 && i >= st.arr.length - s);
+        g += box(cx - 28, y, 56, 24, { fill: isSorted ? C.orangeBg : C.bg, stroke: isSorted ? C.orange : C.line });
+        g += txt(cx, y + 17, st.arr[i], { size: 12, fill: isSorted ? C.orange : C.text, weight: isSorted ? 600 : 'normal' });
+      }
+      g += txt(cx, st.top + st.arr.length * 30 + 14, st.note, { size: 11, fill: C.blue });
+      if (s < 3) g += txt(cx + 85, st.top + 40, '→', { size: 16, fill: C.gray });
+    }
+    g += box(60, 268, 640, 40, { fill: C.bg, stroke: C.line });
+    g += txt(380, 294, '橙色 = 已沉底的有序区。轮数 = 不同值个数：这里 4 个值，4 轮', { size: 12 });
+    document.getElementById('figSink').innerHTML = '<figcaption>每轮沉掉一种最大值，未排序区从底部缩短。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 图 3：汉诺塔递归树（n=3） ============
+  (function () {
+    var W = 760, H = 340, g = '';
+    g += txt(380, 24, '汉诺塔递归树：f(3) = f(2) + 盘3 动一次 + f(2)', { size: 15, weight: 600 });
+    g += box(300, 44, 160, 30, { fill: C.blue, stroke: C.blue }); g += txt(380, 63, 'f(3) 左→右', { size: 12, fill: '#fff', weight: 600 });
+    g += line(380, 74, 200, 130); g += line(380, 74, 560, 130);
+    g += box(120, 118, 160, 30, { fill: C.blueBg, stroke: C.blue }); g += txt(200, 137, 'f(2) 左→中', { size: 12, fill: C.blue, weight: 600 });
+    g += box(480, 118, 160, 30, { fill: C.blueBg, stroke: C.blue }); g += txt(560, 137, 'f(2) 中→右', { size: 12, fill: C.blue, weight: 600 });
+    g += txt(380, 104, '盘 3：左→右', { size: 11, fill: C.orange, weight: 600 });
+    g += line(200, 148, 110, 204); g += line(200, 148, 290, 204);
+    g += line(560, 148, 470, 204); g += line(560, 148, 650, 204);
+    var leaf = [
+      { x: 110, s: '盘1 左→右' }, { x: 290, s: '盘1 右→中' },
+      { x: 470, s: '盘1 中→左' }, { x: 650, s: '盘1 左→右' }
+    ];
+    for (var i = 0; i < 4; i++) {
+      g += box(leaf[i].x - 80, 192, 160, 28, { fill: C.bg, stroke: C.line });
+      g += txt(leaf[i].x, 210, leaf[i].s, { size: 11, fill: C.text });
+    }
+    g += txt(380, 246, '盘 2：左→中（f(2) 内部）、中→右（另一个 f(2) 内部）', { size: 11, fill: C.dim });
+    g += txt(380, 274, '节点数 = 调用数 = 1 + 2 + 4 = 7 = 步数（2³ − 1）', { size: 12, fill: C.blue, weight: 600 });
+    g += txt(380, 310, 'n 层：T(n) = 2T(n−1) + 1，步数 2ⁿ − 1', { size: 12, fill: C.dim });
+    document.getElementById('figHanoiTree').innerHTML = '<figcaption>递归树是满二叉树，节点数恰好等于步数。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 演示一：逆序栈逐帧 ============
+  (function () {
+    var body = document.getElementById('vizRevBody');
+    var ctl = document.getElementById('vizRevCtl');
+    var PRESETS = [5, 4]; // 栈长度
+    var sel = document.createElement('select'); sel.className = 'cb-sel';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var op = document.createElement('option'); op.value = i; op.text = '栈长 ' + PRESETS[i] + '（顶到底 5 4 3 2 1）'; sel.appendChild(op);
+    }
+    var bPrev = document.createElement('button'); bPrev.className = 'cb-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'cb-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'cb-btn'; bReset.textContent = '重置';
+    ctl.appendChild(sel); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+
+    // 生成步骤：reverse 递归展开。arr[0] 是栈顶，数组即「顶到底」排列
+    function genSteps(n) {
+      var steps = [];
+      var arr = [];
+      for (var i = n; i >= 1; i--) arr.push(i); // 顶到底 [n, n-1, ..., 1]
+      function bottomOut(deep, depth) {
+        // 取栈底（最后一个元素），其余保持原相对顺序放回
+        var bottom = arr[arr.length - 1];
+        var tmp = arr.splice(0, deep); // 弹出 deep 层
+        var rest = tmp.slice(0, deep - 1);
+        arr = rest.concat(arr);
+        steps.push({ arr: arr.slice(), tag: 'bottom', num: bottom, depth: depth });
+        return bottom;
+      }
+      (function rev(depth) {
+        if (arr.length === 0) return;
+        var num = bottomOut(arr.length, depth);
+        rev(depth + 1);
+        arr.unshift(num); // 压回栈顶
+        steps.push({ arr: arr.slice(), tag: 'push', num: num, depth: depth });
+      })(1);
+      return steps;
+    }
+    var cur = 0, steps = genSteps(5);
+
+    function render() {
+      var W = 740, H = 320, g = '';
+      var n = PRESETS[parseInt(sel.value, 10)];
+      var st = steps[cur], arr = st.arr;
+      g += txt(370, 22, '栈（顶 → 底）　第 ' + (cur + 1) + ' / ' + steps.length + ' 步', { size: 14, weight: 600 });
+      for (var i = 0; i < arr.length; i++) {
+        g += box(300 + (i % 4) * 70, 60 + Math.floor(i / 4) * 60, 56, 28, { fill: i === 0 ? C.blueBg : C.bg, stroke: i === 0 ? C.blue : C.line });
+        g += txt(328 + (i % 4) * 70, 79 + Math.floor(i / 4) * 60, arr[i], { size: 13, fill: i === 0 ? C.blue : C.text, weight: i === 0 ? 600 : 'normal' });
+      }
+      if (arr.length === 0) g += txt(370, 90, '（空栈）', { size: 12, fill: C.dim });
+      var note;
+      if (st.tag === 'bottom') note = 'bottomOut 第 ' + st.depth + ' 层：取出栈底 ' + st.num + '，其余压回原位';
+      else note = 'reverse 第 ' + st.depth + ' 层：把 ' + st.num + ' 压回栈顶';
+      var done = st.tag === 'push' && st.depth === 1;
+      if (done) note = '完成：顶到底 ' + st.arr.join(' ') + '，与原栈相反';
+      g += txt(370, 200, note, { size: 12, fill: done ? C.orange : C.text, weight: done ? 600 : 'normal' });
+      g += txt(370, 240, '预期：顶到底 1 2 3 ... n，弹压合计约 n²', { size: 12, fill: C.dim });
+      body.innerHTML = svg(g, W, H);
+    }
+    sel.addEventListener('change', function () { steps = genSteps(PRESETS[parseInt(sel.value, 10)]); cur = 0; render(); });
+    bPrev.addEventListener('click', function () { if (cur > 0) cur--; render(); });
+    bNext.addEventListener('click', function () { if (cur < steps.length - 1) cur++; render(); });
+    bReset.addEventListener('click', function () { cur = 0; render(); });
+    render();
+  })();
+
+  // ============ 演示二：排序栈逐帧 ============
+  (function () {
+    var body = document.getElementById('vizSortBody');
+    var ctl = document.getElementById('vizSortCtl');
+    var PRESETS = [[5, 1, 4, 2], [1, 5, 4, 5, 3, 2, 3, 1, 4, 2]];
+    var sel = document.createElement('select'); sel.className = 'cb-sel';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var op = document.createElement('option'); op.value = i; op.text = '顶到底 [' + PRESETS[i].join(',') + ']'; sel.appendChild(op);
+    }
+    var bPrev = document.createElement('button'); bPrev.className = 'cb-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'cb-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'cb-btn'; bReset.textContent = '重置';
+    ctl.appendChild(sel); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+
+    function genSteps(nums) {
+      var steps = [];
+      var arr = nums.slice(); // 顶到底
+      steps.push({ arr: arr.slice(), phase: 'deep', d: arr.length, m: null, k: null });
+      var d = arr.length;
+      var round = 0;
+      while (d > 0) {
+        round++;
+        var sub = arr.slice(0, d);
+        var m = Math.max.apply(null, sub);
+        var k = 0, j;
+        for (j = 0; j < sub.length; j++) if (sub[j] === m) k++;
+        steps.push({ arr: arr.slice(), phase: 'max', d: d, m: m, k: k });
+        // down：把前 d 层里 k 个 m 沉到前 d 层底部
+        var keep = [], mm = [];
+        for (j = 0; j < d; j++) { if (arr[j] === m) mm.push(arr[j]); else keep.push(arr[j]); }
+        var rest = arr.slice(d);
+        arr = keep.concat(mm, rest);
+        steps.push({ arr: arr.slice(), phase: 'down', d: d, m: m, k: k });
+        d -= k;
+      }
+      steps.push({ arr: arr.slice(), phase: 'done', d: 0, m: null, k: null });
+      return steps;
+    }
+    var cur = 0, steps = genSteps(PRESETS[0]);
+
+    function render() {
+      var W = 760, H = 340, g = '';
+      var nums = PRESETS[parseInt(sel.value, 10)];
+      var n = nums.length, st = steps[cur];
+      g += txt(380, 22, '栈（顶 → 底）　第 ' + (cur + 1) + ' / ' + steps.length + ' 步', { size: 14, weight: 600 });
+      var cols = Math.min(n, 8), rows = Math.ceil(n / cols);
+      var topY = 48;
+      for (var i = 0; i < n; i++) {
+        var sorted = st.phase === 'done' || (st.phase === 'down' && i >= st.d);
+        var inRange = i < st.d && st.phase !== 'deep';
+        var isM = inRange && st.m !== null && st.arr[i] === st.m;
+        g += box(240 + (i % cols) * 70, topY + Math.floor(i / cols) * 40, 60, 32, {
+          fill: isM ? C.orangeBg : inRange ? C.blueBg : C.bg,
+          stroke: isM ? C.orange : sorted ? '#c9ced4' : inRange ? C.blue : C.line,
+          sw: isM ? 2 : 1.2
+        });
+        g += txt(270 + (i % cols) * 70, topY + 12 + Math.floor(i / cols) * 40, st.arr[i], { size: 13, fill: isM ? C.orange : C.text, weight: isM ? 600 : 'normal' });
+      }
+      var note;
+      if (st.phase === 'deep') note = 'deep 数出栈深 ' + st.d + '，未排序区 = 前 ' + st.d + ' 层';
+      else if (st.phase === 'max') note = '第 ' + Math.ceil(cur / 2) + ' 轮：max = ' + st.m + '，出现 k = ' + st.k + ' 次';
+      else if (st.phase === 'down') note = 'down：把 ' + st.k + ' 个 ' + st.m + ' 沉底，未排序区缩短到 ' + st.d + ' − ' + st.k + ' = ' + (st.d - st.k);
+      else {
+        var uniq = {}, dc = 0, q;
+        for (q = 0; q < nums.length; q++) if (!uniq[nums[q]]) { uniq[nums[q]] = true; dc++; }
+        note = '排完：顶到底 ' + st.arr.join(' ') + '，共 ' + dc + ' 轮（不同值个数）';
+      }
+      g += txt(380, topY + rows * 40 + 24, note, { size: 12, fill: st.phase === 'done' ? C.orange : C.text, weight: st.phase === 'done' ? 600 : 'normal' });
+      g += txt(380, topY + rows * 40 + 50, '蓝框 = 当前未排序区，橙框 = 本轮最大值，灰框 = 已沉底', { size: 11, fill: C.dim });
+      body.innerHTML = svg(g, W, H);
+    }
+    sel.addEventListener('change', function () { steps = genSteps(PRESETS[parseInt(sel.value, 10)]); cur = 0; render(); });
+    bPrev.addEventListener('click', function () { if (cur > 0) cur--; render(); });
+    bNext.addEventListener('click', function () { if (cur < steps.length - 1) cur++; render(); });
+    bReset.addEventListener('click', function () { cur = 0; render(); });
+    render();
+  })();
+
+  // ============ 演示三：汉诺塔逐帧 ============
+  (function () {
+    var body = document.getElementById('vizHanoiBody');
+    var ctl = document.getElementById('vizHanoiCtl');
+    var PRESETS = [3, 4];
+    var sel = document.createElement('select'); sel.className = 'cb-sel';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var op = document.createElement('option'); op.value = i; op.text = 'n = ' + PRESETS[i] + '（' + (Math.pow(2, PRESETS[i]) - 1) + ' 步）'; sel.appendChild(op);
+    }
+    var bPrev = document.createElement('button'); bPrev.className = 'cb-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'cb-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'cb-btn'; bReset.textContent = '重置';
+    ctl.appendChild(sel); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+
+    function genMoves(n) {
+      var moves = [];
+      (function f(i, from, to, other) {
+        if (i === 1) moves.push({ disk: 1, from: from, to: to });
+        else { f(i - 1, from, other, to); moves.push({ disk: i, from: from, to: to }); f(i - 1, other, to, from); }
+      })(n, 0, 2, 1);
+      return moves;
+    }
+    var n = 3, moves = genMoves(3), cur = 0;
+
+    function render() {
+      var W = 760, H = 340, g = '';
+      var pegs = [[], [], []];
+      for (var i = n; i >= 1; i--) pegs[0].push(i);
+      var mv = null;
+      if (cur > 0) {
+        for (var m = 0; m < cur; m++) {
+          var mo = moves[m];
+          var d = pegs[mo.from].pop();
+          pegs[mo.to].push(d);
+        }
+        mv = moves[cur - 1];
+      }
+      var names = ['左', '中', '右'];
+      var px = [140, 380, 620];
+      // 柱
+      for (var p = 0; p < 3; p++) {
+        g += line(px[p], 60, px[p], 250, { stroke: '#c9ced4', w: 3 });
+        g += box(px[p] - 60, 250, 120, 8, { fill: '#e5e7eb', stroke: 'none' });
+        g += txt(px[p], 286, names[p], { size: 13, fill: C.text, weight: 600 });
+        // 盘（底到顶）
+        var y = 244;
+        for (var k = 0; k < pegs[p].length; k++) {
+          var d = pegs[p][k], w = 24 + d * 22;
+          var isMoving = mv && mv.disk === d && (mv.from === p || mv.to === p);
+          g += box(px[p] - w / 2, y - 14, w, 14, { fill: isMoving ? C.orange : C.blue, stroke: isMoving ? C.orange : C.blue });
+          g += txt(px[p], y - 3, d, { size: 10, fill: '#fff' });
+          y -= 14;
+        }
+      }
+      var note;
+      if (cur === 0) note = '初始：' + n + ' 层全在左柱，目标搬到右柱';
+      else note = '第 ' + cur + ' / ' + moves.length + ' 步：盘 ' + mv.disk + ' ' + names[mv.from] + ' → ' + names[mv.to];
+      var done = cur === moves.length;
+      if (done) note = '完成：全部搬到右柱，共 ' + moves.length + ' 步（2ⁿ − 1）';
+      g += txt(380, 318, note, { size: 13, fill: done ? C.orange : C.text, weight: done ? 600 : 'normal' });
+      body.innerHTML = svg(g, W, H);
+    }
+    sel.addEventListener('change', function () { n = PRESETS[parseInt(sel.value, 10)]; moves = genMoves(n); cur = 0; render(); });
+    bPrev.addEventListener('click', function () { if (cur > 0) cur--; render(); });
+    bNext.addEventListener('click', function () { if (cur < moves.length) cur++; render(); });
+    bReset.addEventListener('click', function () { cur = 0; render(); });
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

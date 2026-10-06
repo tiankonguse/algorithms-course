@@ -2,7 +2,16 @@
 
 进度表在 `algorithms-course/prompt.md`，本文件只记每次执行的概要，方便下次接手。
 
-## 2026-10-05（本次）
+## 2026-10-06（本次）
+
+- 读了 prompt.md，下一课 = 033（位运算实现加减乘除，`src/class033/BitOperationAddMinusMultiplyDivide.java`，低号课单 Java）。开工前探过 /tmp 与 algorithms/，无 033 残留。
+- 产出 1 页：`algorithms/bit-arithmetic.html`，并入「入门」组、插在 `bitset.html` 之后（json 177 → 178）。6 图 + 3 演示（加法逐帧 6 分支 / 龟速乘逐帧 5 分支 / 除法逐帧 32 步含「跳到下次命中」）。
+- 正文数字全部实测（/tmp/cpp033/src/bitmath.cpp、exp2.cpp、verify.cpp）：进位末尾 0 个数严格递增（50 万组 0 反例）→ 最多 32 轮；add 随机 200 万对平均 5.24 轮 / 最长 22 轮，构造的 add(2147483647,1) 与 add(-1,1) 走满 32 轮；除数左移版 20 万组随机正整数 100% 算错（y<<29 当 int 读已是 −536870912）；命中轮次里 y<<i 超界 0 次；INT_MIN 九组边界全对；龟速乘对 __int128 参考 5200836 组 0 MISMATCH。
+- 踩坑：① `ri(INT_MIN, INT_MAX)` 里 `hi-lo+1` 有符号溢出触发 UB，clang -O2 在不同调用点算出不同的 a（表现为 Div 返回值与独立程序矛盾）——全 32 位随机要写 `(int)rng()`；② 页面代码内部统一用 unsigned，对拍的真值也要按 32 位回绕比；③ 本环境 `captureScreenshot` 带 captureBeyondViewport 会挂死，改成「固定视口 + scrollIntoView + 截视口 + sips 裁」；④ SVG helper 漏传 fill 会渲染成黑底，bbox 查不出。
+- 自检：verify_pages（figs/svg 6/6、nav 178、toc 8、viz 3、code 5、pager「位图 ↔ 离散化」）、三个演示逐帧、自写 branches.js 15 分支末帧答案全对、verify_home 178 卡片 PASS，六字段计数全齐。
+- 收口：prompt.md 下一课改成 **034**、033 写入已完成；daily log（2026-10-06.md）追加细节。
+
+## 2026-10-05
 
 - 读了 prompt.md，下一课 = 017（二叉树及其三种序的递归实现，`src/class017/BinaryTreeTraversalRecursion.java`，低号课单 Java）。
 - 产出 1 页：`algorithms/binary-tree-traversal.html`，并入「入门」组、插在 `deque.html` 之后（json 161 → 162 条）。站点第一个二叉树页面。

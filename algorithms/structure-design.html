@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>复合结构设计：LRU、中位数与频率栈 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.sd-sel,.sd-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.sd-sel:focus{outline:none;border-color:var(--accent);}
+.sd-btn{cursor:pointer;}
+.sd-btn:hover{border-color:var(--accent);color:var(--accent);}
+.sd-btn:disabled{opacity:.4;cursor:default;}
+.sd-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.sd-ctl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--text-dim);}
+.legend .dot.hot{background:var(--accent-soft);border-color:var(--accent);}
+.legend .dot.del{background:#fee2e2;border-color:#dc2626;}
+.sd-note{font-size:13px;color:var(--text-dim);margin-top:6px;min-height:20px;}
+.sd-note b{color:var(--accent);font-weight:600;}
+.sd-note.bad b{color:#dc2626;}
+.sd-list{display:flex;gap:0;align-items:center;flex-wrap:wrap;margin-top:6px;}
+.sd-node{
+  border:1px solid var(--border);border-radius:6px;background:var(--bg);
+  padding:5px 10px;text-align:center;font-size:14px;min-width:70px;
+  font-variant-numeric:tabular-nums;position:relative;
+}
+.sd-node.hot{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);}
+.sd-node.del{border-color:#dc2626;background:#fee2e2;color:#b91c1c;}
+.sd-node .sd-key{font-size:11px;color:var(--text-dim);display:block;}
+.sd-arrow{color:#c9ced4;font-size:16px;padding:0 2px;}
+.sd-heaps{display:flex;gap:34px;align-items:flex-start;flex-wrap:wrap;}
+.sd-heap{min-width:110px;}
+.sd-heap-h{font-size:12px;color:var(--text-dim);margin-bottom:6px;text-align:center;}
+.sd-heap-cells{display:flex;flex-direction:column-reverse;gap:3px;}
+.sd-heap-cell{
+  border:1px solid var(--border);border-radius:5px;background:var(--bg);
+  padding:5px 0;text-align:center;font-size:14px;min-width:56px;
+  font-variant-numeric:tabular-nums;
+}
+.sd-heap-cell.top{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);}
+.sd-layer{display:inline-flex;gap:4px;align-items:center;}
+.sd-layer-tag{font-size:12px;color:var(--text-dim);min-width:34px;text-align:right;}
+.sd-layer-cell{
+  border:1px solid var(--border);border-radius:5px;background:var(--bg);
+  padding:4px 9px;font-size:13px;min-width:34px;text-align:center;
+  font-variant-numeric:tabular-nums;
+}
+.sd-layer-cell.top{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);}
+.sd-layer-cell.del{border-color:#dc2626;background:#fee2e2;color:#b91c1c;}
+.sd-tag{font-size:11px;color:var(--text-dim);margin-top:5px;text-align:center;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>复合结构设计：LRU、中位数与频率栈</h1>
+      <p class="intro">上一讲哈希表配数组，管的是「定位 + 随机访问」。这一讲哈希表要配的是能排次序的结构：双链表排「最近使用」，双堆放「两半的分界」，分层栈排「频率优先」，桶链表排「计数的阶梯」。四题都是同一句口诀：哈希表负责 O(1) 找到人，另一半结构负责把次序记对。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>缓存要淘汰、数据流要取中位数、统计要问最大频率，这些场景的共性是「既能按名字找到东西，又要维护一种次序」。哈希表给前者，但哈希表本身不保序；次序得靠另一个结构扛。</p>
+      <p>次序的种类决定了结构的选择：淘汰最近最久未用，要的是「位置可变的有序队列」，双链表最合适；动态中位数，要的是「维护两个半区」，堆正好；按频率取栈顶，要的是「按频率分层的栈」；查最大最小计数，要的是「按计数分桶的链表」。</p>
+
+      <h2 id="lru">一、LRU：哈希表 + 双链表</h2>
+      <p>题目 2（LeetCode 146）：实现一个缓存，get 和 put 都是 O(1)，容量满了淘汰「最久未使用」的键。</p>
+      <p>朴素做法：数组里存 (key, value, 最后使用时间)，每次 get/put 全数组扫一遍找键，淘汰时再扫一遍找最旧的。容量 128、20 万次操作实测 21.7 毫秒，键多到几百个时就扛不住了。</p>
+      <p>组合：哈希表 key → 链表节点，双链表按「最近使用」排：表头最久未用、表尾最近使用。</p>
+      <ul>
+        <li><code>get(key)</code>：哈希表找到节点，把节点移到链表尾，返回值。命中一次就代表刚用过，必须挪</li>
+        <li><code>put(key, value)</code>：键已存在 → 更新值、移到链表尾；不存在 → 若已满，删链表头（哈希表同步删），新节点挂到链表尾</li>
+      </ul>
+      <p>链表尾是「最近」，链表头是「最久」，所以淘汰永远发生在表头，O(1)。挪动节点要断两边的链、接上新位置，正好是上一讲双链表那套操作。</p>
+
+      <figure class="fig" id="figLRU"></figure>
+      <figcaption>哈希表指到节点，双链表排访问顺序：表头最久未用，表尾最近使用，淘汰只动表头</figcaption>
+
+      <div class="viz" id="vizLRU"></div>
+
+    <pre class="code"><span class="cm">// LRU：哈希表定位节点，双链表维护访问顺序，表头最久未用、表尾最近使用</span>
+    <span class="kw">class</span> LRUCache {
+    <span class="kw">public</span>:
+        <span class="kw">struct</span> DoubleNode {
+            <span class="kw">int</span> key, val;
+            DoubleNode *last, *next;
+            DoubleNode(<span class="kw">int</span> k, <span class="kw">int</span> v) : key(k), val(v), last(<span class="kw">nullptr</span>), next(<span class="kw">nullptr</span>) {}
+        };
+
+        <span class="kw">struct</span> DoubleList {
+            DoubleNode *head = <span class="kw">nullptr</span>, *tail = <span class="kw">nullptr</span>;
+
+            <span class="kw">void</span> <span class="fn">addNode</span>(DoubleNode *newNode) {
+                <span class="kw">if</span> (!newNode) <span class="kw">return</span>;
+                <span class="kw">if</span> (!head) {
+                    head = tail = newNode;
+                } <span class="kw">else</span> {
+                    tail-&gt;next = newNode;
+                    newNode-&gt;last = tail;
+                    tail = newNode;
+                }
+            }
+
+            <span class="kw">void</span> <span class="fn">moveNodeToTail</span>(DoubleNode *node) {
+                <span class="kw">if</span> (tail == node) <span class="kw">return</span>;
+                <span class="kw">if</span> (head == node) {
+                    head = node-&gt;next;
+                    head-&gt;last = <span class="kw">nullptr</span>;
+                } <span class="kw">else</span> {
+                    node-&gt;last-&gt;next = node-&gt;next;
+                    node-&gt;next-&gt;last = node-&gt;last;
+                }
+                node-&gt;last = tail;
+                node-&gt;next = <span class="kw">nullptr</span>;
+                tail-&gt;next = node;
+                tail = node;
+            }
+
+            DoubleNode *removeHead() {
+                <span class="kw">if</span> (!head) <span class="kw">return</span> <span class="kw">nullptr</span>;
+                DoubleNode *ans = head;
+                <span class="kw">if</span> (head == tail) {
+                    head = tail = <span class="kw">nullptr</span>;
+                } <span class="kw">else</span> {
+                    head = ans-&gt;next;
+                    ans-&gt;next = <span class="kw">nullptr</span>;
+                    head-&gt;last = <span class="kw">nullptr</span>;
+                }
+                <span class="kw">return</span> ans;
+            }
+        };
+
+        unordered_map&lt;<span class="kw">int</span>, DoubleNode *&gt; keyNodeMap;
+        DoubleList nodeList;
+        <span class="kw">int</span> capacity;
+
+        LRUCache(<span class="kw">int</span> cap) : capacity(cap) {}
+
+        <span class="kw">int</span> <span class="fn">get</span>(<span class="kw">int</span> key) {
+            <span class="kw">if</span> (keyNodeMap.count(key)) {
+                DoubleNode *ans = keyNodeMap[key];
+                nodeList.moveNodeToTail(ans);
+                <span class="kw">return</span> ans-&gt;val;
+            }
+            <span class="kw">return</span> -1;
+        }
+
+        <span class="kw">void</span> <span class="fn">put</span>(<span class="kw">int</span> key, <span class="kw">int</span> value) {
+            <span class="kw">if</span> (keyNodeMap.count(key)) {
+                DoubleNode *node = keyNodeMap[key];
+                node-&gt;val = value;
+                nodeList.moveNodeToTail(node);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> ((<span class="kw">int</span>)keyNodeMap.size() == capacity) {
+                    keyNodeMap.erase(nodeList.removeHead()-&gt;key);
+                }
+                DoubleNode *newNode = <span class="kw">new</span> DoubleNode(key, value);
+                keyNodeMap[key] = newNode;
+                nodeList.addNode(newNode);
+            }
+        }
+    };</pre>
+
+      <p>实测同样 20 万次操作：哈希 + 链表 4.9 毫秒，比朴素快 4.4 倍。键再多也基本不涨，因为哈希表平均 O(1)，链表操作只碰两个节点。</p>
+
+      <h2 id="median">二、数据流中位数：双堆</h2>
+      <p>题目 5（LeetCode 295）：一个数据流不断 addNum，随时可以 findMedian 问当前中位数，两个操作都要快。</p>
+      <p>朴素做法：维护一个有序数组，插入时二分找位置再搬移。10 万次 addNum 实测 147 毫秒，平均每次插入要搬 2.5 万个元素，n 越大越慢。</p>
+      <p>组合：两个堆。大根堆放左半，堆顶是左半最大；小根堆放右半，堆顶是右半最小。两个堆的大小差不超过 1。</p>
+      <ul>
+        <li><code>addNum(num)</code>：num 比左堆顶小或相等就进左堆，否则进右堆；两边差 2 时从多的那边挪一个堆顶到另一边</li>
+        <li><code>findMedian()</code>：两堆一样大，中位数是两堆顶的平均；不一样大，中位数是多的那堆堆顶</li>
+      </ul>
+      <p>为什么是堆：只需要知道分界处的两个值（左半最大、右半最小），不需要整段有序。堆顶恰好就是这两个值，插入和取顶都是 O(log n)。</p>
+
+      <figure class="fig" id="figMedian"></figure>
+      <figcaption>左半是大根堆、右半是小根堆，堆顶就是分界。中位数永远在其中一个堆顶上</figcaption>
+
+      <div class="viz" id="vizMedian"></div>
+
+    <pre class="code"><span class="cm">// 数据流中位数：大根堆放左半、小根堆放右半，两边数量差最多 1</span>
+    <span class="kw">class</span> MedianFinder {
+    <span class="kw">public</span>:
+        priority_queue&lt;<span class="kw">int</span>&gt; maxHeap;                              <span class="cm">// 左半，堆顶是左侧最大</span>
+        priority_queue&lt;<span class="kw">int</span>, vector&lt;<span class="kw">int</span>&gt;, greater&lt;<span class="kw">int</span>&gt;&gt; minHeap;   <span class="cm">// 右半，堆顶是右侧最小</span>
+
+        <span class="kw">void</span> <span class="fn">addNum</span>(<span class="kw">int</span> num) {
+            <span class="kw">if</span> (maxHeap.empty() || maxHeap.top() &gt;= num) {
+                maxHeap.push(num);
+            } <span class="kw">else</span> {
+                minHeap.push(num);
+            }
+            balance();
+        }
+
+        <span class="kw">double</span> <span class="fn">findMedian</span>() {
+            <span class="kw">if</span> (maxHeap.size() == minHeap.size()) {
+                <span class="kw">return</span> ((<span class="kw">double</span>)maxHeap.top() + minHeap.top()) / 2;
+            }
+            <span class="kw">return</span> maxHeap.size() &gt; minHeap.size() ? maxHeap.top() : minHeap.top();
+        }
+
+        <span class="kw">void</span> <span class="fn">balance</span>() {
+            <span class="kw">if</span> (abs((<span class="kw">int</span>)maxHeap.size() - (<span class="kw">int</span>)minHeap.size()) == 2) {
+                <span class="kw">if</span> (maxHeap.size() &gt; minHeap.size()) {
+                    minHeap.push(maxHeap.top());
+                    maxHeap.pop();
+                } <span class="kw">else</span> {
+                    maxHeap.push(minHeap.top());
+                    minHeap.pop();
+                }
+            }
+        }
+    };</pre>
+
+      <p>实测 10 万次 addNum + 5 万次查询：双堆 2.1 毫秒，有序数组 147 毫秒，差 71 倍。</p>
+
+      <h2 id="freq">三、最大频率栈：分层栈</h2>
+      <p>题目 6（LeetCode 895）：实现一个栈，push 照常，pop 返回「频率最高」的数；频率一样时返回「最近 push」的那个。</p>
+      <p>普通栈只记一个顺序，管不了频率。朴素做法：每次 pop 全表扫一遍找最大频率，再从 push 序列倒着找第一个。20 万次操作实测 20.7 毫秒，值越多越慢。</p>
+      <p>组合：按频率分层。cntValues[f] 是频率 f 的一列值（每层内部是栈，后进先出），valueTimes 记每个值当前的频率，topTimes 记当前最高频率。</p>
+      <ul>
+        <li><code>push(val)</code>：值频率 +1，塞进对应那层的栈顶；topTimes 跟着涨</li>
+        <li><code>pop()</code>：取 topTimes 那一层的栈顶；层空了 topTimes 减一；值的频率 -1</li>
+      </ul>
+      <p>频率一样的数，谁后 push 谁在层内栈顶，pop 时先出，正好满足「同频率取最近」。</p>
+
+      <figure class="fig" id="figFreq"></figure>
+      <figcaption>每一层是频率 f 的栈，pop 永远在最顶层取。层空了 topTimes 才往下退</figcaption>
+
+      <div class="viz" id="vizFreq"></div>
+
+    <pre class="code"><span class="cm">// 最大频率栈：按频率分层存值，每层内部是栈，pop 取最高层栈顶</span>
+    <span class="kw">class</span> FreqStack {
+    <span class="kw">public</span>:
+        <span class="kw">int</span> topTimes = 0;
+        unordered_map&lt;<span class="kw">int</span>, vector&lt;<span class="kw">int</span>&gt;&gt; cntValues;   <span class="cm">// 频率 -&gt; 该频率的数，后进先出</span>
+        unordered_map&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt; valueTimes;          <span class="cm">// 数 -&gt; 当前频率</span>
+
+        <span class="kw">void</span> <span class="fn">push</span>(<span class="kw">int</span> val) {
+            <span class="kw">int</span> cur = ++valueTimes[val];
+            cntValues[cur].push_back(val);
+            topTimes = max(topTimes, cur);
+        }
+
+        <span class="kw">int</span> <span class="fn">pop</span>() {
+            vector&lt;<span class="kw">int</span>&gt; &amp;topVec = cntValues[topTimes];
+            <span class="kw">int</span> ans = topVec.back();
+            topVec.pop_back();
+            <span class="kw">if</span> (topVec.empty()) {
+                cntValues.erase(topTimes--);
+            }
+            <span class="kw">int</span> times = valueTimes[ans];
+            <span class="kw">if</span> (times == 1) {
+                valueTimes.erase(ans);
+            } <span class="kw">else</span> {
+                valueTimes[ans] = times - 1;
+            }
+            <span class="kw">return</span> ans;
+        }
+    };</pre>
+
+      <p>实测 20 万次 push/pop：分层 3.8 毫秒，朴素全表扫 20.7 毫秒，快 5.4 倍。频率层数最多是最大频率，栈深加起来正好是元素个数，空间 O(n)。</p>
+
+      <h2 id="allone">四、全 O(1) 结构：桶链表</h2>
+      <p>题目 7（LeetCode 432）：键是字符串，支持 inc、dec、getMaxKey、getMinKey，四个操作全 O(1)。</p>
+      <p>朴素做法：哈希表记每个键的计数，问最大最小计数时全表扫。2 万个键、10 万次操作（含 5000 次查询）实测 2235 毫秒，查询一次扫 2 万键。</p>
+      <p>组合：桶 + 双向链表。每个桶存「计数相同的键集合」，桶按计数从小到大串成链表；哈希表把键指到它所在的桶。链表两端加哨兵：head 代表计数 0，tail 代表无穷大。</p>
+      <ul>
+        <li><code>inc(key)</code>：键从当前桶挪到计数 +1 的桶；没有这个桶就新建一个插到中间</li>
+        <li><code>dec(key)</code>：键挪到计数 -1 的桶；计数归零直接从哈希表删掉</li>
+        <li><code>getMaxKey()</code> / <code>getMinKey()</code>：取链表两端桶里随便一个键</li>
+      </ul>
+      <p>挪键时先看「隔壁桶的计数是不是正好差 1」，是就蹭进去，不是才新建桶。桶空了就摘掉。这样桶的数量永远不超过键的数量，链表上每个操作都是 O(1)。</p>
+
+      <figure class="fig" id="figAllOne"></figure>
+      <figcaption>桶按计数串成双向链表，哈希表指到桶。最大最小计数就是链表两端的桶，不用扫</figcaption>
+
+    <pre class="code"><span class="cm">// 全 O(1) 结构：哈希表指向桶，桶按计数串成双向链表，桶内哈希集合存同计数的键</span>
+    <span class="kw">class</span> AllOne {
+    <span class="kw">public</span>:
+        <span class="kw">struct</span> Bucket {
+            unordered_set&lt;<span class="kw">string</span>&gt; set;
+            <span class="kw">int</span> cnt;
+            Bucket *last, *next;
+            Bucket(<span class="kw">string</span> s, <span class="kw">int</span> c) : cnt(c), last(<span class="kw">nullptr</span>), next(<span class="kw">nullptr</span>) {
+                set.insert(s);
+            }
+        };
+
+        <span class="kw">void</span> <span class="fn">insert</span>(Bucket *cur, Bucket *pos) {
+            cur-&gt;next-&gt;last = pos;
+            pos-&gt;next = cur-&gt;next;
+            cur-&gt;next = pos;
+            pos-&gt;last = cur;
+        }
+
+        <span class="kw">void</span> <span class="fn">remove</span>(Bucket *cur) {
+            cur-&gt;last-&gt;next = cur-&gt;next;
+            cur-&gt;next-&gt;last = cur-&gt;last;
+        }
+
+        Bucket *head;
+        Bucket *tail;
+        unordered_map&lt;<span class="kw">string</span>, Bucket *&gt; map;
+
+        AllOne() {
+            head = <span class="kw">new</span> Bucket("", 0);
+            tail = <span class="kw">new</span> Bucket("", INT_MAX);
+            head-&gt;next = tail;
+            tail-&gt;last = head;
+        }
+
+        <span class="kw">void</span> <span class="fn">inc</span>(<span class="kw">string</span> key) {
+            <span class="kw">if</span> (!map.count(key)) {
+                <span class="kw">if</span> (head-&gt;next-&gt;cnt == 1) {
+                    map[key] = head-&gt;next;
+                    head-&gt;next-&gt;set.insert(key);
+                } <span class="kw">else</span> {
+                    Bucket *newBucket = <span class="kw">new</span> Bucket(key, 1);
+                    map[key] = newBucket;
+                    insert(head, newBucket);
+                }
+            } <span class="kw">else</span> {
+                Bucket *bucket = map[key];
+                <span class="kw">if</span> (bucket-&gt;next-&gt;cnt == bucket-&gt;cnt + 1) {
+                    map[key] = bucket-&gt;next;
+                    bucket-&gt;next-&gt;set.insert(key);
+                } <span class="kw">else</span> {
+                    Bucket *newBucket = <span class="kw">new</span> Bucket(key, bucket-&gt;cnt + 1);
+                    map[key] = newBucket;
+                    insert(bucket, newBucket);
+                }
+                bucket-&gt;set.erase(key);
+                <span class="kw">if</span> (bucket-&gt;set.empty()) {
+                    remove(bucket);
+                }
+            }
+        }
+
+        <span class="kw">void</span> <span class="fn">dec</span>(<span class="kw">string</span> key) {
+            Bucket *bucket = map[key];
+            <span class="kw">if</span> (bucket-&gt;cnt == 1) {
+                map.erase(key);
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (bucket-&gt;last-&gt;cnt == bucket-&gt;cnt - 1) {
+                    map[key] = bucket-&gt;last;
+                    bucket-&gt;last-&gt;set.insert(key);
+                } <span class="kw">else</span> {
+                    Bucket *newBucket = <span class="kw">new</span> Bucket(key, bucket-&gt;cnt - 1);
+                    map[key] = newBucket;
+                    insert(bucket-&gt;last, newBucket);
+                }
+            }
+            bucket-&gt;set.erase(key);
+            <span class="kw">if</span> (bucket-&gt;set.empty()) {
+                remove(bucket);
+            }
+        }
+
+        <span class="kw">string</span> getMaxKey() {
+            <span class="kw">return</span> *tail-&gt;last-&gt;set.begin();
+        }
+
+        <span class="kw">string</span> getMinKey() {
+            <span class="kw">return</span> *head-&gt;next-&gt;set.begin();
+        }
+    };</pre>
+
+      <p>实测同一份操作：桶链表 11.8 毫秒，朴素全表扫 2235 毫秒，快 189.5 倍。多个键同计数时返回任意一个，题目允许。</p>
+
+      <h2 id="complexity">五、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>结构</th><th>get / put</th><th>addNum / findMedian</th><th>push / pop</th><th>inc / dec / 极值</th></tr>
+        <tr><td>LRU（哈希 + 双链表）</td><td>O(1)</td><td>—</td><td>—</td><td>—</td></tr>
+        <tr><td>中位数（双堆）</td><td>—</td><td>O(log n) / O(1)</td><td>—</td><td>—</td></tr>
+        <tr><td>频率栈（分层栈）</td><td>—</td><td>—</td><td>O(1)</td><td>—</td></tr>
+        <tr><td>全 O(1)（桶链表）</td><td>—</td><td>—</td><td>—</td><td>O(1)</td></tr>
+      </table>
+      <p>四题空间都是 O(n)。双堆的堆顶只暴露一个值，是「只要分界不要全序」的典型；桶链表的哨兵让 inc/dec 的边界判断省掉一堆特判。</p>
+
+      <h2 id="summary">六、总结</h2>
+      <p>四题放到一起，结构选择看的是「要哪种次序」：</p>
+      <ul>
+        <li>淘汰最久未用 → 双链表，表头就是答案，挪动 O(1)</li>
+        <li>动态中位数 → 双堆，堆顶就是分界，只维护两个极值</li>
+        <li>频率优先的栈 → 分层栈，每层一个栈，顶层就是答案</li>
+        <li>任意键的最大最小计数 → 桶链表，桶按计数排序，两端就是答案</li>
+      </ul>
+      <p>共同点：哈希表永远负责「按名字 O(1) 找到」，次序结构负责「按规则 O(1) 回答」。设计题答得好不好，就看能不能说清「哈希表里存什么、另一半结构维护什么次序、为什么这个次序选这种结构」。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>全O(1)的数据结构</td><td><a href="https://leetcode.cn/problems/all-oone-data-structure/" target="_blank">leetcode.cn/problems/all-oone-data-structure</a></td></tr>
+        <tr><td>LeetCode</td><td>快速获得数据流的中位数的结构</td><td><a href="https://leetcode.cn/problems/find-median-from-data-stream/" target="_blank">leetcode.cn/problems/find-median-from-data-stream</a></td></tr>
+        <tr><td>LeetCode</td><td>最大频率栈</td><td><a href="https://leetcode.cn/problems/maximum-frequency-stack/" target="_blank">leetcode.cn/problems/maximum-frequency-stack</a></td></tr>
+        <tr><td>LeetCode</td><td>插入、删除和获取随机元素O(1)时间的结构</td><td><a href="https://leetcode.cn/problems/insert-delete-getrandom-o1/" target="_blank">leetcode.cn/problems/insert-delete-getrandom-o1</a></td></tr>
+        <tr><td>牛客</td><td>setAll功能的哈希表</td><td><a href="https://www.nowcoder.com/practice/7c4559f138e74ceb9ba57d76fd169967" target="_blank">www.nowcoder.com/practice/7c4559f138e74ceb9ba57d76fd169967</a></td></tr>
+        <tr><td>LeetCode</td><td>实现LRU结构</td><td><a href="https://leetcode.cn/problems/lru-cache/" target="_blank">leetcode.cn/problems/lru-cache</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解035【必备】数据结构设计高频题</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function svg(w,h){var s=document.createElementNS(NS,'svg');s.setAttribute('viewBox','0 0 '+w+' '+h);s.setAttribute('width','100%');return s;}
+  function g(){return document.createElementNS(NS,'g');}
+  function rect(x,y,w,h,rx,fill,stroke){var r=document.createElementNS(NS,'rect');r.setAttribute('x',x);r.setAttribute('y',y);r.setAttribute('width',w);r.setAttribute('height',h);r.setAttribute('rx',rx||4);if(fill)r.setAttribute('fill',fill);if(stroke)r.setAttribute('stroke',stroke);r.setAttribute('stroke-width',1);return r;}
+  function text(x,y,s,size,fill,anchor){var t=document.createElementNS(NS,'text');t.setAttribute('x',x);t.setAttribute('y',y);t.setAttribute('font-size',size||13);if(fill)t.setAttribute('fill',fill);if(anchor)t.setAttribute('text-anchor',anchor);t.textContent=s;return t;}
+  function line(x1,y1,x2,y2,color){var l=document.createElementNS(NS,'line');l.setAttribute('x1',x1);l.setAttribute('y1',y1);l.setAttribute('x2',x2);l.setAttribute('y2',y2);l.setAttribute('stroke',color||'#c9ced4');l.setAttribute('stroke-width',1);return l;}
+
+  // ===== Figure 1: LRU 结构 =====
+  var fig1 = document.getElementById('figLRU');
+  var s1 = svg(660, 240);
+  s1.appendChild(text(60, 26, 'LRU：哈希表定位节点，双链表排访问顺序', 14, '#111827'));
+  // 链表：head(最久) -> node1 -> node2 -> node3(最新)
+  var nodes = [['1','10'],['2','20'],['3','30']];
+  var g1 = g(); g1.setAttribute('transform','translate(40,60)');
+  g1.appendChild(text(0, -8, '表头 = 最久未用', 12, '#ea580c'));
+  nodes.forEach(function(n,i){
+    g1.appendChild(rect(i*110, 0, 86, 44, 6, i===0?'#ffedd5':'#ffffff', i===0?'#ea580c':'#e6e8eb'));
+    g1.appendChild(text(i*110+43, 20, 'key '+n[0], 12, i===0?'#ea580c':'#111827', 'middle'));
+    g1.appendChild(text(i*110+43, 38, 'val '+n[1], 12, i===0?'#ea580c':'#111827', 'middle'));
+    if (i < 2) g1.appendChild(text(i*110+104, 24, '→', 14, '#c9ced4', 'middle'));
+  });
+  g1.appendChild(text(340, -8, '表尾 = 最近使用', 12, '#2563eb'));
+  s1.appendChild(g1);
+  // map 箭头
+  var g1m = g(); g1m.setAttribute('transform','translate(40,150)');
+  g1m.appendChild(rect(0,0,110,34,4,'#dbeafe','#2563eb'));
+  g1m.appendChild(text(55,22,'map: 1→N1',12,'#2563eb','middle'));
+  g1m.appendChild(rect(140,0,110,34,4,'#dbeafe','#2563eb'));
+  g1m.appendChild(text(195,22,'2→N2',12,'#2563eb','middle'));
+  g1m.appendChild(rect(280,0,110,34,4,'#dbeafe','#2563eb'));
+  g1m.appendChild(text(335,22,'3→N3',12,'#2563eb','middle'));
+  s1.appendChild(g1m);
+  s1.appendChild(line(95,150,83,104,'#c9ced4'));
+  s1.appendChild(line(235,150,193,104,'#c9ced4'));
+  s1.appendChild(line(375,150,373,104,'#c9ced4'));
+  fig1.appendChild(s1);
+
+  // ===== Figure 2: 双堆 =====
+  var fig2 = document.getElementById('figMedian');
+  var s2 = svg(660, 250);
+  s2.appendChild(text(60, 26, '中位数：大根堆放左半、小根堆放右半，堆顶是分界', 14, '#111827'));
+  // 左堆
+  var g2 = g(); g2.setAttribute('transform','translate(50,50)');
+  g2.appendChild(rect(0,0,170,140,6,'#f6f7f9','#e6e8eb'));
+  g2.appendChild(text(85,22,'左半 · 大根堆',12,'#6b7280','middle'));
+  [['1'],['2'],['3']].forEach(function(c,i){
+    g2.appendChild(rect(52, 34+i*34, 66, 28, 4, i===2?'#dbeafe':'#ffffff', i===2?'#2563eb':'#e6e8eb'));
+    g2.appendChild(text(85, 53+i*34, c[0], 13, i===2?'#2563eb':'#111827', 'middle'));
+  });
+  g2.appendChild(text(85, 150, '堆顶 = 左半最大 = 3', 12, '#2563eb', 'middle'));
+  s2.appendChild(g2);
+  s2.appendChild(text(255, 120, '分界', 13, '#9aa0a6', 'middle'));
+  s2.appendChild(line(235, 105, 235, 130, '#c9ced4'));
+  // 右堆
+  var g2r = g(); g2r.setAttribute('transform','translate(400,50)');
+  g2r.appendChild(rect(0,0,170,140,6,'#f6f7f9','#e6e8eb'));
+  g2r.appendChild(text(85,22,'右半 · 小根堆',12,'#6b7280','middle'));
+  [['4'],['5'],['6']].forEach(function(c,i){
+    g2r.appendChild(rect(52, 34+i*34, 66, 28, 4, i===0?'#dbeafe':'#ffffff', i===0?'#2563eb':'#e6e8eb'));
+    g2r.appendChild(text(85, 53+i*34, c[0], 13, i===0?'#2563eb':'#111827', 'middle'));
+  });
+  g2r.appendChild(text(85, 150, '堆顶 = 右半最小 = 4', 12, '#2563eb', 'middle'));
+  s2.appendChild(g2r);
+  s2.appendChild(text(330, 205, '两堆一样大：中位数 = (3 + 4) / 2 = 3.5', 13, '#111827', 'middle'));
+  fig2.appendChild(s2);
+
+  // ===== Figure 3: 频率分层栈 =====
+  var fig3 = document.getElementById('figFreq');
+  var s3 = svg(660, 210);
+  s3.appendChild(text(60, 26, '最大频率栈：频率 1 一层、频率 2 一层，pop 从最顶层取', 14, '#111827'));
+  var g3 = g(); g3.setAttribute('transform','translate(60,50)');
+  // 层 1
+  g3.appendChild(text(0, 20, '频率 1', 12, '#6b7280'));
+  [['2'],['3']].forEach(function(c,i){
+    g3.appendChild(rect(70+i*48, 0, 42, 30, 4, '#ffffff', '#e6e8eb'));
+    g3.appendChild(text(91+i*48, 20, c[0], 13, '#111827', 'middle'));
+  });
+  // 层 2
+  g3.appendChild(text(0, 78, '频率 2', 12, '#6b7280'));
+  g3.appendChild(rect(70, 58, 42, 30, 4, '#dbeafe', '#2563eb'));
+  g3.appendChild(text(91, 78, '1', 13, '#2563eb', 'middle'));
+  g3.appendChild(text(140, 78, '← pop 先拿这里', 12, '#2563eb'));
+  // 值频率表
+  g3.appendChild(text(0, 128, 'valueTimes', 12, '#6b7280'));
+  [['1','2'],['2','1'],['3','1']].forEach(function(c,i){
+    g3.appendChild(rect(70+i*70, 108, 62, 30, 4, '#f6f7f9', '#e6e8eb'));
+    g3.appendChild(text(101+i*70, 128, c[0]+' ×'+c[1], 12, '#111827', 'middle'));
+  });
+  s3.appendChild(g3);
+  s3.appendChild(text(330, 190, 'topTimes = 2：只认最高层，层空才往下退', 12, '#6b7280', 'middle'));
+  fig3.appendChild(s3);
+
+  // ===== Figure 4: 桶链表 =====
+  var fig4 = document.getElementById('figAllOne');
+  var s4 = svg(660, 230);
+  s4.appendChild(text(60, 26, '全 O(1)：桶按计数串成双向链表，头尾哨兵，map 指到桶', 14, '#111827'));
+  var g4 = g(); g4.setAttribute('transform','translate(30,50)');
+  var buckets = [
+    {tag:'head', cnt:'0', cls:'#f6f7f9', w:66},
+    {tag:'cnt=1', cnt:'b, c', cls:'#ffffff', w:110},
+    {tag:'cnt=2', cnt:'a', cls:'#ffffff', w:110},
+    {tag:'tail', cnt:'∞', cls:'#f6f7f9', w:66}
+  ];
+  var x = 0;
+  buckets.forEach(function(b,i){
+    g4.appendChild(rect(x, 0, b.w, 48, 6, b.cls, '#e6e8eb'));
+    g4.appendChild(text(x+b.w/2, 19, b.tag, 12, '#6b7280', 'middle'));
+    g4.appendChild(text(x+b.w/2, 38, b.cnt, 12, i===0||i===3?'#9aa0a6':'#111827', 'middle'));
+    if (i < buckets.length-1) g4.appendChild(text(x+b.w+4, 26, '⇄', 13, '#c9ced4', 'middle'));
+    x += b.w + 20;
+  });
+  s4.appendChild(g4);
+  // map 行
+  var g4m = g(); g4m.setAttribute('transform','translate(30,130)');
+  g4m.appendChild(rect(0,0,150,34,4,'#dbeafe','#2563eb'));
+  g4m.appendChild(text(75,22,'map: a→cnt=2 桶',12,'#2563eb','middle'));
+  g4m.appendChild(rect(180,0,150,34,4,'#dbeafe','#2563eb'));
+  g4m.appendChild(text(255,22,'b→cnt=1 桶',12,'#2563eb','middle'));
+  s4.appendChild(g4m);
+  s4.appendChild(line(115,130,105,98,'#c9ced4'));
+  s4.appendChild(line(295,130,295,98,'#c9ced4'));
+  s4.appendChild(text(330, 210, 'getMaxKey = tail 前一个桶，getMinKey = head 后一个桶', 12, '#6b7280', 'middle'));
+  fig4.appendChild(s4);
+
+  // ===== 演示 1: LRU 操作台 =====
+  var wrap1 = document.getElementById('vizLRU');
+  wrap1.innerHTML =
+    '<div class="viz-title">LRU 操作台：容量 3，看 get 挪节点、put 淘汰表头</div>' +
+    '<div class="viz-body"></div>' +
+    '<div class="viz-controls"></div>';
+  var body1 = wrap1.querySelector('.viz-body');
+  var ctl1 = wrap1.querySelector('.viz-controls');
+  var ops1 = [
+    {op:'put', k:1, v:10},
+    {op:'put', k:2, v:20},
+    {op:'put', k:3, v:30},
+    {op:'get', k:1, ans:10, note:'命中，1 挪到表尾'},
+    {op:'put', k:4, v:40, note:'已满，淘汰表头的 2'},
+    {op:'get', k:2, ans:-1, note:'2 已被淘汰，-1'},
+    {op:'get', k:3, ans:30, note:'命中，3 挪到表尾'},
+    {op:'get', k:4, ans:40, note:'命中，4 挪到表尾'}
+  ];
+  var lru = {cap:3, order:[], map:{}, nextId:1};
+  var step1 = 0;
+  function nodeHtml(id, k, v, cls){
+    return '<div class="sd-node'+(cls?' '+cls:'')+'"><span class="sd-key">#'+id+' · key '+k+'</span>'+v+'</div>';
+  }
+  function render1(){
+    var html = '<div class="sd-list">';
+    lru.order.forEach(function(id, i){
+      var n = lru.map[id];
+      html += nodeHtml(id, n.k, n.v, i===0?'del':'');
+      if (i < lru.order.length-1) html += '<span class="sd-arrow">→</span>';
+    });
+    html += '</div><div class="sd-tag">表头（最久未用）→ 表尾（最近使用）</div>';
+    var note = '';
+    if (step1 > 0) {
+      var o = ops1[step1-1];
+      if (o.op==='put') note = 'put('+o.k+', '+o.v+')'+(o.note?'　'+o.note:'');
+      else note = 'get('+o.k+') → <b>'+o.ans+'</b>'+(o.note?'　'+o.note:'');
+    } else note = '初始状态，容量 3';
+    html += '<div class="sd-note">'+note+'</div>';
+    body1.innerHTML = html;
+    var b = document.createElement('button');
+    b.className = 'sd-btn';
+    b.textContent = step1 < ops1.length ? '下一步 ('+(step1+1)+' / '+ops1.length+')' : '重置';
+    ctl1.innerHTML = '';
+    ctl1.appendChild(b);
+    b.onclick = function(){
+      if (step1 >= ops1.length) { step1 = 0; lru = {cap:3, order:[], map:{}, nextId:1}; }
+      else {
+        var o = ops1[step1];
+        if (o.op==='put') {
+          var found = null;
+          for (var id in lru.map) if (lru.map[id].k===o.k) { found = lru.map[id]; break; }
+          if (found) {
+            found.v = o.v;
+            lru.order.splice(lru.order.indexOf(found.id), 1);
+            lru.order.push(found.id);
+          } else {
+            if (lru.order.length === lru.cap) {
+              var old = lru.order.shift();
+              delete lru.map[old];
+            }
+            var nid = lru.nextId++;
+            lru.map[nid] = {id:nid, k:o.k, v:o.v};
+            lru.order.push(nid);
+          }
+        } else if (o.op==='get') {
+          for (var id2 in lru.map) if (lru.map[id2].k===o.k) {
+            lru.order.splice(lru.order.indexOf(+id2), 1);
+            lru.order.push(+id2);
+            break;
+          }
+        }
+        step1++;
+      }
+      render1();
+    };
+  }
+  render1();
+
+  // ===== 演示 2: 中位数操作台 =====
+  var wrap2 = document.getElementById('vizMedian');
+  wrap2.innerHTML =
+    '<div class="viz-title">中位数操作台：addNum 依次进堆，看两堆怎么分、中位数从哪来</div>' +
+    '<div class="viz-body"></div>' +
+    '<div class="viz-controls"></div>';
+  var body2 = wrap2.querySelector('.viz-body');
+  var ctl2 = wrap2.querySelector('.viz-controls');
+  var seq2 = [1,2,3,4,5,6];
+  var st2 = {left:[], right:[]};
+  var step2 = 0;
+  function heapCells(arr, topIdx, isLeft){
+    var html = '<div class="sd-heap-cells">';
+    arr.forEach(function(v, i){
+      html += '<div class="sd-heap-cell'+(i===topIdx?' top':'')+'">'+v+'</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+  function median2(){
+    var l = st2.left, r = st2.right;
+    if (l.length === r.length) return (l[0]+r[0])/2;
+    return l.length > r.length ? l[0] : r[0];
+  }
+  function render2(){
+    var html = '<div class="sd-heaps">' +
+      '<div class="sd-heap"><div class="sd-heap-h">左半 · 大根堆（堆顶最大）</div>' + heapCells(st2.left, 0, true) + '</div>' +
+      '<div class="sd-heap"><div class="sd-heap-h">右半 · 小根堆（堆顶最小）</div>' + heapCells(st2.right, 0, false) + '</div>' +
+      '</div>';
+    var note = '';
+    if (step2 > 0) {
+      note = 'addNum('+seq2[step2-1]+') → 中位数 = <b>'+median2()+'</b>'+(step2%2?'（多的那堆堆顶）':'（两堆一样大，取平均）');
+    } else note = '初始状态，两堆都空';
+    html += '<div class="sd-note">'+note+'</div>';
+    body2.innerHTML = html;
+    var b = document.createElement('button');
+    b.className = 'sd-btn';
+    b.textContent = step2 < seq2.length ? '下一步 ('+(step2+1)+' / '+seq2.length+')' : '重置';
+    ctl2.innerHTML = '';
+    ctl2.appendChild(b);
+    b.onclick = function(){
+      if (step2 >= seq2.length) { step2 = 0; st2 = {left:[], right:[]}; }
+      else {
+        var num = seq2[step2];
+        if (st2.left.length===0 || st2.left[0] >= num) {
+          st2.left.push(num);
+          st2.left.sort(function(a,b){return b-a;});
+        } else {
+          st2.right.push(num);
+          st2.right.sort(function(a,b){return a-b;});
+        }
+        if (Math.abs(st2.left.length - st2.right.length) === 2) {
+          if (st2.left.length > st2.right.length) {
+            st2.right.push(st2.left.shift());
+            st2.right.sort(function(a,b){return a-b;});
+          } else {
+            st2.left.push(st2.right.shift());
+            st2.left.sort(function(a,b){return b-a;});
+          }
+        }
+        step2++;
+      }
+      render2();
+    };
+  }
+  render2();
+
+  // ===== 演示 3: 频率栈操作台 =====
+  var wrap3 = document.getElementById('vizFreq');
+  wrap3.innerHTML =
+    '<div class="viz-title">最大频率栈：push 1,2,1,3 后连续 pop，看分层与 topTimes 怎么配合</div>' +
+    '<div class="viz-body"></div>' +
+    '<div class="viz-controls"></div>';
+  var body3 = wrap3.querySelector('.viz-body');
+  var ctl3 = wrap3.querySelector('.viz-controls');
+  var ops3 = [
+    {op:'push', v:1}, {op:'push', v:2}, {op:'push', v:1}, {op:'push', v:3},
+    {op:'pop', ans:1, note:'频率 2 层栈顶是 1'},
+    {op:'pop', ans:3, note:'层 2 空了，topTimes 降到 1；层 1 栈顶是 3'},
+    {op:'pop', ans:2, note:'层 1 栈顶是 2'},
+    {op:'pop', ans:1, note:'层 1 栈顶是 1'}
+  ];
+  var st3 = {layers:{}, times:{}, topTimes:0};
+  var step3 = 0;
+  function render3(){
+    var maxF = Math.max(st3.topTimes, 1);
+    var html = '';
+    for (var f = maxF; f >= 1; f--) {
+      var layer = st3.layers[f] || [];
+      var isTop = f === st3.topTimes;
+      var cells = layer.map(function(v, i){
+        var last = i === layer.length-1;
+        return '<span class="sd-layer-cell'+(isTop&&last?' top':'')+'">'+v+'</span>';
+      }).join('');
+      html += '<div class="sd-layer"><span class="sd-layer-tag">频率 '+f+'</span><div class="sd-layer-cell" style="opacity:.35;border:none;background:none;">[</div>'+cells+'<div class="sd-layer-cell" style="opacity:.35;border:none;background:none;">]</div>'+(isTop?'<span style="font-size:12px;color:var(--accent);margin-left:6px;">← topTimes 层</span>':'')+'</div><div style="height:6px;"></div>';
+    }
+    html += '<div style="font-size:12px;color:var(--text-dim);margin-top:6px;">valueTimes：' +
+      Object.keys(st3.times).map(function(k){ return k+' ×'+st3.times[k]; }).join('　') + '　　topTimes = <b>'+st3.topTimes+'</b></div>';
+    var note = '';
+    if (step3 > 0) {
+      var o = ops3[step3-1];
+      note = (o.op==='push' ? 'push('+o.v+')' : 'pop() → <b>'+o.ans+'</b>'+(o.note?'　'+o.note:''));
+    } else note = '初始状态';
+    html += '<div class="sd-note">'+note+'</div>';
+    body3.innerHTML = html;
+    var b = document.createElement('button');
+    b.className = 'sd-btn';
+    b.textContent = step3 < ops3.length ? '下一步 ('+(step3+1)+' / '+ops3.length+')' : '重置';
+    ctl3.innerHTML = '';
+    ctl3.appendChild(b);
+    b.onclick = function(){
+      if (step3 >= ops3.length) { step3 = 0; st3 = {layers:{}, times:{}, topTimes:0}; }
+      else {
+        var o = ops3[step3];
+        if (o.op==='push') {
+          var cur = (st3.times[o.v] || 0) + 1;
+          st3.times[o.v] = cur;
+          if (!st3.layers[cur]) st3.layers[cur] = [];
+          st3.layers[cur].push(o.v);
+          st3.topTimes = Math.max(st3.topTimes, cur);
+        } else {
+          var vec = st3.layers[st3.topTimes];
+          var ans = vec.pop();
+          if (vec.length === 0) { delete st3.layers[st3.topTimes]; st3.topTimes--; }
+          var t = st3.times[ans];
+          if (t === 1) delete st3.times[ans];
+          else st3.times[ans] = t - 1;
+        }
+        step3++;
+      }
+      render3();
+    };
+  }
+  render3();
+})();
+</script>
+</body>
+</html>

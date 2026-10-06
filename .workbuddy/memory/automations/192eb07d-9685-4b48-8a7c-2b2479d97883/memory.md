@@ -32,3 +32,15 @@
   - 自检：verify_pages PASS（figs/svg 5/5、nav 161、viz 2、code 4、pager「最小栈 | 离散化」）、verify_home PASS（161 卡片）、AI 味与杂字扫描干净。json 160 → 161。
   - 收口：prompt.md（016 已完成、下一课 017）、memory 日志 2026-10-05.md、技能第十二节补了四条经验（切片替换炸文件、rebuild 停末帧、模拟器要防断链、随机序列要加权）。
 - 无遗留问题。
+
+## 2026-10-06 00:00
+- 任务：转换下一课 → 读取 prompt.md 得到「下一课 032（位图）」。
+- 执行：主循环直做，产出 1 页 `algorithms/bitset.html`，并入「入门」组、插在 bit-tricks 之后（discretize 之前）。
+  - 材料：PPT 2 页（位图原理 + LeetCode 2166 Design Bitset）；`src/class032/` 两份低号课风格 Java（Code01_Bitset、Code02_DesignBitsetTest），无 C++ 版，页面代码自己改写 C++（数组用 `unsigned`，掩码 `1u << bit`）。
+  - `/tmp/cpp032`：自建 bits shim（补了缺的 `<unordered_set>`）；`verify.cpp` 对数器跑通（基础位图 vs unordered_set、设计位图 vs 真翻的朴素实现，0 不一致）；`exp*.cpp` 量出全部正文数字。
+  - 关键实测：判重四做法（位图 23.12ms / char 57.75ms / 排序 501.47ms / 哈希集合 979.17ms）；常驻内存（1e8 个位：位图 12MB vs char 96MB；哈希集合存 1e7 个 int 512MB）；求交 855 倍；flip 懒标记 3600 倍；三个坑（`1<<31` 实测四操作仍全对、`(n+31)/32` 溢出 vector 抛异常、n=70 多出 26 位）。
+  - 踩坑：macOS 沙箱里 calloc 惰性零页把 `vector<char>(n,0)` 的 RSS 量成 0，要强制触页才量得准（详见当日 memory 日志）。
+  - 6 张 SVG + 2 个演示；自写 `/tmp/br032/branches.js` 把 preset+rand 共 48 步跑到末帧，set 值与手算逐项一致。修了三处截图问题（fig-layout 标注重叠、fig-ops 高亮错位与「→ true」丢失、演示 1 的位面板按 uint32 分行）。
+  - 自检：verify_pages PASS（figs/svg 6/6、nav 177、toc 9、viz 2、code 4、pager「位运算的常见技巧 | 离散化」）、verify_home PASS（177 卡片）、json 176 → 177 六字段全齐、AI 味与杂字扫描干净。
+  - 收口：prompt.md（032 已完成、下一课 033）、memory 日志 2026-10-06.md。
+- 无遗留问题。

@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>基数排序 - algorithms-course</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .rs-array { display:flex; gap:2px; margin:4px 0; flex-wrap:nowrap; }
+  .rs-cell { width:38px; height:38px; display:flex; align-items:center; justify-content:center; border:1px solid #e6e8eb; border-radius:4px; font-size:14px; font-family:ui-monospace,monospace; background:#f6f7f9; position:relative; flex:none; }
+  .rs-cell.hl { background:#dbeafe; border-color:#2563eb; }
+  .rs-cell.pivot { background:#ffedd5; border-color:#ea580c; }
+  .rs-cell.done { background:#dcfce7; border-color:#22c55e; }
+  .rs-cell.ghost { background:#f6f7f9; border-color:#e6e8eb; color:#c9ced4; }
+  .rs-cell.idx { height:16px; border:none; background:transparent; font-size:10px; color:#9aa0a6; }
+  .rs-cnt { width:24px; height:30px; display:flex; align-items:center; justify-content:center; border:1px solid #e6e8eb; border-radius:3px; font-size:12px; font-family:ui-monospace,monospace; background:#f6f7f9; flex:none; }
+  .rs-cnt.hl { background:#dbeafe; border-color:#2563eb; }
+  .rs-cnt.prefix { background:#eef4ff; border-color:#93c5fd; }
+  .rs-cnt.pivot { background:#ffedd5; border-color:#ea580c; }
+  .rs-rowlabel { font-size:11px; color:#6b7280; width:52px; flex:none; line-height:38px; text-align:right; padding-right:8px; }
+  .rs-info { font-size:13px; color:#374151; margin:8px 0; min-height:20px; }
+  .rs-stats { font-size:12px; color:#6b7280; margin-top:8px; }
+  .rs-viz { padding:12px; }
+  .rs-line { display:flex; align-items:center; margin-bottom:8px; }
+  .rs-arrow { width:16px; text-align:center; color:#9aa0a6; flex:none; }
+  .rs-card { border:1px solid #e6e8eb; border-radius:8px; padding:10px 14px; margin:8px 0; font-size:13px; }
+  .rs-card .big { font-size:20px; font-weight:bold; font-family:ui-monospace,monospace; margin-top:4px; }
+  .rs-card .warn { color:#dc2626; }
+  .rs-card .ok { color:#16a34a; }
+  .rs-cmp-controls { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+  .rs-cmp-controls label { font-size:13px; color:#374151; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>基数排序</h1>
+      <p class="intro">排序不一定要比大小。基数排序从低位到高位，每轮按当前位的数字把元素分进几个桶，排完最高位整个数组就有序。时间 O(n·bits)，额外空间 O(n)，而且稳定。代价是它只吃「能按位拆开」的数据。</p>
+
+      <h2>零、背景</h2>
+      <p>n=100 万的随机数组，基数排序约 16ms，std::sort 约 45ms，快了快三倍。整个排序过程一次大小都没比过。</p>
+      <p>之前的归并、快排、堆排序都在干同一件事：拿两个元素比大小，按结果决定谁先谁后。基数排序换了个思路，它不问 5 和 3 谁大，只看每一位上是几，把数字按位分进桶里。</p>
+      <p>代价是挑数据。它要求样本是非负整数，还得有进制。这一讲把实现细节讲透，最后说清楚这个限制从哪来。</p>
+
+      <h2>一、基于比较 vs 不基于比较</h2>
+      <p>比较排序只需要定义好「怎么比」：给两个对象一个 < 就行，数字、字符串、结构体都能排，很通用。但它有一个绕不开的下界 O(n log n)：一次比较最多拿回 1 bit 信息，n 个元素的全排列有 n! 种，信息论上至少需要 log₂(n!) ≈ n log₂n 次比较才分得开。归并、快排、堆排序全在这个家族里。</p>
+      <p>不基于比较的排序不比较，直接看数据本身。计数排序是最直白的一个：开一个值域那么长的数组，数每个值出现几次，再按值从小到大倒出来。</p>
+      <p>计数排序快得吓人。n=100 万、值域 10 万时只要 1.5ms，比基数排序和 std::sort 都快。但它的数组长度必须顶到值域，值域 1 亿要 400MB，10 亿要 4GB，机器直接开不下。数值一大，计数排序立刻歇菜。</p>
+      <p>基数排序就是为了绕开这个问题：值域大不要紧，一次只看一位，把大值域拆成「每一位的小值域」。一位的取值只有 BASE 种，计数数组只要 BASE 长。一句话：计数排序是「值域有多宽，数组就有多长」，基数排序是「把值域按位拆开，让数组长度回到 BASE」。</p>
+      <figure class="fig" id="fig-cmp"></figure>
+
+      <h2>二、数字提取某一位</h2>
+      <p>基数排序的第一步，是能把「某一位」抠出来。给定 offset=1、10、100、…，当前位就是 (x / offset) % BASE。以 BASE=10、x=724 为例：offset=1 取到个位 4，offset=10 取到十位 2，offset=100 取到百位 7。</p>
+      <p>offset 每轮乘一次 BASE，从个位一路走到最高位。排几轮取决于最大的数有几位，Bits(max) 用一个 while 数出来：max=999 → 3 轮，max=1000 → 4 轮（进位了，谁也没法省），max=999999999 → 9 轮，max=2^31-1 → 10 轮。</p>
+      <figure class="fig" id="fig-bits"></figure>
+              <pre class="code"><span class="cm">// 返回 number 在 BASE 进制下有几位</span>
+    <span class="kw">int</span> <span class="fn">Bits</span>(<span class="kw">int</span> number) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">while</span> (number &gt; 0) {
+            ans++;
+            number /= BASE;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2>三、一轮完整流程</h2>
+      <p>一轮做四件事：计数、前缀和、放置、拷回。拿 [17, 13, 25, 100, 72] 的个位轮走一遍。</p>
+      <p>计数：统计每个数字出现几次。五个数的个位是 7、3、5、0、2，cnts = [1,0,1,1,0,1,0,1,0,0]。</p>
+      <p>前缀和：把 cnts 改成累加形式，cnts[i] 变成「个位数字 ≤ i 的元素个数」，得到 [1,1,2,3,3,4,4,5,5,5]。这一步之后，cnts[i] 同时就是「数字 i 放置区间的右边界」。</p>
+      <p>放置：从后往前扫 arr，每遇到一个元素就 --cnts[digit] 拿位置。arr[4]=72 个位 2，--cnts[2]=1，72 放进 help[1]；arr[3]=100 个位 0，--cnts[0]=0，100 放进 help[0]；arr[2]=25 个位 5，--cnts[5]=3，25 放进 help[3]；arr[1]=13 个位 3，--cnts[3]=2，13 放进 help[2]；arr[0]=17 个位 7，--cnts[7]=4，17 放进 help[4]。help = [100, 72, 13, 25, 17]，按个位 0、2、3、5、7 排好了。</p>
+      <p>拷回：arr ← help，个位轮结束。高位轮重复同样四步。</p>
+      <figure class="fig" id="fig-pass"></figure>
+      <p>为什么从后往前放？这是稳定性的关键，下一节展开。先看完整代码。</p>
+              <pre class="code"><span class="cm">// arr 里保证没有负数；bits 是最大值在 BASE 进制下的位数</span>
+    <span class="kw">void</span> <span class="fn">RadixSort</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr, <span class="kw">int</span> n, <span class="kw">int</span> bits) {
+        <span class="kw">for</span> (<span class="kw">int</span> offset = 1; bits &gt; 0; offset *= BASE, bits--) {
+            <span class="cm">// 1. 统计当前位每个数字出现几次</span>
+            fill(cnts.begin(), cnts.end(), 0);
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+                cnts[(arr[i] / offset) % BASE]++;
+            }
+            <span class="cm">// 2. 前缀和：cnts[i] 变成「该位数字 &lt;= i」的元素个数</span>
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; BASE; i++) {
+                cnts[i] += cnts[i - 1];
+            }
+            <span class="cm">// 3. 从后往前放，help 里当前位数字相同的部分保持原序</span>
+            <span class="kw">for</span> (<span class="kw">int</span> i = n - 1; i &gt;= 0; i--) {
+                help[--cnts[(arr[i] / offset) % BASE]] = arr[i];
+            }
+            <span class="cm">// 4. 拷回 arr</span>
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+                arr[i] = help[i];
+            }
+        }
+    }</pre>
+
+      <div class="viz" id="viz-rs">
+        <h3>演示：基数排序逐帧</h3>
+        <p class="viz-desc">选一组数据，点「下一步」看完整流程：先减最小值转非负，再逐轮做计数、前缀和、放置、拷回，最后加回最小值。</p>
+        <div class="rs-viz" id="rs-body"></div>
+        <div class="viz-controls">
+          <button id="rs-next">下一步</button>
+          <button id="rs-reset">重置</button>
+          <select id="rs-preset">
+            <option value="0">[17,13,25,100,72]（无负数）</option>
+            <option value="1">[-5,3,-12,7,0]（含负数）</option>
+            <option value="2">[9,99,5,555,0]（三位数）</option>
+            <option value="3">随机 6 个（含负数）</option>
+          </select>
+        </div>
+        <div class="breakdown" id="rs-info"></div>
+      </div>
+
+      <h2>四、稳定性</h2>
+      <p>从低位到高位（LSD）的基数排序，正确性建立在「每一轮都稳定」上。个位排完后，相同个位的元素里保持着原顺序；十位轮必须把这份「个位的顺序」原样保住，否则低位信息就丢了。一轮轮叠上去，最后整体才是「先按低位、再按高位」的字典序。</p>
+      <p>稳定靠放置方向配合。前缀和给出的是右边界，从后往前扫、每次 --cnts 递减放，同数字的元素「后出现的放得更靠后」，原顺序保持。这是课程代码的写法。</p>
+      <p>把遍历方向写成从前往后就坏了。同数字的元素会倒着放：先扫到的反而放得靠后。2000 组小值域随机数组实测，94.3% 的组顺序乱掉。排序结果还是对的（每组都按值有序），只是相等元素的相对顺序被打乱，基数排序的整体正确性也就没了。</p>
+      <figure class="fig" id="fig-stable"></figure>
+      <p>什么时候用得上稳定？先按班级排、再按成绩排，想得到「同成绩里按班级有序」，第二趟排序必须稳定。基数排序本身就是「先按低位、再按高位」地叠稳定排序。</p>
+
+      <h2>五、负数与其它进制</h2>
+      <p>基数排序要求非负整数。C++ 的除法取模对负数不给面子：-7/10=0，(-7)%10=-7，digit 直接算成 -7，cnts[-7] 越界访问，程序当场崩。</p>
+      <p>预处理把整个数组平移成非负：所有数减去最小值，排完再加回来。min=-12 时，-12 变 0，3 变 15。排序过程只认平移后的值，相对大小没变。</p>
+              <pre class="code"><span class="kw">const</span> <span class="kw">int</span> BASE = 10;
+    vector&lt;<span class="kw">int</span>&gt; help, cnts;
+
+    <span class="kw">void</span> <span class="fn">SortArray</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr) {
+        <span class="kw">int</span> n = (<span class="kw">int</span>)arr.size();
+        <span class="kw">if</span> (n &lt;= 1) <span class="kw">return</span>;
+        help.assign(n, 0);
+        cnts.assign(BASE, 0);
+        <span class="cm">// 所有数减去最小值，转成非负数组</span>
+        <span class="kw">int</span> minv = arr[0];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) minv = min(minv, arr[i]);
+        <span class="kw">int</span> maxv = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            arr[i] -= minv;
+            maxv = max(maxv, arr[i]);
+        }
+        <span class="cm">// 最大值有几位，就排几轮</span>
+        RadixSort(arr, n, Bits(maxv));
+        <span class="cm">// 还原</span>
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            arr[i] += minv;
+        }
+    }</pre>
+      <p>两个细节。一是溢出：min=-2^31、数组里又有 2^31-1 时，2^31-1 - (-2^31) = 2^32-1，超出 int 上限，算出来是 -1，排序全错。题目数据保证不溢出时才能放心用 int，否则照注释改成 long。</p>
+      <p>二是全相等：max-min=0，Bits(0)=0，while 一次不进，0 轮直接结束。数组本来就有序，这轮省得合理。</p>
+      <p>BASE 可以换成任何进制，轮数与空间在 BASE 上此消彼长。max=10^9 时 BASE=2 要 30 轮，BASE=10 要 10 轮，BASE=16 只要 8 轮；但 cnts 也要跟着变长，从 8 字节到 64 字节。BASE 小轮数多、每轮便宜；BASE 大轮数少、每轮贵一点，BASE=16 的 cnts 也只有 64 字节，随便开。</p>
+      <figure class="fig" id="fig-base"></figure>
+
+      <h2>六、复杂度分析</h2>
+      <p>每轮扫三遍数组加一遍 cnts：n 次计数、BASE-1 次前缀、n 次放置、n 次拷回，共 3n+BASE-1 次操作，O(n+BASE)。bits 轮，总时间 O(bits·(n+BASE))。</p>
+      <p>bits = ⌊log_BASE(max)⌋ + 1。值域 10^9 时十进制 9~10 轮，所以「O(n·bits)」在 int 范围内就是大约 10n 次操作。n=10^6 时约 3000 万次，比较排序的 n log₂n 要 2000 万次比较，量级相同、常数还更小，实测也确实更快。</p>
+      <p>速度实测（g++ -O2，随机 0~10^9 数据）：n=10^4 基数约 0.2ms vs std::sort 约 0.4ms；n=10^5 约 2ms vs 5ms；n=10^6 约 16ms vs 45ms。</p>
+      <p>值域对时间的影响（n=10^6）：V=10^3 约 5ms（3 轮），V=10^6 约 9ms（6 轮），V=10^9 约 13ms（9 轮）。轮数翻三倍，时间也翻近三倍，每轮的常数是死的。</p>
+      <table class="complexity">
+        <tr><th>指标</th><th>值</th><th>说明</th></tr>
+        <tr><td>时间复杂度</td><td>O(bits·(n+BASE))</td><td>值域固定时约 O(n)，int 范围内约 10n 次操作</td></tr>
+        <tr><td>额外空间</td><td>O(n+BASE)</td><td>help 数组 n 格 + cnts 数组 BASE 格</td></tr>
+        <tr><td>稳定性</td><td>稳定</td><td>每轮从后往前放，同数字保持原序</td></tr>
+        <tr><td>适用范围</td><td>能按位拆的对象</td><td>非负整数（平移后可含负数）、固定进制</td></tr>
+      </table>
+      <p>但这份快只属于「排 int」。换排序字符串、结构体，按位拆这套就使不上，得先把对象编码成整数，编码本身的代价常常比排序还贵。比较排序没有这个前置成本。基数排序是「数据特征换速度」：数据越规整，它越快；数据越自由，它越没用。</p>
+
+      <div class="viz" id="viz-cmp">
+        <h3>演示：计数排序 vs 基数排序，值域说了算</h3>
+        <p class="viz-desc">调数据量 n、值域 V、进制 BASE，看两种不基于比较的排序各自要付出什么代价。</p>
+        <div class="rs-cmp-controls">
+          <label>数据量 n
+            <select id="cmp-n">
+              <option value="1000">10^3</option>
+              <option value="10000">10^4</option>
+              <option value="100000">10^5</option>
+              <option value="1000000" selected>10^6</option>
+              <option value="10000000">10^7</option>
+            </select>
+          </label>
+          <label>值域 V
+            <select id="cmp-v">
+              <option value="1000">10^3</option>
+              <option value="100000">10^5</option>
+              <option value="1000000">10^6</option>
+              <option value="1000000000">10^9</option>
+              <option value="2147483648">2^31</option>
+            </select>
+          </label>
+          <label>进制 BASE
+            <select id="cmp-b">
+              <option value="2">2</option>
+              <option value="8">8</option>
+              <option value="10" selected>10</option>
+              <option value="16">16</option>
+            </select>
+          </label>
+        </div>
+        <div id="cmp-out"></div>
+      </div>
+
+      <h2>七、总结</h2>
+      <p>基数排序不比较大小，按位分桶：每轮计数、前缀和、从后往前放置、拷回，四步循环。要点如下：</p>
+      <p>第一，稳定靠放置方向。前缀和给右边界，从后往前扫、递减放，同数字的原顺序才保得住；遍历方向一反过来，94% 以上的数据会乱序。</p>
+      <p>第二，负数平移处理，减最小值再还原；平移会溢出时（INT_MIN 和 INT_MAX 同现）改用 long。</p>
+      <p>第三，轮数由最大值位数决定，BASE 越大轮数越少、cnts 越大，空间时间在 BASE 上此消彼长。</p>
+      <p>第四，复杂度 O(bits·(n+BASE))，值域固定时线性，比比较排序快，但只吃「能按位拆的对象」。</p>
+      <p>基数排序之后，后缀数组、桶排序里那套「按位拆 + 稳定叠」还会反复出现，这一讲是把地基打上。</p>
+    
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>基数排序</td><td><a href="https://leetcode.cn/problems/sort-an-array/" target="_blank">leetcode.cn/problems/sort-an-array/</a></td></tr>
+        <tr><td>洛谷</td><td>基数排序，acm练习风格</td><td><a href="https://www.luogu.com.cn/problem/P1177" target="_blank">www.luogu.com.cn/problem/P1177</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解028【必备】基数排序</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+</section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  // ===== mulberry32 =====
+  function mulberry32(seed){
+    return function(){
+      seed = (seed + 0x6D2B79F5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  var BLUE = '#2563eb', BLUE_LIGHT = '#dbeafe', BLUE_MID = '#93c5fd';
+  var ORANGE = '#ea580c', ORANGE_LIGHT = '#ffedd5';
+  var GREEN = '#22c55e', GREEN_LIGHT = '#dcfce7';
+  var GRAY = '#9aa0a6', GRAY_BG = '#f6f7f9';
+  var BORDER = '#e6e8eb';
+  var DARK = '#374151';
+  var RED = '#dc2626';
+
+  function svgEl(tag, attrs){
+    var e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for(var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function text(x, y, str, attrs){
+    var t = svgEl('text', Object.assign({x:x,y:y,'font-size':12,fill:DARK,'font-family':'ui-monospace,monospace'}, attrs||{}));
+    t.textContent = str;
+    return t;
+  }
+
+  // ===== Figure 1: 基于比较 vs 不基于比较 =====
+  (function(){
+    var fig = document.getElementById('fig-cmp');
+    if(!fig) return;
+    var W = 660, H = 300;
+    var svg = svgEl('svg', {viewBox:'0 0 '+W+' '+H, width:'100%'});
+
+    // 两个家族的大框
+    var boxW = 290, boxH = 200, boxY = 55;
+    svg.appendChild(svgEl('rect', {x:20,y:boxY,width:boxW,height:boxH,rx:8,fill:BLUE_LIGHT,stroke:BLUE,'stroke-width':1.2}));
+    svg.appendChild(text(165, boxY+24, '基于比较', {'text-anchor':'middle','font-size':14,fill:BLUE,'font-weight':'bold'}));
+    svg.appendChild(svgEl('rect', {x:350,y:boxY,width:boxW,height:boxH,rx:8,fill:ORANGE_LIGHT,stroke:ORANGE,'stroke-width':1.2}));
+    svg.appendChild(text(495, boxY+24, '不基于比较', {'text-anchor':'middle','font-size':14,fill:ORANGE,'font-weight':'bold'}));
+
+    // 左侧：归并 / 快排 / 堆
+    var itemsL = ['归并排序', '快速排序', '堆排序'];
+    for(var i=0;i<3;i++){
+      var y = boxY + 50 + i*44;
+      svg.appendChild(svgEl('rect', {x:50,y:y,width:120,height:30,rx:4,fill:'#ffffff',stroke:BLUE,'stroke-width':1}));
+      svg.appendChild(text(110, y+20, itemsL[i], {'text-anchor':'middle','font-size':12,fill:DARK}));
+    }
+    svg.appendChild(text(190, boxY+64, '只要一个 < 就通用', {'font-size':12,fill:DARK}));
+    svg.appendChild(text(190, boxY+86, '数字、字符串、结构体都能排', {'font-size':11,fill:GRAY}));
+    svg.appendChild(text(190, boxY+112, '信息论下界 O(n log n)', {'font-size':12,fill:BLUE,'font-weight':'bold'}));
+    svg.appendChild(text(190, boxY+132, '一次比较最多拿回 1 bit', {'font-size':11,fill:GRAY}));
+
+    // 右侧：计数 / 基数
+    svg.appendChild(svgEl('rect', {x:380,y:boxY+50,width:120,height:30,rx:4,fill:'#ffffff',stroke:ORANGE,'stroke-width':1}));
+    svg.appendChild(text(440, boxY+70, '计数排序', {'text-anchor':'middle','font-size':12,fill:DARK}));
+    svg.appendChild(text(515, boxY+64, '值域多宽，数组多长', {'font-size':12,fill:DARK}));
+    svg.appendChild(text(515, boxY+86, 'V=10^9 要 4GB，开不下', {'font-size':11,fill:RED}));
+    svg.appendChild(svgEl('rect', {x:380,y:boxY+112,width:120,height:30,rx:4,fill:'#ffffff',stroke:ORANGE,'stroke-width':1}));
+    svg.appendChild(text(440, boxY+132, '基数排序', {'text-anchor':'middle','font-size':12,fill:DARK}));
+    svg.appendChild(text(515, boxY+126, '值域按位拆开', {'font-size':12,fill:DARK}));
+    svg.appendChild(text(515, boxY+148, '计数数组只要 BASE 长', {'font-size':11,fill:GRAY}));
+    svg.appendChild(text(495, boxY+176, '要求：非负整数 + 固定进制', {'text-anchor':'middle','font-size':11,fill:ORANGE}));
+
+    // 顶部标题
+    svg.appendChild(text(330, 30, '两类排序的适用条件', {'text-anchor':'middle','font-size':13,fill:DARK,'font-weight':'bold'}));
+
+    fig.appendChild(svg);
+    var cap = document.createElement('figcaption');
+    cap.textContent = '基于比较的排序（蓝）只需要 < 运算符，通用但有 O(n log n) 下界；不基于比较的排序（橙）直接看数据，计数排序数组长度顶到值域、一宽就炸，基数排序把值域按位拆开，计数数组回到 BASE 长。';
+    fig.appendChild(cap);
+  })();
+
+  // ===== Figure 2: 位分解 =====
+  (function(){
+    var fig = document.getElementById('fig-bits');
+    if(!fig) return;
+    var W = 660, H = 250;
+    var svg = svgEl('svg', {viewBox:'0 0 '+W+' '+H, width:'100%'});
+
+    // 724 的三个位
+    var rows = [
+      {offset:1,  label:'offset = 1',  digit:4, note:'(724 / 1) % 10 = 4'},
+      {offset:10, label:'offset = 10', digit:2, note:'(724 / 10) % 10 = 2'},
+      {offset:100,label:'offset = 100',digit:7, note:'(724 / 100) % 10 = 7'}
+    ];
+    var cellW = 56, cellH = 40;
+    for(var i=0;i<3;i++){
+      var y = 30 + i*62;
+      svg.appendChild(text(70, y+26, rows[i].label, {'text-anchor':'middle','font-size':12,fill:BLUE,'font-weight':'bold'}));
+      svg.appendChild(text(70, y+44, rows[i].note, {'text-anchor':'middle','font-size':11,fill:GRAY}));
+      // 724 的三格
+      var x0 = 160;
+      var digs = [7, 2, 4];
+      for(var j=0;j<3;j++){
+        var x = x0 + j*(cellW+6);
+        var isDigit = (i === 0 && j === 2) || (i === 1 && j === 1) || (i === 2 && j === 0);
+        var r = svgEl('rect', {x:x,y:y,width:cellW,height:cellH,rx:5,
+          fill:isDigit ? ORANGE_LIGHT : GRAY_BG,
+          stroke:isDigit ? ORANGE : BORDER,'stroke-width':1.5});
+        svg.appendChild(r);
+        svg.appendChild(text(x+cellW/2, y+26, digs[j], {'text-anchor':'middle','font-size':16,fill:isDigit?ORANGE:DARK,'font-weight':isDigit?'bold':'normal'}));
+      }
+      // 结果
+      svg.appendChild(text(x0+3*(cellW+6)+30, y+26, '→ '+rows[i].digit, {'font-size':16,fill:ORANGE,'font-weight':'bold'}));
+    }
+
+    // 底部：轮数小表
+    svg.appendChild(svgEl('line', {x1:20,y1:222,x2:640,y2:222,stroke:BORDER,'stroke-width':1}));
+    svg.appendChild(text(330, 242, '轮数 = Bits(max)：999→3 轮 | 1000→4 轮 | 999999999→9 轮 | 2^31-1→10 轮', {'text-anchor':'middle','font-size':12,fill:DARK}));
+
+    fig.appendChild(svg);
+    var cap = document.createElement('figcaption');
+    cap.textContent = '位分解：offset 从 1 开始每轮乘 10，(x / offset) % 10 依次取到个位、十位、百位。排几轮由最大值位数决定，999 是 3 轮，进位到 1000 就变 4 轮。';
+    fig.appendChild(cap);
+  })();
+
+  // ===== Figure 3: 一轮完整流程 =====
+  (function(){
+    var fig = document.getElementById('fig-pass');
+    if(!fig) return;
+    var W = 660, H = 330;
+    var svg = svgEl('svg', {viewBox:'0 0 '+W+' '+H, width:'100%'});
+
+    var arr = [17, 13, 25, 100, 72];
+    var digs = [7, 3, 5, 0, 2];
+    var cellW = 44, cellH = 32;
+    var x0 = 190;
+
+    function cells(y, values, fill, stroke){
+      for(var i=0;i<values.length;i++){
+        var x = x0 + i*(cellW+2);
+        svg.appendChild(svgEl('rect', {x:x,y:y,width:cellW,height:cellH,rx:3,fill:fill,stroke:stroke,'stroke-width':1}));
+        svg.appendChild(text(x+cellW/2, y+21, values[i], {'text-anchor':'middle','font-size':13}));
+      }
+    }
+
+    // 行1: 原始数组 + digit
+    svg.appendChild(text(30, 40, '① 计数', {'font-size':12,fill:BLUE,'font-weight':'bold'}));
+    svg.appendChild(text(140, 40, '个位', {'font-size':11,fill:GRAY}));
+    cells(24, arr, BLUE_LIGHT, BLUE);
+    svg.appendChild(text(30, 70, 'digit', {'font-size':11,fill:GRAY}));
+    cells(58, digs, '#ffffff', BORDER);
+    // cnts 结果
+    var cnts1 = [1,0,1,1,0,1,0,1,0,0];
+    svg.appendChild(text(30, 104, 'cnts', {'font-size':11,fill:GRAY}));
+    var cx0 = 190;
+    for(var i=0;i<10;i++){
+      var x = cx0 + i*16;
+      svg.appendChild(svgEl('rect', {x:x,y:92,width:14,height:24,rx:2,fill:cnts1[i]?BLUE_LIGHT:GRAY_BG,stroke:cnts1[i]?BLUE:BORDER,'stroke-width':1}));
+      svg.appendChild(text(x+7, 108, cnts1[i], {'text-anchor':'middle','font-size':10}));
+      svg.appendChild(text(x+7, 84, i, {'text-anchor':'middle','font-size':9,fill:GRAY}));
+    }
+
+    // 行2: 前缀和
+    svg.appendChild(text(30, 152, '② 前缀和', {'font-size':12,fill:BLUE,'font-weight':'bold'}));
+    var pre = [1,1,2,3,3,4,4,5,5,5];
+    for(var i=0;i<10;i++){
+      var x = cx0 + i*16;
+      svg.appendChild(svgEl('rect', {x:x,y:140,width:14,height:24,rx:2,fill:'#eef4ff',stroke:BLUE_MID,'stroke-width':1}));
+      svg.appendChild(text(x+7, 156, pre[i], {'text-anchor':'middle','font-size':10,fill:BLUE}));
+    }
+    svg.appendChild(text(cx0+160+10, 156, '= 右边界', {'font-size':11,fill:GRAY}));
+
+    // 行3: 放置结果 help
+    svg.appendChild(text(30, 210, '③ 放置', {'font-size':12,fill:ORANGE,'font-weight':'bold'}));
+    svg.appendChild(text(140, 210, '从后往前', {'font-size':11,fill:GRAY}));
+    var help = [100, 72, 13, 25, 17];
+    cells(198, help, ORANGE_LIGHT, ORANGE);
+    svg.appendChild(text(30, 244, '个位', {'font-size':11,fill:GRAY}));
+    cells(232, [0,2,3,5,7], '#ffffff', BORDER);
+
+    // 行4: 拷回
+    svg.appendChild(text(30, 282, '④ 拷回', {'font-size':12,fill:GREEN,'font-weight':'bold'}));
+    cells(270, help, GREEN_LIGHT, GREEN);
+
+    fig.appendChild(svg);
+    var cap = document.createElement('figcaption');
+    cap.textContent = '个位轮四步：① 统计 digit 出现次数，cnts=[1,0,1,1,0,1,0,1,0,0]；② 前缀和 [1,1,2,3,3,4,4,5,5,5]，cnts[i] 即数字 i 的放置区间右边界；③ 从后往前放置，help 按个位 0、2、3、5、7 有序；④ 拷回 arr。';
+    fig.appendChild(cap);
+  })();
+
+  // ===== Figure 4: 稳定性 =====
+  (function(){
+    var fig = document.getElementById('fig-stable');
+    if(!fig) return;
+    var W = 660, H = 260;
+    var svg = svgEl('svg', {viewBox:'0 0 '+W+' '+H, width:'100%'});
+
+    var cellW = 50, cellH = 36, gap = 4;
+    var startX = 160;
+
+    var before = [{v:5,sub:'A'},{v:2,sub:''},{v:5,sub:'B'},{v:7,sub:''}];
+    var afterStable = [{v:2,sub:''},{v:5,sub:'A'},{v:5,sub:'B'},{v:7,sub:''}];
+    var afterUnstable = [{v:2,sub:''},{v:5,sub:'B'},{v:5,sub:'A'},{v:7,sub:''}];
+
+    function drawRow(y, data, label, color){
+      svg.appendChild(text(30, y+23, label, {'font-size':12,fill:DARK,'font-weight':'bold'}));
+      for(var i=0;i<data.length;i++){
+        var x = startX + i*(cellW+gap);
+        svg.appendChild(svgEl('rect', {x:x,y:y,width:cellW,height:cellH,rx:4,fill:GRAY_BG,stroke:color,'stroke-width':1.2}));
+        svg.appendChild(text(x+cellW/2-6, y+23, data[i].v, {'text-anchor':'middle','font-size':15,fill:DARK}));
+        if(data[i].sub){
+          svg.appendChild(text(x+cellW/2+10, y+26, data[i].sub, {'font-size':10,fill:color,'font-weight':'bold'}));
+        }
+      }
+    }
+
+    drawRow(20, before, '放置前', BORDER);
+    drawRow(90, afterStable, '从后往前放', GREEN);
+    drawRow(160, afterUnstable, '从前往后放', RED);
+
+    svg.appendChild(svgEl('path', {d:'M 300 60 L 300 86', stroke:GRAY,'stroke-width':1.5,fill:'none','marker-end':'url(#rArr)'}));
+    svg.appendChild(svgEl('path', {d:'M 300 130 L 300 156', stroke:GRAY,'stroke-width':1.5,fill:'none','marker-end':'url(#rArr)'}));
+    var defs = svgEl('defs');
+    var m = svgEl('marker', {id:'rArr', viewBox:'0 0 10 10', refX:8, refY:5, markerWidth:6, markerHeight:6, orient:'auto'});
+    m.appendChild(svgEl('path', {d:'M 0 0 L 10 5 L 0 10 z', fill:GRAY}));
+    defs.appendChild(m);
+    svg.appendChild(defs);
+
+    svg.appendChild(text(startX + 4*(cellW+gap) + 10, 113, '5A 在 5B 前面，顺序保住', {'font-size':11,fill:'#16a34a'}));
+    svg.appendChild(text(startX + 4*(cellW+gap) + 10, 183, '5B 跑到 5A 前面，顺序乱了', {'font-size':11,fill:RED}));
+    svg.appendChild(text(startX + 4*(cellW+gap) + 10, 203, '2000 组实测：94.3% 乱序', {'font-size':11,fill:RED}));
+
+    fig.appendChild(svg);
+    var cap = document.createElement('figcaption');
+    cap.textContent = '稳定性：两个相等的 5 记作 5A（下标 0）和 5B（下标 2）。从后往前扫、递减放（绿），后扫到的 5B 放得更靠后，5A 保持在前；从前往后扫、递减放（红），先扫到的 5A 反而被放到后面，相对顺序反转。';
+    fig.appendChild(cap);
+  })();
+
+  // ===== Figure 5: 不同 BASE 的轮数 =====
+  (function(){
+    var fig = document.getElementById('fig-base');
+    if(!fig) return;
+    var W = 660, H = 260;
+    var svg = svgEl('svg', {viewBox:'0 0 '+W+' '+H, width:'100%'});
+
+    var data = [
+      {base:2,  rounds:30, cntBytes:8},
+      {base:8,  rounds:10, cntBytes:32},
+      {base:10, rounds:10, cntBytes:40},
+      {base:16, rounds:8,  cntBytes:64}
+    ];
+    var chartX = 90, chartY = 40, chartW = 520, chartH = 140;
+    var maxR = 30;
+
+    svg.appendChild(svgEl('line', {x1:chartX,y1:chartY,x2:chartX,y2:chartY+chartH,stroke:BORDER,'stroke-width':1}));
+    svg.appendChild(svgEl('line', {x1:chartX,y1:chartY+chartH,x2:chartX+chartW,y2:chartY+chartH,stroke:BORDER,'stroke-width':1}));
+    for(var g=0; g<=30; g+=5){
+      var y = chartY + chartH - g/maxR*chartH;
+      svg.appendChild(svgEl('line', {x1:chartX,y1:y,x2:chartX+chartW,y2:y,stroke:'#f0f0f0','stroke-width':1}));
+      svg.appendChild(text(chartX-6, y+4, g, {'text-anchor':'end','font-size':10,fill:GRAY}));
+    }
+    svg.appendChild(text(20, chartY+chartH/2, '轮数', {'font-size':11,fill:GRAY, transform:'rotate(-90 20 '+(chartY+chartH/2)+')'}));
+
+    var groupW = chartW / data.length;
+    for(var i=0;i<data.length;i++){
+      var d = data[i];
+      var bx = chartX + i*groupW + groupW/2 - 22;
+      var bh = d.rounds/maxR*chartH;
+      var by = chartY + chartH - bh;
+      svg.appendChild(svgEl('rect', {x:bx,y:by,width:44,height:bh,fill:i===2?BLUE:ORANGE,rx:2}));
+      svg.appendChild(text(bx+22, by-6, d.rounds+' 轮', {'text-anchor':'middle','font-size':12,fill:DARK,'font-weight':'bold'}));
+      svg.appendChild(text(bx+22, chartY+chartH+16, 'BASE='+d.base, {'text-anchor':'middle','font-size':12,fill:DARK}));
+      svg.appendChild(text(bx+22, chartY+chartH+34, 'cnts '+d.cntBytes+'B', {'text-anchor':'middle','font-size':10,fill:GRAY}));
+    }
+
+    fig.appendChild(svg);
+    var cap = document.createElement('figcaption');
+    cap.textContent = 'max=10^9 时不同进制的轮数：BASE=2 要 30 轮，BASE=10 要 10 轮，BASE=16 只要 8 轮；cnts 数组也从 8 字节涨到 64 字节。轮数与每轮代价在 BASE 上此消彼长。';
+    fig.appendChild(cap);
+  })();
+
+  // ===== Demo 1: 基数排序逐帧 =====
+  (function(){
+    var body = document.getElementById('rs-body');
+    var info = document.getElementById('rs-info');
+    var btnNext = document.getElementById('rs-next');
+    var btnReset = document.getElementById('rs-reset');
+    var selPreset = document.getElementById('rs-preset');
+    var BASE = 10;
+
+    var presets = [
+      [17,13,25,100,72],
+      [-5,3,-12,7,0],
+      [9,99,5,555,0],
+      null // random
+    ];
+    var rand = mulberry32(20261005);
+    function genRandom(){
+      var a = [];
+      for(var i=0;i<6;i++){
+        var neg = rand() < 0.5;
+        var v = Math.floor(rand()*100);
+        a.push(neg ? -v : v);
+      }
+      return a;
+    }
+
+    var st = {};
+
+    function bitsOf(x){
+      var b = 0;
+      while(x > 0){ b++; x = Math.floor(x/BASE); }
+      return b;
+    }
+
+    function buildSteps(orig){
+      var n = orig.length;
+      var steps = [];
+      var arr = orig.slice();
+      var minv = Math.min.apply(null,arr);
+      steps.push({phase:'findmin', arr:arr.slice(), minv:minv});
+      for(var i=0;i<n;i++) arr[i] -= minv;
+      var maxv = Math.max.apply(null,arr);
+      var bits = bitsOf(maxv);
+      steps.push({phase:'shift', arr:arr.slice(), minv:minv, maxv:maxv, bits:bits});
+
+      var help = new Array(n).fill(null);
+      var offset = 1;
+      for(var r=0; r<bits; r++){
+        steps.push({phase:'roundstart', arr:arr.slice(), offset:offset, round:r+1, bits:bits, cnts:new Array(BASE).fill(0), help:help.slice()});
+        var cnts2 = new Array(BASE).fill(0);
+        for(var i=0;i<n;i++){
+          var d = Math.floor(arr[i]/offset) % BASE;
+          cnts2[d]++;
+          steps.push({phase:'count', arr:arr.slice(), offset:offset, round:r+1, idx:i, digit:d, cnts:cnts2.slice(), help:help.slice()});
+        }
+        var pre = cnts2.slice();
+        for(var i=1;i<BASE;i++) pre[i] += pre[i-1];
+        steps.push({phase:'prefix', arr:arr.slice(), offset:offset, round:r+1, cnts:pre.slice(), help:help.slice()});
+        var cnts3 = pre.slice();
+        var help2 = new Array(n).fill(null);
+        for(var i=n-1;i>=0;i--){
+          var d = Math.floor(arr[i]/offset) % BASE;
+          var p = --cnts3[d];
+          help2[p] = arr[i];
+          steps.push({phase:'place', arr:arr.slice(), offset:offset, round:r+1, idx:i, digit:d, pos:p, cnts:cnts3.slice(), help:help2.slice()});
+        }
+        arr = help2.slice();
+        steps.push({phase:'copy', arr:arr.slice(), offset:offset, round:r+1, bits:bits, cnts:cnts3.slice(), help:help2.slice()});
+        offset *= BASE;
+      }
+      for(var i=0;i<n;i++) arr[i] += minv;
+      steps.push({phase:'restore', arr:arr.slice(), minv:minv, bits:bits});
+      steps.push({phase:'done', arr:arr.slice(), minv:minv, bits:bits});
+      return steps;
+    }
+
+    function init(){
+      var p = presets[parseInt(selPreset.value)];
+      if(!p) p = genRandom();
+      st.orig = p.slice();
+      st.steps = buildSteps(p);
+      st.idx = 0;
+      render();
+    }
+
+    function doStep(){
+      if(st.idx < st.steps.length - 1){
+        st.idx++;
+        render();
+      }
+    }
+
+    function fmt(n){ return n === null ? '' : n; }
+
+    function render(){
+      var s = st.steps[st.idx];
+      var n = st.orig.length;
+      var html = '';
+
+      html += '<div class="rs-line"><span class="rs-rowlabel">arr</span><div class="rs-array">';
+      for(var i=0;i<n;i++){
+        var cls = 'rs-cell';
+        if(s.phase==='shift' || s.phase==='restore') cls += ' hl';
+        if((s.phase==='count' || s.phase==='place') && i===s.idx) cls += ' pivot';
+        if(s.phase==='done') cls += ' done';
+        html += '<div class="'+cls+'">'+fmt(s.arr[i])+'</div>';
+      }
+      html += '</div></div>';
+      html += '<div class="rs-line"><span class="rs-rowlabel"></span><div class="rs-array">';
+      for(var i=0;i<n;i++){
+        html += '<div class="rs-cell idx">'+i+'</div>';
+      }
+      html += '</div></div>';
+
+      if(s.cnts){
+        var isPre = (s.phase==='prefix' || s.phase==='place' || s.phase==='copy');
+        html += '<div class="rs-line"><span class="rs-rowlabel">'+(isPre?'前缀':'cnts')+'</span><div class="rs-array">';
+        for(var d=0;d<BASE;d++){
+          var cls = 'rs-cnt' + (isPre ? ' prefix' : '');
+          if((s.phase==='count' || s.phase==='place') && d===s.digit) cls += ' pivot';
+          html += '<div class="'+cls+'">'+s.cnts[d]+'</div>';
+        }
+        html += '</div></div>';
+      }
+
+      if(s.help){
+        html += '<div class="rs-line"><span class="rs-rowlabel">help</span><div class="rs-array">';
+        for(var i=0;i<n;i++){
+          var cls = s.help[i] === null ? 'rs-cell ghost' : 'rs-cell done';
+          if(s.phase==='place' && i===s.pos) cls = 'rs-cell pivot';
+          html += '<div class="'+cls+'">'+fmt(s.help[i])+'</div>';
+        }
+        html += '</div></div>';
+      }
+
+      body.innerHTML = html;
+
+      var msg = '';
+      if(s.phase==='findmin'){
+        msg = '第 1 步：找到最小值 '+s.minv+'。基数排序要求非负整数，先把整个数组平移。';
+      } else if(s.phase==='shift'){
+        msg = '所有数减去 '+s.minv+'：'+st.orig.join(', ')+' → '+s.arr.join(', ')+'。最大值 '+s.maxv+' 有 '+s.bits+' 位，要做 '+s.bits+' 轮。';
+      } else if(s.phase==='roundstart'){
+        msg = '第 '+s.round+' 轮（共 '+s.bits+' 轮）：offset='+s.offset+'，这一轮按 (x / '+s.offset+') % '+BASE+' 取位。';
+      } else if(s.phase==='count'){
+        msg = '统计 arr['+s.idx+']='+s.arr[s.idx]+' 的当前位：('+s.arr[s.idx]+' / '+s.offset+') % '+BASE+' = '+s.digit+'，cnts['+s.digit+']++。';
+      } else if(s.phase==='prefix'){
+        msg = 'cnts 改成前缀和：cnts[i] = 当前位数字 ≤ i 的元素个数，也是数字 i 放置区间的右边界。';
+      } else if(s.phase==='place'){
+        msg = '从后往前放置 arr['+s.idx+']='+s.arr[s.idx]+'，当前位 '+s.digit+'，--cnts['+s.digit+']='+s.pos+'，放进 help['+s.pos+']。';
+      } else if(s.phase==='copy'){
+        msg = '第 '+s.round+' 轮结束：help 拷回 arr，当前按第 '+s.round+' 位有序。offset 乘 '+BASE+' 进入下一轮。';
+      } else if(s.phase==='restore'){
+        msg = '全部 '+s.bits+' 轮完成，数组按值有序。最后加回最小值 '+s.minv+'。';
+      } else {
+        msg = '完成！原始数组 '+st.orig.join(', ')+' → '+s.arr.join(', ')+'。';
+      }
+      info.innerHTML = '<div>进度：'+(st.idx+1)+' / '+st.steps.length+(s.round?(' | 第 '+s.round+' 轮'):'')+'</div><div style="margin-top:4px;color:#374151">'+msg+'</div>';
+
+      btnNext.disabled = (st.idx >= st.steps.length - 1);
+      btnNext.textContent = (st.idx >= st.steps.length - 1) ? '已完成' : '下一步';
+    }
+
+    btnNext.addEventListener('click', doStep);
+    btnReset.addEventListener('click', init);
+    selPreset.addEventListener('change', init);
+    init();
+  })();
+
+  // ===== Demo 2: 计数排序 vs 基数排序 =====
+  (function(){
+    var selN = document.getElementById('cmp-n');
+    var selV = document.getElementById('cmp-v');
+    var selB = document.getElementById('cmp-b');
+    var out = document.getElementById('cmp-out');
+    if(!out) return;
+
+    function fmtBytes(b){
+      if(b >= 1024*1024*1024) return (b/1024/1024/1024).toFixed(1)+' GB';
+      if(b >= 1024*1024) return (b/1024/1024).toFixed(1)+' MB';
+      if(b >= 1024) return (b/1024).toFixed(1)+' KB';
+      return b+' B';
+    }
+
+    function render(){
+      var n = parseInt(selN.value);
+      var V = parseInt(selV.value);
+      var B = parseInt(selB.value);
+      var cntBytes = V * 4;
+      var rounds = 0, x = V;
+      while(x > 0){ rounds++; x = Math.floor(x/B); }
+      var radixBytes = n * 4 + B * 4;
+
+      var html = '<div class="rs-card"><b>计数排序</b>：计数数组顶到值域，需要 <span class="big '+(cntBytes > 100*1024*1024 ? 'warn' : 'ok')+'">'+fmtBytes(cntBytes)+'</span>';
+      if(cntBytes > 200*1024*1024){
+        html += '<br><span class="warn">超过 200MB，竞赛里基本开不下，计数排序出局。</span>';
+      } else if(cntBytes > 4*1024*1024){
+        html += '<br><span class="warn">能开，但有点奢侈，值域再大一点就危险。</span>';
+      } else {
+        html += '<br><span class="ok">很轻，计数排序是首选。</span>';
+      }
+      html += '</div>';
+
+      html += '<div class="rs-card"><b>基数排序</b>：最大值在 '+B+' 进制下有 <span class="big">'+rounds+' 位</span>，做 '+rounds+' 轮，每轮约 3n 次操作。';
+      html += '<br>辅助空间 help('+fmtBytes(n*4)+') + cnts('+fmtBytes(B*4)+') = <span class="big '+(radixBytes > 100*1024*1024 ? 'warn' : 'ok')+'">'+fmtBytes(radixBytes)+'</span>';
+      html += '</div>';
+
+      html += '<div class="rs-card"><b>结论</b>：值域小，计数排序又快又省；值域一大，计数数组爆炸；基数排序 '+rounds+' 轮，每轮约 3n 次操作，轮数只差常数倍，总代价线性。</div>';
+
+      out.innerHTML = html;
+    }
+
+    selN.addEventListener('change', render);
+    selV.addEventListener('change', render);
+    selB.addEventListener('change', render);
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

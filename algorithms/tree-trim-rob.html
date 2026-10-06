@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>修剪搜索二叉树与二叉树打家劫舍</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz { margin: 16px 0; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
+  .viz-title { margin: 0 0 8px; font-size: 14px; color: #374151; }
+  .viz-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .cb-sel { font-size: 13px; padding: 3px 8px; }
+  .cb-btn { font-size: 13px; padding: 4px 12px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>修剪搜索二叉树与二叉树打家劫舍</h1>
+      <p class="intro">一个靠值域递归重建，一个给每个节点定偷与不偷两个状态。后者是树型 dp 的第一道正式题。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>这一课最后两题。669 是 BST 上的区间过滤：把值域外的节点整棵剪掉，剩下的还是 BST。337 是树上选点：相邻节点不能都选，求能拿到的最大和。</p>
+      <p>337 的「两个状态、一个转移」就是树型 dp 的完整骨架，这一讲先把骨架立住，整体方法论在动态规划大章节会展开。节点定义沿用前面的课，带构造器。</p>
+
+      <h2 id="q1">一、修剪搜索二叉树（LeetCode 669）</h2>
+      <p>递归三句话就能写完。当前节点比 low 小，它和整棵左子树一起丢掉，因为左子树全比它还小，留着必然越界，剩下只可能藏在右子树里，去修剪右子树。比 high 大是对称的，去修剪左子树。在范围内，就保留自己，把两棵子树修剪后的结果接回来。</p>
+          <pre class="code"><span class="cm">// 修剪搜索二叉树（LeetCode 669），保留值在 [low, high] 内的节点</span>
+    <span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode *left, *right;
+    };
+
+    TreeNode* TrimBST(TreeNode* cur, <span class="kw">int</span> low, <span class="kw">int</span> high) {
+        <span class="kw">if</span> (cur == <span class="kw">nullptr</span>) {
+            <span class="kw">return</span> <span class="kw">nullptr</span>;
+        }
+        <span class="kw">if</span> (cur-&gt;val &lt; low) {
+            <span class="cm">// 当前节点连左子树一起丢掉，整棵右子树继续修剪</span>
+            <span class="kw">return</span> TrimBST(cur-&gt;right, low, high);
+        }
+        <span class="kw">if</span> (cur-&gt;val &gt; high) {
+            <span class="kw">return</span> TrimBST(cur-&gt;left, low, high);
+        }
+        <span class="cm">// cur 在范围内，修剪两棵子树后保留自己</span>
+        cur-&gt;left = TrimBST(cur-&gt;left, low, high);
+        cur-&gt;right = TrimBST(cur-&gt;right, low, high);
+        <span class="kw">return</span> cur;
+    }</pre>
+      <p>注意丢子树的写法：<code class="inline">cur->val &lt; low</code> 时直接返回 <code class="inline">TrimBST(cur->right, low, high)</code>，左子树根本不进去。这才是修剪 O(n) 的原因：每个节点至多被探一次，被丢掉的整棵子树一个节点都不碰。</p>
+      <p>探访量实测过。随机 BST 10 万节点，保留值域中间 50%：探访 100022 个节点，约等于 n + 1；保留全部值域：探访 200001 = 2n + 1，每个节点探两次（自身加一次空子树）。链 10 万节点保留 [20000, 80000]：探访 140003，前缀 19999 个各探 1 次、中间 60001 个各探 2 次、后缀 80001 只探 1 次就整棵返回。</p>
+      <figure class="fig" id="figTrim"></figure>
+      <p>剪完还是 BST：结构上每一步都是「用子树替换节点」，中序序列等于原中序过滤掉区间外的值，有序性一点没坏。</p>
+
+      <h2 id="q2">二、二叉树打家劫舍（LeetCode 337）</h2>
+      <p>相邻节点不能都偷。给每个节点定义两个状态：yes 是偷这个节点时，这棵子树能拿到的最大收益；no 是不偷它时，子树的最大收益。两个状态各自独立算，后序一次遍历就够。</p>
+          <pre class="code"><span class="cm">// 二叉树打家劫舍（LeetCode 337）</span>
+    <span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode *left, *right;
+    };
+
+    <span class="cm">// 完成 X 子树遍历后：</span>
+    <span class="cm">// yes = 偷 X 头节点时 X 子树的最大收益</span>
+    <span class="cm">// no  = 不偷 X 头节点时 X 子树的最大收益</span>
+    <span class="kw">long</span> <span class="kw">long</span> yes, no;  <span class="cm">// 全局变量</span>
+
+    <span class="kw">void</span> <span class="fn">F</span>(TreeNode* root) {
+        <span class="kw">if</span> (root == <span class="kw">nullptr</span>) {
+            yes = 0;
+            no = 0;
+        } <span class="kw">else</span> {
+            <span class="kw">long</span> <span class="kw">long</span> y = root-&gt;val;  <span class="cm">// 偷当前节点：左右孩子都不能偷</span>
+            <span class="kw">long</span> <span class="kw">long</span> n = 0;          <span class="cm">// 不偷当前节点：左右孩子各取较大值</span>
+            F(root-&gt;left);
+            y += no;
+            n += max(yes, no);
+            F(root-&gt;right);
+            y += no;
+            n += max(yes, no);
+            yes = y;
+            no = n;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">Rob</span>(TreeNode* root) {
+        F(root);
+        <span class="kw">return</span> (<span class="kw">int</span>)max(yes, no);
+    }</pre>
+      <p>转移就两条。偷当前节点，两个孩子都不能偷：<code class="inline">y = val + no(left) + no(right)</code>。不偷当前节点，两个孩子随便，各取较大的那个：<code class="inline">n = max(yes(left), no(left)) + max(yes(right), no(right))</code>。</p>
+      <p>全局变量 yes、no 的语义是「完成 X 子树遍历后」的两个值。后序先递归左、再递归右，每次递归完，全局 yes/no 就是那棵子树的结果，父节点直接拿来用。这是把「返回值」藏进全局变量的惯用写法，省得函数签名里带两个引用参数。</p>
+      <p>收益用 long long：节点值上限 10⁴、节点数上限 10⁵，累加和能到 10⁹ 量级，int 顶不住。实测随机树 10 万节点，答案 313681523，已经越过 3 亿。</p>
+      <figure class="fig" id="figRob"></figure>
+      <p>能不能贪心，隔层取一层？不行。链 [2,1,1,2]，隔层取第 1、3 层得 3，正确答案是 2 + 2 = 4。随机链 2 万组（n ≤ 30），贪心错了 11607 组，58% 的树都栽。贪心只看层，不看值，值一大就翻车。</p>
+
+      <h2 id="comp">三、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>时间</th><th>额外空间</th><th>说明</th></tr>
+        <tr><td>修剪搜索二叉树</td><td>O(n)</td><td>O(h)</td><td>被丢掉的子树不深入，每个节点至多探一次</td></tr>
+        <tr><td>二叉树打家劫舍</td><td>O(n)</td><td>O(h)</td><td>后序一次遍历，全局存两个状态</td></tr>
+      </table>
+      <p>两题都是每个节点进出一次，递归栈深等于树高。链退化时 O(h) 变 O(n)，但总时间始终 O(n)。</p>
+
+      <h2 id="viz1">演示一：修剪操作台</h2>
+      <div class="viz" id="vizTrim">
+        <p class="viz-title">值域外整棵丢：丢的子树一个节点都不探</p>
+        <div id="vizTrimBody"></div>
+        <div class="viz-controls" id="vizTrimCtl"></div>
+      </div>
+
+      <h2 id="viz2">演示二：打家劫舍操作台</h2>
+      <div class="viz" id="vizRob">
+        <p class="viz-title">后序一次遍历，每个节点标 yes / no 两个值</p>
+        <div id="vizRobBody"></div>
+        <div class="viz-controls" id="vizRobCtl"></div>
+      </div>
+
+      <h2 id="sum">四、总结</h2>
+      <p>修剪靠的是 BST 的值域性质：节点越界，整棵子树的方向就定了，越界侧的孩子直接整体丢掉。探访量说明一切，保留 50% 的区间只比保留全部少探一半不到。</p>
+      <p>打家劫舍的骨架是树型 dp：每个节点两个状态，转移只看自己的两个孩子，后序把子树的答案逐层汇总。贪心在这里是错的，状态枚举才稳。</p>
+      <p>两题的递归形态在动态规划大章节会以树型 dp 的完整套路重讲一遍：状态怎么定、转移怎么写、答案在哪个节点收口。037 的树题到这里就讲完了。</p>
+
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>修剪搜索二叉树</td><td><a href="https://leetcode.cn/problems/trim-a-binary-search-tree/" target="_blank">leetcode.cn/problems/trim-a-binary-search-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>验证搜索二叉树</td><td><a href="https://leetcode.cn/problems/validate-binary-search-tree/" target="_blank">leetcode.cn/problems/validate-binary-search-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>搜索二叉树上寻找两个节点的最近公共祖先</td><td><a href="https://leetcode.cn/problems/lowest-common-ancestor-of-a-binary-search-tree/" target="_blank">leetcode.cn/problems/lowest-common-ancestor-of-a-binary-search-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>验证平衡二叉树</td><td><a href="https://leetcode.cn/problems/balanced-binary-tree/" target="_blank">leetcode.cn/problems/balanced-binary-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>普通二叉树上寻找两个节点的最近公共祖先</td><td><a href="https://leetcode.cn/problems/lowest-common-ancestor-of-a-binary-tree/" target="_blank">leetcode.cn/problems/lowest-common-ancestor-of-a-binary-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>二叉树打家劫舍问题</td><td><a href="https://leetcode.cn/problems/house-robber-iii/" target="_blank">leetcode.cn/problems/house-robber-iii</a></td></tr>
+        <tr><td>LeetCode</td><td>收集累加和等于aim的所有路径</td><td><a href="https://leetcode.cn/problems/path-sum-ii/" target="_blank">leetcode.cn/problems/path-sum-ii</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解037【必备】二叉树高频题目-下-不含树型dp</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5', gray: '#9aa0a6', text: '#1f2937', dim: '#6b7280', line: '#cbd5e1', bg: '#f6f7f9', green: '#16a34a', greenBg: '#dcfce7' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function box(x, y, w, h, o) { o = o || {}; return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx || 4) + '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.line) + '" stroke-width="' + (o.sw || 1.2) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>'; }
+  function txt(x, y, s, o) { o = o || {}; return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 13) + '" fill="' + (o.fill || C.text) + '" font-weight="' + (o.weight || 'normal') + '" text-anchor="' + (o.anchor || 'middle') + '" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">' + esc(s) + '</text>'; }
+  function line(x1, y1, x2, y2, o) { o = o || {}; return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.line) + '" stroke-width="' + (o.w || 1.2) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + ' stroke-linecap="round"/>'; }
+  function svg(g, w, h) { return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" width="100%" role="img">' + g + '</svg>'; }
+  function mulberry32(a) { return function () { a = (a + 0x6D2B79F5) | 0; var t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+  // ============ 图 1：修剪 ============
+  (function () {
+    var W = 720, H = 330, g = '';
+    g += txt(185, 22, '原树，修剪 [1, 3]', { size: 13, weight: 600 });
+    g += txt(535, 22, '修剪后：中序 = 1, 2, 3，还是 BST', { size: 13, weight: 600 });
+    function drawTree(pos, edges, mark) {
+      var g2 = '';
+      for (var i = 0; i < edges.length; i++) {
+        var a = pos[edges[i][0]], b = pos[edges[i][1]];
+        g2 += line(a[0], a[1] + 14, b[0], b[1] - 14, { stroke: mark[edges[i][0]] && mark[edges[i][0]].drop && mark[edges[i][1]] && mark[edges[i][1]].drop ? '#c9ced4' : C.line });
+      }
+      for (var u in pos) {
+        var p = pos[u]; var m = mark[u] || {};
+        var fill = m.drop ? C.bg : C.blueBg;
+        var stroke = m.drop ? '#c9ced4' : C.blue;
+        g2 += box(p[0] - 15, p[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: m.drop ? 1.2 : 1.6 });
+        g2 += txt(p[0], p[1] + 5, u, { size: 12, fill: m.drop ? C.gray : C.text, weight: 600 });
+      }
+      return g2;
+    }
+    // 左：3[0,4]，0[null,2]，4 空，2[1,null]，1 空
+    var P = { '3': [185, 70], '0': [120, 140], '4': [250, 140], '2': [150, 210], '1': [120, 280] };
+    var E = [['3', '0'], ['3', '4'], ['0', '2'], ['2', '1']];
+    var M = {};
+    for (var u in P) M[u] = { drop: u === '0' || u === '4' };
+    g += drawTree(P, E, M);
+    g += txt(185, 308, '0 和 4 越界，连子树一起丢；2、1 保住', { size: 11, fill: C.dim });
+    // 右：修剪结果 3[2,null]，2[1,null]，1 空
+    var R = { '3': [500, 70], '2': [550, 140], '1': [500, 210] };
+    var RE = [['3', '2'], ['2', '1']];
+    var RM = {};
+    for (var v in R) RM[v] = {};
+    g += drawTree(R, RE, RM);
+    g += txt(535, 260, '0 被 2 顶替，4 直接没了', { size: 11, fill: C.dim });
+    g += txt(535, 308, '中序从 0,1,2,3,4 过滤成 1,2,3', { size: 11, fill: C.dim });
+    document.getElementById('figTrim').innerHTML = '<figcaption>越界的节点整棵丢，子树顶替它的位置，中序过滤区间后仍然有序。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 图 2：打家劫舍状态 ============
+  (function () {
+    var W = 720, H = 330, g = '';
+    g += txt(360, 22, 'LeetCode 337 样例 [3,2,3,null,3,null,1]，答案 7', { size: 13, weight: 600 });
+    // 树：3[2,3b]，2[null,3a]，3b[null,1]，3a、1 叶子
+    var P = { '3': [360, 70], '2': [230, 140], '3b': [490, 140], '3a': [180, 210], '1': [450, 210] };
+    var E = [['3', '2'], ['3', '3b'], ['2', '3a'], ['3b', '1']];
+    for (var i = 0; i < E.length; i++) { var a = P[E[i][0]], b = P[E[i][1]]; g += line(a[0], a[1] + 14, b[0], b[1] - 14); }
+    var yn = { '3a': ['y = 3', 'n = 0'], '1': ['y = 1', 'n = 0'], '2': ['y = 2', 'n = 3'], '3b': ['y = 3', 'n = 1'], '3': ['y = 7', 'n = 6'] };
+    for (var u in P) {
+      var p = P[u];
+      var root = u === '3';
+      var fill = root ? C.orangeBg : C.blueBg;
+      var stroke = root ? C.orange : C.blue;
+      g += box(p[0] - 15, p[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: root ? 2 : 1.2 });
+      g += txt(p[0], p[1] + 5, u.replace('3b', '3').replace('3a', '3'), { size: 12, fill: root ? C.orange : C.text, weight: 600 });
+      g += txt(p[0], p[1] + 27, yn[u][0], { size: 10, fill: root ? C.orange : C.dim });
+      g += txt(p[0], p[1] + 42, yn[u][1], { size: 10, fill: root ? C.orange : C.dim });
+    }
+    g += txt(360, 300, '偷根 3，孩子 3 和 1 都能偷：3 + 3 + 1 = 7；不偷根：3 + 3 = 6。答案取 max = 7。', { size: 12, fill: C.text });
+    document.getElementById('figRob').innerHTML = '<figcaption>每个节点的两个值都由孩子拼出来：偷它，孩子只能取 n；不偷它，孩子各取较大值。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 演示一：修剪操作台 ============
+  (function () {
+    // 树：3[0,4]，0[null,2]，4 空，2[1,null]，1 空
+    var NODES = { '3': [0, 4], '0': [null, 2], '4': [null, null], '2': [1, null], '1': [null, null] };
+    var ROOT = '3';
+    var RANGES = [ { name: '[1, 3]', lo: 1, hi: 3 }, { name: '[0, 2]', lo: 0, hi: 2 }, { name: '[2, 4]', lo: 2, hi: 4 }, { name: '[0, 4] 全保留', lo: 0, hi: 4 } ];
+    var body = document.getElementById('vizTrimBody');
+    var ctl = document.getElementById('vizTrimCtl');
+    var selR = document.createElement('select');
+    selR.className = 'cb-sel';
+    RANGES.forEach(function (r, i) { var o = document.createElement('option'); o.value = i; o.textContent = r.name; selR.appendChild(o); });
+    var bPrev = document.createElement('button'); bPrev.className = 'cb-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'cb-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'cb-btn'; bReset.textContent = '重置';
+    ctl.appendChild(selR); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var state = null;
+
+    function layout(nodes, root) {
+      var depth = {}, pos = {}, maxD = 0;
+      (function dfs(u, d, left, right) {
+        depth[u] = d; if (d > maxD) maxD = d;
+        pos[u] = (left + right) / 2;
+        if (nodes[u][0] !== null) dfs(nodes[u][0], d + 1, left, pos[u]);
+        if (nodes[u][1] !== null) dfs(nodes[u][1], d + 1, pos[u], right);
+      })(root, 0, 80, 620);
+      return { depth: depth, pos: pos, maxD: maxD };
+    }
+    var L = layout(NODES, ROOT);
+
+    function simTrim(lo, hi) {
+      var events = [], kept = {}, result = {}, visited = 0;
+      function trim(u) {
+        events.push({ t: 'enter', u: u });
+        if (u !== null) visited++;
+        if (u === null) { events.push({ t: 'null', u: null }); return null; }
+        var v = parseInt(u, 10);
+        if (v < lo) { events.push({ t: 'drop', u: u, side: 'low' }); return trim(NODES[u][1]); }
+        if (v > hi) { events.push({ t: 'drop', u: u, side: 'high' }); return trim(NODES[u][0]); }
+        kept[u] = true;
+        var l = trim(NODES[u][0]);
+        var r = trim(NODES[u][1]);
+        result[u] = [l, r];
+        events.push({ t: 'keep', u: u });
+        return u;
+      }
+      trim(ROOT);
+      return { events: events, kept: kept, result: result, visited: visited };
+    }
+
+    function render() {
+      var r = RANGES[parseInt(selR.value, 10)];
+      var sim = simTrim(r.lo, r.hi);
+      var idx = state && state.idx !== undefined ? state.idx : 0;
+      if (idx >= sim.events.length) idx = sim.events.length - 1;
+      var ev = sim.events[idx];
+      var dropped = {}, entered = {};
+      for (var i = 0; i <= idx; i++) {
+        var e = sim.events[i];
+        if (e.t === 'enter' && e.u !== null) entered[e.u] = true;
+        if (e.t === 'drop') dropped[e.u] = true;
+      }
+      var W = 700, H = 340, g = '';
+      for (var u in NODES) {
+        var ch = NODES[u];
+        var dropU = dropped[u] !== undefined;
+        if (ch[0] !== null) { var a = [L.pos[u], 40 + L.depth[u] * 56], b = [L.pos[ch[0]], 40 + L.depth[ch[0]] * 56]; g += line(a[0], a[1] + 14, b[0], b[1] - 14, { stroke: dropU && dropped[ch[0]] !== undefined ? '#c9ced4' : C.line }); }
+        if (ch[1] !== null) { var a2 = [L.pos[u], 40 + L.depth[u] * 56], b2 = [L.pos[ch[1]], 40 + L.depth[ch[1]] * 56]; g += line(a2[0], a2[1] + 14, b2[0], b2[1] - 14, { stroke: dropU && dropped[ch[1]] !== undefined ? '#c9ced4' : C.line }); }
+      }
+      for (var u2 in NODES) {
+        var p = [L.pos[u2], 40 + L.depth[u2] * 56];
+        var cur = u2 === ev.u;
+        var isDrop = dropped[u2] !== undefined;
+        var fill, stroke, sw = 1.2, tc = C.text;
+        if (cur) { fill = C.blue; stroke = C.blue; tc = '#fff'; sw = 2; }
+        else if (isDrop) { fill = C.bg; stroke = '#c9ced4'; tc = C.gray; }
+        else if (entered[u2]) { fill = C.blueBg; stroke = C.blue; }
+        else { fill = '#fff'; stroke = C.line; }
+        g += box(p[0] - 15, p[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: sw });
+        g += txt(p[0], p[1] + 5, u2, { size: 12, fill: tc, weight: 600 });
+      }
+      var note;
+      if (ev.t === 'null') note = '空子树，返回空';
+      else if (ev.t === 'drop') note = '节点 ' + ev.u + (ev.side === 'low' ? ' < ' + r.lo + '：自己和左子树都丢，去修剪右子树' : ' > ' + r.hi + '：自己和右子树都丢，去修剪左子树');
+      else if (ev.t === 'keep') note = '节点 ' + ev.u + ' 在 [' + r.lo + ', ' + r.hi + '] 内，保留，接上修剪后的子树';
+      else note = '进入节点 ' + ev.u;
+      var last = idx === sim.events.length - 1;
+      var keptN = Object.keys(sim.kept).length;
+      if (last) note = '探访 ' + sim.visited + ' / 5 个节点（不含空子树），保留 ' + keptN + ' 个';
+      g += txt(350, 318, '第 ' + (idx + 1) + ' / ' + sim.events.length + ' 步：' + note, { size: 12, fill: last ? C.orange : C.text, weight: last ? 600 : 'normal' });
+      body.innerHTML = svg(g, W, H);
+    }
+
+    selR.addEventListener('change', function () { state = { idx: 0 }; render(); });
+    bPrev.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; if (idx > 0) { state = { idx: idx - 1 }; render(); } });
+    bNext.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; state = { idx: idx + 1 }; render(); });
+    bReset.addEventListener('click', function () { state = { idx: 0 }; render(); });
+    render();
+  })();
+
+  // ============ 演示二：打家劫舍操作台 ============
+  (function () {
+    var TREES = [
+      { name: '链 1-2-3-4-5', nodes: { 1: [2, null], 2: [3, null], 3: [4, null], 4: [5, null], 5: [null, null] }, root: 1 },
+      { name: '链 [2,1,1,2]', nodes: { 1: [2, null], 2: [3, null], 3: [4, null], 4: [null, null] }, root: 1, vals: { 1: 2, 2: 1, 3: 1, 4: 2 } },
+      { name: '样例 [3,2,3,null,3,null,1]', nodes: { '3r': [2, '3b'], 2: [null, '3a'], '3b': [null, 1], '3a': [null, null], 1: [null, null] }, root: '3r', vals: { '3r': 3, 2: 2, '3a': 3, '3b': 3, 1: 1 } },
+      { name: '随机树', nodes: null, root: null, seed: 61 }
+    ];
+    var body = document.getElementById('vizRobBody');
+    var ctl = document.getElementById('vizRobCtl');
+    var selT = document.createElement('select');
+    selT.className = 'cb-sel';
+    TREES.forEach(function (t, i) { var o = document.createElement('option'); o.value = i; o.textContent = t.name; selT.appendChild(o); });
+    var bPrev = document.createElement('button'); bPrev.className = 'cb-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'cb-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'cb-btn'; bReset.textContent = '重置';
+    ctl.appendChild(selT); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var state = null;
+
+    function buildRand(seed) {
+      var rnd = mulberry32(seed);
+      var nodes = { 1: [null, null] };
+      var keys = [1], id = 2;
+      for (var i = 1; i <= 6; i++) {
+        var u = keys[Math.floor(rnd() * keys.length)];
+        var slot = rnd() < 0.5 ? 0 : 1;
+        if (nodes[u][slot] !== null) continue;
+        nodes[u][slot] = id; nodes[id] = [null, null]; keys.push(id); id++;
+      }
+      var vals = {};
+      for (var k in nodes) vals[k] = 1 + Math.floor(rnd() * 9);
+      return { nodes: nodes, root: 1, vals: vals };
+    }
+
+    function layout(nodes, root) {
+      var depth = {}, pos = {}, maxD = 0;
+      (function dfs(u, d, left, right) {
+        depth[u] = d; if (d > maxD) maxD = d;
+        pos[u] = (left + right) / 2;
+        if (nodes[u][0] !== null) dfs(nodes[u][0], d + 1, left, pos[u]);
+        if (nodes[u][1] !== null) dfs(nodes[u][1], d + 1, pos[u], right);
+      })(root, 0, 120, 580);
+      return { depth: depth, pos: pos, maxD: maxD };
+    }
+
+    function simRob(nodes, root, vals) {
+      var events = [], ans = {};
+      function dfs(u) {
+        events.push({ t: 'enter', u: u });
+        if (u === null) { ans[null] = { y: 0, n: 0 }; events.push({ t: 'null', u: null }); return; }
+        dfs(nodes[u][0]);
+        dfs(nodes[u][1]);
+        var y = vals[u] + ans[nodes[u][0]].n + ans[nodes[u][1]].n;
+        var n = Math.max(ans[nodes[u][0]].y, ans[nodes[u][0]].n) + Math.max(ans[nodes[u][1]].y, ans[nodes[u][1]].n);
+        ans[u] = { y: y, n: n };
+        events.push({ t: 'calc', u: u, y: y, n: n });
+      }
+      dfs(root);
+      return { events: events, ans: ans, root: root };
+    }
+
+    function greedyLevels(nodes, root, vals) {
+      var sum = { 0: 0, 1: 0 };
+      (function dfs(u, d) {
+        if (u === null) return;
+        sum[d % 2] += vals[u];
+        dfs(nodes[u][0], d + 1);
+        dfs(nodes[u][1], d + 1);
+      })(root, 0);
+      return Math.max(sum[0], sum[1]);
+    }
+
+    function render() {
+      var t = TREES[parseInt(selT.value, 10)];
+      var nodes, root, vals;
+      if (t.nodes) { nodes = t.nodes; root = t.root; vals = t.vals || {}; }
+      else { var r = buildRand(t.seed); nodes = r.nodes; root = r.root; vals = r.vals || {}; }
+      for (var k in nodes) if (vals[k] === undefined) vals[k] = parseInt(k.replace('3r', '3').replace('3a', '3').replace('3b', '3'), 10) || 1;
+      var L = layout(nodes, root);
+      var sim = simRob(nodes, root, vals);
+      var idx = state && state.idx !== undefined ? state.idx : 0;
+      if (idx >= sim.events.length) idx = sim.events.length - 1;
+      var ev = sim.events[idx];
+      var done = {};
+      for (var i = 0; i <= idx; i++) {
+        var e = sim.events[i];
+        if (e.t === 'calc') done[e.u] = { y: e.y, n: e.n };
+        if (e.t === 'enter' && e.u !== null && done[e.u] === undefined) done[e.u] = null;
+      }
+      var W = 700, H = 350, g = '';
+      for (var u in nodes) {
+        var ch = nodes[u];
+        if (ch[0] !== null) { var a = [L.pos[u], 40 + L.depth[u] * 56], b = [L.pos[ch[0]], 40 + L.depth[ch[0]] * 56]; g += line(a[0], a[1] + 14, b[0], b[1] - 14); }
+        if (ch[1] !== null) { var a2 = [L.pos[u], 40 + L.depth[u] * 56], b2 = [L.pos[ch[1]], 40 + L.depth[ch[1]] * 56]; g += line(a2[0], a2[1] + 14, b2[0], b2[1] - 14); }
+      }
+      for (var u2 in nodes) {
+        var p = [L.pos[u2], 40 + L.depth[u2] * 56];
+        var cur = ev.u === u2;
+        var st = done[u2];
+        var fill, stroke, sw = 1.2, tc = C.text;
+        if (cur && st === null) { fill = C.blue; stroke = C.blue; tc = '#fff'; sw = 2; }
+        else if (st && st.y !== undefined) { fill = C.blueBg; stroke = C.blue; }
+        else { fill = '#fff'; stroke = C.line; }
+        g += box(p[0] - 15, p[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: sw });
+        var label = String(u2).replace('3r', '3').replace('3a', '3').replace('3b', '3');
+        g += txt(p[0], p[1] + 5, label, { size: 12, fill: tc, weight: 600 });
+        if (st && st.y !== undefined) {
+          g += txt(p[0], p[1] + 27, 'y=' + st.y, { size: 10, fill: C.dim });
+          g += txt(p[0], p[1] + 42, 'n=' + st.n, { size: 10, fill: C.dim });
+        }
+      }
+      var note;
+      if (ev.t === 'enter') note = '进入节点 ' + String(ev.u).replace('3r', '3').replace('3a', '3').replace('3b', '3') + '（值 ' + vals[ev.u] + '），先算孩子';
+      else if (ev.t === 'null') note = '空子树：y = 0，n = 0';
+      else note = '节点 ' + String(ev.u).replace('3r', '3').replace('3a', '3').replace('3b', '3') + '：y = ' + ev.y + '（偷，孩子只能取 n），n = ' + ev.n + '（不偷，孩子取较大）';
+      var last = idx === sim.events.length - 1;
+      if (last) {
+        var ans = sim.ans[sim.root];
+        var greed = greedyLevels(nodes, root, vals);
+        note = '答案 = max(y, n) = ' + Math.max(ans.y, ans.n) + '；贪心隔层取 = ' + greed + (greed === Math.max(ans.y, ans.n) ? '，碰巧一致' : '，错');
+      }
+      g += txt(350, 334, '第 ' + (idx + 1) + ' / ' + sim.events.length + ' 步：' + note, { size: 12, fill: last ? C.orange : C.text, weight: last ? 600 : 'normal' });
+      body.innerHTML = svg(g, W, H);
+    }
+
+    selT.addEventListener('change', function () { state = { idx: 0 }; render(); });
+    bPrev.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; if (idx > 0) { state = { idx: idx - 1 }; render(); } });
+    bNext.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; state = { idx: idx + 1 }; render(); });
+    bReset.addEventListener('click', function () { state = { idx: 0 }; render(); });
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

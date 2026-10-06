@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>路径收集与树的递归判定</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz { margin: 16px 0; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
+  .viz-title { margin: 0 0 8px; font-size: 14px; color: #374151; }
+  .viz-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .cb-sel { font-size: 13px; padding: 3px 8px; }
+  .cb-btn { font-size: 13px; padding: 4px 12px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>路径收集与树的递归判定</h1>
+      <p class="intro">三个递归形态：收集路径要恢复现场，验证平衡要后序回传高度，验证搜索树要全局单调。后两题是树型 dp 的沾边用法。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>上一课处理了遍历和结构验证，这一课处理「路径」和「验证」两类问题。路径题靠递归带一条共享的栈，验证题靠递归把子树的结论逐层汇总。</p>
+      <p>LeetCode 110 和 98 这两道验证题，在后面的动态规划大章节会用「树型 dp」的正规讲法再讲一遍。这里先把递归骨架立住：子树自底向上传信息，父节点只用自己的两个孩子，就是树型 dp 的原型。</p>
+      <p>节点定义沿用上一节，带构造器。</p>
+
+      <h2 id="q1">一、收集累加和等于 aim 的路径（LeetCode 113）</h2>
+      <p>根到叶一路累加，走到叶就判定一次。递归带着一条 path 栈往下走，进节点时 push，出节点时 pop，命中的路径整条拷贝进答案。</p>
+          <pre class="code"><span class="cm">// 收集累加和等于 aim 的所有路径（LeetCode 113）</span>
+    <span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode *left, *right;
+    };
+
+    <span class="kw">void</span> <span class="fn">F</span>(TreeNode* cur, <span class="kw">int</span> aim, <span class="kw">int</span> sum, vector&lt;<span class="kw">int</span>&gt;&amp; path, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; ans) {
+        <span class="kw">if</span> (cur-&gt;left == <span class="kw">nullptr</span> &amp;&amp; cur-&gt;right == <span class="kw">nullptr</span>) {
+            <span class="cm">// 叶节点</span>
+            <span class="kw">if</span> (cur-&gt;val + sum == aim) {
+                path.push_back(cur-&gt;val);
+                ans.push_back(path);
+                path.pop_back();
+            }
+        } <span class="kw">else</span> {
+            <span class="cm">// 不是叶节点</span>
+            path.push_back(cur-&gt;val);
+            <span class="kw">if</span> (cur-&gt;left != <span class="kw">nullptr</span>) {
+                F(cur-&gt;left, aim, sum + cur-&gt;val, path, ans);
+            }
+            <span class="kw">if</span> (cur-&gt;right != <span class="kw">nullptr</span>) {
+                F(cur-&gt;right, aim, sum + cur-&gt;val, path, ans);
+            }
+            path.pop_back();
+        }
+    }
+
+    vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">PathSum</span>(TreeNode* root, <span class="kw">int</span> aim) {
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; ans;
+        <span class="kw">if</span> (root != <span class="kw">nullptr</span>) {
+            vector&lt;<span class="kw">int</span>&gt; path;
+            F(root, aim, 0, path, ans);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>pop 这一步看着多余，删掉就出事。path 是所有递归分支共享的一条栈，不恢复现场，回到父节点后栈里残留着刚才那个分支的节点，下一个分支收集到的路径开头全是脏数据。</p>
+      <p>实测过这个错：忘掉 pop，在有路径命中的 480 组随机树上，80 组答案集合和暴力不一样（16.7%）；逐条路径数，581 条里 101 条被污染（17.4%）。这是「叶节点命中后漏了 pop_back」这一类错误的标准长相，对拍一抓一个准。</p>
+      <p>累加值也不用从根重新算：sum 参数带着走到当前节点的和，进分支时加当前节点值。判定只看叶：cur 左右都空且 sum == aim，就收集。</p>
+      <figure class="fig" id="figPath"></figure>
+
+      <h2 id="q2">二、验证平衡二叉树（LeetCode 110）</h2>
+      <p>朴素做法好想：对每个节点单独算一遍左右子树的高度，比一比。代价是重复劳动。链 n = 10⁴，n(n+1)/2 ≈ 5000 万次高度计算；单趟后序只要 2n + 1 ≈ 2 万次调用。差了两个数量级。</p>
+          <pre class="code"><span class="cm">// 验证平衡二叉树（LeetCode 110）</span>
+    <span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode *left, *right;
+    };
+
+    <span class="kw">bool</span> balance;  <span class="cm">// 全局变量，所有调用过程共享</span>
+
+    <span class="kw">int</span> <span class="fn">Height</span>(TreeNode* cur) {
+        <span class="kw">if</span> (!balance || cur == <span class="kw">nullptr</span>) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">int</span> lh = Height(cur-&gt;left);
+        <span class="kw">int</span> rh = Height(cur-&gt;right);
+        <span class="kw">if</span> (abs(lh - rh) &gt; 1) {
+            balance = <span class="kw">false</span>;
+        }
+        <span class="kw">return</span> max(lh, rh) + 1;
+    }
+
+    <span class="kw">bool</span> <span class="fn">IsBalanced</span>(TreeNode* root) {
+        balance = <span class="kw">true</span>;  <span class="cm">// 每次判断开始时重置</span>
+        Height(root);
+        <span class="kw">return</span> balance;
+    }</pre>
+      <p>正解是后序一次遍历，顺路把子树高度带回：左右子树的高度各算一次，|左高 − 右高| 超过 1 就把全局布尔 balance 置 false，之后的高度不用再算，递归直接按 0 返回。</p>
+      <p>这就是树型 dp 的骨架：每个节点只等自己的两个孩子报数，拿到孩子的高度拼出自己的高度，往上递。坏消息（不平衡）靠全局布尔一路带上，省得每层都传引用。</p>
+      <figure class="fig" id="figBalance"></figure>
+
+      <h2 id="q3">三、验证搜索二叉树（LeetCode 98）</h2>
+      <p>BST 的定义是「整棵左子树全小于根，整棵右子树全大于根」。两个等价刻画：中序遍历严格递增；或者子树回传自己的最小值和最大值，检查左子树的最大值小于根、根小于右子树的最小值。</p>
+      <p>先看中序迭代版。栈模拟中序遍历，pre 记上一个访问的节点，出现 pre >= 当前就返回 false。</p>
+          <pre class="code"><span class="cm">// 验证搜索二叉树（LeetCode 98）</span>
+    <span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode *left, *right;
+    };
+
+    <span class="cm">// 方法一：中序遍历，看是否严格递增</span>
+    <span class="kw">bool</span> <span class="fn">IsValidBST1</span>(TreeNode* head) {
+        <span class="kw">if</span> (head == <span class="kw">nullptr</span>) {
+            <span class="kw">return</span> <span class="kw">true</span>;
+        }
+        TreeNode* pre = <span class="kw">nullptr</span>;
+        vector&lt;TreeNode*&gt; stack;
+        <span class="kw">while</span> (!stack.empty() || head != <span class="kw">nullptr</span>) {
+            <span class="kw">if</span> (head != <span class="kw">nullptr</span>) {
+                stack.push_back(head);
+                head = head-&gt;left;
+            } <span class="kw">else</span> {
+                head = stack.back();
+                stack.pop_back();
+                <span class="kw">if</span> (pre != <span class="kw">nullptr</span> &amp;&amp; pre-&gt;val &gt;= head-&gt;val) {
+                    <span class="kw">return</span> <span class="kw">false</span>;
+                }
+                pre = head;
+                head = head-&gt;right;
+            }
+        }
+        <span class="kw">return</span> <span class="kw">true</span>;
+    }
+
+    <span class="cm">// 方法二：递归回传子树的最小值与最大值</span>
+    <span class="kw">long</span> <span class="kw">long</span> minv, maxv;  <span class="cm">// 全局变量：当前子树的最小值、最大值</span>
+
+    <span class="kw">bool</span> <span class="fn">IsValidBST2</span>(TreeNode* head) {
+        <span class="kw">if</span> (head == <span class="kw">nullptr</span>) {
+            minv = LLONG_MAX;
+            maxv = LLONG_MIN;
+            <span class="kw">return</span> <span class="kw">true</span>;
+        }
+        <span class="kw">bool</span> lok = IsValidBST2(head-&gt;left);
+        <span class="kw">long</span> <span class="kw">long</span> lmin = minv, lmax = maxv;
+        <span class="kw">bool</span> rok = IsValidBST2(head-&gt;right);
+        <span class="kw">long</span> <span class="kw">long</span> rmin = minv, rmax = maxv;
+        minv = min(min(lmin, rmin), (<span class="kw">long</span> <span class="kw">long</span>)head-&gt;val);
+        maxv = max(max(lmax, rmax), (<span class="kw">long</span> <span class="kw">long</span>)head-&gt;val);
+        <span class="kw">return</span> lok &amp;&amp; rok &amp;&amp; lmax &lt; head-&gt;val &amp;&amp; head-&gt;val &lt; rmin;
+    }</pre>
+      <p>递归版回传子树的最小值和最大值，父节点用三个数字夹住自己。两个全局变量 minv、maxv 存当前子树的范围，空子树用 LLONG_MAX / LLONG_MIN 占位，这样空孩子永远「夹得住」，不用特判。</p>
+      <p>边界值必须用 long long：节点值本身可以到 ±2³¹，拿 int 当哨兵，int 的最大值会被真实的节点值顶穿。LeetCode 的判题器里节点值就是这个量级，int 哨兵直接翻车。</p>
+      <p>为什么要中序而不是只跟父节点比，看一棵陷阱树：</p>
+      <figure class="fig" id="figTrap"></figure>
+      <p>[5,4,6,null,null,3,7]：6 是 5 的右孩子，3 是 6 的左孩子。只跟父节点比，4 < 5 < 6，全过，但它不是 BST，因为 3 落在 5 的右子树里却比 5 小。中序拉直是 4, 5, 3, 6, 7，3 破坏了递增，拒绝。</p>
+
+      <h2 id="comp">四、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>时间</th><th>额外空间</th><th>说明</th></tr>
+        <tr><td>路径总和 II</td><td>O(n + 路径总长)</td><td>O(h)</td><td>访问 O(n)，命中路径整条拷贝，最坏 O(n²)</td></tr>
+        <tr><td>验证平衡二叉树</td><td>O(n)</td><td>O(h)</td><td>单趟后序带回高度，不重复扫</td></tr>
+        <tr><td>验证搜索二叉树</td><td>O(n)</td><td>O(h)</td><td>中序版用栈，递归版用全局 min/max</td></tr>
+      </table>
+      <p>三题的共同点：递归深度等于树高，栈占 O(h)。验证题的最坏输入都是链，O(h) 会退化到 O(n)，但时间上怎么都是 O(n)，因为每个节点至多进出一次。</p>
+
+      <h2 id="viz1">演示一：路径收集操作台</h2>
+      <div class="viz" id="vizPath">
+        <p class="viz-title">根到叶收集：进节点 push，出节点 pop，叶节点判定</p>
+        <div id="vizPathBody"></div>
+        <div class="viz-controls" id="vizPathCtl"></div>
+      </div>
+
+      <h2 id="viz2">演示二：搜索树验证操作台</h2>
+      <div class="viz" id="vizCheck">
+        <p class="viz-title">中序迭代：pre 一旦大于等于当前值，判 false</p>
+        <div id="vizCheckBody"></div>
+        <div class="viz-controls" id="vizCheckCtl"></div>
+      </div>
+
+      <h2 id="sum">五、总结</h2>
+      <p>路径题的关键是恢复现场：共享的 path 栈进分支前 push、出分支后 pop，命中的整条拷贝。忘了 pop 是这类题最常见的错，对拍能抓。</p>
+      <p>验证平衡的形态是后序回传高度，坏消息挂全局布尔；验证搜索树的形态是子树 min/max 夹住根，或者中序单调。</p>
+      <p>110 和 98 的递归结构已经是树型 dp：子树自底向上传信息，父节点只用自己的两个孩子。动态规划章节会把「两个状态、一个转移」的完整套路补上。</p>
+      <p>下一节讲修剪搜索二叉树与二叉树打家劫舍：一个按值域剪子树，一个给每个节点定偷与不偷两个状态。</p>
+
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>修剪搜索二叉树</td><td><a href="https://leetcode.cn/problems/trim-a-binary-search-tree/" target="_blank">leetcode.cn/problems/trim-a-binary-search-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>验证搜索二叉树</td><td><a href="https://leetcode.cn/problems/validate-binary-search-tree/" target="_blank">leetcode.cn/problems/validate-binary-search-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>搜索二叉树上寻找两个节点的最近公共祖先</td><td><a href="https://leetcode.cn/problems/lowest-common-ancestor-of-a-binary-search-tree/" target="_blank">leetcode.cn/problems/lowest-common-ancestor-of-a-binary-search-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>验证平衡二叉树</td><td><a href="https://leetcode.cn/problems/balanced-binary-tree/" target="_blank">leetcode.cn/problems/balanced-binary-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>普通二叉树上寻找两个节点的最近公共祖先</td><td><a href="https://leetcode.cn/problems/lowest-common-ancestor-of-a-binary-tree/" target="_blank">leetcode.cn/problems/lowest-common-ancestor-of-a-binary-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>二叉树打家劫舍问题</td><td><a href="https://leetcode.cn/problems/house-robber-iii/" target="_blank">leetcode.cn/problems/house-robber-iii</a></td></tr>
+        <tr><td>LeetCode</td><td>收集累加和等于aim的所有路径</td><td><a href="https://leetcode.cn/problems/path-sum-ii/" target="_blank">leetcode.cn/problems/path-sum-ii</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解037【必备】二叉树高频题目-下-不含树型dp</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5', gray: '#9aa0a6', text: '#1f2937', dim: '#6b7280', line: '#cbd5e1', bg: '#f6f7f9', green: '#16a34a', greenBg: '#dcfce7' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function box(x, y, w, h, o) { o = o || {}; return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx || 4) + '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.line) + '" stroke-width="' + (o.sw || 1.2) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>'; }
+  function txt(x, y, s, o) { o = o || {}; return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 13) + '" fill="' + (o.fill || C.text) + '" font-weight="' + (o.weight || 'normal') + '" text-anchor="' + (o.anchor || 'middle') + '" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">' + esc(s) + '</text>'; }
+  function line(x1, y1, x2, y2, o) { o = o || {}; return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.line) + '" stroke-width="' + (o.w || 1.2) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + ' stroke-linecap="round"/>'; }
+  function svg(g, w, h) { return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" width="100%" role="img">' + g + '</svg>'; }
+  function mulberry32(a) { return function () { a = (a + 0x6D2B79F5) | 0; var t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+  // ============ 图 1：路径收集 ============
+  (function () {
+    var W = 720, H = 340, g = '';
+    g += txt(360, 22, 'LeetCode 113 样例：aim = 22，两条命中路径', { size: 14, weight: 600 });
+    var P = { '5': [360, 60], '4': [240, 120], '8': [480, 120], '11': [190, 180], '13': [430, 180], '4b': [540, 180], '7': [140, 240], '2': [250, 240], '5b': [500, 240], '1': [590, 240] };
+    var E = [['5', '4'], ['5', '8'], ['4', '11'], ['8', '13'], ['8', '4b'], ['11', '7'], ['11', '2'], ['4b', '5b'], ['4b', '1']];
+    var path1 = { '5': 1, '4': 1, '11': 1, '2': 1 };
+    var path2 = { '5': 1, '8': 1, '4b': 1, '5b': 1 };
+    for (var i = 0; i < E.length; i++) {
+      var a = E[i][0], b = E[i][1];
+      var on1 = path1[a] && path1[b], on2 = path2[a] && path2[b];
+      var stroke = on1 ? C.orange : (on2 ? C.blue : C.line);
+      g += line(P[a][0], P[a][1] + 14, P[b][0], P[b][1] - 14, { stroke: stroke, w: on1 || on2 ? 2.2 : 1.2 });
+    }
+    for (var u in P) {
+      var p = P[u];
+      var base = u.replace(/b$/, '');
+      var on1 = path1[u] !== undefined, on2 = path2[u] !== undefined;
+      var fill = on1 ? C.orangeBg : (on2 ? C.blueBg : '#fff');
+      var stroke = on1 ? C.orange : (on2 ? C.blue : C.line);
+      g += box(p[0] - 15, p[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: on1 || on2 ? 2 : 1.2 });
+      g += txt(p[0], p[1] + 5, base, { size: 12, fill: on1 ? C.orange : (on2 ? C.blue : C.text), weight: 600 });
+    }
+    g += txt(140, 290, '橙：5+4+11+2 = 22', { size: 12, fill: C.orange, weight: 600, anchor: 'start' });
+    g += txt(140, 312, '蓝：5+8+4+5 = 22', { size: 12, fill: C.blue, weight: 600, anchor: 'start' });
+    g += txt(480, 290, '两条路径先后走同一棵子树：', { size: 12, fill: C.text, anchor: 'start' });
+    g += txt(480, 312, '走完第一条，4、11 出栈，路径才干净', { size: 12, fill: C.dim, anchor: 'start' });
+    g += txt(360, 332, '若 2 收集完不 pop，下一条路径开头会残留 4、11、2', { size: 11, fill: C.orange });
+    document.getElementById('figPath').innerHTML = '<figcaption>命中的路径整条拷贝进答案；没命中的分支靠 pop 把栈还原，等下一个兄弟分支复用。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 图 2：平衡 ============
+  (function () {
+    var W = 720, H = 320, g = '';
+    g += txt(360, 22, '后序带回高度：哪一层 |左高 − 右高| > 1，就在哪一层判 false', { size: 14, weight: 600 });
+    // 树：1[2,3]，2 空，3[4,null]，4[5,null]，5 空。根不平衡。
+    var P = { '1': [360, 70], '2': [240, 140], '3': [480, 140], '4': [430, 210], '5': [390, 280] };
+    var E = [['1', '2'], ['1', '3'], ['3', '4'], ['4', '5']];
+    for (var i = 0; i < E.length; i++) { var a = P[E[i][0]], b = P[E[i][1]]; g += line(a[0], a[1] + 14, b[0], b[1] - 14); }
+    var info = { '5': 'h = 0', '4': 'h = 1', '3': 'h = 2', '2': 'h = 0', '1': '|0−2| = 2 > 1，false' };
+    for (var u in P) {
+      var p = P[u];
+      var bad = u === '1';
+      var fill = bad ? '#fef2f2' : (u === '4' || u === '3' ? C.blueBg : '#fff');
+      var stroke = bad ? '#dc2626' : C.blue;
+      g += box(p[0] - 15, p[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: bad ? 2 : 1.2 });
+      g += txt(p[0], p[1] + 5, u, { size: 12, fill: bad ? '#dc2626' : C.text, weight: 600 });
+      g += txt(p[0], p[1] + 26, info[u], { size: 10, fill: bad ? '#dc2626' : C.dim });
+    }
+    g += txt(360, 306, '4 号子树报 h=1，3 号报 h=2，根一看两边差 2，整棵树判 false。', { size: 12, fill: C.text });
+    document.getElementById('figBalance').innerHTML = '<figcaption>高度自底向上拼：孩子先报数，父亲才能判自己。链子树让某一侧高度失控，根的检查一票否决。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 图 3：陷阱树 ============
+  (function () {
+    var W = 720, H = 330, g = '';
+    g += txt(185, 22, '只跟父节点比：全过，误判通过', { size: 13, weight: 600 });
+    g += txt(535, 22, '中序拉直：4, 5, 3, 6, 7，3 破坏递增', { size: 13, weight: 600 });
+    var P = { '5': [185, 80], '4': [120, 150], '6': [250, 150], '3': [210, 220], '7': [290, 220] };
+    var E = [['5', '4'], ['5', '6'], ['6', '3'], ['6', '7']];
+    for (var i = 0; i < E.length; i++) { var a = P[E[i][0]], b = P[E[i][1]]; g += line(a[0], a[1] + 14, b[0], b[1] - 14); }
+    for (var u in P) {
+      var p = P[u];
+      var bad = u === '3';
+      var fill = bad ? C.orangeBg : C.blueBg;
+      var stroke = bad ? C.orange : C.blue;
+      g += box(p[0] - 15, p[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: bad ? 2 : 1.2 });
+      g += txt(p[0], p[1] + 5, u, { size: 12, fill: bad ? C.orange : C.text, weight: 600 });
+    }
+    g += txt(185, 268, '4 < 5 且 5 < 6，每层父子的检查都成立', { size: 11, fill: C.dim });
+    g += txt(185, 292, '可 3 在 5 的右子树里，比 5 小', { size: 11, fill: C.orange });
+    // 右：中序序列
+    var seq = [['4', 470], ['5', 520], ['3', 570], ['6', 620], ['7', 670]];
+    for (var j = 0; j < seq.length - 1; j++) {
+      g += line(seq[j][1], 150, seq[j + 1][1], 150, { w: 1.6, stroke: j === 1 ? C.orange : C.line });
+      g += txt(seq[j][1], 172, '▲', { size: 10, fill: j === 1 ? C.orange : C.line });
+    }
+    for (var k = 0; k < seq.length; k++) {
+      var v = seq[k][0], x = seq[k][1];
+      var bad2 = k === 2;
+      var fill2 = bad2 ? C.orangeBg : '#fff';
+      var stroke2 = bad2 ? C.orange : C.line;
+      g += box(x - 15, 120, 30, 30, { fill: fill2, stroke: stroke2, sw: bad2 ? 2 : 1.2 });
+      g += txt(x, 145, v, { size: 12, fill: bad2 ? C.orange : C.text, weight: 600 });
+    }
+    g += txt(535, 205, '5 → 3 这一步递减，拒绝', { size: 11, fill: C.orange });
+    g += txt(535, 300, '中序判定把「整棵子树」的约束变成一条递增序列，越界藏不住', { size: 11, fill: C.dim });
+    document.getElementById('figTrap').innerHTML = '<figcaption>同一棵树，局部检查全过，中序判定拒绝。BST 的约束是整棵子树，不是父子相邻。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 演示一：路径收集 ============
+  (function () {
+    // 树：5[4,8]，4[null,11]，8[13,4]，11[7,2]，13 空，4b[5,1]，其余叶子
+    var NODES = { '5': [4, 8], '4': [null, 11], '8': [13, '4b'], '11': [7, 2], '13': [null, null], '4b': ['5b', 1], '7': [null, null], '2': [null, null], '5b': [null, null], '1': [null, null] };
+    var ROOT = '5';
+    var body = document.getElementById('vizPathBody');
+    var ctl = document.getElementById('vizPathCtl');
+    var selA = document.createElement('select');
+    selA.className = 'cb-sel';
+    [22, 26, 21].forEach(function (a, i) { var o = document.createElement('option'); o.value = i; o.textContent = 'aim = ' + a; selA.appendChild(o); });
+    var bPrev = document.createElement('button'); bPrev.className = 'cb-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'cb-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'cb-btn'; bReset.textContent = '重置';
+    ctl.appendChild(selA); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var state = null;
+
+    function layout(nodes, root) {
+      var depth = {}, pos = {}, maxD = 0;
+      (function dfs(u, d, left, right) {
+        depth[u] = d; if (d > maxD) maxD = d;
+        pos[u] = (left + right) / 2;
+        if (nodes[u][0]) dfs(nodes[u][0], d + 1, left, pos[u]);
+        if (nodes[u][1]) dfs(nodes[u][1], d + 1, pos[u], right);
+      })(root, 0, 60, 640);
+      return { depth: depth, pos: pos, maxD: maxD };
+    }
+    var L = layout(NODES, ROOT);
+
+    function sim(aim) {
+      var events = [], path = [], found = [];
+      function dfs(u, sum) {
+        u = String(u);
+        path.push(u);
+        events.push({ t: 'push', u: u, sum: sum + parseInt(u.replace('b', ''), 10) });
+        var isLeaf = NODES[u][0] === null && NODES[u][1] === null;
+        if (isLeaf) {
+          var tot = sum + parseInt(u.replace('b', ''), 10);
+          if (tot === aim) { found.push(path.slice()); events.push({ t: 'hit', u: u, sum: tot }); }
+          else { events.push({ t: 'miss', u: u, sum: tot }); }
+        } else {
+          if (NODES[u][0]) dfs(NODES[u][0], sum + parseInt(u.replace('b', ''), 10));
+          if (NODES[u][1]) dfs(NODES[u][1], sum + parseInt(u.replace('b', ''), 10));
+        }
+        path.pop();
+        events.push({ t: 'pop', u: u });
+      }
+      dfs(ROOT, 0);
+      return { events: events, found: found };
+    }
+
+    function render() {
+      var aim = [22, 26, 21][parseInt(selA.value, 10)];
+      var simR = sim(aim);
+      var idx = state && state.idx !== undefined ? state.idx : 0;
+      if (idx >= simR.events.length) idx = simR.events.length - 1;
+      var ev = simR.events[idx];
+      var inPath = {};
+      for (var i = 0; i <= idx; i++) {
+        var e = simR.events[i];
+        if (e.t === 'push') inPath[e.u] = true;
+        if (e.t === 'pop') inPath[e.u] = false;
+      }
+      var W = 700, H = 340, g = '';
+      for (var u in NODES) {
+        var ch = NODES[u];
+        if (ch[0]) { var a = [L.pos[u], 40 + L.depth[u] * 52], b = [L.pos[ch[0]], 40 + L.depth[ch[0]] * 52]; g += line(a[0], a[1] + 14, b[0], b[1] - 14, { stroke: inPath[ch[0]] && inPath[u] ? C.orange : C.line, w: inPath[ch[0]] && inPath[u] ? 2.2 : 1.2 }); }
+        if (ch[1]) { var a2 = [L.pos[u], 40 + L.depth[u] * 52], b2 = [L.pos[ch[1]], 40 + L.depth[ch[1]] * 52]; g += line(a2[0], a2[1] + 14, b2[0], b2[1] - 14, { stroke: inPath[ch[1]] && inPath[u] ? C.orange : C.line, w: inPath[ch[1]] && inPath[u] ? 2.2 : 1.2 }); }
+      }
+      for (var u2 in NODES) {
+        var p = [L.pos[u2], 40 + L.depth[u2] * 52];
+        var label = u2.replace('b', '');
+        var fill, stroke, sw = 1.2, tc = C.text;
+        if (ev.t === 'hit' && ev.u === u2) { fill = C.orange; stroke = C.orange; tc = '#fff'; sw = 2; }
+        else if (ev.t === 'miss' && ev.u === u2) { fill = C.orangeBg; stroke = C.orange; tc = C.orange; sw = 2; }
+        else if (ev.t === 'push' && ev.u === u2) { fill = C.blue; stroke = C.blue; tc = '#fff'; sw = 2; }
+        else if (inPath[u2]) { fill = C.blueBg; stroke = C.blue; }
+        else { fill = C.bg; stroke = '#c9ced4'; tc = C.gray; }
+        g += box(p[0] - 15, p[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: sw });
+        g += txt(p[0], p[1] + 5, label, { size: 12, fill: tc, weight: 600 });
+      }
+      // path 栈条
+      var barY = 300;
+      g += txt(80, barY + 12, 'path:', { size: 11, fill: C.dim, anchor: 'start' });
+      var stackKeys = Object.keys(inPath).filter(function (k) { return inPath[k]; });
+      var bx = 120;
+      for (var s = 0; s < stackKeys.length; s++) {
+        g += box(bx, barY, 34, 22, { fill: C.blueBg, stroke: C.blue });
+        g += txt(bx + 17, barY + 15, stackKeys[s].replace('b', ''), { size: 11, fill: C.blue, weight: 600 });
+        bx += 42;
+      }
+      var note;
+      if (ev.t === 'push') note = '进入节点 ' + ev.u.replace('b', '') + '，累计 ' + ev.sum;
+      else if (ev.t === 'hit') note = '叶子 ' + ev.u.replace('b', '') + ' 累计 = ' + aim + '，整条路径拷贝进答案';
+      else if (ev.t === 'miss') note = '叶子 ' + ev.u.replace('b', '') + ' 累计 ' + ev.sum + ' ≠ ' + aim + '，不收集';
+      else note = '节点 ' + ev.u.replace('b', '') + ' 出栈，恢复现场';
+      var last = idx === simR.events.length - 1;
+      if (last) {
+        var hits = simR.found.map(function (p2) { return p2.map(function (x) { return x.replace('b', ''); }).join('→'); });
+        note = '收集到 ' + simR.found.length + ' 条：' + (hits.join('；') || '无');
+      }
+      g += txt(350, 334, '第 ' + (idx + 1) + ' / ' + simR.events.length + ' 步：' + note, { size: 12, fill: last ? C.orange : C.text, weight: last ? 600 : 'normal' });
+      body.innerHTML = svg(g, W, H);
+    }
+
+    selA.addEventListener('change', function () { state = { idx: 0 }; render(); });
+    bPrev.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; if (idx > 0) { state = { idx: idx - 1 }; render(); } });
+    bNext.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; state = { idx: idx + 1 }; render(); });
+    bReset.addEventListener('click', function () { state = { idx: 0 }; render(); });
+    render();
+  })();
+
+  // ============ 演示二：搜索树验证 ============
+  (function () {
+    var TREES = [
+      { name: '陷阱树 [5,4,6,null,null,3,7]', nodes: { 5: [4, 6], 4: [null, null], 6: [3, 7], 3: [null, null], 7: [null, null] }, root: 5 },
+      { name: '合法树 [2,1,3]', nodes: { 2: [1, 3], 1: [null, null], 3: [null, null] }, root: 2 },
+      { name: '合法树 [4,2,6,1,3,5,7]', nodes: { 4: [2, 6], 2: [1, 3], 6: [5, 7], 1: [null, null], 3: [null, null], 5: [null, null], 7: [null, null] }, root: 4 },
+      { name: '随机树（多半非法）', nodes: null, root: null, seed: 53 }
+    ];
+    var body = document.getElementById('vizCheckBody');
+    var ctl = document.getElementById('vizCheckCtl');
+    var selT = document.createElement('select');
+    selT.className = 'cb-sel';
+    TREES.forEach(function (t, i) { var o = document.createElement('option'); o.value = i; o.textContent = t.name; selT.appendChild(o); });
+    var bPrev = document.createElement('button'); bPrev.className = 'cb-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'cb-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'cb-btn'; bReset.textContent = '重置';
+    ctl.appendChild(selT); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var state = null;
+
+    function buildRand(seed) {
+      var rnd = mulberry32(seed);
+      var nodes = { 8: [null, null] };
+      var id = 1;
+      var keys = [8];
+      for (var i = 1; i <= 6; i++) {
+        var u = keys[Math.floor(rnd() * keys.length)];
+        var slot = rnd() < 0.5 ? 0 : 1;
+        if (nodes[u][slot] !== null) continue;
+        nodes[u][slot] = id; nodes[id] = [null, null]; keys.push(id); id++;
+      }
+      return { nodes: nodes, root: 8 };
+    }
+
+    function layout(nodes, root) {
+      var depth = {}, pos = {}, maxD = 0;
+      (function dfs(u, d, left, right) {
+        depth[u] = d; if (d > maxD) maxD = d;
+        pos[u] = (left + right) / 2;
+        if (nodes[u][0] !== null && nodes[u][0] !== undefined) dfs(nodes[u][0], d + 1, left, pos[u]);
+        if (nodes[u][1] !== null && nodes[u][1] !== undefined) dfs(nodes[u][1], d + 1, pos[u], right);
+      })(root, 0, 120, 580);
+      return { depth: depth, pos: pos, maxD: maxD };
+    }
+
+    function simInorder(nodes, root) {
+      var events = [];
+      var stack = [], cur = root, pre = null, bad = null, done = false;
+      while ((stack.length > 0 || cur !== null) && !done) {
+        while (cur !== null) { stack.push(cur); cur = nodes[cur][0]; }
+        cur = stack.pop();
+        events.push({ t: 'visit', u: cur, pre: pre, stack: stack.slice() });
+        if (pre !== null && pre >= cur) { bad = cur; done = true; events.push({ t: 'bad', u: cur, pre: pre }); }
+        else { pre = cur; }
+        cur = nodes[cur][1];
+      }
+      if (!done) events.push({ t: 'ok' });
+      return { events: events, bad: bad };
+    }
+
+    function render() {
+      var t = TREES[parseInt(selT.value, 10)];
+      var nodes, root;
+      if (t.nodes) { nodes = t.nodes; root = t.root; }
+      else { var r = buildRand(t.seed); nodes = r.nodes; root = r.root; }
+      var L = layout(nodes, root);
+      var sim = simInorder(nodes, root);
+      var idx = state && state.idx !== undefined ? state.idx : 0;
+      if (idx >= sim.events.length) idx = sim.events.length - 1;
+      var ev = sim.events[idx];
+      var visited = {}, badNode = null;
+      for (var i = 0; i <= idx; i++) {
+        var e = sim.events[i];
+        if (e.t === 'visit') visited[e.u] = true;
+        if (e.t === 'bad') badNode = e.u;
+      }
+      var W = 700, H = 320, g = '';
+      for (var u in nodes) {
+        var ch = nodes[u];
+        if (ch[0] !== null) { var a = [L.pos[u], 40 + L.depth[u] * 56], b = [L.pos[ch[0]], 40 + L.depth[ch[0]] * 56]; g += line(a[0], a[1] + 14, b[0], b[1] - 14); }
+        if (ch[1] !== null) { var a2 = [L.pos[u], 40 + L.depth[u] * 56], b2 = [L.pos[ch[1]], 40 + L.depth[ch[1]] * 56]; g += line(a2[0], a2[1] + 14, b2[0], b2[1] - 14); }
+      }
+      for (var u2 in nodes) {
+        var p = [L.pos[u2], 40 + L.depth[u2] * 56];
+        var fill, stroke, sw = 1.2, tc = C.text;
+        if (u2 === badNode) { fill = C.orange; stroke = C.orange; tc = '#fff'; sw = 2; }
+        else if (ev.t === 'visit' && ev.u === u2) { fill = C.blue; stroke = C.blue; tc = '#fff'; sw = 2; }
+        else if (visited[u2]) { fill = C.blueBg; stroke = C.blue; }
+        else { fill = C.bg; stroke = '#c9ced4'; tc = C.gray; }
+        g += box(p[0] - 15, p[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: sw });
+        g += txt(p[0], p[1] + 5, u2, { size: 12, fill: tc, weight: 600 });
+      }
+      // 中序序列条
+      var seqY = 300;
+      var seqKeys = [];
+      for (var i = 0; i <= idx; i++) {
+        var se = sim.events[i];
+        if (se.t === 'visit' || se.t === 'bad') seqKeys.push(se.u);
+      }
+      g += txt(80, seqY + 12, '中序:', { size: 11, fill: C.dim, anchor: 'start' });
+      var bx = 120;
+      for (var s = 0; s < seqKeys.length; s++) {
+        var v = seqKeys[s];
+        var isBad = v === badNode;
+        g += box(bx, seqY, 34, 22, { fill: isBad ? C.orangeBg : C.blueBg, stroke: isBad ? C.orange : C.blue });
+        g += txt(bx + 17, seqY + 15, v, { size: 11, fill: isBad ? C.orange : C.blue, weight: 600 });
+        if (s < seqKeys.length - 1) g += txt(bx + 34, seqY + 15, '<', { size: 11, fill: C.dim });
+        bx += 42;
+      }
+      var note;
+      if (ev.t === 'visit') note = '访问节点 ' + ev.u + '，pre = ' + (ev.pre === null ? '空' : ev.pre) + '，pre < 当前则继续';
+      else if (ev.t === 'bad') note = 'pre = ' + ev.pre + ' ≥ 当前 ' + ev.u + '，非递增，判 false';
+      else if (ev.t === 'ok') note = '中序全程递增，验证通过';
+      var last = idx === sim.events.length - 1;
+      if (last) note = ev.t === 'bad' ? '结论：不是搜索二叉树（中序在 ' + ev.u + ' 处递减）' : '结论：是搜索二叉树';
+      g += txt(350, 314, '第 ' + (idx + 1) + ' / ' + sim.events.length + ' 步：' + note, { size: 12, fill: last ? (ev.t === 'bad' ? C.orange : C.green) : C.text, weight: last ? 600 : 'normal' });
+      body.innerHTML = svg(g, W, H);
+    }
+
+    selT.addEventListener('change', function () { state = { idx: 0 }; render(); });
+    bPrev.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; if (idx > 0) { state = { idx: idx - 1 }; render(); } });
+    bNext.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; state = { idx: idx + 1 }; render(); });
+    bReset.addEventListener('click', function () { state = { idx: 0 }; render(); });
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

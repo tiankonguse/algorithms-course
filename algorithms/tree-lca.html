@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>最近公共祖先：普通二叉树与搜索二叉树</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz { margin: 16px 0; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
+  .viz-title { margin: 0 0 8px; font-size: 14px; color: #374151; }
+  .viz-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .cb-sel { font-size: 13px; padding: 3px 8px; }
+  .cb-btn { font-size: 13px; padding: 4px 12px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>最近公共祖先：普通二叉树与搜索二叉树</h1>
+      <p class="intro">同一道「两个节点的最近公共祖先」，普通二叉树要递归把整片相关子树搜一遍，搜索二叉树靠值域一路往下走。后者是前者在有序树上白捡的提速。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>两个节点往上走，第一次碰头的那个节点，叫最近公共祖先（LCA）。同一个节点算自己的祖先，所以 p 是 q 的祖先时，答案就是 p。</p>
+      <p>LCA 是树上最常用的查询之一。后面的树链剖分、虚树、可持久化前缀树，都把「求两个节点的 LCA」当零件用，只是查询量大了以后，单次 O(n) 的递归扛不住，要换批量或在线版本。</p>
+      <p>这一课先把单次查询的两种做法讲透。节点定义沿用前面的课，带构造器：</p>
+      <pre class="code"><span class="kw">struct</span> TreeNode {
+    <span class="kw">int</span> val;
+    TreeNode *left, *right;
+    TreeNode(<span class="kw">int</span> v = <span class="kw">0</span>) : val(v), left(<span class="kw">nullptr</span>), right(<span class="kw">nullptr</span>) {}
+};</pre>
+
+      <h2 id="q1">一、普通二叉树：三分支递归（LeetCode 236）</h2>
+      <p>递归函数回答一个问题：root 这棵子树里，p 和 q 有没有找到，找到了哪一个，还是它俩的 LCA 就在这棵子树里。</p>
+      <p>三种情况直接返回 root：root 是空、root 就是 p、root 就是 q。第三种情况其实盖住了前两种，写在一起是因为返回的本来就是 root。</p>
+          <pre class="code"><span class="cm">// 普通二叉树上的最近公共祖先（LeetCode 236）</span>
+    <span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode *left, *right;
+    };
+
+    TreeNode* LowestCommonAncestor(TreeNode* root, TreeNode* p, TreeNode* q) {
+        <span class="kw">if</span> (root == <span class="kw">nullptr</span> || root == p || root == q) {
+            <span class="cm">// 遇到空、或者 p、或者 q，直接返回</span>
+            <span class="kw">return</span> root;
+        }
+        TreeNode* l = LowestCommonAncestor(root-&gt;left, p, q);
+        TreeNode* r = LowestCommonAncestor(root-&gt;right, p, q);
+        <span class="kw">if</span> (l != <span class="kw">nullptr</span> &amp;&amp; r != <span class="kw">nullptr</span>) {
+            <span class="cm">// 左树也搜到、右树也搜到，返回 root</span>
+            <span class="kw">return</span> root;
+        }
+        <span class="kw">if</span> (l == <span class="kw">nullptr</span> &amp;&amp; r == <span class="kw">nullptr</span>) {
+            <span class="cm">// 两边都没搜到，返回空</span>
+            <span class="kw">return</span> <span class="kw">nullptr</span>;
+        }
+        <span class="cm">// l 和 r 一个空一个不空，返回不空的那个</span>
+        <span class="kw">return</span> l != <span class="kw">nullptr</span> ? l : r;
+    }</pre>
+      <p>先搜左子树，再搜右子树。两边都搜到了，说明 p 在一边、q 在另一边，唯一的公共祖先就是 root，返回自己。一边空一边不空，把不空的那边传上来的答案继续往上带。三种收尾画成一张图：</p>
+      <figure class="fig" id="figBranch"></figure>
+      <p>这个写法没有记忆化。p 找到以后，它沿途每个祖先的另一棵子树照样得搜完，因为函数不知道 p 已经找到了，它必须确认另一侧没有 q。探访量就是这么来的：跟 p、q 隔得多远关系不大，跟沿途兄弟子树有多大关系大。</p>
+      <figure class="fig" id="figScope"></figure>
+      <p>实测一个满二叉树，4095 个节点，p 在最左最深、q 在最右最深，4095 个节点一个不少全探完。p、q 换成第 4 层的近亲，还是探了 3075 个，约 3/4：p 沿途两棵兄弟子树，5 号有 1023 个节点，3 号有 2047 个，全得探一遍。随机树 200 个节点，随机两点平均探 185 个。</p>
+      <p>链上反而是最快的：n = 100000 的链，p 在第 33334 个、q 在链尾，探访 33334 个节点，找到 p 就停。因为 q 在 p 的下面，p 就是答案，链尾不用再走。</p>
+
+      <h2 id="q2">二、搜索二叉树：值域下走（LeetCode 235）</h2>
+      <p>BST 多了一条普通树没有的信息：左子树全小于根，右子树全大于根。从根往下走，每到一个节点，p、q 相对 root 的位置关系就把答案定死了。</p>
+          <pre class="code"><span class="cm">// 搜索二叉树上的最近公共祖先（LeetCode 235）</span>
+    <span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode *left, *right;
+    };
+
+    TreeNode* LowestCommonAncestor(TreeNode* root, TreeNode* p, TreeNode* q) {
+        <span class="cm">// root 从上往下走</span>
+        <span class="cm">// 先遇到 p，p 就是答案；先遇到 q，q 就是答案</span>
+        <span class="cm">// root 的值落在 p、q 之间，此刻的 root 就是答案</span>
+        <span class="cm">// root 在 p、q 左侧，往右走；在右侧，往左走</span>
+        <span class="kw">while</span> (root-&gt;val != p-&gt;val &amp;&amp; root-&gt;val != q-&gt;val) {
+            <span class="kw">if</span> (min(p-&gt;val, q-&gt;val) &lt; root-&gt;val &amp;&amp; root-&gt;val &lt; max(p-&gt;val, q-&gt;val)) {
+                <span class="kw">break</span>;
+            }
+            root = root-&gt;val &lt; min(p-&gt;val, q-&gt;val) ? root-&gt;right : root-&gt;left;
+        }
+        <span class="kw">return</span> root;
+    }</pre>
+      <p>root 的值夹在 p、q 之间，p 和 q 就分列 root 的两棵子树，公共祖先只能是 root。root 比两个都小，答案在右子树，往右走；比两个都大，往左走。谁大谁小不用管，min、max 一包，判断就一行。</p>
+      <p>先遇到 p 或 q 本身也停：root 就是 p，说明 q 在 p 的子树里，p 是 q 的祖先，答案就是 p。循环条件里写 root 不等于 p 且不等于 q，圈住的正是这个。</p>
+      <figure class="fig" id="figBst"></figure>
+      <p>走几步由树高决定。随机 BST 10 万节点，平均深度 21、最大深度 45，2 万对随机 p、q 平均只走 3.25 步：随机两点一半概率分列根两侧，根直接是答案。链退化时树高变成 n，p 在第 33334 个、q 在链尾，要走 33333 步，跟普通树一个下场。</p>
+
+      <h2 id="comp">三、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>时间</th><th>额外空间</th><th>说明</th></tr>
+        <tr><td>普通二叉树 LCA</td><td>O(n)</td><td>O(h)</td><td>递归探访相关子树，栈深等于树高</td></tr>
+        <tr><td>搜索二叉树 LCA</td><td>O(h)</td><td>O(1)</td><td>值域下走，平衡时 h = log n，退化时 h = n</td></tr>
+      </table>
+      <p>普通树的 O(n) 不是每次都是整棵树，但最坏就是整棵。搜索树把 O(n) 压成 O(h)，代价是输入必须有序。两题共用同一份空间账：递归多深，栈就占多深。</p>
+
+      <h2 id="viz1">演示一：普通树 LCA 逐帧</h2>
+      <div class="viz" id="vizRec">
+        <p class="viz-title">后序递归：先搜左再搜右，返回值逐层往上带</p>
+        <div id="vizRecBody"></div>
+        <div class="viz-controls" id="vizRecCtl"></div>
+      </div>
+
+      <h2 id="viz2">演示二：搜索树 LCA 下走</h2>
+      <div class="viz" id="vizBst">
+        <p class="viz-title">值域下走：root 夹在 p、q 之间就停，夹不住就朝一侧走</p>
+        <div id="vizBstBody"></div>
+        <div class="viz-controls" id="vizBstCtl"></div>
+      </div>
+
+      <h2 id="sum">四、总结</h2>
+      <p>普通树 LCA 的骨架是后序三分支：左右都搜到就返回自己，只搜到一边就带那一边。探访量看兄弟子树的大小，p、q 再近也躲不过沿途的兄弟。</p>
+      <p>搜索树 LCA 靠值域把搜索压到一条路径：root 夹住即停，夹不住就朝一侧走，步数等于树高，额外空间 O(1)。</p>
+      <p>单次查询到此够用。查询多了以后，Tarjan 离线批量、树链剖分在线跳链，都是给这个 O(n) 递归提速的后话，后面几课会碰到。</p>
+      <p>下一节讲路径收集与树的递归判定：恢复现场、后序回传高度、中序单调，三种递归形态。</p>
+
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>修剪搜索二叉树</td><td><a href="https://leetcode.cn/problems/trim-a-binary-search-tree/" target="_blank">leetcode.cn/problems/trim-a-binary-search-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>验证搜索二叉树</td><td><a href="https://leetcode.cn/problems/validate-binary-search-tree/" target="_blank">leetcode.cn/problems/validate-binary-search-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>搜索二叉树上寻找两个节点的最近公共祖先</td><td><a href="https://leetcode.cn/problems/lowest-common-ancestor-of-a-binary-search-tree/" target="_blank">leetcode.cn/problems/lowest-common-ancestor-of-a-binary-search-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>验证平衡二叉树</td><td><a href="https://leetcode.cn/problems/balanced-binary-tree/" target="_blank">leetcode.cn/problems/balanced-binary-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>普通二叉树上寻找两个节点的最近公共祖先</td><td><a href="https://leetcode.cn/problems/lowest-common-ancestor-of-a-binary-tree/" target="_blank">leetcode.cn/problems/lowest-common-ancestor-of-a-binary-tree</a></td></tr>
+        <tr><td>LeetCode</td><td>二叉树打家劫舍问题</td><td><a href="https://leetcode.cn/problems/house-robber-iii/" target="_blank">leetcode.cn/problems/house-robber-iii</a></td></tr>
+        <tr><td>LeetCode</td><td>收集累加和等于aim的所有路径</td><td><a href="https://leetcode.cn/problems/path-sum-ii/" target="_blank">leetcode.cn/problems/path-sum-ii</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解037【必备】二叉树高频题目-下-不含树型dp</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5', gray: '#9aa0a6', text: '#1f2937', dim: '#6b7280', line: '#cbd5e1', bg: '#f6f7f9' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function box(x, y, w, h, o) { o = o || {}; return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx || 4) + '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.line) + '" stroke-width="' + (o.sw || 1.2) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>'; }
+  function txt(x, y, s, o) { o = o || {}; return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 13) + '" fill="' + (o.fill || C.text) + '" font-weight="' + (o.weight || 'normal') + '" text-anchor="' + (o.anchor || 'middle') + '" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">' + esc(s) + '</text>'; }
+  function line(x1, y1, x2, y2, o) { o = o || {}; return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.line) + '" stroke-width="' + (o.w || 1.2) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + ' stroke-linecap="round"/>'; }
+  function svg(g, w, h) { return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" width="100%" role="img">' + g + '</svg>'; }
+  function mulberry32(a) { return function () { a = (a + 0x6D2B79F5) | 0; var t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+  // ============ 图 1：三分支决策 ============
+  (function () {
+    var W = 720, H = 340, g = '';
+    g += txt(360, 24, '后序递归的三种收尾', { size: 15, weight: 600 });
+    var rows = [
+      { cond: 'root 为空，或 root == p，或 root == q', act: '返回 root', note: '空：没找到；撞上 p、q：直接交人', y: 56 },
+      { cond: '左、右都搜到（返回值都非空）', act: '返回 root', note: 'p、q 分列两侧，root 就是 LCA', y: 146 },
+      { cond: '只有一边搜到', act: '返回搜到的那一边', note: 'p、q 都在这一侧，答案往上带', y: 236 }
+    ];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      g += box(40, r.y, 290, 66, { fill: '#fff', stroke: C.line });
+      g += txt(185, r.y + 24, r.cond, { size: 12, anchor: 'middle' });
+      g += line(330, r.y + 33, 390, r.y + 33, { w: 1.6, stroke: C.blue });
+      g += box(390, r.y, 220, 66, { fill: C.blueBg, stroke: C.blue });
+      g += txt(500, r.y + 24, r.act, { size: 12, fill: C.blue, weight: 600 });
+      g += txt(500, r.y + 48, r.note, { size: 10, fill: C.blue });
+    }
+    g += txt(360, 330, '返回值的含义：这棵子树里找到的 p、q 之一，或它俩的 LCA', { size: 12, fill: C.text });
+    document.getElementById('figBranch').innerHTML = '<figcaption>三分支只决定「返回什么」，搜索本身是死板的后序：整棵子树扫完才轮到 root。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 图 2：探访范围 ============
+  (function () {
+    var W = 720, H = 340, g = '';
+    g += txt(185, 22, '满二叉树 15 节点：p=8、q=9 是近亲', { size: 12, weight: 600 });
+    g += txt(535, 22, '链 7 节点：p=4、q=7', { size: 12, weight: 600 });
+    function drawTree(cx0, nodes, edges, pos, mark) {
+      var g2 = '';
+      for (var i = 0; i < edges.length; i++) { var a = pos[edges[i][0]], b = pos[edges[i][1]]; g2 += line(a[0], a[1] + 15, b[0], b[1] - 15); }
+      for (var u in pos) {
+        var p = pos[u]; var m = mark[u] || {};
+        var fill = m.fill || '#fff', stroke = m.stroke || C.line;
+        g2 += box(p[0] - 15, p[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: m.sw || 1.2 });
+        g2 += txt(p[0], p[1] + 5, u, { size: 12, fill: m.tc || C.text, weight: 600 });
+      }
+      return g2;
+    }
+    // 左：满二叉 15 节点，p=8 q=9，全探；兄弟子树 5、3 标浅橙
+    var Lp = { '1': [60, 70], '2': [110, 130], '3': [260, 130], '4': [80, 190], '5': [140, 190], '6': [220, 190], '7': [300, 190], '8': [50, 250], '9': [110, 250] };
+    var Le = [['1', '2'], ['1', '3'], ['2', '4'], ['2', '5'], ['3', '6'], ['3', '7'], ['4', '8'], ['4', '9']];
+    var Lm = {};
+    for (var u in Lp) Lm[u] = { fill: C.blueBg, stroke: C.blue };
+    Lm['5'] = { fill: C.orangeBg, stroke: C.orange }; Lm['6'] = { fill: C.orangeBg, stroke: C.orange }; Lm['7'] = { fill: C.orangeBg, stroke: C.orange };
+    Lm['8'] = { fill: '#fff', stroke: C.orange, sw: 2, tc: C.orange }; Lm['9'] = { fill: '#fff', stroke: C.orange, sw: 2, tc: C.orange };
+    g += drawTree(0, Lp, Le, Lp, Lm);
+    g += txt(185, 300, '15 个节点全探：p、q 再近，5 号和 3 号两棵兄弟子树照探不误', { size: 11, fill: C.dim });
+    g += txt(185, 320, '（4095 节点树实测：近亲也探 3075）', { size: 11, fill: C.dim });
+    // 右：链 7 节点，p=4 q=7
+    var Rp = { '1': [470, 64], '2': [520, 96], '3': [570, 128], '4': [620, 160], '5': [620, 192], '6': [620, 224], '7': [620, 256] };
+    var Re = [['1', '2'], ['2', '3'], ['3', '4'], ['4', '5'], ['5', '6'], ['6', '7']];
+    var Rm = {};
+    for (var v in Rp) Rm[v] = { fill: v <= 4 ? C.blueBg : C.bg, stroke: v <= 4 ? C.blue : '#c9ced4', tc: v <= 4 ? C.text : C.gray };
+    Rm['4'] = { fill: '#fff', stroke: C.orange, sw: 2, tc: C.orange };
+    g += drawTree(0, Rp, Re, Rp, Rm);
+    g += txt(535, 300, 'p=4 是 q=7 的祖先，找到 p 就停，链尾 5、6、7 不探', { size: 11, fill: C.dim });
+    g += txt(360, 326, 'q 在 p 下面：探到 p 为止。否则：沿途兄弟子树有多大，就探多少。', { size: 12, fill: C.text, weight: 600 });
+    document.getElementById('figScope').innerHTML = '<figcaption>探访范围的两种极端：满树近亲也全探（4095 节点树实测探 3075），链上祖先与后代只探到 p。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 图 3：BST 下走 ============
+  (function () {
+    var W = 720, H = 300, g = '';
+    g += txt(185, 22, 'p=35、q=45：50 夹不住，往左', { size: 12, weight: 600 });
+    g += txt(535, 22, 'p=20、q=80：50 正好夹住', { size: 12, weight: 600 });
+    function drawBst(nodes, rootVal, pos, path, p, q) {
+      var g2 = '';
+      for (var u in pos) {
+        var ch = nodes[u];
+        for (var i = 0; i < 2; i++) {
+          if (ch[i]) { var a = pos[u], b = pos[ch[i]]; g2 += line(a[0], a[1] + 15, b[0], b[1] - 15, { stroke: path.indexOf(ch[i]) >= 0 && path.indexOf(u) >= 0 ? C.orange : C.line, w: path.indexOf(ch[i]) >= 0 && path.indexOf(u) >= 0 ? 2 : 1.2 }); }
+        }
+      }
+      for (var u2 in pos) {
+        var p0 = pos[u2];
+        var on = path.indexOf(u2) >= 0;
+        var isP = u2 === p, isQ = u2 === q;
+        var fill = isP || isQ ? '#fff' : (on ? C.orangeBg : '#fff');
+        var stroke = isP || isQ ? C.orange : (on ? C.orange : C.line);
+        g2 += box(p0[0] - 15, p0[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: isP || isQ ? 2 : (on ? 2 : 1.2) });
+        g2 += txt(p0[0], p0[1] + 5, u2, { size: 12, fill: isP || isQ ? C.orange : (on ? C.orange : C.text), weight: 600 });
+      }
+      return g2;
+    }
+    var root1 = { 50: [30, 70], 30: [20, 40], 70: [60, 80], 20: [null, null], 40: [35, 45], 60: [null, null], 80: [null, null], 35: [null, null], 45: [null, null] };
+    var P1 = { 50: [120, 70], 30: [80, 130], 70: [160, 130], 20: [50, 190], 40: [110, 190], 60: [130, 190], 80: [190, 190], 35: [90, 250], 45: [130, 250] };
+    g += drawBst(root1, 50, P1, ['50', '30', '40'], 35, 45);
+    g += txt(185, 268, '50 比两数都大，往左到 30；30 比两数都小，往右到 40；', { size: 10.5, fill: C.dim });
+    g += txt(185, 286, '40 夹住，共 2 步。', { size: 10.5, fill: C.dim });
+    var root2 = { 50: [30, 70], 30: [20, 40], 70: [60, 80], 20: [null, null], 40: [null, null], 60: [null, null], 80: [null, null] };
+    var P2 = { 50: [470, 70], 30: [430, 130], 70: [510, 130], 20: [400, 190], 40: [460, 190], 60: [480, 190], 80: [540, 190] };
+    g += drawBst(root2, 50, P2, ['50'], 20, 80);
+    g += txt(535, 268, '20 < 50 < 80，root 夹住，', { size: 10.5, fill: C.dim });
+    g += txt(535, 286, '第一步就是答案。共 0 步。', { size: 10.5, fill: C.dim });
+    document.getElementById('figBst').innerHTML = '<figcaption>BST LCA 只在一条路径上走：夹住即停，夹不住看两侧位置关系定方向。</figcaption>' + svg(g, W, H);
+  })();
+
+  // ============ 演示一：普通树 LCA 逐帧 ============
+  (function () {
+    var PRESETS = [
+      { name: '满树 · 最左 vs 最右', kind: 'full', p: 16, q: 31 },
+      { name: '满树 · 近亲', kind: 'full', p: 16, q: 17 },
+      { name: '满树 · 祖先与后代', kind: 'full', p: 16, q: 8 },
+      { name: '链 · 中段 vs 尾', kind: 'chain', p: 4, q: 7 },
+      { name: '随机树', kind: 'rand', seed: 37 }
+    ];
+    var body = document.getElementById('vizRecBody');
+    var ctl = document.getElementById('vizRecCtl');
+    var selT = document.createElement('select');
+    selT.className = 'cb-sel';
+    PRESETS.forEach(function (t, i) { var o = document.createElement('option'); o.value = i; o.textContent = t.name; selT.appendChild(o); });
+    var bPrev = document.createElement('button'); bPrev.className = 'cb-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'cb-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'cb-btn'; bReset.textContent = '重置';
+    ctl.appendChild(selT); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var state = null;
+
+    function buildTree(preset) {
+      var nodes = {}, root;
+      if (preset.kind === 'full') {
+        root = 1;
+        for (var i = 1; i <= 31; i++) nodes[i] = [i * 2 <= 31 ? i * 2 : null, i * 2 + 1 <= 31 ? i * 2 + 1 : null];
+      } else {
+        root = 1;
+        for (var i = 1; i <= 7; i++) nodes[i] = [null, i + 1 <= 7 ? i + 1 : null];
+      }
+      return { nodes: nodes, root: root };
+    }
+    // 随机树：按层级随机挂孩子，保证连通、叶子随机
+    function buildRand(preset) {
+      var rnd = mulberry32(preset.seed);
+      var nodes = { 1: [null, null] };
+      var open = [1], next = [];
+      var id = 2;
+      var levels = 4;
+      for (var d = 0; d < levels; d++) {
+        next = [];
+        for (var i = 0; i < open.length && id <= 18; i++) {
+          var u = open[i];
+          var slots = nodes[u];
+          for (var s = 0; s < 2; s++) {
+            if (id > 18) break;
+            if (rnd() < (d === levels - 1 ? 0.25 : 0.65)) {
+              slots[s] = id; nodes[id] = [null, null]; next.push(id); id++;
+            }
+          }
+        }
+        open = next.length ? next : open;
+        if (id > 18) break;
+      }
+      return { nodes: nodes, root: 1 };
+    }
+
+    function layout(nodes, root) {
+      var depth = {}, pos = {}, maxD = 0;
+      (function dfs(u, d, left, right) {
+        depth[u] = d; if (d > maxD) maxD = d;
+        pos[u] = (left + right) / 2;
+        if (nodes[u][0]) dfs(nodes[u][0], d + 1, left, pos[u]);
+        if (nodes[u][1]) dfs(nodes[u][1], d + 1, pos[u], right);
+      })(root, 0, 60, 660);
+      return { depth: depth, pos: pos, maxD: maxD };
+    }
+
+    function simLca(nodes, root, p, q) {
+      var events = [], visited = 0;
+      function dfs(u) {
+        events.push({ t: 'enter', u: u }); visited++;
+        if (u === p || u === q) { events.push({ t: 'ret', u: u, val: u, both: false, l: null, r: null }); return u; }
+        var l = nodes[u][0] ? dfs(nodes[u][0]) : null;
+        var r = nodes[u][1] ? dfs(nodes[u][1]) : null;
+        var val = (l !== null && r !== null) ? u : (l !== null ? l : r);
+        events.push({ t: 'ret', u: u, val: val, both: l !== null && r !== null, l: l, r: r });
+        return val;
+      }
+      var ans = dfs(root);
+      return { events: events, ans: ans, visited: visited };
+    }
+
+    function render() {
+      var preset = PRESETS[parseInt(selT.value, 10)];
+      var tree;
+      if (preset.kind === 'rand') { tree = buildRand(preset); } else { tree = buildTree(preset); }
+      var nodes = tree.nodes;
+      var p = preset.kind === 'rand' ? pickRand(nodes, preset) : preset.p;
+      var q = preset.kind === 'rand' ? pickRand2(nodes, preset, p) : preset.q;
+      var L = layout(nodes, tree.root);
+      var sim = simLca(nodes, tree.root, p, q);
+      var idx = state && state.idx !== undefined ? state.idx : 0;
+      if (idx >= sim.events.length) idx = sim.events.length - 1;
+      var ev = sim.events[idx];
+      var entered = {};
+      for (var i = 0; i <= idx; i++) { entered[sim.events[i].u] = true; }
+      var W = 700, H = 340, g = '';
+      var dy = Math.min(52, 240 / (L.maxD + 1));
+      for (var u in nodes) {
+        if (!nodes[u]) continue;
+        var ch = nodes[u];
+        if (ch[0]) { var a = [L.pos[u], 40 + L.depth[u] * dy], b = [L.pos[ch[0]], 40 + L.depth[ch[0]] * dy]; g += line(a[0], a[1] + 14, b[0], b[1] - 14); }
+        if (ch[1]) { var a2 = [L.pos[u], 40 + L.depth[u] * dy], b2 = [L.pos[ch[1]], 40 + L.depth[ch[1]] * dy]; g += line(a2[0], a2[1] + 14, b2[0], b2[1] - 14); }
+      }
+      for (var u2 in nodes) {
+        if (!nodes[u2]) continue;
+        var pp = [L.pos[u2], 40 + L.depth[u2] * dy];
+        var cur = u2 === ev.u;
+        var fill, stroke, sw = 1.2, tc = C.text;
+        if (u2 === p || u2 === q) { fill = '#fff'; stroke = C.orange; sw = 2; tc = C.orange; }
+        else if (cur) { fill = C.blue; stroke = C.blue; tc = '#fff'; }
+        else if (entered[u2]) { fill = C.blueBg; stroke = C.blue; }
+        else { fill = C.bg; stroke = '#c9ced4'; tc = C.gray; }
+        g += box(pp[0] - 15, pp[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: sw });
+        g += txt(pp[0], pp[1] + 5, u2, { size: 12, fill: tc, weight: 600 });
+      }
+      var note;
+      if (ev.t === 'enter') {
+        note = '进入节点 ' + ev.u;
+      } else {
+        if (ev.u === p || ev.u === q) note = '节点 ' + ev.u + ' 撞上 p 或 q，返回 ' + ev.u;
+        else if (ev.both) note = '节点 ' + ev.u + ' 左返 ' + ev.l + '、右返 ' + ev.r + '，都非空，返回自己 ' + ev.u;
+        else note = '节点 ' + ev.u + ' 返回 ' + (ev.val === null ? '空' : ev.val);
+      }
+      var last = idx === sim.events.length - 1;
+      if (last) {
+        note = '答案：节点 ' + sim.ans + '，探访 ' + sim.visited + ' / ' + Object.keys(nodes).length + ' 个节点';
+      }
+      g += txt(350, 318, '第 ' + (idx + 1) + ' / ' + sim.events.length + ' 步：' + note, { size: 12, fill: last ? C.orange : C.text, weight: last ? 600 : 'normal' });
+      body.innerHTML = svg(g, W, H);
+    }
+
+    function pickRand(nodes, preset) {
+      var keys = Object.keys(nodes).filter(function (k) { return nodes[k]; });
+      var rnd = mulberry32(preset.seed + 7);
+      return parseInt(keys[Math.floor(rnd() * keys.length)], 10);
+    }
+    function pickRand2(nodes, preset, p) {
+      var keys = Object.keys(nodes).filter(function (k) { return nodes[k] && parseInt(k, 10) !== p; });
+      var rnd = mulberry32(preset.seed + 13);
+      return parseInt(keys[Math.floor(rnd() * keys.length)], 10);
+    }
+
+    selT.addEventListener('change', function () { state = { idx: 0 }; render(); });
+    bPrev.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; if (idx > 0) { state = { idx: idx - 1 }; render(); } });
+    bNext.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; state = { idx: idx + 1 }; render(); });
+    bReset.addEventListener('click', function () { state = { idx: 0 }; render(); });
+    render();
+  })();
+
+  // ============ 演示二：搜索树 LCA 下走 ============
+  (function () {
+    var PRESETS = [
+      { name: '35 与 45', p: 35, q: 45 },
+      { name: '20 与 40', p: 20, q: 40 },
+      { name: '60 与 80', p: 60, q: 80 },
+      { name: '20 与 80', p: 20, q: 80 }
+    ];
+    var body = document.getElementById('vizBstBody');
+    var ctl = document.getElementById('vizBstCtl');
+    var selT = document.createElement('select');
+    selT.className = 'cb-sel';
+    PRESETS.forEach(function (t, i) { var o = document.createElement('option'); o.value = i; o.textContent = t.name; selT.appendChild(o); });
+    var bPrev = document.createElement('button'); bPrev.className = 'cb-btn'; bPrev.textContent = '上一步';
+    var bNext = document.createElement('button'); bNext.className = 'cb-btn'; bNext.textContent = '下一步';
+    var bReset = document.createElement('button'); bReset.className = 'cb-btn'; bReset.textContent = '重置';
+    ctl.appendChild(selT); ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var state = null;
+
+    function buildBst() {
+      var vals = [50, 30, 70, 20, 40, 60, 80, 35, 45];
+      var root = null, nodes = {};
+      for (var i = 0; i < vals.length; i++) {
+        var v = vals[i];
+        nodes[v] = { val: v, left: null, right: null };
+        if (root === null) { root = v; continue; }
+        var cur = root;
+        for (;;) {
+          if (v < cur) { if (nodes[cur].left === null) { nodes[cur].left = v; break; } cur = nodes[cur].left; }
+          else { if (nodes[cur].right === null) { nodes[cur].right = v; break; } cur = nodes[cur].right; }
+        }
+      }
+      return { root: root, nodes: nodes };
+    }
+
+    function simWalk(p, q) {
+      var steps = [];
+      var cur = BST.root;
+      for (;;) {
+        if (cur === p || cur === q) { steps.push({ u: cur, why: 'hit' }); break; }
+        var lo = Math.min(p, q), hi = Math.max(p, q);
+        if (lo < cur && cur < hi) { steps.push({ u: cur, why: 'between' }); break; }
+        var dir = cur < lo ? 'right' : 'left';
+        steps.push({ u: cur, why: dir });
+        cur = dir === 'right' ? BST.nodes[cur].right : BST.nodes[cur].left;
+      }
+      return steps;
+    }
+    var BST = buildBst();
+
+    function layout(nodes, root) {
+      var depth = {}, pos = {}, maxD = 0;
+      (function dfs(u, d, left, right) {
+        depth[u] = d; if (d > maxD) maxD = d;
+        pos[u] = (left + right) / 2;
+        if (nodes[u].left) dfs(nodes[u].left, d + 1, left, pos[u]);
+        if (nodes[u].right) dfs(nodes[u].right, d + 1, pos[u], right);
+      })(root, 0, 100, 600);
+      return { depth: depth, pos: pos, maxD: maxD };
+    }
+    var L = layout(BST.nodes, BST.root);
+
+    function render() {
+      var preset = PRESETS[parseInt(selT.value, 10)];
+      var steps = simWalk(preset.p, preset.q);
+      var idx = state && state.idx !== undefined ? state.idx : 0;
+      if (idx >= steps.length) idx = steps.length - 1;
+      var f = steps[idx];
+      var visited = {};
+      for (var i = 0; i <= idx; i++) visited[steps[i].u] = true;
+      var W = 700, H = 300, g = '';
+      for (var u in BST.nodes) {
+        var n = BST.nodes[u];
+        if (n.left) { var a = [L.pos[u], 40 + L.depth[u] * 50], b = [L.pos[n.left], 40 + L.depth[n.left] * 50]; g += line(a[0], a[1] + 14, b[0], b[1] - 14); }
+        if (n.right) { var a2 = [L.pos[u], 40 + L.depth[u] * 50], b2 = [L.pos[n.right], 40 + L.depth[n.right] * 50]; g += line(a2[0], a2[1] + 14, b2[0], b2[1] - 14); }
+      }
+      for (var u2 in BST.nodes) {
+        var v = parseInt(u2, 10);
+        var pp = [L.pos[v], 40 + L.depth[v] * 50];
+        var cur = v === f.u;
+        var fill, stroke, sw = 1.2, tc = C.text;
+        if (v === preset.p || v === preset.q) { fill = '#fff'; stroke = C.orange; sw = 2; tc = C.orange; }
+        else if (cur) { fill = C.blue; stroke = C.blue; tc = '#fff'; }
+        else if (visited[v]) { fill = C.blueBg; stroke = C.blue; }
+        else { fill = C.bg; stroke = '#c9ced4'; tc = C.gray; }
+        g += box(pp[0] - 15, pp[1] - 15, 30, 30, { fill: fill, stroke: stroke, sw: sw });
+        g += txt(pp[0], pp[1] + 5, v, { size: 12, fill: tc, weight: 600 });
+      }
+      var note;
+      var lo = Math.min(preset.p, preset.q), hi = Math.max(preset.p, preset.q);
+      if (f.why === 'between') note = 'root ' + f.u + ' 在 ' + lo + '、' + hi + ' 之间，p、q 分列两侧，返回 ' + f.u;
+      else if (f.why === 'hit') note = 'root ' + f.u + ' 就是 p 或 q，另一个在它下面，返回 ' + f.u;
+      else note = 'root ' + f.u + ' 比 ' + (f.why === 'right' ? lo : hi) + ' 还' + (f.why === 'right' ? '小，往右走' : '大，往左走');
+      var last = idx === steps.length - 1;
+      if (last) note = '答案：' + f.u + '，共走 ' + idx + ' 步';
+      g += txt(350, 282, '第 ' + (idx + 1) + ' / ' + steps.length + ' 步：' + note, { size: 12, fill: last ? C.orange : C.text, weight: last ? 600 : 'normal' });
+      body.innerHTML = svg(g, W, H);
+    }
+
+    selT.addEventListener('change', function () { state = { idx: 0 }; render(); });
+    bPrev.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; if (idx > 0) { state = { idx: idx - 1 }; render(); } });
+    bNext.addEventListener('click', function () { var idx = state && state.idx !== undefined ? state.idx : 0; state = { idx: idx + 1 }; render(); });
+    bReset.addEventListener('click', function () { state = { idx: 0 }; render(); });
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

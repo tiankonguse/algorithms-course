@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>位图 - algorithms-course</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .bs-bits { margin:4px 0 10px; }
+  .bs-row { display:flex; gap:2px; margin-bottom:2px; }
+  .bs-bit { width:17px; height:23px; display:flex; align-items:center; justify-content:center;
+            border:1px solid #e6e8eb; border-radius:3px; font-family:ui-monospace,monospace;
+            font-size:11px; background:#f6f7f9; color:#9aa0a6; flex:none; }
+  .bs-bit.on { background:#dbeafe; border-color:#2563eb; color:#111827; }
+  .bs-bit.new { background:#ffedd5; border-color:#ea580c; color:#111827; }
+  .bs-bit.same { background:#ffedd5; border-color:#ea580c; color:#ea580c; }
+  .bs-lab { font-size:12px; color:#6b7280; margin:6px 0 2px; }
+  .bs-note { font-size:13px; color:#374151; margin:6px 0 6px; min-height:22px; }
+  .bs-words { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+  .bs-word { border:1px solid #e6e8eb; border-radius:4px; padding:5px 10px; background:#f6f7f9;
+             font-family:ui-monospace,monospace; font-size:12px; color:#374151; }
+  .bs-word.hot { background:#dbeafe; border-color:#2563eb; }
+  .bs-ctl { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:6px; }
+  .bs-ctl label { font-size:13px; color:#374151; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>位图</h1>
+      <p class="intro">存 1 亿个「有 / 没有」的标记，char 数组要 96 MB，位图只要 12 MB。给 1 千万个数判重，哈希集合跑 979 毫秒，位图 23 毫秒。这一讲看位图怎么用一个 uint32 装 32 个标记，四个操作各长什么样，以及三个容易写错的地方：向上取整会溢出、最后一个 uint32 里有多出来的位、翻转全体为什么能做到 O(1)。</p>
+
+      <h2>零、背景</h2>
+      <p>先看一个具体问题：给 1 千万个取值在 0 到 10⁸−1 之间的数，问每个数是不是第一次出现。四种做法的实测结果：</p>
+      <table class="complexity">
+        <tr><th>做法</th><th>耗时</th><th>相对位图</th><th>存了什么</th></tr>
+        <tr><td>位图</td><td>23.12 ms</td><td>1 倍</td><td>10⁸ 个位，12 MB</td></tr>
+        <tr><td>char 数组</td><td>57.75 ms</td><td>2.5 倍</td><td>10⁸ 个字节，96 MB</td></tr>
+        <tr><td>先排序再去重</td><td>501.47 ms</td><td>21.7 倍</td><td>1 千万个 int，40 MB</td></tr>
+        <tr><td>哈希集合</td><td>979.17 ms</td><td>42.4 倍</td><td>1 千万个节点，512 MB</td></tr>
+      </table>
+      <p>快慢的差别出在存法上。位图是一串 bit，第 i 个 bit 记「i 在不在集合里」，一个数占一个位。char 数组一个数占一个字节，哈希集合一个数占一个节点，节点里还得存指向下一个节点的指针，桶数组另算。位图没这些开销，一个数就是一位，没有前后指针，没有哈希函数。</p>
+      <p>代价是值域必须连续、范围必须事先知道。位图只支持 0 到 n−1，n = 10⁸ 开 12 MB，n = 10⁹ 开 119 MB，再往上就得换思路了。</p>
+
+      <h2>一、问题与三种存法</h2>
+      <p>要支持的就四件事：把 num 加进去、删掉、有就删没有就加、问 num 在不在。四个操作都得是 O(1)。</p>
+      <p>空间这块值得单独量一下。同样是「1 亿个有或没有」，实测的常驻内存：</p>
+      <figure class="fig" id="fig-space"></figure>
+      <p>哈希集合那一栏只存了 1 千万个「存在」的数就已经 512 MB，是位图存 1 亿个位的 42 倍。这也是为什么位图常出现在「值域大、个数多、只问有没有」的场景里。</p>
+
+      <h2>二、位图的形态</h2>
+      <p>用一个 <code>unsigned</code> 数组装。一个 unsigned 是 32 位，能装 32 个标记，第 k 个 unsigned 管 32k 到 32k + 31 这 32 个数。</p>
+      <p>num 落在哪：第 <code>num / 32</code> 个 unsigned 的第 <code>num % 32</code> 位。32 是 2 的 5 次方，所以除 32 写成 <code>num &gt;&gt; 5</code>，对 32 取余写成 <code>num &amp; 31</code>（留下低 5 位）。num 非负时这两条跟除法取余完全等价。</p>
+      <figure class="fig" id="fig-layout"></figure>
+      <p>数组类型写成 <code>unsigned</code> 而不是 <code>int</code>，理由在第 31 位上。<code>1 &lt;&lt; 31</code> 在有符号 int 里得到 −2147483648，位模式倒是对的（0x80000000），所以四个操作照用位运算也能算出正确结果（三个种子各 2 万次随机操作，0 处不一致）。麻烦在于那个格子从此是个负数：打印出来是 −2147483648，拿去做任何算术、比较或者判空都会出问题。写成 <code>1u &lt;&lt; 31</code> 得到 2147483648，干净。</p>
+
+      <h2>三、四个操作</h2>
+      <p>四个操作各一行，改的都是同一个 uint32 上的同一位：</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 位图：只支持 0 ~ n-1</span>
+    <span class="kw">class</span> Bitset {
+    <span class="kw">public</span>:
+        vector&lt;<span class="kw">unsigned</span>&gt; set;
+
+        <span class="cm">// n 个位需要 (n + 31) / 32 个 uint32</span>
+        Bitset(<span class="kw">int</span> n) { set.assign((n + 31) / 32, 0); }
+
+        <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) { set[num &gt;&gt; 5] |= 1u &lt;&lt; (num &amp; 31); }
+
+        <span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> num) { set[num &gt;&gt; 5] &amp;= ~(1u &lt;&lt; (num &amp; 31)); }
+
+        <span class="kw">void</span> <span class="fn">reverse</span>(<span class="kw">int</span> num) { set[num &gt;&gt; 5] ^= 1u &lt;&lt; (num &amp; 31); }
+
+        <span class="kw">bool</span> <span class="fn">contains</span>(<span class="kw">int</span> num) { <span class="kw">return</span> (set[num &gt;&gt; 5] &amp; (1u &lt;&lt; (num &amp; 31))) != 0; }
+    };</pre>
+      <p><code>remove</code> 里的 <code>~</code> 不能省。<code>~00010000</code> 是 <code>11101111</code>，只有目标位是 0，与上去刚好清掉目标位而不碰别的位。写成 <code>&amp;= 00010000</code> 会把其它位一起清掉。</p>
+      <figure class="fig" id="fig-ops"></figure>
+      <p><code>reverse</code> 用异或，那一位是 1 就变 0、是 0 就变 1，正好对上「有就删没有就加」。它和 <code>remove</code> 只差一个运算符，写的时候别顺手。</p>
+      <div class="viz" id="viz-basic">
+        <div class="bs-ctl viz-controls">
+          <label>序列 <select id="bsSeq"><option value="preset">预设</option><option value="rand">随机</option></select></label>
+          <button type="button" id="bsNext">下一步</button>
+          <button type="button" id="bsReset">重置</button>
+        </div>
+        <div class="bs-note" id="bsNote"></div>
+        <div class="bs-lab">64 个位（每个 uint32 一组，bit 31 在左，bit 0 在右）</div>
+        <div class="bs-bits" id="bsBits"></div>
+        <div class="bs-lab">底层的 uint32</div>
+        <div class="bs-words" id="bsWords"></div>
+        <div class="breakdown" id="bsBd"></div>
+      </div>
+
+      <h2>四、向上取整与多出来的位</h2>
+      <p>n 个位需要 ⌈n / 32⌉ 个 unsigned。常见的写法是 <code>(n + 31) / 32</code>，n 小的时候没问题，n 接近 int 上限就炸了：</p>
+      <figure class="fig" id="fig-pit"></figure>
+      <p><code>n + 31</code> 在 n ≥ 2147483617 时溢出成负数，拿这个负数去开数组，<code>vector</code> 直接抛异常。改成 <code>n == 0 ? 0 : (n - 1) / 32 + 1</code> 就全程安全：n = 32 得 1，n = 33 得 2，n = 2147483647 得 67108864（256 MB）。顺带一句，<code>n / 32 + 1</code> 也对，但 n 是 32 的倍数时会多开一个 unsigned。</p>
+      <p>第二个坑在最后一个 unsigned 上。n = 70 要 3 个 unsigned，一共 96 位，比 70 多出 26 位。这 26 位平时是 0，<code>contains</code> 也永远问不到它们（下标最大是 69），所以相安无事。但 <code>flip</code> 之后就露馅了：把每个 unsigned 全部翻成 1，popcount 从头数到尾是 96，真实的 1 只有 70 个，多出 26。</p>
+      <p>所以按 popcount 数 1 的时候，最后一个 unsigned 要单独把多余位掩掉：</p>
+          <pre class="code"><span class="cm">// 两个位图求交：一次算 32 位，比逐位问 contains 快两个数量级</span>
+    <span class="kw">int</span> <span class="fn">intersect</span>(<span class="kw">const</span> vector&lt;<span class="kw">unsigned</span>&gt;&amp; a, <span class="kw">const</span> vector&lt;<span class="kw">unsigned</span>&gt;&amp; b) {
+        <span class="kw">int</span> cnt = 0;
+        <span class="kw">for</span> (size_t k = 0; k &lt; a.size(); k++) {
+            cnt += __builtin_popcount(a[k] &amp; b[k]);
+        }
+        <span class="kw">return</span> cnt;
+    }
+
+    <span class="cm">// 数 1 的个数时要跳过最后一个 uint32 里多出来的位</span>
+    <span class="kw">int</span> <span class="fn">countAll</span>(<span class="kw">const</span> vector&lt;<span class="kw">unsigned</span>&gt;&amp; set, <span class="kw">int</span> n) {
+        <span class="kw">int</span> words = n &gt;&gt; 5, rest = n &amp; 31;
+        <span class="kw">int</span> cnt = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> k = 0; k &lt; words; k++) cnt += __builtin_popcount(set[k]);
+        <span class="kw">if</span> (rest &gt; 0) cnt += __builtin_popcount(set[words] &amp; ((1u &lt;&lt; rest) - 1));
+        <span class="kw">return</span> cnt;
+    }</pre>
+
+      <h2>五、批量操作：一次算 32 位</h2>
+      <p>位图还有一个容易被忽略的好处：集合运算可以一次算 32 个。两个位图求交，逐位问 <code>contains</code> 要 n 次，把两个 unsigned 与起来再 popcount 只要 n / 32 次。</p>
+      <figure class="fig" id="fig-batch"></figure>
+      <p>实测 n = 10⁷、两个位图各放 300 万个数：逐位 18.03 毫秒，32 位一组 0.0211 毫秒，855 倍。省掉的是「一个一个问」这件事本身，一次 <code>&amp;</code> 顶 32 次判断，一次 popcount 顶 32 次取位。</p>
+      <p>同样的思路也能用在全扫上。n = 10⁸ 的位图里数 1 的个数，扫 312.5 万个 unsigned 用 0.17 毫秒；char 数组要扫 10⁸ 个字节，2.51 毫秒，差 14.8 倍。这个差距来自内存带宽：位图要读的字节数只有 char 数组的八分之一。</p>
+
+      <h2>六、设计位图：flip 的懒标记</h2>
+      <p>再看一道具体的题：设计一个类，支持把某位设 1、设 0、翻转全体、问是不是全 1、问有没有 1、数 1 的个数、输出所有位的状态。前两个和刚才的 add / remove 一样，麻烦在「翻转全体」。</p>
+      <p>真翻一遍要动 n 个位，也就是 n / 32 个 unsigned。n = 10⁷ 时一轮要扫 312501 个 unsigned，跑 1000 轮 flip 实测 18.357 毫秒。</p>
+      <p>换个记法就不必翻了。加一个标记 <code>rev</code>，它记的是「底层存的这些位，含义是不是反过来了」：</p>
+      <figure class="fig" id="fig-rev"></figure>
+      <p><code>rev</code> 为 false 时，位上的 1 表示存在；<code>rev</code> 为 true 时，位上的 0 表示存在。<code>flip</code> 于是不用碰任何一位，只做两件事：<code>rev</code> 取反，<code>zeros</code> 与 <code>ones</code> 交换。n = 10⁷ 跑 1000 轮实测 0.005 毫秒。</p>
+      <p>代价转嫁到了 <code>fix</code> 和 <code>unfix</code> 上：它们要先看 <code>rev</code>，才知道「设成存在」该写 1 还是写 0。</p>
+          <pre class="code">    <span class="cm">// 把 i 这位设成「存在」。rev == false 时存在是 1，rev == true 时存在是 0</span>
+        <span class="kw">void</span> <span class="fn">fix</span>(<span class="kw">int</span> i) {
+            <span class="kw">int</span> idx = i &gt;&gt; 5, bit = i &amp; 31;
+            <span class="kw">if</span> (!rev) {
+                <span class="kw">if</span> ((set[idx] &amp; (1u &lt;&lt; bit)) == 0) {
+                    zeros--;
+                    ones++;
+                    set[idx] |= 1u &lt;&lt; bit;
+                }
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> ((set[idx] &amp; (1u &lt;&lt; bit)) != 0) {
+                    zeros--;
+                    ones++;
+                    set[idx] ^= 1u &lt;&lt; bit;
+                }
+            }
+        }
+
+        <span class="kw">void</span> <span class="fn">unfix</span>(<span class="kw">int</span> i) {
+            <span class="kw">int</span> idx = i &gt;&gt; 5, bit = i &amp; 31;
+            <span class="kw">if</span> (!rev) {
+                <span class="kw">if</span> ((set[idx] &amp; (1u &lt;&lt; bit)) != 0) {
+                    ones--;
+                    zeros++;
+                    set[idx] ^= 1u &lt;&lt; bit;
+                }
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> ((set[idx] &amp; (1u &lt;&lt; bit)) == 0) {
+                    ones--;
+                    zeros++;
+                    set[idx] |= 1u &lt;&lt; bit;
+                }
+            }
+        }</pre>
+      <p>两个分支里那层 <code>if</code> 也不能省。<code>zeros</code> 和 <code>ones</code> 是跟着位走的，重复 <code>fix</code> 同一个位置时位没变，计数就不该动；多减一次 <code>zeros</code>，后面 <code>all()</code> 和 <code>count()</code> 全跟着错。</p>
+      <p>剩下几个操作都只读 <code>ones</code> 和 <code>rev</code>，不碰底层数组：</p>
+          <pre class="code">    <span class="cm">// 翻全局：只翻标记，再交换 zeros 与 ones</span>
+        <span class="kw">void</span> <span class="fn">flip</span>() {
+            rev = !rev;
+            swap(zeros, ones);
+        }
+
+        <span class="kw">bool</span> <span class="fn">all</span>() { <span class="kw">return</span> ones == size; }
+
+        <span class="kw">bool</span> <span class="fn">one</span>() { <span class="kw">return</span> ones &gt; 0; }
+
+        <span class="kw">int</span> <span class="fn">count</span>() { <span class="kw">return</span> ones; }
+
+        <span class="cm">// 输出时按 rev 决定要不要把每一位再翻回来</span>
+        <span class="kw">string</span> toString() {
+            <span class="kw">string</span> s;
+            s.reserve(size);
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0, k = 0; i &lt; size; k++) {
+                <span class="kw">unsigned</span> number = set[k];
+                <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; 32 &amp;&amp; i &lt; size; j++, i++) {
+                    s.push_back(<span class="kw">char</span>('0' + (((number &gt;&gt; j) &amp; 1) ^ (rev ? 1 : 0))));
+                }
+            }
+            <span class="kw">return</span> s;
+        }</pre>
+      <p><code>toString</code> 是唯一一个必须回到 O(n) 的地方：每一位都要输出，输出多少位就得走多少步，这个省不掉。它按 <code>rev</code> 决定要不要把取出来的位再翻一次。</p>
+      <div class="viz" id="viz-design">
+        <div class="bs-ctl viz-controls">
+          <label>序列 <select id="dvSeq"><option value="preset">预设</option><option value="rand">随机</option></select></label>
+          <button type="button" id="dvNext">下一步</button>
+          <button type="button" id="dvReset">重置</button>
+        </div>
+        <div class="bs-note" id="dvNote"></div>
+        <div class="bs-lab">底层 set[0] 实际存的位（bit 15 在左，bit 0 在右）</div>
+        <div class="bs-bits" id="dvRaw"></div>
+        <div class="bs-lab">对外看到的状态</div>
+        <div class="bs-bits" id="dvOut"></div>
+        <div class="breakdown" id="dvBd"></div>
+      </div>
+
+      <h2>七、复杂度分析</h2>
+      <p>设值域是 0 到 n−1，哈希集合里已有 k 个元素：</p>
+      <table class="complexity">
+        <tr><th>操作</th><th>位图</th><th>哈希集合</th><th>说明</th></tr>
+        <tr><td>add / remove / reverse / contains</td><td>O(1)</td><td>期望 O(1)</td><td>位图是两次运算：num &gt;&gt; 5 定 unsigned，掩码定位</td></tr>
+        <tr><td>初始化</td><td>O(n / 32)</td><td>O(1)</td><td>要把每个 unsigned 清 0，n = 10⁹ 时要清 3125 万个</td></tr>
+        <tr><td>空间</td><td>O(n / 8) 字节</td><td>O(k) 个节点</td><td>1 亿个位 12 MB；哈希集合 1 千万个 int 要 512 MB</td></tr>
+        <tr><td>flip（懒标记）</td><td>O(1)</td><td>无此操作</td><td>真翻每一位是 O(n / 32)，n = 10⁷ 时慢 3600 倍</td></tr>
+        <tr><td>求交 / 求并</td><td>O(n / 32)</td><td>O(k)</td><td>一次 AND 顶 32 次查询，n = 10⁷ 时快 855 倍</td></tr>
+        <tr><td>count</td><td>O(n / 32)，popcount 全程</td><td>O(k) 或 O(1) 记账</td><td>位图靠 popcount 扫，也可像设计位图那样记账</td></tr>
+        <tr><td>toString</td><td>O(n)</td><td>O(n)</td><td>输出多少位就得走多少步，省不掉</td></tr>
+      </table>
+      <p>空间那一行是位图真正的卖点：O(n / 8) 字节，跟集合里实际有多少个元素无关。哈希集合是 O(k)，元素越多越占地方。反过来说，值域大但元素稀疏时位图就亏了：n = 10⁹ 只存 100 个数，也要开 119 MB。</p>
+      <p>时间上要说实话：单点随机访问，位图和 char 数组基本打平（n = 10⁶ 混合 1 千万次操作：位图 41.44 毫秒，char 数组 40.06 毫秒）。位图拉开差距要靠批量操作和大值域：n = 10⁸ 的随机访问位图 5.05 毫秒、char 数组 23.73 毫秒；全扫一遍数 1 是 0.17 毫秒对 2.51 毫秒。</p>
+
+      <h2>八、总结</h2>
+      <p>要点列一下：</p>
+      <p>1）位图是一串 bit，第 i 位记 i 在不在集合里。定位用 <code>num &gt;&gt; 5</code>（第几个 unsigned）和 <code>num &amp; 31</code>（第几位）。</p>
+      <p>2）四个操作分别是 <code>|= 1u &lt;&lt; bit</code>、<code>&amp;= ~(1u &lt;&lt; bit)</code>、<code>^= 1u &lt;&lt; bit</code>、<code>&amp; (1u &lt;&lt; bit)</code>。数组写 <code>unsigned</code>，<code>1 &lt;&lt; 31</code> 会得到一个负数。</p>
+      <p>3）开数组的长度用 <code>(n - 1) / 32 + 1</code>，<code>(n + 31) / 32</code> 在 n 接近 int 上限时溢出成负数。</p>
+      <p>4）最后一个 unsigned 里有多出来的位，按 popcount 数 1 时要单独掩掉。</p>
+      <p>5）集合运算一次算 32 位，一次 <code>&amp;</code> 加一次 popcount 顶 32 次 <code>contains</code>。</p>
+      <p>6）翻转全体不必真翻，加一个 <code>rev</code> 标记加 <code>zeros</code> / <code>ones</code> 两个计数器就行，flip 变 O(1)。</p>
+      <p>再往后，位图还有两个方向。一个是布尔过滤：允许少量误判、不许漏判，就能用多个哈希函数把任意值压进一个位图，空间再降一个数量级。另一个是把它当集合用在动态规划里，状态压缩那一类题会反复见到。这两块留到后面讲。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>位图的实现</td><td><a href="https://leetcode-cn.com/problems/design-bitset/" target="_blank">leetcode-cn.com/problems/design-bitset</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解032【必备】位图</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function mk(tag, a){ var e = document.createElementNS(NS, tag); for (var k in a) e.setAttribute(k, a[k]); return e; }
+  function T(x, y, s, a){ var e = mk('text', a || {}); e.setAttribute('x', x); e.setAttribute('y', y); e.textContent = s; return e; }
+  function R(x, y, w, h, fill, stroke){ return mk('rect', {x:x, y:y, width:w, height:h, fill:fill, 'stroke':stroke || '#e6e8eb', rx:3}); }
+  function cap(host, t){ var c = document.createElement('figcaption'); c.textContent = t; host.appendChild(c); }
+  function path(d, stroke){ return mk('path', {d:d, fill:'none', 'stroke':stroke || '#9aa0a6', 'stroke-width':1.4}); }
+
+  // ===== 图 1：三种存法的实测内存 =====
+  (function(){
+    var host = document.getElementById('fig-space');
+    var svg = mk('svg', {viewBox:'0 0 660 240', width:'100%'});
+    svg.appendChild(T(24, 26, '存 1 亿个「有 / 没有」，实测常驻内存', {'font-size':15,'font-weight':'bold'}));
+    var rows = [
+      ['哈希集合（存 1 千万个 int）', 512, '#f6f7f9', '#9aa0a6'],
+      ['char 数组（1 字节存 1 个）', 96, '#f6f7f9', '#9aa0a6'],
+      ['位图（1 bit 存 1 个）', 12, '#dbeafe', '#2563eb']
+    ];
+    var x0 = 246, maxW = 344, maxV = 512;
+    rows.forEach(function(r, i){
+      var y = 52 + i * 44;
+      svg.appendChild(T(24, y + 20, r[0], {'font-size':12}));
+      var w = Math.max(4, r[1] / maxV * maxW);
+      svg.appendChild(R(x0, y, w, 26, r[2], r[3]));
+      svg.appendChild(T(x0 + w + 8, y + 19, r[1] + ' MB', {'font-size':13,'font-weight':'bold',fill:r[3]}));
+    });
+    svg.appendChild(T(24, 196, '哈希集合那一栏只存了 1 千万个已存在的数，就已经是位图存 1 亿个位的 42 倍。', {'font-size':11, fill:'#6b7280'}));
+    svg.appendChild(T(24, 216, '位图占 n / 8 字节，char 数组占 n 字节，哈希集合每个元素还要带节点和桶。', {'font-size':11, fill:'#6b7280'}));
+    host.appendChild(svg);
+    cap(host, '三种存法的实测常驻内存：位图是 char 数组的八分之一，是哈希集合的四十二分之一。');
+  })();
+
+  // ===== 图 2：num = 67 的定位 =====
+  (function(){
+    var host = document.getElementById('fig-layout');
+    var svg = mk('svg', {viewBox:'0 0 660 274', width:'100%'});
+    svg.appendChild(T(24, 26, 'num = 67 落在哪个 unsigned 的哪一位', {'font-size':15,'font-weight':'bold'}));
+    svg.appendChild(R(268, 40, 124, 34, '#dbeafe', '#2563eb'));
+    svg.appendChild(T(330, 62, 'num = 67', {'font-size':14,'text-anchor':'middle',fill:'#111827'}));
+    svg.appendChild(path('M 300 74 L 226 92'));
+    svg.appendChild(path('M 360 74 L 434 92'));
+    svg.appendChild(T(140, 104, '67 >> 5 = 2', {'font-size':12,'text-anchor':'middle',fill:'#374151'}));
+    svg.appendChild(T(470, 104, '67 & 31 = 3', {'font-size':12,'text-anchor':'middle',fill:'#374151'}));
+    svg.appendChild(T(140, 120, '第 2 个 unsigned', {'font-size':11,'text-anchor':'middle',fill:'#6b7280'}));
+    svg.appendChild(T(470, 120, '第 3 位', {'font-size':11,'text-anchor':'middle',fill:'#6b7280'}));
+
+    var names = ['set[0]', 'set[1]', 'set[2]', 'set[3]'];
+    for (var i = 0; i < 4; i++) {
+      var x = 40 + i * 140;
+      var hot = (i === 2);
+      svg.appendChild(R(x, 134, 120, 34, hot ? '#ffedd5' : '#f6f7f9', hot ? '#ea580c' : '#e6e8eb'));
+      svg.appendChild(T(x + 60, 156, names[i], {'font-size':12,'text-anchor':'middle',fill:hot?'#ea580c':'#374151'}));
+      if (hot) svg.appendChild(T(x + 60, 186, '↑', {'font-size':13,'text-anchor':'middle',fill:'#ea580c'}));
+    }
+    svg.appendChild(T(40, 208, '管 0 ~ 31', {'font-size':11, fill:'#6b7280'}));
+    svg.appendChild(T(320, 208, '管 64 ~ 95', {'font-size':11, fill:'#6b7280'}));
+
+    // 展开 set[2] 的 32 位
+    svg.appendChild(T(24, 232, 'set[2] 展开：', {'font-size':11, fill:'#6b7280'}));
+    for (var b = 0; b < 32; b++) {
+      var cx = 110 + b * 17;
+      var isBit3 = (b === 28); // 从左到右是 bit31..bit0，bit3 在下标 28
+      svg.appendChild(R(cx, 220, 16, 22, isBit3 ? '#ffedd5' : '#f6f7f9', isBit3 ? '#ea580c' : '#e6e8eb'));
+      if (isBit3) svg.appendChild(T(cx + 8, 235, '1', {'font-size':11,'text-anchor':'middle',fill:'#ea580c'}));
+    }
+    svg.appendChild(T(118, 258, 'bit 31', {'font-size':10, fill:'#9aa0a6'}));
+    svg.appendChild(T(645, 258, 'bit 0', {'font-size':10,'text-anchor':'middle', fill:'#9aa0a6'}));
+    svg.appendChild(T(594, 268, 'bit 3', {'font-size':10,'text-anchor':'middle', fill:'#ea580c'}));
+    host.appendChild(svg);
+    cap(host, '67 = 2 × 32 + 3：右移 5 位得到第几个 unsigned，与 31 得到第几位。');
+  })();
+
+  // ===== 图 3：四个操作的位运算 =====
+  (function(){
+    var host = document.getElementById('fig-ops');
+    var svg = mk('svg', {viewBox:'0 0 660 258', width:'100%'});
+    svg.appendChild(T(24, 26, '四个操作在同一个 uint32 上改同一位', {'font-size':15,'font-weight':'bold'}));
+    var heads = [['操作', 24], ['运算前', 150], ['运算', 336], ['运算后', 430]];
+    heads.forEach(function(h){ svg.appendChild(T(h[1], 50, h[0], {'font-size':12,'font-weight':'bold',fill:'#374151'})); });
+    var data = [
+      ['add(4)',      '01001010', '|= 00010000', '01011010', 4, ''],
+      ['remove(6)',   '01011010', '&= 10111111', '00011010', 6, ''],
+      ['reverse(0)',  '00011010', '^= 00000001', '00011011', 0, ''],
+      ['contains(1)', '00011011', '&  00000010', '00000010', 1, '→ true']
+    ];
+    data.forEach(function(d, i){
+      var y = 68 + i * 38;
+      svg.appendChild(T(24, y + 16, d[0], {'font-size':12, fill:'#374151'}));
+      [d[1], d[3]].forEach(function(s, ci){
+        var base = ci === 0 ? 150 : 430;
+        for (var b = 0; b < 8; b++) {
+          var x = base + b * 22;
+          var on = s.charAt(b) === '1';
+          var hi = (ci === 1 && b === d[4]);
+          svg.appendChild(R(x, y, 20, 24, hi ? '#dbeafe' : (on ? '#f6f7f9' : '#ffffff'), hi ? '#2563eb' : '#e6e8eb'));
+          svg.appendChild(T(x + 10, y + 16, s.charAt(b), {'font-size':11,'text-anchor':'middle',fill:hi?'#111827':(on?'#374151':'#c9ced4')}));
+        }
+        if (ci === 1 && d[5]) svg.appendChild(T(base + 182, y + 16, d[5], {'font-size':12,'font-weight':'bold',fill:'#2563eb'}));
+      });
+      svg.appendChild(T(336, y + 16, d[2], {'font-size':11, fill:'#374151'}));
+    });
+    svg.appendChild(T(24, 232, '蓝色是本次操作改到的位（contains 那行是查到的位）。remove 的掩码取了反，只有目标位是 0。', {'font-size':11, fill:'#6b7280'}));
+    host.appendChild(svg);
+    cap(host, 'add 置 1、remove 清 0、reverse 翻转、contains 取出，差别只在运算符和掩码。');
+  })();
+
+  // ===== 图 4：三个坑 =====
+  (function(){
+    var host = document.getElementById('fig-pit');
+    var svg = mk('svg', {viewBox:'0 0 660 300', width:'100%'});
+    svg.appendChild(T(24, 26, '三个容易写错的地方', {'font-size':15,'font-weight':'bold'}));
+    var boxes = [
+      ['一、1 << 31 是个负数', [
+        '1  << 31 = -2147483648        （位模式 0x80000000，是个负数）',
+        '1u << 31 =  2147483648        （unsigned，干净）',
+        '四个操作只用位运算时结果仍然正确，但那个格子从此是负数'
+      ], '#ea580c'],
+      ['二、(n + 31) / 32 会溢出', [
+        'n = 2147483647 时，n + 31 = -2147483618，再除 32 得 -67108863',
+        '拿这个长度开数组，vector 直接抛异常',
+        '改成 n == 0 ? 0 : (n - 1) / 32 + 1，全程安全（n = 32 得 1，n = 33 得 2）'
+      ], '#2563eb'],
+      ['三、最后一个 unsigned 有多出来的位', [
+        'n = 70 要 3 个 unsigned = 96 位，多出 26 位',
+        '全部翻成 1 之后 popcount = 96，真实的 1 只有 70 个',
+        '数 1 的时候要把最后一个 unsigned 的多余位掩掉'
+      ], '#ea580c']
+    ];
+    boxes.forEach(function(bx, i){
+      var y = 42 + i * 84;
+      svg.appendChild(R(24, y, 612, 74, '#f6f7f9', '#e6e8eb'));
+      svg.appendChild(T(36, y + 20, bx[0], {'font-size':13,'font-weight':'bold',fill:bx[2]}));
+      bx[1].forEach(function(s, j){
+        svg.appendChild(T(36, y + 40 + j * 15, s, {'font-size':11, fill:'#374151'}));
+      });
+    });
+    host.appendChild(svg);
+    cap(host, '移位量、向上取整、多余位：这三个坑都不会让单点查询报错，只会在计数和开数组时爆出来。');
+  })();
+
+  // ===== 图 5：批量操作 =====
+  (function(){
+    var host = document.getElementById('fig-batch');
+    var svg = mk('svg', {viewBox:'0 0 660 272', width:'100%'});
+    svg.appendChild(T(24, 26, '一次 AND 顶 32 次查询', {'font-size':15,'font-weight':'bold'}));
+    svg.appendChild(R(40, 42, 160, 34, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(T(120, 64, 'A[k]  1011…0101', {'font-size':12,'text-anchor':'middle',fill:'#374151'}));
+    svg.appendChild(T(212, 64, '&', {'font-size':16,'text-anchor':'middle',fill:'#ea580c','font-weight':'bold'}));
+    svg.appendChild(R(238, 42, 160, 34, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(T(318, 64, 'B[k]  0110…1101', {'font-size':12,'text-anchor':'middle',fill:'#374151'}));
+    svg.appendChild(T(410, 64, '→', {'font-size':16,'text-anchor':'middle',fill:'#2563eb','font-weight':'bold'}));
+    svg.appendChild(R(436, 42, 160, 34, '#dbeafe', '#2563eb'));
+    svg.appendChild(T(516, 64, 'C[k] = A[k] & B[k]', {'font-size':12,'text-anchor':'middle',fill:'#111827'}));
+    svg.appendChild(T(40, 94, 'popcount(C[k]) 就是这一段里同时在两个集合中的个数，一次算完 32 位。', {'font-size':11, fill:'#6b7280'}));
+
+    var cols = [['做法', 24], ['循环次数', 180], ['每次做的事', 300], ['实测（n = 10⁷）', 470]];
+    cols.forEach(function(c){ svg.appendChild(T(c[1], 124, c[0], {'font-size':12,'font-weight':'bold',fill:'#374151'})); });
+    var rows = [
+      ['逐位 contains', '1000 万', '定位 + 取位 + 与', '18.03 ms'],
+      ['32 位一组', '31.25 万', '一次 AND + 一次 popcount', '0.0211 ms']
+    ];
+    rows.forEach(function(r, i){
+      var y = 148 + i * 34;
+      svg.appendChild(R(24, y - 20, 612, 28, i === 1 ? '#dbeafe' : '#ffffff', i === 1 ? '#2563eb' : '#e6e8eb'));
+      svg.appendChild(T(34, y, r[0], {'font-size':12, fill:'#374151'}));
+      svg.appendChild(T(180, y, r[1], {'font-size':12, fill:'#374151'}));
+      svg.appendChild(T(300, y, r[2], {'font-size':12, fill:'#374151'}));
+      svg.appendChild(T(470, y, r[3], {'font-size':12,'font-weight':'bold', fill: i === 1 ? '#2563eb' : '#374151'}));
+    });
+    svg.appendChild(T(24, 208, '855 倍。省掉的是「一个一个问」这件事本身。', {'font-size':12, fill:'#374151'}));
+    svg.appendChild(T(24, 234, '全扫数 1 也是同一笔账：n = 10⁸ 时位图 0.17 ms，char 数组 2.51 ms，差 14.8 倍。', {'font-size':11, fill:'#6b7280'}));
+    host.appendChild(svg);
+    cap(host, '两个位图求交：逐位问要 n 次，按 unsigned 与只要 n / 32 次。');
+  })();
+
+  // ===== 图 6：flip 的懒标记 =====
+  (function(){
+    var host = document.getElementById('fig-rev');
+    var svg = mk('svg', {viewBox:'0 0 660 306', width:'100%'});
+    svg.appendChild(T(24, 26, 'flip 只翻一个标记，一位都不动', {'font-size':15,'font-weight':'bold'}));
+    svg.appendChild(T(24, 50, 'n = 8，底层 set[0] = 00000011', {'font-size':12, fill:'#374151'}));
+
+    function bits(x, y, s, hi, lab, tail, tailColor) {
+      svg.appendChild(T(24, y + 16, lab, {'font-size':12, fill:'#374151'}));
+      for (var i = 0; i < 8; i++) {
+        var cx = 140 + i * 30;
+        var on = s.charAt(i) === '1';
+        var hot = hi && on;
+        svg.appendChild(R(cx, y, 28, 24, hot ? '#dbeafe' : (on ? '#f6f7f9' : '#ffffff'), hot ? '#2563eb' : '#e6e8eb'));
+        svg.appendChild(T(cx + 14, y + 16, s.charAt(i), {'font-size':11,'text-anchor':'middle',fill:hot?'#111827':(on?'#374151':'#c9ced4')}));
+      }
+      if (tail) svg.appendChild(T(392, y + 16, tail, {'font-size':12,'font-weight':'bold',fill:tailColor || '#374151'}));
+    }
+    bits(0, 62, '00000011', false, '底层实际存的', 'flip 前后都一样');
+    bits(0, 96, '00000011', true, 'rev = false，对外', 'ones = 2，zeros = 6', '#2563eb');
+    bits(0, 130, '11111100', true, 'rev = true，对外', 'ones = 6，zeros = 2', '#2563eb');
+
+    svg.appendChild(R(24, 170, 612, 92, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(T(36, 190, 'rev = false：位上是 1 表示存在，fix 写 1，unfix 写 0', {'font-size':12, fill:'#374151'}));
+    svg.appendChild(T(36, 210, 'rev = true ：位上是 0 表示存在，fix 写 0，unfix 写 1', {'font-size':12, fill:'#374151'}));
+    svg.appendChild(T(36, 230, 'flip 只做两件事：rev 取反，zeros 与 ones 交换。底层一位都没动。', {'font-size':12, fill:'#ea580c'}));
+    svg.appendChild(T(36, 250, 'n = 10⁷ 跑 1000 轮 flip：懒标记 0.005 ms，真翻每一位 18.357 ms。', {'font-size':11, fill:'#6b7280'}));
+    host.appendChild(svg);
+    cap(host, '翻转全体改成翻标记：位的含义由 rev 决定，zeros 与 ones 跟着交换。');
+  })();
+
+  // ===== 演示 1：基础位图操作台 =====
+  (function(){
+    var elSeq = document.getElementById('bsSeq');
+    var elNote = document.getElementById('bsNote');
+    var elBits = document.getElementById('bsBits');
+    var elWords = document.getElementById('bsWords');
+    var elBd = document.getElementById('bsBd');
+    var NW = 2, NB = 64;
+    var st = null;
+
+    function hex(v){ return ('00000000' + (v >>> 0).toString(16)).slice(-8).toUpperCase(); }
+    function mulberry32(a){
+      return function(){
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        var t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    function presetOps(){
+      return [
+        {op:'add', num:3}, {op:'add', num:7}, {op:'add', num:31},
+        {op:'contains', num:7}, {op:'remove', num:3}, {op:'reverse', num:31},
+        {op:'contains', num:31}, {op:'add', num:37}, {op:'add', num:63},
+        {op:'reverse', num:37}, {op:'contains', num:37}, {op:'remove', num:63}
+      ];
+    }
+    function randOps(){
+      var r = mulberry32(20261006), ops = [];
+      for (var i = 0; i < 14; i++) {
+        var d = r();
+        var op = d < 0.40 ? 'add' : (d < 0.65 ? 'remove' : (d < 0.85 ? 'reverse' : 'contains'));
+        ops.push({op: op, num: Math.floor(r() * NB)});
+      }
+      return ops;
+    }
+    function build(){
+      var ops = elSeq.value === 'rand' ? randOps() : presetOps();
+      var set = [0, 0], steps = [];
+      ops.forEach(function(o){
+        var w = o.num >> 5, b = o.num & 31, mask = (1 << b) >>> 0, notmask = (~mask) >>> 0;
+        var before = set[w], after = before, ret = null, expr = '', desc = '';
+        if (o.op === 'add') { after = (before | mask) >>> 0; expr = '|= 0x' + hex(mask); }
+        else if (o.op === 'remove') { after = (before & notmask) >>> 0; expr = '&= ~0x' + hex(mask) + ' = 0x' + hex(notmask); }
+        else if (o.op === 'reverse') { after = (before ^ mask) >>> 0; expr = '^= 0x' + hex(mask); }
+        else { ret = ((before & mask) >>> 0) !== 0; after = before; expr = '& 0x' + hex(mask) + ' → ' + (ret ? 'true' : 'false'); }
+        desc = o.op + '(' + o.num + ')  set[' + w + '] ' + expr;
+        set[w] = after;
+        steps.push({op:o.op, num:o.num, w:w, b:b, mask:mask, before:before, after:after, ret:ret, desc:desc, set:set.slice()});
+      });
+      st = {steps: steps, step: 0};
+    }
+    function render(){
+      var s = st.steps[st.step];
+      var changed = (s.before !== s.after);
+      elNote.textContent = '第 ' + (st.step + 1) + ' / ' + st.steps.length + ' 步：' + s.desc;
+      var html = '';
+      for (var w = 0; w < NW; w++) {
+        html += '<div class="bs-row">';
+        for (var b = 31; b >= 0; b--) {
+          var on = ((s.set[w] >>> b) & 1) === 1;
+          var isTarget = (w === s.w && b === s.b);
+          var cls = 'bs-bit';
+          if (isTarget) cls += (s.op === 'contains') ? (s.ret ? ' new' : ' same') : (changed ? ' new' : ' same');
+          else if (on) cls += ' on';
+          html += '<div class="' + cls + '">' + (on ? '1' : '0') + '</div>';
+        }
+        html += '</div>';
+      }
+      elBits.innerHTML = html;
+      var wh = '';
+      for (var k = 0; k < NW; k++) {
+        wh += '<div class="bs-word' + (k === s.w ? ' hot' : '') + '">set[' + k + '] = 0x' + hex(s.set[k]) + '</div>';
+      }
+      elWords.innerHTML = wh;
+      var bd = 'num = ' + s.num + '<br>num &gt;&gt; 5 = ' + s.w + '　第 ' + s.w + ' 个 unsigned<br>num &amp; 31 = ' + s.b + '　第 ' + s.b + ' 位<br>掩码 1u &lt;&lt; ' + s.b + ' = 0x' + hex(s.mask) +
+               '<br>set[' + s.w + '] : 0x' + hex(s.before) + ' → 0x' + hex(s.after);
+      if (s.op === 'contains') bd += '<br><b>contains(' + s.num + ') = ' + (s.ret ? 'true' : 'false') + '</b>';
+      elBd.innerHTML = bd;
+    }
+    document.getElementById('bsNext').addEventListener('click', function(){
+      if (st.step < st.steps.length - 1) { st.step++; render(); }
+    });
+    document.getElementById('bsReset').addEventListener('click', function(){ build(); render(); });
+    elSeq.addEventListener('change', function(){ build(); render(); });
+    build(); render();
+  })();
+
+  // ===== 演示 2：设计位图操作台 =====
+  (function(){
+    var elSeq = document.getElementById('dvSeq');
+    var elNote = document.getElementById('dvNote');
+    var elRaw = document.getElementById('dvRaw');
+    var elOut = document.getElementById('dvOut');
+    var elBd = document.getElementById('dvBd');
+    var N = 16;
+    var st = null;
+
+    function mulberry32(a){
+      return function(){
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        var t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    function presetOps(){
+      return [
+        {op:'fix', i:0}, {op:'fix', i:3}, {op:'fix', i:15}, {op:'count'},
+        {op:'flip'}, {op:'count'}, {op:'fix', i:0}, {op:'all'},
+        {op:'unfix', i:15}, {op:'flip'}, {op:'toString'}, {op:'one'}
+      ];
+    }
+    function randOps(){
+      var r = mulberry32(32061), ops = [];
+      for (var i = 0; i < 12; i++) {
+        var d = r();
+        var op;
+        if (d < 0.35) op = 'fix';
+        else if (d < 0.55) op = 'unfix';
+        else if (d < 0.72) op = 'flip';
+        else if (d < 0.84) op = 'count';
+        else if (d < 0.92) op = 'all';
+        else op = 'toString';
+        var o = {op: op};
+        if (op === 'fix' || op === 'unfix') o.i = Math.floor(r() * N);
+        ops.push(o);
+      }
+      return ops;
+    }
+    function build(){
+      var ops = elSeq.value === 'rand' ? randOps() : presetOps();
+      var set = 0, zeros = N, ones = 0, rev = false, steps = [];
+      ops.forEach(function(o){
+        var desc = '', ret = null, before = {set:set, zeros:zeros, ones:ones, rev:rev};
+        if (o.op === 'fix') {
+          var bit = (set >>> o.i) & 1;
+          if (!rev) { if (bit === 0) { set = (set | (1 << o.i)) >>> 0; zeros--; ones++; } }
+          else { if (bit === 1) { set = (set ^ (1 << o.i)) >>> 0; zeros--; ones++; } }
+          desc = 'fix(' + o.i + ')　rev = ' + rev + '，位上' + (rev ? ' 0 ' : ' 1 ') + '表示存在，当前位是 ' + bit +
+                 (bit === (rev ? 0 : 1) ? '，已经在目标状态，不动' : '，改成 ' + (rev ? 0 : 1));
+        } else if (o.op === 'unfix') {
+          var b2 = (set >>> o.i) & 1;
+          if (!rev) { if (b2 === 1) { set = (set ^ (1 << o.i)) >>> 0; ones--; zeros++; } }
+          else { if (b2 === 0) { set = (set | (1 << o.i)) >>> 0; ones--; zeros++; } }
+          desc = 'unfix(' + o.i + ')　rev = ' + rev + '，当前位是 ' + b2 +
+                 (b2 === (rev ? 1 : 0) ? '，已经在目标状态，不动' : '，改成 ' + (rev ? 1 : 0));
+        } else if (o.op === 'flip') {
+          rev = !rev; var t = zeros; zeros = ones; ones = t;
+          desc = 'flip()　rev 取反，zeros 与 ones 交换。底层一位都没动';
+        } else if (o.op === 'count') {
+          ret = ones; desc = 'count()　直接读 ones';
+        } else if (o.op === 'all') {
+          ret = (ones === N); desc = 'all()　ones == size ?';
+        } else if (o.op === 'one') {
+          ret = (ones > 0); desc = 'one()　ones > 0 ?';
+        } else {
+          var s = '';
+          for (var i = 0; i < N; i++) s += (((set >>> i) & 1) ^ (rev ? 1 : 0));
+          ret = s; desc = 'toString()　每一位按 rev 翻回来再拼';
+        }
+        steps.push({op:o.op, i:o.i, ret:ret, desc:desc, set:set, zeros:zeros, ones:ones, rev:rev});
+      });
+      st = {steps: steps, step: 0};
+    }
+    function bitsHtml(set, rev, target){
+      var html = '';
+      for (var i = N - 1; i >= 0; i--) {
+        var v = ((set >>> i) & 1) ^ (rev ? 1 : 0);
+        var cls = 'bs-bit' + (v ? ' on' : '') + (i === target ? ' new' : '');
+        html += '<div class="' + cls + '">' + v + '</div>';
+      }
+      return html;
+    }
+    function render(){
+      var s = st.steps[st.step];
+      elNote.textContent = '第 ' + (st.step + 1) + ' / ' + st.steps.length + ' 步：' + s.desc;
+      elRaw.innerHTML = bitsHtml(s.set, false, (s.op === 'fix' || s.op === 'unfix') ? s.i : -1);
+      elOut.innerHTML = bitsHtml(s.set, s.rev, (s.op === 'fix' || s.op === 'unfix') ? s.i : -1);
+      var bd = 'rev = ' + s.rev + '　zeros = ' + s.zeros + '　ones = ' + s.ones + '　size = ' + N;
+      if (s.ret !== null && s.ret !== undefined) {
+        bd += '<br><b>' + s.op + '() = ' + (typeof s.ret === 'boolean' ? (s.ret ? 'true' : 'false') : s.ret) + '</b>';
+      }
+      elBd.innerHTML = bd;
+    }
+    document.getElementById('dvNext').addEventListener('click', function(){
+      if (st.step < st.steps.length - 1) { st.step++; render(); }
+    });
+    document.getElementById('dvReset').addEventListener('click', function(){ build(); render(); });
+    elSeq.addEventListener('change', function(){ build(); render(); });
+    build(); render();
+  })();
+
+})();</script>
+</body>
+</html>

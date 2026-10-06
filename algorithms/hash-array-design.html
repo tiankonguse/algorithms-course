@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>哈希表设计：setAll 与 O(1) 随机集合 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.ha-sel,.ha-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.ha-sel:focus{outline:none;border-color:var(--accent);}
+.ha-btn{cursor:pointer;}
+.ha-btn:hover{border-color:var(--accent);color:var(--accent);}
+.ha-btn:disabled{opacity:.4;cursor:default;}
+.ha-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.ha-ctl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--text-dim);}
+.legend .dot.sel{background:var(--accent-soft);border-color:var(--accent);}
+.legend .dot.mov{background:var(--partial-soft);border-color:var(--partial);}
+.ha-map{display:inline-grid;gap:6px;font-variant-numeric:tabular-nums;}
+.ha-row{display:flex;align-items:center;gap:8px;font-size:13px;}
+.ha-key{min-width:22px;font-weight:600;color:var(--accent);}
+.ha-tuple{display:inline-flex;gap:4px;align-items:center;}
+.ha-cell{border:1px solid var(--border);border-radius:5px;background:var(--bg);padding:3px 9px;font-size:13px;min-width:44px;text-align:center;}
+.ha-cell.time{color:var(--text-dim);font-size:12px;}
+.ha-cell.hot{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:600;}
+.ha-cell.mov{border-color:var(--partial);background:var(--partial-soft);color:var(--partial);font-weight:600;}
+.ha-cell.gone{opacity:.35;}
+.ha-global{display:inline-flex;gap:10px;font-size:12px;color:var(--text-dim);margin-top:8px;}
+.ha-global b{color:var(--text);font-weight:600;}
+.ha-note{font-size:13px;color:var(--text-dim);margin-top:6px;min-height:20px;}
+.ha-note b{color:var(--accent);font-weight:600;}
+.ha-note.bad b{color:#dc2626;}
+.ha-arr{display:flex;gap:4px;align-items:flex-end;}
+.ha-arr .cell{width:52px;}
+.ha-arr .cell.idx{width:52px;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>哈希表设计：setAll 与 O(1) 随机集合</h1>
+      <p class="intro">数据结构设计题不考新结构，考的是把哈希表、数组、链表这些旧零件按需拼起来。这一讲三题的地基都是同一对组合：哈希表负责 O(1) 定位，数组负责按位置访问。区别只在哈希表里存什么：时间戳、下标，还是下标集合。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>「设计一个结构，几个操作全部 O(1)」是笔试常客。单个结构往往撑不起这种要求：哈希表能 O(1) 查值，但没法按位置随机取；数组能 O(1) 按下标访问，但删中间元素要搬后面的全部。</p>
+      <p>把两个拼起来就好办了。哈希表记「值 → 位置」，数组按位置存真身，两边各干各擅长的。setAll、随机集合这两类题，都是在给这个组合加一个 O(1) 操作：要么让批量赋值变懒，要么让删除不搬移。</p>
+
+      <h2 id="setall">一、setAll 的哈希表</h2>
+      <p>题目 1：普通哈希表的四个操作，外加一个 <code>setAll(v)</code>：把表里所有键的值一次性改成 v，要求每个操作都是 O(1)。</p>
+      <p>最直白的做法是 setAll 时真的遍历整张表，把每个键的值改掉。这步是 O(n)，表越大越扛不住。实测：2 万个键、10 万次操作（其中约 1 万次 setAll），全量改的总耗时 707 毫秒，其中 setAll 单次平均要碰 2 万个键。</p>
+      <p>不想真改，就得把「该改成什么」记下来。给每个键的值配一个时间戳，同时记一个全局的 <code>setAllValue</code> 和 <code>setAllTime</code>：</p>
+      <ul>
+        <li><code>put(k, v)</code>：表里存 (v, 当前时间戳)，时间戳自增</li>
+        <li><code>setAll(v)</code>：只改 <code>setAllValue = v</code>、<code>setAllTime = 当前时间戳</code></li>
+        <li><code>get(k)</code>：键的时间戳 &gt; <code>setAllTime</code> 说明是 setAll 之后单独写的，返回自己的值；否则返回 <code>setAllValue</code></li>
+      </ul>
+      <p>setAll 从 O(n) 变成 O(1)：只动两个变量，一个键都不用碰。get 也只是多一次比较。实测同一份 10 万次操作，懒标记版 3.4 毫秒，快 208 倍。</p>
+
+      <figure class="fig" id="figSetAll"></figure>
+      <figcaption>同样一次 setAll(9)：左边把每个键的值都改掉，右边只改 setAllValue 和 setAllTime，键纹丝不动</figcaption>
+
+      <div class="viz" id="vizSetAll"></div>
+
+    <pre class="code"><span class="cm">// setAll 功能的哈希表：值带时间戳，setAll 只记懒标记</span>
+    <span class="kw">class</span> SetAllMap {
+    <span class="kw">public</span>:
+        unordered_map&lt;<span class="kw">int</span>, pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt; map;   <span class="cm">// key -&gt; (value, time)</span>
+        <span class="kw">int</span> setAllValue = 0;
+        <span class="kw">int</span> setAllTime = -1;
+        <span class="kw">int</span> cnt = 0;
+
+        <span class="kw">void</span> <span class="fn">put</span>(<span class="kw">int</span> k, <span class="kw">int</span> v) {
+            map[k] = {v, cnt++};
+        }
+
+        <span class="kw">void</span> <span class="fn">setAll</span>(<span class="kw">int</span> v) {
+            setAllValue = v;
+            setAllTime = cnt++;
+        }
+
+        <span class="kw">int</span> <span class="fn">get</span>(<span class="kw">int</span> k) {
+            <span class="kw">if</span> (!map.count(k)) {
+                <span class="kw">return</span> -1;
+            }
+            auto [v, t] = map[k];
+            <span class="kw">return</span> t &gt; setAllTime ? v : setAllValue;
+        }
+    };</pre>
+
+      <p>这里有个细节：<code>cnt</code> 一直自增，理论上会溢出，但题目的键数和操作数都有限，int 够用。另外 get 一个不存在的键返回 -1，题目约定如此。</p>
+
+      <h2 id="randset">二、O(1) 随机集合</h2>
+      <p>题目 3（LeetCode 380）：设计一个结构，支持 insert、remove、getRandom，三个操作全 O(1)。getRandom 要求等概率返回集合里的任意一个元素。</p>
+      <p>哈希集合能 O(1) 判重、删除，但 getRandom 没办法。哈希表不保序，也没有下标。数组能 O(1) 按下标取，但删中间元素要搬移，平均 O(n)。</p>
+      <p>组合起来：哈希表记「值 → 下标」，数组按位置存值。</p>
+      <ul>
+        <li><code>insert(val)</code>：表里没有才插。值追加到数组尾，表里记它的下标，返回 true；已存在返回 false</li>
+        <li><code>getRandom()</code>：<code>arr[rand() % size]</code>，等概率</li>
+        <li><code>remove(val)</code>：表里有才删。把数组最后一个元素搬到 val 的位置，盖掉它，再弹掉数组尾。表里把被搬走的那个值的下标改成 val 的原下标</li>
+      </ul>
+      <p>删除不搬中间，只搬最后一个，所以是 O(1)。搬完数组尾部多出一个没人要的旧副本，直接弹掉。实测：10 万个数里删 5 万次，交换删除 3.2 毫秒；用数组真删（每次搬平均 5 万个元素、一共 25 亿次搬移）695 毫秒，差 214 倍。</p>
+
+      <figure class="fig" id="figSwap"></figure>
+      <figcaption>remove(4)：末尾的 9 搬到下标 1 盖掉 4，map 里 9 的下标改成 1，再弹尾。中间元素一个都没动</figcaption>
+
+      <div class="viz" id="vizRand"></div>
+
+    <pre class="code"><span class="cm">// O(1) 随机集合：map 记值-&gt;下标，删除时把末尾元素换过来再弹尾</span>
+    <span class="kw">class</span> RandomizedSet {
+    <span class="kw">public</span>:
+        unordered_map&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt; map;   <span class="cm">// val -&gt; index</span>
+        vector&lt;<span class="kw">int</span>&gt; arr;
+
+        <span class="kw">bool</span> <span class="fn">insert</span>(<span class="kw">int</span> val) {
+            <span class="kw">if</span> (map.count(val)) {
+                <span class="kw">return</span> <span class="kw">false</span>;
+            }
+            map[val] = (<span class="kw">int</span>)arr.size();
+            arr.push_back(val);
+            <span class="kw">return</span> <span class="kw">true</span>;
+        }
+
+        <span class="kw">bool</span> <span class="fn">remove</span>(<span class="kw">int</span> val) {
+            <span class="kw">if</span> (!map.count(val)) {
+                <span class="kw">return</span> <span class="kw">false</span>;
+            }
+            <span class="kw">int</span> valIndex = map[val];
+            <span class="kw">int</span> endValue = arr.back();
+            map[endValue] = valIndex;
+            arr[valIndex] = endValue;
+            map.erase(val);
+            arr.pop_back();
+            <span class="kw">return</span> <span class="kw">true</span>;
+        }
+
+        <span class="kw">int</span> <span class="fn">getRandom</span>() {
+            <span class="kw">return</span> arr[rand() % (<span class="kw">int</span>)arr.size()];
+        }
+    };</pre>
+
+      <p>还有个边界：要删的恰好是末尾元素时，交换逻辑照走，map[endValue] = valIndex 把末尾值自己的下标改成它自己，再 pop，结果一样对。</p>
+
+      <h2 id="randcoll">三、允许重复的随机集合</h2>
+      <p>题目 4（LeetCode 381）：上一题放款条件，集合允许重复数字。insert 返回「这个值是不是第一次出现」。其余要求不变，全 O(1)。</p>
+      <p>难点是同一个值有好几个下标，删一个不能把别的也带走。哈希表里存的从「一个下标」升级成「一个下标集合」：<code>map: 值 → set&lt;下标&gt;</code>。</p>
+      <ul>
+        <li><code>insert(val)</code>：值追加到数组尾，下标塞进该值的集合。返回 <code>set.size() == 1</code>，为 true 说明这是第一次出现</li>
+        <li><code>remove(val)</code>：从该值的下标集合里任取一个（代码取最小下标，行为确定），末尾值搬过来，两边的下标集合各改一下；末尾值和要删的值相同时，直接从集合里删下标，不用搬</li>
+        <li><code>getRandom()</code>：照旧 <code>arr[rand() % size]</code></li>
+      </ul>
+      <p>和上一题唯一的差别在 remove 要维护两个集合的增删，搬移动作一模一样：末尾值换到被删位置，集合里删掉旧下标、加进新下标。</p>
+
+      <figure class="fig" id="figColl"></figure>
+      <figcaption>map 里每个值挂一个下标集合。删 3 时取最小下标 0，末尾 7 搬过来，两个集合各改一处</figcaption>
+
+    <pre class="code"><span class="cm">// 允许重复的 O(1) 随机集合：map 记值-&gt;下标集合，删除时只动一个下标（取最小下标，行为确定）</span>
+    <span class="kw">class</span> RandomizedCollection {
+    <span class="kw">public</span>:
+        unordered_map&lt;<span class="kw">int</span>, unordered_set&lt;<span class="kw">int</span>&gt;&gt; map;   <span class="cm">// val -&gt; set of index</span>
+        vector&lt;<span class="kw">int</span>&gt; arr;
+
+        <span class="kw">bool</span> <span class="fn">insert</span>(<span class="kw">int</span> val) {
+            arr.push_back(val);
+            unordered_set&lt;<span class="kw">int</span>&gt; &amp;set = map[val];
+            set.insert((<span class="kw">int</span>)arr.size() - 1);
+            <span class="kw">return</span> set.size() == 1;
+        }
+
+        <span class="kw">bool</span> <span class="fn">remove</span>(<span class="kw">int</span> val) {
+            <span class="kw">if</span> (!map.count(val)) {
+                <span class="kw">return</span> <span class="kw">false</span>;
+            }
+            unordered_set&lt;<span class="kw">int</span>&gt; &amp;valSet = map[val];
+            <span class="kw">int</span> valAnyIndex = *min_element(valSet.begin(), valSet.end());
+            <span class="kw">int</span> endValue = arr.back();
+            <span class="kw">if</span> (val == endValue) {
+                valSet.erase((<span class="kw">int</span>)arr.size() - 1);
+            } <span class="kw">else</span> {
+                unordered_set&lt;<span class="kw">int</span>&gt; &amp;endValueSet = map[endValue];
+                endValueSet.insert(valAnyIndex);
+                arr[valAnyIndex] = endValue;
+                endValueSet.erase((<span class="kw">int</span>)arr.size() - 1);
+                valSet.erase(valAnyIndex);
+            }
+            arr.pop_back();
+            <span class="kw">if</span> (valSet.empty()) {
+                map.erase(val);
+            }
+            <span class="kw">return</span> <span class="kw">true</span>;
+        }
+
+        <span class="kw">int</span> <span class="fn">getRandom</span>() {
+            <span class="kw">return</span> arr[rand() % (<span class="kw">int</span>)arr.size()];
+        }
+    };</pre>
+
+      <h2 id="complexity">四、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>操作</th><th>setAll 哈希表</th><th>O(1) 随机集合</th><th>允许重复版</th></tr>
+        <tr><td>插入</td><td>O(1)</td><td>O(1)</td><td>O(1)</td></tr>
+        <tr><td>删除</td><td>O(1)</td><td>O(1)，交换末尾</td><td>O(1)，交换末尾</td></tr>
+        <tr><td>随机取</td><td>—</td><td>O(1)，数组下标</td><td>O(1)，数组下标</td></tr>
+        <tr><td>批量赋值</td><td>O(1)，懒标记</td><td>—</td><td>—</td></tr>
+        <tr><td>查询</td><td>O(1)</td><td>—</td><td>—</td></tr>
+        <tr><td>空间</td><td>O(n)</td><td>O(n)</td><td>O(n)</td></tr>
+      </table>
+      <p>三题的空间都是 O(n)：哈希表一份、数组一份。允许重复版的下标集合加起来也正好是数组长度，没有多余。</p>
+
+      <h2 id="summary">五、总结</h2>
+      <p>把三题摆在一起看，套路就一条：<b>哈希表定位置，数组保随机，删除靠交换，批量靠懒标记</b>。</p>
+      <p>setAll 的关键是别真改，值带时间戳，setAll 只动全局两个变量；随机集合的关键是删除别搬中间，末尾元素换过来。允许重复时，哈希表存下标集合，删一个只动一个下标。</p>
+      <p>下一讲把数组换成能排次序的结构：LRU 用双链表排「最近使用」，中位数用双堆放两半，频率栈用分层栈，全 O(1) 结构用桶链表。哈希表依然负责定位，只是另一半换了零件。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>全O(1)的数据结构</td><td><a href="https://leetcode.cn/problems/all-oone-data-structure/" target="_blank">leetcode.cn/problems/all-oone-data-structure</a></td></tr>
+        <tr><td>LeetCode</td><td>快速获得数据流的中位数的结构</td><td><a href="https://leetcode.cn/problems/find-median-from-data-stream/" target="_blank">leetcode.cn/problems/find-median-from-data-stream</a></td></tr>
+        <tr><td>LeetCode</td><td>最大频率栈</td><td><a href="https://leetcode.cn/problems/maximum-frequency-stack/" target="_blank">leetcode.cn/problems/maximum-frequency-stack</a></td></tr>
+        <tr><td>LeetCode</td><td>插入、删除和获取随机元素O(1)时间的结构</td><td><a href="https://leetcode.cn/problems/insert-delete-getrandom-o1/" target="_blank">leetcode.cn/problems/insert-delete-getrandom-o1</a></td></tr>
+        <tr><td>牛客</td><td>setAll功能的哈希表</td><td><a href="https://www.nowcoder.com/practice/7c4559f138e74ceb9ba57d76fd169967" target="_blank">www.nowcoder.com/practice/7c4559f138e74ceb9ba57d76fd169967</a></td></tr>
+        <tr><td>LeetCode</td><td>实现LRU结构</td><td><a href="https://leetcode.cn/problems/lru-cache/" target="_blank">leetcode.cn/problems/lru-cache</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解035【必备】数据结构设计高频题</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  // ===== Figure 1: setAll 懒标记 vs 全量改 =====
+  var fig1 = document.getElementById('figSetAll');
+  var NS = 'http://www.w3.org/2000/svg';
+  function svg(w,h){var s=document.createElementNS(NS,'svg');s.setAttribute('viewBox','0 0 '+w+' '+h);s.setAttribute('width','100%');return s;}
+  function g(){return document.createElementNS(NS,'g');}
+  function rect(x,y,w,h,rx,fill,stroke){var r=document.createElementNS(NS,'rect');r.setAttribute('x',x);r.setAttribute('y',y);r.setAttribute('width',w);r.setAttribute('height',h);r.setAttribute('rx',rx||4);if(fill)r.setAttribute('fill',fill);if(stroke)r.setAttribute('stroke',stroke);r.setAttribute('stroke-width',1);return r;}
+  function text(x,y,s,size,fill,anchor){var t=document.createElementNS(NS,'text');t.setAttribute('x',x);t.setAttribute('y',y);t.setAttribute('font-size',size||13);if(fill)t.setAttribute('fill',fill);if(anchor)t.setAttribute('text-anchor',anchor);t.textContent=s;return t;}
+
+  var s1 = svg(660, 320);
+  s1.appendChild(text(60, 26, '朴素：setAll(9) 真的把每个键改掉', 14, '#111827'));
+  // 朴素表：三个键都改
+  var na = g(); na.setAttribute('transform','translate(30,40)');
+  na.appendChild(rect(0,0,180,150,6,'#f6f7f9','#e6e8eb'));
+  na.appendChild(text(90,22,'朴素哈希表',12,'#6b7280','middle'));
+  [['A','5'],['B','3'],['C','1']].forEach(function(r,i){
+    na.appendChild(text(14, 48+i*38, r[0], 13, '#2563eb'));
+    var v = na.appendChild(rect(40, 32+i*38, 54, 22, 4, '#ffffff', '#e6e8eb'));
+    v.setAttribute('data-k', r[0]);
+    na.appendChild(text(67, 47+i*38, r[1], 13, '#111827', 'middle'));
+    na.appendChild(rect(104, 32+i*38, 54, 22, 4, '#ffffff', '#e6e8eb'));
+    na.appendChild(text(131, 47+i*38, r[1], 13, '#9aa0a6', 'middle'));
+  });
+  s1.appendChild(na);
+  s1.appendChild(text(330, 80, '→', 20, '#9aa0a6', 'middle'));
+  var na2 = g(); na2.setAttribute('transform','translate(360,40)');
+  na2.appendChild(rect(0,0,180,150,6,'#f6f7f9','#e6e8eb'));
+  na2.appendChild(text(90,22,'setAll(9) 之后',12,'#6b7280','middle'));
+  [['A','9'],['B','9'],['C','9']].forEach(function(r,i){
+    na2.appendChild(text(14, 48+i*38, r[0], 13, '#2563eb'));
+    var v = na2.appendChild(rect(40, 32+i*38, 54, 22, 4, '#dbeafe', '#2563eb'));
+    v.setAttribute('data-k', r[0]);
+    na2.appendChild(text(67, 47+i*38, r[1], 13, '#2563eb', 'middle'));
+    na2.appendChild(rect(104, 32+i*38, 54, 22, 4, '#dbeafe', '#2563eb'));
+    na2.appendChild(text(131, 47+i*38, r[1], 13, '#2563eb', 'middle'));
+  });
+  s1.appendChild(na2);
+  // 懒标记
+  s1.appendChild(text(60, 226, '懒标记：setAll(9) 只动两个变量，键不碰', 14, '#111827'));
+  var lb = g(); lb.setAttribute('transform','translate(30,240)');
+  lb.appendChild(rect(0,0,180,40,6,'#f6f7f9','#e6e8eb'));
+  lb.appendChild(text(90,25,'setAllValue = 9',12,'#ea580c','middle'));
+  lb.appendChild(rect(210,0,180,40,6,'#f6f7f9','#e6e8eb'));
+  lb.appendChild(text(300,25,'setAllTime = t+1',12,'#ea580c','middle'));
+  s1.appendChild(lb);
+  var lb2 = g(); lb2.setAttribute('transform','translate(410,240)');
+  lb2.appendChild(rect(0,0,180,40,6,'#f6f7f9','#e6e8eb'));
+  lb2.appendChild(text(90,25,'键的值全部不动',12,'#6b7280','middle'));
+  s1.appendChild(lb2);
+  s1.appendChild(text(500, 305, 'get 时比 time 大小决定返回谁', 12, '#6b7280', 'middle'));
+  fig1.appendChild(s1);
+
+  // ===== Figure 2: 交换删除 =====
+  var fig2 = document.getElementById('figSwap');
+  var s2 = svg(660, 210);
+  s2.appendChild(text(60, 26, 'remove(4)：末尾元素搬到被删位置，再弹尾', 14, '#111827'));
+  // 删除前
+  var g2a = g(); g2a.setAttribute('transform','translate(30,40)');
+  g2a.appendChild(text(0, 12, '删除前', 12, '#6b7280'));
+  [['0','2'],['1','4'],['2','9']].forEach(function(c,i){
+    g2a.appendChild(rect(i*62, 22, 54, 34, 4, i===1?'#fee2e2':'#ffffff', i===1?'#dc2626':'#e6e8eb'));
+    g2a.appendChild(text(i*62+27, 43, c[1], 14, i===1?'#dc2626':'#111827', 'middle'));
+    g2a.appendChild(text(i*62+27, 70, c[0], 11, '#9aa0a6', 'middle'));
+  });
+  g2a.appendChild(text(190, 50, 'map: 4→1, 9→2', 12, '#6b7280'));
+  s2.appendChild(g2a);
+  s2.appendChild(text(330, 90, '→', 20, '#9aa0a6', 'middle'));
+  // 搬移后
+  var g2b = g(); g2b.setAttribute('transform','translate(360,40)');
+  g2b.appendChild(text(0, 12, '搬 9 到下标 1', 12, '#6b7280'));
+  [['0','2'],['1','9'],['2','9']].forEach(function(c,i){
+    g2b.appendChild(rect(i*62, 22, 54, 34, 4, i===1?'#ffedd5':'#ffffff', i===1?'#ea580c':'#e6e8eb'));
+    g2b.appendChild(text(i*62+27, 43, c[1], 14, i===1?'#ea580c':'#111827', 'middle'));
+    g2b.appendChild(text(i*62+27, 70, c[0], 11, '#9aa0a6', 'middle'));
+  });
+  g2b.appendChild(text(190, 50, 'map: 9→1', 12, '#ea580c'));
+  g2b.appendChild(text(190, 68, '4 已从 map 删除', 12, '#9aa0a6'));
+  s2.appendChild(g2b);
+  s2.appendChild(text(330, 150, '→', 20, '#9aa0a6', 'middle'));
+  // 弹尾后
+  var g2c = g(); g2c.setAttribute('transform','translate(30,120)');
+  g2c.appendChild(text(0, 12, '弹尾：arr = [2, 9]', 12, '#6b7280'));
+  [['0','2'],['1','9']].forEach(function(c,i){
+    g2c.appendChild(rect(i*62, 22, 54, 34, 4, '#ffffff', '#e6e8eb'));
+    g2c.appendChild(text(i*62+27, 43, c[1], 14, '#111827', 'middle'));
+    g2c.appendChild(text(i*62+27, 70, c[0], 11, '#9aa0a6', 'middle'));
+  });
+  s2.appendChild(g2c);
+  s2.appendChild(text(330, 168, '等概率 getRandom', 12, '#6b7280', 'middle'));
+  fig2.appendChild(s2);
+
+  // ===== Figure 3: 下标集合 =====
+  var fig3 = document.getElementById('figColl');
+  var s3 = svg(660, 280);
+  s3.appendChild(text(60, 26, '允许重复：map 记「值 → 下标集合」', 14, '#111827'));
+  var g3 = g(); g3.setAttribute('transform','translate(30,40)');
+  // arr
+  g3.appendChild(text(0, 12, 'arr', 12, '#6b7280'));
+  [['0','3'],['1','3'],['2','7']].forEach(function(c,i){
+    g3.appendChild(rect(i*62, 22, 54, 34, 4, '#ffffff', '#e6e8eb'));
+    g3.appendChild(text(i*62+27, 43, c[1], 14, '#111827', 'middle'));
+    g3.appendChild(text(i*62+27, 70, c[0], 11, '#9aa0a6', 'middle'));
+  });
+  // map
+  g3.appendChild(text(0, 120, 'map', 12, '#6b7280'));
+  g3.appendChild(rect(0, 132, 200, 40, 4, '#dbeafe', '#2563eb'));
+  g3.appendChild(text(30, 157, '3 → { 0, 1 }', 13, '#2563eb'));
+  g3.appendChild(rect(0, 180, 200, 40, 4, '#dbeafe', '#2563eb'));
+  g3.appendChild(text(30, 205, '7 → { 2 }', 13, '#2563eb'));
+  // 箭头
+  [[30,155, 14,45],[30,155, 76,45],[30,200, 138,45]].forEach(function(a){
+    var l=document.createElementNS(NS,'line');l.setAttribute('x1',a[0]);l.setAttribute('y1',a[1]);l.setAttribute('x2',a[2]);l.setAttribute('y2',a[3]);l.setAttribute('stroke','#c9ced4');l.setAttribute('stroke-width',1);
+    g3.appendChild(l);
+  });
+  g3.appendChild(text(230, 160, '同一值挂多个下标，删一个只动一个', 12, '#6b7280'));
+  s3.appendChild(g3);
+  fig3.appendChild(s3);
+
+  // ===== 演示 1: setAll 操作台 =====
+  var wrap1 = document.getElementById('vizSetAll');
+  wrap1.innerHTML =
+    '<div class="viz-title">setAll 操作台：逐步执行，看每个键的 (值, 时间戳) 和全局懒标记怎么配合</div>' +
+    '<div class="viz-body"></div>' +
+    '<div class="viz-controls"></div>';
+  var body1 = wrap1.querySelector('.viz-body');
+  var ctl1 = wrap1.querySelector('.viz-controls');
+  var ops1 = [
+    {op:'put', k:'A', v:5},
+    {op:'put', k:'B', v:3},
+    {op:'setAll', v:9},
+    {op:'get', k:'A', ans:9, why:'t=0 < 2，返回 setAllValue'},
+    {op:'put', k:'A', v:7},
+    {op:'get', k:'A', ans:7, why:'t=3 > 2，返回自己的值'},
+    {op:'get', k:'B', ans:9, why:'t=1 < 2，返回 setAllValue'},
+    {op:'put', k:'C', v:1},
+    {op:'get', k:'C', ans:1, why:'t=4 > 2，返回自己的值'},
+    {op:'setAll', v:0},
+    {op:'get', k:'A', ans:0, why:'t=3 < 5，返回 setAllValue'},
+    {op:'get', k:'C', ans:0, why:'t=4 < 5，返回 setAllValue'}
+  ];
+  var st1 = {map:{}, setAllValue:0, setAllTime:-1, cnt:0};
+  var step1 = 0;
+  function render1(){
+    var keys = ['A','B','C'];
+    var html = '<div class="ha-map">';
+    keys.forEach(function(k){
+      var e = st1.map[k];
+      html += '<div class="ha-row"><span class="ha-key">'+k+'</span>';
+      if (!e) {
+        html += '<span class="ha-cell gone">不在表里</span>';
+      } else {
+        var hot = step1 < ops1.length && ops1[step1].op==='get' && ops1[step1].k===k;
+        html += '<span class="ha-tuple">' +
+          '<span class="ha-cell'+(hot&&e.t>st1.setAllTime?' hot':'')+'">'+e.v+'</span>' +
+          '<span class="ha-cell time">t='+e.t+'</span></span>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<div class="ha-global">setAllValue = <b>'+st1.setAllValue+'</b>  setAllTime = <b>'+st1.setAllTime+'</b>  cnt = <b>'+st1.cnt+'</b></div>';
+    var note = '';
+    if (step1 > 0) {
+      var o = ops1[step1-1];
+      if (o.op==='get') note = 'get('+o.k+') → <b>'+o.ans+'</b>（'+o.why+'）';
+      else if (o.op==='put') note = 'put('+o.k+', '+o.v+') → 存 (值 '+o.v+', 时间戳 '+(st1.map[o.k].t)+')';
+      else note = 'setAll('+o.v+') → 只改 setAllValue 和 setAllTime';
+    } else {
+      note = '初始状态：setAllTime = -1，所有 get 都返回自己的值';
+    }
+    html += '<div class="ha-note">'+note+'</div>';
+    body1.innerHTML = html;
+    var b = document.createElement('button');
+    b.className = 'ha-btn';
+    b.textContent = step1 < ops1.length ? '下一步 ('+(step1+1)+' / '+ops1.length+')' : '重置';
+    ctl1.innerHTML = '';
+    ctl1.appendChild(b);
+    b.onclick = function(){
+      if (step1 >= ops1.length) { step1 = 0; st1 = {map:{}, setAllValue:0, setAllTime:-1, cnt:0}; }
+      else {
+        var o = ops1[step1];
+        if (o.op==='put') st1.map[o.k] = {v:o.v, t:st1.cnt++};
+        else if (o.op==='setAll') { st1.setAllValue = o.v; st1.setAllTime = st1.cnt++; }
+        step1++;
+      }
+      render1();
+    };
+  }
+  render1();
+
+  // ===== 演示 2: 随机集合操作台 =====
+  var wrap2 = document.getElementById('vizRand');
+  wrap2.innerHTML =
+    '<div class="viz-title">随机集合操作台：insert / remove / getRandom 全 O(1)，看交换删除怎么不搬中间</div>' +
+    '<div class="viz-controls"></div>' +
+    '<div class="viz-body"></div>';
+  var ctl2 = wrap2.querySelector('.viz-controls');
+  var body2 = wrap2.querySelector('.viz-body');
+  var sel2 = document.createElement('select');
+  sel2.className = 'ha-sel';
+  sel2.innerHTML = '<option value="rs">RandomizedSet（不重复）</option><option value="rc">RandomizedCollection（可重复）</option>';
+  var bt2 = document.createElement('button'); bt2.className='ha-btn'; bt2.textContent='下一步';
+  var btReset2 = document.createElement('button'); btReset2.className='ha-btn'; btReset2.textContent='重置';
+  ctl2.appendChild(sel2); ctl2.appendChild(bt2); ctl2.appendChild(btReset2);
+  var opsRS = [
+    {op:'insert', v:2, ret:true},
+    {op:'insert', v:4, ret:true},
+    {op:'insert', v:9, ret:true},
+    {op:'remove', v:4, ret:true},
+    {op:'insert', v:6, ret:true},
+    {op:'remove', v:2, ret:true},
+    {op:'getRandom', note:'固定种子，等概率'}
+  ];
+  var opsRC = [
+    {op:'insert', v:3, ret:true, note:'第一次出现，返回 true'},
+    {op:'insert', v:3, ret:false, note:'已有一个 3，返回 false'},
+    {op:'insert', v:7, ret:true},
+    {op:'remove', v:3, ret:true, note:'取最小下标 0，末尾 7 搬过来'},
+    {op:'remove', v:3, ret:true, note:'val == endValue，直接删集合里的下标'},
+    {op:'getRandom', note:'arr 里只剩 7'}
+  ];
+  var mode2 = 'rs', step2 = 0;
+  var st2 = {arr:[], map:{}};
+  function render2(){
+    var ops = mode2==='rs' ? opsRS : opsRC;
+    var html = '<div style="font-size:13px;color:var(--text-dim);margin-bottom:6px;">arr（数组按位置存值）</div>';
+    html += '<div class="ha-arr">';
+    st2.arr.forEach(function(v,i){
+      html += '<div class="ha-cell" style="width:52px;">'+v+'</div>';
+    });
+    html += '</div><div style="height:6px;"></div>';
+    if (mode2==='rs') {
+      html += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:6px;">map（值 → 下标）</div><div class="ha-map">';
+      Object.keys(st2.map).forEach(function(k){
+        html += '<div class="ha-row"><span class="ha-key">'+k+'</span><span class="ha-cell">→ '+st2.map[k]+'</span></div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:6px;">map（值 → 下标集合）</div><div class="ha-map">';
+      Object.keys(st2.map).forEach(function(k){
+        var set = st2.map[k];
+        html += '<div class="ha-row"><span class="ha-key">'+k+'</span><span class="ha-cell">{ '+set.join(', ')+' }</span></div>';
+      });
+      html += '</div>';
+    }
+    var note = '';
+    if (step2 > 0) {
+      var o = ops[step2-1];
+      if (o.op==='insert') note = 'insert('+o.v+') → <b>'+o.ret+'</b>'+(o.note?'（'+o.note+'）':'');
+      else if (o.op==='remove') note = 'remove('+o.v+') → <b>'+o.ret+'</b>'+(o.note?'（'+o.note+'）':'');
+      else note = 'getRandom() → <b>'+st2.lastRand+'</b>（'+o.note+'）';
+    } else note = '初始状态';
+    html += '<div class="ha-note">'+note+'</div>';
+    body2.innerHTML = html;
+    bt2.disabled = step2 >= ops.length;
+    bt2.textContent = step2 < ops.length ? '下一步 ('+(step2+1)+' / '+ops.length+')' : '已到最后一步';
+  }
+  function apply2(){
+    var ops = mode2==='rs' ? opsRS : opsRC;
+    var o = ops[step2];
+    if (o.op==='insert') {
+      if (mode2==='rs') {
+        if (!(o.v in st2.map)) { st2.map[o.v] = st2.arr.length; st2.arr.push(o.v); }
+      } else {
+        if (!(o.v in st2.map)) st2.map[o.v] = [];
+        st2.map[o.v].push(st2.arr.length);
+        st2.arr.push(o.v);
+      }
+    } else if (o.op==='remove') {
+      if (mode2==='rs') {
+        var idx = st2.map[o.v];
+        var endV = st2.arr[st2.arr.length-1];
+        st2.map[endV] = idx;
+        st2.arr[idx] = endV;
+        delete st2.map[o.v];
+        st2.arr.pop();
+      } else {
+        var set = st2.map[o.v];
+        var any = Math.min.apply(null, set);
+        var endV2 = st2.arr[st2.arr.length-1];
+        if (o.v === endV2) {
+          set.splice(set.indexOf(st2.arr.length-1), 1);
+        } else {
+          var eset = st2.map[endV2];
+          eset.push(any);
+          st2.arr[any] = endV2;
+          eset.splice(eset.indexOf(st2.arr.length-1), 1);
+          set.splice(set.indexOf(any), 1);
+        }
+        st2.arr.pop();
+        if (set.length===0) delete st2.map[o.v];
+      }
+    } else if (o.op==='getRandom') {
+      st2.lastRand = st2.arr[step2 % st2.arr.length];
+    }
+    step2++;
+  }
+  bt2.onclick = function(){ if(step2 < (mode2==='rs'?opsRS:opsRC).length) apply2(); render2(); };
+  btReset2.onclick = function(){ step2 = 0; st2 = {arr:[], map:{}}; render2(); };
+  sel2.onchange = function(){
+    mode2 = sel2.value; step2 = 0; st2 = {arr:[], map:{}}; render2();
+  };
+  render2();
+
+})();
+</script>
+</body>
+</html>
