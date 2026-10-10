@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数位 dp：区间与数位和</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.digits { display: flex; gap: 6px; margin: 4px 0 10px; }
+.dcell { width: 40px; height: 40px; border: 1px solid var(--border); border-radius: 6px; display: flex;
+         align-items: center; justify-content: center; font-family: ui-monospace, Menlo, Consolas, monospace;
+         font-size: 17px; background: #fff; color: var(--text); }
+.dcell.on { border-color: #2563eb; background: #dbeafe; font-weight: 700; }
+.dcell.dim { color: var(--text-dim); background: var(--bg); }
+.tagline { font-size: 13px; color: var(--text-dim); margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>数位 dp：区间与数位和</h1>
+      <p class="intro">「统计整数数目」里有两类约束同时出现：下界和上界框出一个区间，数位和又要落在某个范围内。区间那部分靠两次「不超过某个上界」的计数相减解决，数位和则变成状态里的第三个量。麻烦的地方在后面：这个状态必须成体系地挂缓存，否则 22 位数会展开成 10²² 条路径。</p>
+
+      <h2>零、两个约束互相独立</h2>
+      <p>题目给两个数字串 <code>num1</code>、<code>num2</code>（长度可以到 22）和两个整数 <code>min_sum</code>、<code>max_sum</code>，问有多少个 x 满足 <code>num1 ≤ x ≤ num2</code> 且数位和落在 <code>[min_sum, max_sum]</code>。</p>
+      <p>把这两件事分开看。区间是「x 落在哪一段」，跟数位本身无关；数位和是「边走边累加的量」，跟上下界无关。前者用减法，后者进状态。</p>
+
+      <h2>一、区间拆成两个上界</h2>
+      <p>记 <code>F(m)</code> 表示 0 到 m 之间、数位和落在区间内的个数。那么 <code>[num1, num2]</code> 里的答案就是 <code>F(num2) − F(num1 − 1)</code>。</p>
+      <p>但这里 <code>num1</code> 是长度 22 的数字串，做「减一」要处理一长串退位，代码很难看。换成 <code>F(num2) − F(num1) + [num1 自己合法]</code> 一样对：减掉的是「小于 num1」的那部分，把 num1 单独判断一次补回来就行。</p>
+      <figure class="fig" id="figRange"></figure>
+      <p>这里有个细节：两次调用都把同一个缓存表用一遍是不行的。第一趟沿着 <code>num2</code> 建的是「贴着 num2」那一套状态，第二趟的上界换成了 <code>num1</code>，同一个 <code>(i, sum, free)</code> 代表的含义已经不同。所以每次换 <code>num</code> 都要把表清成 −1，代码里就是两次 <code>build()</code>。</p>
+      <pre class="code"><span class="cm">// 数位和落在 [minSum, maxSum] 的整数个数，区间等于「上界以内的」减「下界以内的」</span>
+    <span class="kw">int</span> <span class="fn">count</span>(<span class="kw">string</span> num1, <span class="kw">string</span> num2, <span class="kw">int</span> minSum, <span class="kw">int</span> maxSum) {
+        mn = minSum; mx = maxSum;
+        s = num2; len = num2.size(); build();    <span class="cm">// dp[i][sum][free] 全部清成 -1</span>
+        <span class="kw">int</span> ans = f(0, 0, 0);
+        s = num1; len = num1.size(); build();    <span class="cm">// 换成下界，缓存要重来</span>
+        ans = (ans - f(0, 0, 0) + MOD) % MOD;
+        <span class="kw">if</span> (check(num1)) ans = (ans + 1) % MOD;  <span class="cm">// 减掉的是「小于 num1」，num1 自己得补回来</span>
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>补 <code>num1</code> 自己那一句很容易漏。实测随机 2 万组里，漏掉它有 44.05% 会与正确解不一致，而且只在「num1 自己合法」时才对不上，所以样例里未必撞得到。</p>
+
+      <h2>二、状态里多一个 sum</h2>
+      <p>自由标记 free 还是老样子两态，多出来的量是「已经决定的那些位的数位和」。递归写成 <code>f(i, sum, free)</code>：从最高位走到第 i 位，前面决定的位和是 sum。</p>
+      <figure class="fig" id="figState"></figure>
+      <p>转移和上一题一样分两支。贴着上界时，这一位能填 0 到 <code>cur</code>：填小于 <code>cur</code> 的走 free = 1，填等于 <code>cur</code> 的继续贴着。已经自由时，0 到 9 随便填，而且每个选择都把 sum 加进下一层。</p>
+      <pre class="code"><span class="cm">// 从最高位走到第 i 位，已决定的数位和是 sum；free == 1 表示前缀已经比 s 小</span>
+    <span class="kw">int</span> <span class="fn">f</span>(<span class="kw">int</span> i, <span class="kw">int</span> sum, <span class="kw">int</span> free) {
+        <span class="kw">if</span> (sum &gt; mx) <span class="kw">return</span> 0;                     <span class="cm">// 上界剪枝：再加只会更大</span>
+        <span class="kw">if</span> (sum + (len - i) * 9 &lt; mn) <span class="kw">return</span> 0;     <span class="cm">// 下界剪枝：剩下全填 9 也够不到</span>
+        <span class="kw">if</span> (i == len) <span class="kw">return</span> 1;
+        <span class="kw">if</span> (dp[i][sum][free] != -1) <span class="kw">return</span> dp[i][sum][free];
+        <span class="kw">int</span> cur = s[i] - '0', ans = 0;
+        <span class="kw">if</span> (free == 0) {
+            <span class="kw">for</span> (<span class="kw">int</span> pick = 0; pick &lt; cur; pick++) ans = (ans + f(i + 1, sum + pick, 1)) % MOD;
+            ans = (ans + f(i + 1, sum + cur, 0)) % MOD;
+        } <span class="kw">else</span> {
+            <span class="kw">for</span> (<span class="kw">int</span> pick = 0; pick &lt;= 9; pick++) ans = (ans + f(i + 1, sum + pick, 1)) % MOD;
+        }
+        <span class="kw">return</span> dp[i][sum][free] = ans;
+    }</pre>
+      <p>状态的规模很好数：i 有 len 种，sum 有 <code>max_sum + 1</code> 种，free 两种。<code>len = 22</code>、<code>max_sum = 400</code> 时上界是 <code>22 × 401 × 2 = 17644</code> 个。实际能走到的更少，实测只有 2102 个，因为很多 sum 根本到不了。</p>
+
+      <h2>三、两条剪枝，下界那条不能省</h2>
+      <p>函数开头有两行提前返回。第一行是 <code>sum &gt; max</code>：数位和只会变大，超了上界整支可以扔掉。第二行是 <code>sum + (len − i) × 9 &lt; min</code>：剩下的位全部填 9 都够不到下界，也可以扔掉。</p>
+      <figure class="fig" id="figPrune"></figure>
+      <p>第二条容易被当成「优化」顺手删掉，后果却比想象的大。原因是终点的返回写的是 <code>if (i == len) return 1</code>，它没有检查 sum 是否达到 <code>min</code>。下界完全靠这条剪枝在中间挡：能走到终点的路径，一定满足了 <code>sum + 0 ≥ min</code>。删掉以后所有「够不到下界」的状态都会被算成合法，实测 89.98% 的随机样本答案偏大。</p>
+      <p>第一行剪枝则是兜住上界的，因为终点也不检查 sum 是否超过 max。</p>
+      <table class="complexity">
+        <tr><th>写法</th><th>与正确解不一致的比例</th><th>为什么会错</th></tr>
+        <tr><td>漏掉 <code>sum + 剩余位×9 &lt; min</code> 那条剪枝</td><td>89.98%</td><td>终点不检查下界，剪枝一撤，够不到 min 的状态全被算进来</td></tr>
+        <tr><td>贴着上界时，等于 <code>cur</code> 也走自由分支</td><td>97.42%</td><td>后面每一位都当成随便填，答案整片偏大</td></tr>
+        <tr><td>状态只记 <code>(i, sum)</code>，漏掉 free</td><td>92.98%</td><td>同一层里「贴着」和「已自由」的计数被混成一个</td></tr>
+        <tr><td>区间少补 <code>num1</code> 自己</td><td>44.05%</td><td>算成了 (num1, num2]</td></tr>
+      </table>
+
+      <h2>四、演示：一次上界以内的计数</h2>
+      <p>下面走的是 <code>F(num2)</code> 这一棵树。每帧显示当前节点 <code>(i, sum, free)</code>，两种剪枝的节点标橙，命中缓存的节点直接取回旧值不再往下展开。走完看总答案。</p>
+      <div class="viz" id="vizRange">
+        <p class="viz-title">数位和落在区间内的计数</p>
+        <div id="rgBody"></div>
+        <p class="viz-note" id="rgNote"></p>
+        <p class="viz-answer" id="rgAns"></p>
+        <div class="viz-controls">
+          <button id="rgNext">下一步</button>
+          <button id="rgAuto">自动播放</button>
+          <button id="rgReset">重置</button>
+          <label>数据 <select id="rgData">
+            <option value="0">num2 = 12，数位和 [1, 8]（答案 11）</option>
+            <option value="1">num2 = 22，数位和 [1, 8]（答案 19）</option>
+            <option value="2">num2 = 100，数位和 [1, 9]（答案 55）</option>
+            <option value="3">num2 = 999，数位和 [1, 20]（答案 915）</option>
+          </select></label>
+        </div>
+      </div>
+      <p>把「缓存」关掉再看不挂缓存是什么形状：<code>num2 = 999</code> 这棵树的节点数还只是千级，位数加到 22 就是 10²² 级了。</p>
+
+      <h2>五、挂不挂缓存</h2>
+      <p>同一个递归，一份带 memo，一份不带，跑 <code>num2</code> 为 len 个 9、<code>max_sum = 40</code>，实测：</p>
+      <figure class="fig" id="figPerf"></figure>
+      <p>不挂缓存的调用次数是 11111、111111、1109851……基本就是 10 的次幂，每多一位乘 10；挂上之后实填的状态数只从 58 爬到 259，每多一位多 41 个（正好等于 <code>max_sum + 1</code>）。</p>
+      <p>把规模推到题目上限：<code>num2</code> 取 22 个 9、<code>max_sum = 400</code>，实填 2102 个状态，0.048 ms 跑完。同一个输入不挂缓存要展开 10²² 条路径，这两者之间没有折中，必须挂。</p>
+
+      <h2>六、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>写法</th><th>时间</th><th>空间</th><th>说明</th></tr>
+        <tr><td>不挂缓存</td><td>O(10^len)</td><td>O(len)</td><td>每一层十个分支全展开，len = 22 时不可用</td></tr>
+        <tr><td>挂缓存</td><td>O(len · max_sum · 10)</td><td>O(len · max_sum)</td><td>状态数是 len × (max_sum+1) × 2，每个状态摊十次转移</td></tr>
+        <tr><td>两次调用</td><td>同上，常数乘 2</td><td>同上</td><td>上界换人时缓存要重建</td></tr>
+      </table>
+      <p>注意这里的复杂度里没有 <code>num2</code> 的大小，只有它的位数。这是数位 dp 和一般 dp 最大的区别：状态数由「位数」和「过程量」决定，跟数值本身无关。</p>
+
+      <h2>七、总结</h2>
+      <p>区间的处理是两次上界以内的计数相减。下界做「减一」太麻烦，就减 <code>F(num1)</code> 再把 <code>num1</code> 单独判一次补回来，这一步漏了只会在 num1 自己合法时出错。</p>
+      <p>过程量（这里数位和）直接加进状态，代价是状态数乘上它的取值范围。位数乘过程量再乘 free 的两态，就是仓库的总容量。</p>
+      <p>剪枝和终点条件要配套读。<code>sum &gt; max</code> 和 <code>sum + 剩余位×9 &lt; min</code> 这两行是把上下界挡在中间的，终点那句 <code>return 1</code> 什么都没检查。它们属于正确性的一部分，不能当成可以省掉的优化。</p>
+      <p>最后是缓存。位数一多，「展开所有可能」和「填一张状态表」的差距是数量级级别的，这题里差 10²² 倍。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>统计整数数目</td><td><a href="https://leetcode.cn/problems/count-of-integers/" target="_blank">2719. Count of Integers</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解084【必备】数位dp-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function box(x, y, w, h, fill, stroke, rx) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx == null ? 8 : rx) +
+           '" fill="' + fill + '" stroke="' + stroke + '"/>';
+  }
+  function tx(x, y, s, size, fill, anchor, weight) {
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (size || 13) + '" fill="' + fill +
+           '" text-anchor="' + (anchor || 'start') + '"' + (weight ? ' font-weight="' + weight + '"' : '') +
+           '>' + esc(s) + '</text>';
+  }
+  function ln(x1, y1, x2, y2, stroke, dash) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke +
+           '" stroke-width="1.4"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
+  }
+  function svg(h, inner) {
+    return '<svg viewBox="0 0 680 ' + h + '" xmlns="http://www.w3.org/2000/svg">' + inner + '</svg>';
+  }
+
+  // ---------- 图 1：区间相减 ----------
+  (function () {
+    var g = '', y = 96;
+    g += tx(20, 26, '把 [num1, num2] 拆成两段计数相减', 13, C.dim);
+    g += ln(40, y, 640, y, C.gray);
+    var marks = [[40, '0'], [230, 'num1'], [600, 'num2']];
+    for (var i = 0; i < marks.length; i++) {
+      var x = marks[i][0];
+      g += ln(x, y - 8, x, y + 8, C.gray);
+      g += tx(x, y + 26, marks[i][1], 12.5, C.text, 'middle');
+    }
+    g += box(40, 44, 560, 26, C.blueBg, C.blue, 6);
+    g += tx(320, 62, 'F(num2)：0 到 num2 的计数', 12.5, C.blue, 'middle', 600);
+    g += box(40, 130, 190, 26, C.orangeBg, C.orange, 6);
+    g += tx(135, 148, 'F(num1)：0 到 num1', 12.5, C.orange, 'middle', 600);
+    g += tx(250, 148, '减掉它', 12.5, C.dim);
+    g += tx(320, 190, '相减之后剩 (num1, num2]，num1 自己被减掉了', 12.5, C.text, 'middle');
+    g += tx(320, 212, '于是补一句：如果 num1 的数位和也合法，答案 +1', 12.5, C.text, 'middle');
+    document.getElementById('figRange').innerHTML =
+      svg(226, g) + '<figcaption>减 F(num1) 而不是 F(num1−1)，代价是多写一句 num1 的判断</figcaption>';
+  })();
+
+  // ---------- 图 2：(sum, free) 的状态表 ----------
+  (function () {
+    var g = '', cols = 10, cw = 50, x0 = 70;
+    g += tx(20, 24, '同一层 i 上的状态由 (sum, free) 决定，这里画 i = 1 这一层', 13, C.dim);
+    var labels = ['free = 0', 'free = 1'];
+    var hit = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    for (var r = 0; r < 2; r++) {
+      var y = 44 + r * 62;
+      g += tx(62, y + 32, labels[r], 12.5, r === 0 ? C.blue : C.orange, 'end');
+      for (var c = 0; c < cols; c++) {
+        var on = (r === 0) ? c <= 1 : hit.indexOf(c) >= 0;
+        var fill = on ? (r === 0 ? C.blueBg : C.orangeBg) : C.bg;
+        var stroke = on ? (r === 0 ? C.blue : C.orange) : C.border;
+        g += box(x0 + c * cw, y, cw - 6, 42, fill, stroke, 6);
+        g += tx(x0 + c * cw + (cw - 6) / 2, y + 27, String(c), 13, on ? (r === 0 ? C.blue : C.orange) : C.gray, 'middle');
+      }
+    }
+    g += tx(x0, 182, 'sum = 已经决定的那些位的和', 12.5, C.dim);
+    g += tx(x0, 202, '贴着上界的那一行只有两个格子被走到，因为 cur 很小', 12.5, C.dim);
+    document.getElementById('figState').innerHTML =
+      svg(218, g) + '<figcaption>sum 的取值范围是 0 到 max_sum，翻一倍是因为 free 有两种</figcaption>';
+  })();
+
+  // ---------- 图 3：数位和轴上的一条合法带 ----------
+  (function () {
+    var g = '', mn = 1, mx = 8, top = 27, x0 = 40, x1 = 640, y = 100;
+    function px(v) { return x0 + (x1 - x0) * v / top; }
+    g += tx(20, 26, '数位和轴上，能活到终点的只有中间那一段（len = 3，最大和 27）', 13, C.dim);
+    g += box(px(0), y - 18, px(mn) - px(0), 36, C.bg, C.border, 4);
+    g += box(px(mn), y - 18, px(mx) - px(mn), 36, C.blueBg, C.blue, 4);
+    g += box(px(mx), y - 18, px(top) - px(mx), 36, C.orangeBg, C.orange, 4);
+    g += ln(x0, y + 40, x1, y + 40, C.gray);
+    var ticks = [0, mn, mx, 12, 18, 24, 27];
+    for (var i = 0; i < ticks.length; i++) {
+      g += ln(px(ticks[i]), y + 36, px(ticks[i]), y + 44, C.gray);
+      g += tx(px(ticks[i]), y + 62, String(ticks[i]), 12, C.text, 'middle');
+    }
+    g += tx(px(0) + 12, y - 30, 'sum + 剩余位×9 < min 剪掉这里', 12, C.orange, 'start');
+    g += tx(px(mx) + 10, y - 30, 'sum > max 剪掉这里', 12, C.orange, 'start');
+    g += tx(px((mn + mx) / 2), y - 30, '合法', 12, C.blue, 'middle', 600);
+    g += tx(20, 200, '两条剪枝一左一右把合法带夹在中间，终点那句 return 1 不再检查 sum', 12.5, C.dim);
+    document.getElementById('figPrune').innerHTML =
+      svg(216, g) + '<figcaption>上界剪枝管右边，下界剪枝管左边，缺一条就会漏</figcaption>';
+  })();
+
+  // ---------- 图 4：缓存前后的代价 ----------
+  (function () {
+    var g = '', data = [[4, 11111, 58], [5, 111111, 95], [6, 1109851, 136],
+                        [7, 10843571, 177], [8, 98755371, 218], [9, 805731571, 259]];
+    var base = 200, per = 18.5;
+    function yy(v) { return base - (Math.log(v) / Math.LN10 + 1) * per; }
+    g += ln(56, 28, 56, base, C.border);
+    for (var k = 0; k <= 9; k++) {
+      if (k % 3 !== 0) continue;
+      g += ln(52, yy(Math.pow(10, k)), 660, yy(Math.pow(10, k)), C.border, '3 3');
+      g += tx(48, yy(Math.pow(10, k)) + 4, '10' + ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'][k], 11, C.gray, 'end');
+    }
+    g += tx(20, 20, '调用次数 / 状态数', 12, C.dim);
+    for (var i = 0; i < data.length; i++) {
+      var x = 90 + i * 94, hb = base - yy(data[i][1]), hd = base - yy(data[i][2]);
+      g += box(x, yy(data[i][1]), 20, hb, C.orangeBg, C.orange, 4);
+      g += box(x + 26, yy(data[i][2]), 20, hd, C.blueBg, C.blue, 4);
+      g += tx(x + 23, base + 18, 'len=' + data[i][0], 11, C.dim, 'middle');
+    }
+    g += tx(600, 50, '橙：不挂缓存', 12, C.orange);
+    g += tx(600, 70, '蓝：挂缓存', 12, C.blue);
+    document.getElementById('figPerf').innerHTML =
+      svg(240, g) + '<figcaption>纵轴对数刻度。不挂缓存每多一位乘 10，挂缓存只多 41 个状态</figcaption>';
+  })();
+
+  // ---------- 演示：一次上界以内的计数 ----------
+  (function () {
+    var DATA = [{ n: '12', mn: 1, mx: 8, ans: 11 }, { n: '22', mn: 1, mx: 8, ans: 19 },
+                { n: '100', mn: 1, mx: 9, ans: 55 }, { n: '999', mn: 1, mx: 20, ans: 915 }];
+    var body = document.getElementById('rgBody'), note = document.getElementById('rgNote'),
+        ansEl = document.getElementById('rgAns'),
+        nxt = document.getElementById('rgNext'), auto = document.getElementById('rgAuto'),
+        rst = document.getElementById('rgReset'), dsel = document.getElementById('rgData');
+    var st = { step: 0, steps: [], n: '', mn: 0, mx: 0, ans: 0, nodes: 0 };
+    var CAP = 240, timer = null;
+
+    function build() {
+      var d = DATA[+dsel.value], len = d.n.length, mn = d.mn, mx = d.mx, memo = {}, steps = [], nodes = 0;
+      function f(i, sum, free) {
+        nodes++;
+        if (sum > mx) { if (steps.length < CAP) steps.push({ k: 'cut1', i: i, sum: sum, free: free }); return 0; }
+        if (sum + (len - i) * 9 < mn) { if (steps.length < CAP) steps.push({ k: 'cut2', i: i, sum: sum, free: free }); return 0; }
+        if (i === len) { if (steps.length < CAP) steps.push({ k: 'leaf', i: i, sum: sum, free: free }); return 1; }
+        var key = i + ',' + sum + ',' + free;
+        if (key in memo) { if (steps.length < CAP) steps.push({ k: 'hit', i: i, sum: sum, free: free, v: memo[key] }); return memo[key]; }
+        var cur = +d.n[i], ans = 0, pick;
+        if (free === 0) {
+          for (pick = 0; pick < cur; pick++) ans += f(i + 1, sum + pick, 1);
+          ans += f(i + 1, sum + cur, 0);
+        } else {
+          for (pick = 0; pick <= 9; pick++) ans += f(i + 1, sum + pick, 1);
+        }
+        memo[key] = ans;
+        if (steps.length < CAP) steps.push({ k: 'memo', i: i, sum: sum, free: free, v: ans, cur: cur });
+        return ans;
+      }
+      var total = f(0, 0, 0);
+      steps.push({ k: 'done', v: total, nodes: nodes });
+      st.steps = steps; st.n = d.n; st.mn = mn; st.mx = mx; st.ans = d.ans; st.nodes = nodes;
+      st.step = 0;
+    }
+
+    function row(i) {
+      var h = '<div class="digits">', k;
+      for (k = 0; k < st.n.length; k++) {
+        h += '<div class="dcell' + (k === i ? ' on' : (i >= 0 && k < i ? ' dim' : '')) + '">' + st.n[k] + '</div>';
+      }
+      return h + '</div>';
+    }
+
+    function draw() {
+      var s = st.steps[Math.min(st.step, st.steps.length - 1)], html = '';
+      html += '<div class="tagline">num2 = ' + st.n + '　数位和范围 [' + st.mn + ', ' + st.mx + ']</div>';
+      if (s.k === 'cut1') {
+        html += row(s.i);
+        html += '<div class="breakdown"><div class="row">节点 (i=' + s.i + ', sum=' + s.sum + ', free=' + s.free + ')</div>' +
+                '<div class="row warn">sum 已经超过上界 ' + st.mx + '，数位和只会变大，整支返回 0</div></div>';
+        note.innerHTML = '上界剪枝：不用再往下走，这一支一个都不合法。';
+      } else if (s.k === 'cut2') {
+        html += row(s.i);
+        var room = (st.n.length - s.i) * 9;
+        html += '<div class="breakdown"><div class="row">节点 (i=' + s.i + ', sum=' + s.sum + ', free=' + s.free + ')</div>' +
+                '<div class="row warn">剩下 ' + (st.n.length - s.i) + ' 位全填 9 也只能加到 ' + (s.sum + room) +
+                '，够不到下界 ' + st.mn + '</div></div>';
+        note.innerHTML = '下界剪枝：能走到这里说明上面已经放进了很多 0，后面再怎么填也补不回来。';
+      } else if (s.k === 'leaf') {
+        html += row(s.i);
+        html += '<div class="breakdown"><div class="row">走到第 ' + s.i + ' 位，sum = ' + s.sum + '</div>' +
+                '<div class="row">两条剪枝都过了，说明 ' + st.mn + ' ≤ sum ≤ ' + st.mx + '，这一条算 1 种</div></div>';
+        note.innerHTML = '终点那句 return 1 没有检查 sum，合法性是前面两条剪枝保证的。';
+      } else if (s.k === 'hit') {
+        html += row(s.i);
+        html += '<div class="breakdown"><div class="row">节点 (i=' + s.i + ', sum=' + s.sum + ', free=' + s.free + ') 之前来过</div>' +
+                '<div class="row">直接从表里取回 ' + s.v + '，不再往下展开</div></div>';
+        note.innerHTML = '同样的 (i, sum, free) 会把后面所有位的填法重复数一遍，取旧值就够了。';
+      } else if (s.k === 'memo') {
+        html += row(s.i);
+        html += '<div class="breakdown"><div class="row">节点 (i=' + s.i + ', sum=' + s.sum + ', free=' + s.free + ')，这一位枚举 ' +
+                (s.free ? '0 到 9' : ('0 到 ' + s.cur)) + '</div>' +
+                '<div class="row">子节点返回后合计 ' + s.v + '，写进表里</div></div>';
+        note.innerHTML = 'free = 1 时十种选择彼此独立，都要往下走；free = 0 时只有等于 cur 的那一支还贴着上界。';
+      } else {
+        html += row(-1);
+        html += '<div class="breakdown"><div class="row">整棵树访问了 ' + s.nodes + ' 个节点' +
+                (s.nodes > st.steps.length ? '（演示只画了前 ' + (st.steps.length - 1) + ' 个）' : '') + '</div>' +
+                '<div class="total">答案：' + s.v + '</div></div>';
+        note.innerHTML = '换成 22 位的上界、max_sum = 400，状态表也只有两千多个格子。';
+        ansEl.textContent = '答案：' + s.v + (s.v === st.ans ? '（与逐个数判断一致）' : '');
+      }
+      body.innerHTML = html;
+      nxt.disabled = (st.step >= st.steps.length - 1);
+      if (nxt.disabled && timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+    }
+
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      build(); draw();
+    }
+    nxt.addEventListener('click', function () { if (st.step < st.steps.length - 1) { st.step++; draw(); } });
+    auto.addEventListener('click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step < st.steps.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 420);
+    });
+    rst.addEventListener('click', reset);
+    dsel.addEventListener('change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

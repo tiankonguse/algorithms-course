@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>优化枚举：只枚有希望的分支</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>优化枚举：只枚有希望的分支</h1>
+      <p class="intro">前面两题的优化来自「转移有规律」。这页两题是另一路：枚举的分支本身可以砍掉一大半：要么大部分分支不可能最优，要么一大堆分支可以成批跳过。</p>
+
+      <h2>零、自由之路：指到哪里算哪里</h2>
+      <p>轮盘是一圈字符，指针停在 12 点位置，要按顺序拼出 key。每转一格花 1，对准了按一下也花 1，问拼完 key 最少花多少。</p>
+      <p>状态是 <code>f(i, j)</code>：指针停在轮盘第 i 个位置，要拼出 <code>key[j...]</code>。转移时如果 <code>ring[i]</code> 正好等于 <code>key[j]</code>，按一下就完事；否则要把指针转到某个等于 <code>key[j]</code> 的位置上去。</p>
+      <p>朴素写法是枚举轮盘上所有等于 <code>key[j]</code> 的位置，逐个算距离取最小。但轮盘是圆的，从 i 出发要够到某个字符，只有两条路值得走：顺时针碰到的第一个、逆时针碰到的第一个。更远的那个同字符位置不可能更优。走到它之前必然先路过近的那个，而在近的那个位置按完按钮之后的状态，跟走远路中途经过它时的状态完全一样，路程却短。</p>
+      <figure class="fig" id="figRing"></figure>
+              <pre class="code"><span class="cm">// f(i, j) : 指针停在轮盘 i 位置，要拼出 key[j...]，最小代价</span>
+    <span class="cm">// where[v] 收集了字符 v 在轮盘上的全部下标，从小到大</span>
+    <span class="kw">int</span> <span class="fn">f</span>(<span class="kw">int</span> i, <span class="kw">int</span> j) {
+        <span class="kw">if</span> (j == m) <span class="kw">return</span> 0;                                        <span class="cm">// key 拼完了</span>
+        <span class="kw">if</span> (dp[i][j] != -1) <span class="kw">return</span> dp[i][j];
+        <span class="kw">int</span> ans;
+        <span class="kw">if</span> (ring[i] == key[j]) {
+            ans = 1 + f(i, j + 1);                                   <span class="cm">// 就在脚下，按一下</span>
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> v = key[j] - 'a';
+            <span class="kw">int</span> jump1 = clockwise(i, v);                             <span class="cm">// 顺时针最近</span>
+            <span class="kw">int</span> d1 = (jump1 &gt; i ? jump1 - i : n - i + jump1);
+            <span class="kw">int</span> jump2 = counterClockwise(i, v);                      <span class="cm">// 逆时针最近</span>
+            <span class="kw">int</span> d2 = (i &gt; jump2 ? i - jump2 : i + n - jump2);
+            ans = min(d1 + f(jump1, j), d2 + f(jump2, j));           <span class="cm">// 只需要这两种走法</span>
+        }
+        dp[i][j] = ans;
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>找这两个位置要快，所以先把每个字符在轮盘上的下标收集起来。<code>where[v]</code> 天然有序，二分就行。</p>
+              <pre class="code"><span class="cm">// where[v] 有序，二分找 &gt; i 的最靠左下标；找不到说明要绕一圈，回到最小下标</span>
+    <span class="kw">int</span> <span class="fn">clockwise</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        <span class="kw">int</span> l = 0, r = (<span class="kw">int</span>)where[v].size() - 1, find = -1, m;
+        <span class="kw">while</span> (l &lt;= r) {
+            m = (l + r) / 2;
+            <span class="kw">if</span> (where[v][m] &gt; i) { find = m; r = m - 1; } <span class="kw">else</span> l = m + 1;
+        }
+        <span class="kw">return</span> find != -1 ? where[v][find] : where[v][0];
+    }</pre>
+      <p>找不到（说明要绕一圈）时返回 <code>where[v][0]</code> 或最后一个下标，正好对应绕过去的第一站。逆时针那个函数对称着写，找 <code>&lt; i</code> 的最靠右下标。</p>
+
+      <h2>一、砍掉多少分支</h2>
+      <p>轮盘长 n、key 长 m，状态总数是 n·m，两种写法都一样。差别在每个状态里做了多少事：全枚要扫 n/c 个候选（c 是字符集大小），只枚两个就固定是 2。</p>
+      <figure class="fig" id="figCand"></figure>
+      <p>ring 长 100、key 长 60 实测：字符集 26 时全枚 0.053 ms、只枚两个 0.018 ms；字符集缩到 2，全枚涨到 1.020 ms，只枚两个还是 0.072 ms。候选总数 300000 对 12000，差 25 倍。</p>
+      <p>只枚一个方向会怎样？随机 2 万组（轮盘长 1 到 8，key 长 1 到 6）实测，只留顺时针时答案偏大的比例：字符集 2 时 28.80%，字符集 3 时 38.63%，字符集 5 时 45.22%，字符集 10 时 49.31%。字符种类越多，同一个字符在轮盘上出现的位置越分散，两个方向的优劣就越难猜。</p>
+
+      <h2>二、演示：每一步只看两个候选</h2>
+      <p>下面这个演示把最优路线走一遍。每一步列出顺、逆两个候选，算出「走到那里的距离 + 从那里拼完剩余 key 的代价」，取小的那个。</p>
+      <div class="viz" id="vizRing">
+        <p class="viz-title">自由之路：逐字符决策</p>
+        <div id="ringBody"></div>
+        <p class="viz-note" id="ringNote"></p>
+        <p class="viz-answer" id="ringAns"></p>
+        <div class="viz-controls">
+          <button id="ringNext">下一步</button>
+          <button id="ringReset">重置</button>
+          <label>轮盘 / key <select id="ringSel">
+            <option value="0">godding / gd</option>
+            <option value="1">godding / godding</option>
+            <option value="2">caotmcaataijjxi / oaaij</option>
+            <option value="3">abcde / edcba</option>
+          </select></label>
+        </div>
+      </div>
+
+      <h2>三、最长子数组：先做一个能二分的数组</h2>
+      <p>给一个可能有正有负的数组 arr 和整数 k，求累加和 ≤ k 的最长子数组长度。数组里有负数，窗口不能简单用双指针。</p>
+      <p>最直接的写法是枚举所有子数组，O(n²)。换个角度：以第 i 个数结尾的子数组，长度是 i − pre + 1，其中 pre 是开始位置的前一个下标。要求 <code>sum(0..i) − sum(0..pre) ≤ k</code>，也就是 <code>sum(0..pre) ≥ sum(0..i) − k</code>。想让长度最大，就要找最靠左的、满足这个条件的 pre。</p>
+      <p>前缀和本身乱序，二分不了。但注意：我们要的是「存在某个 ≤ pre 的位置，它的前缀和 ≥ 某个值」。定义 <code>sums[i]</code> 为前 i 个位置里前缀和的最大值，那 <code>sums</code> 单调不降，「存在」这个条件就变成查 <code>sums</code> 这一个单调数组。</p>
+              <pre class="code"><span class="cm">// sums[i] : 前 i 个数的所有前缀和里的最大值，i 从 0 开始，所以 sums 单调不降</span>
+    <span class="kw">int</span> <span class="fn">compute1</span>() {
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">sums</span>(n + 1, 0);
+        <span class="kw">long</span> <span class="kw">long</span> sum = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            sum += nums[i];
+            sums[i + 1] = (<span class="kw">int</span>)max(sum, (<span class="kw">long</span> <span class="kw">long</span>)sums[i]);
+        }
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">long</span> <span class="kw">long</span> s = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            s += nums[i];
+            <span class="kw">int</span> pre = findFirst(sums, (<span class="kw">int</span>)(s - k));                 <span class="cm">// 最靠左的、前缀和 &gt;= s-k 的位置</span>
+            ans = max(ans, pre == -1 ? 0 : i - pre + 1);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>这样是 O(n log n)。</p>
+
+      <h2>四、最优解：把窗口的推进整段化</h2>
+      <p>再往前一步要两个观察。第一个是窗口的加速建立：从 i 开始往右扩，如果后面那一段的和已经是负的，那它整段吞进来只会让总和变小、长度变长，没有理由不吞。于是先把数组从右往左预处理成若干段，每段是「从某处开始的最小和段」：</p>
+              <pre class="code"><span class="cm">// minSums[i] : 从 i 开始往后，累加和最小的那段（至少包含 nums[i]）的和</span>
+    <span class="cm">// minSumEnds[i] : 那段的结束位置，整段可以一次吞进来</span>
+    <span class="kw">void</span> <span class="fn">buildMinSums</span>() {
+        minSums[n - 1] = nums[n - 1];
+        minSumEnds[n - 1] = n - 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = n - 2; i &gt;= 0; i--) {
+            <span class="kw">if</span> (minSums[i + 1] &lt; 0) {                                <span class="cm">// 后面那段的和是负的，接过来更划算</span>
+                minSums[i] = nums[i] + minSums[i + 1];
+                minSumEnds[i] = minSumEnds[i + 1];
+            } <span class="kw">else</span> {
+                minSums[i] = nums[i];                                <span class="cm">// 自己单独成段</span>
+                minSumEnds[i] = i;
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">compute2</span>() {
+        buildMinSums();
+        <span class="kw">int</span> ans = 0, end = 0;
+        <span class="kw">long</span> <span class="kw">long</span> sum = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">while</span> (end &lt; n &amp;&amp; sum + minSums[end] &lt;= k) {             <span class="cm">// 一整段一整段地吞</span>
+                sum += minSums[end];
+                end = minSumEnds[end] + 1;
+            }
+            <span class="kw">if</span> (end &gt; i) {
+                ans = max(ans, end - i);
+                sum -= nums[i];                                      <span class="cm">// 窗口左端走一步</span>
+            } <span class="kw">else</span> {
+                end = i + 1;                                         <span class="cm">// 这一段本身就超限，整个跳过</span>
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>第二个观察是可能性的淘汰：如果从 i 开始连 i 这一段本身都超过了 k，那以 i 开头的窗口根本扩不出来，直接把 i 丢掉，end 推到 i + 1。窗口一旦扩不出来就不再回头，每个位置最多进出一次，总代价 O(n)。</p>
+      <figure class="fig" id="figMinSums"></figure>
+      <p>随机数据（元素 −20 到 30，n = 100000）下这套预处理把数组切成 38315 段，平均段长 2.61。段越碎，一次吞掉的越少，但每个位置仍然只被处理一次。</p>
+      <figure class="fig" id="figWin"></figure>
+
+      <h2>五、演示：两种解法一步一步走</h2>
+      <p>上面是 compute1（构造单调数组 + 二分），下面是 compute2（整段吞的窗口）。同一个数组同一个 k，逐帧推进，看看两边各自的答案怎么长出来。</p>
+      <div class="viz" id="vizSub">
+        <p class="viz-title">最长子数组：二分法 vs 整段窗口</p>
+        <div id="subBody"></div>
+        <p class="viz-note" id="subNote"></p>
+        <p class="viz-answer" id="subAns"></p>
+        <div class="viz-controls">
+          <button id="subNext">下一步</button>
+          <button id="subAuto">自动播放</button>
+          <button id="subReset">重置</button>
+          <label>数据 <select id="subSel">
+            <option value="0">[1,-2,3,4,-1]，k = 3</option>
+            <option value="1">[2,-1,3,-4,5,-2]，k = -2</option>
+            <option value="2">[-1,-2,-3]，k = 0</option>
+            <option value="3">[3,-2,5,-1,4]，k = 5</option>
+          </select></label>
+        </div>
+      </div>
+
+      <h2>六、写错的地方</h2>
+      <table class="complexity">
+        <tr><th>位置</th><th>写法</th><th>与正确解不一致的比例</th></tr>
+        <tr><td>compute1</td><td><code>sums</code> 不做单调化，直接拿前缀和数组二分</td><td>19.39%</td></tr>
+        <tr><td>compute2</td><td>窗口左端走一步时减 <code>minSums[i]</code></td><td>5.17%</td></tr>
+        <tr><td>compute2</td><td>窗口扩不出来时不推进 end</td><td>19.34%</td></tr>
+        <tr><td>compute2</td><td>窗口按单元素扩，不按整段</td><td>28.84%</td></tr>
+      </table>
+      <p>第一条最隐蔽：前缀和数组本身不单调，二分找到的「最左 ≥ num」没有意义，但在前缀和本身恰好递增的样本上它又是对的，所以只有 19.39% 的样本能抓住。</p>
+      <p>第三条要留意：窗口扩不出来时如果不写 <code>end = i + 1</code>，end 会停在 i 的位置，下一轮 <code>end &gt; i</code> 永远不成立，答案一直停在 0。</p>
+
+      <h2>七、代价对比</h2>
+      <figure class="fig" id="figPerf3"></figure>
+      <p>n = 10000 时暴力枚举 26.16 ms、compute1 0.295 ms、compute2 0.058 ms。n = 1000000 时 compute1 41.268 ms、compute2 5.693 ms，差 7.2 倍。两者都是线性的量级，差的是常数和一个 log。</p>
+
+      <h2>八、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>版本</th><th>时间</th><th>空间</th></tr>
+        <tr><td>自由之路</td><td>枚举全部匹配位置</td><td>O(n·m·n/c)</td><td>O(n·m)</td></tr>
+        <tr><td>自由之路</td><td>只枚顺逆最近两个</td><td>O(n·m·log(n/c))</td><td>O(n·m)</td></tr>
+        <tr><td>最长子数组</td><td>枚举全部子数组</td><td>O(n²)</td><td>O(1)</td></tr>
+        <tr><td>最长子数组</td><td>单调前缀和 + 二分</td><td>O(n log n)</td><td>O(n)</td></tr>
+        <tr><td>最长子数组</td><td>minSums + 整段窗口</td><td>O(n)</td><td>O(n)</td></tr>
+      </table>
+      <p>自由之路那行的 c 是轮盘字符集大小；二分是在 <code>where[v]</code> 上做的，长度 n/c，所以严格说每个状态是 O(log(n/c))。轮盘短、字符少的时候这个 log 可以忽略，直接线性扫 <code>where[v]</code> 也行。</p>
+      <p>最长子数组的 O(n) 版本空间是 O(n)：<code>minSums</code> 和 <code>minSumEnds</code> 两个数组。省空间可以把它们并进一次倒着算的过程里，但那样窗口推进时要现场算段，代码会绕。</p>
+
+      <h2>九、总结</h2>
+      <p>两题的优化都是「看出大部分枚举分支没有价值」。自由之路里，顺着圆走，路过近的同字符位置之后再走到远的那个，状态一样、路程更长，所以远的直接淘汰；最长子数组里，负和段一次吞进来不吃亏，扩不出来的开头直接丢掉。</p>
+      <p>这类判断属于贪心，写的时候要能说清「为什么被砍掉的那种情况不会更好」，不然只是在碰运气。验证的办法也简单：写一个枚举全部可能性的暴力版，小数据上逐组对拍。这页四个数字里的错误率都是这么量出来的。</p>
+      <p>动态规划专题里优化枚举的手段还有很多：单调队列、斜率优化、四边形不等式。它们的共同点和这里一样：先写出带枚举的转移，再盯着那段枚举看规律。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>自由之路</td><td><a href="https://leetcode.cn/problems/freedom-trail/" target="_blank">514. Freedom Trail</a></td></tr>
+        <tr><td>牛客</td><td>累加和不大于 k 的最长子数组</td><td><a href="https://www.nowcoder.com/practice/3473e545d6924077a4f7cbc850408ade" target="_blank">累加和不大于k的最长子数组</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解083【必备】动态规划中用观察优化枚举的技巧-下</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, fill, stroke, rx) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx == null ? 4 : rx) +
+      '" fill="' + fill + '" stroke="' + (stroke || 'none') + '"/>';
+  }
+  function line(x1, y1, x2, y2, stroke, w, dash) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke +
+      '" stroke-width="' + (w || 1) + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
+  }
+  function put(id, inner) { var el = document.getElementById(id); if (el) el.innerHTML = inner; }
+  function svgWrap(h, body) { return '<svg viewBox="0 0 680 ' + h + '" role="img">' + body + '</svg>'; }
+
+  // ---------- 图 1：轮盘上的两个候选 ----------
+  (function () {
+    var ring = 'godding';
+    var n = ring.length, cx = 340, cy = 158, r = 96;
+    var g = '';
+    var pts = [];
+    for (var i = 0; i < n; i++) {
+      var ang = -Math.PI / 2 + i * 2 * Math.PI / n;
+      pts.push([cx + r * Math.cos(ang), cy + r * Math.sin(ang)]);
+    }
+    for (var i2 = 0; i2 < n; i2++) {
+      var p = pts[i2];
+      var isD = ring[i2] === 'd', isStart = i2 === 0;
+      g += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="21" fill="' + (isD ? C.orangeBg : (isStart ? C.blueBg : C.bg)) +
+        '" stroke="' + (isD ? C.orange : (isStart ? C.blue : C.border)) + '"/>';
+      g += txt(p[0], p[1] + 5, ring[i2], { size: 14, fill: C.text, weight: '600' });
+      g += txt(p[0] + 30 * Math.cos(-Math.PI / 2 + i2 * 2 * Math.PI / n), p[1] + 30 * Math.sin(-Math.PI / 2 + i2 * 2 * Math.PI / n) + 4, String(i2), { size: 10, fill: C.dim });
+    }
+    g += txt(cx, 24, '指针停在 0（g），要找 d', { size: 12, fill: C.text, weight: '600' });
+    g += txt(60, cy - 8, '顺时针', { size: 11, fill: C.orange, anchor: 'start' });
+    g += txt(60, cy + 10, '最近的是 2，距离 2', { size: 11, fill: C.dim, anchor: 'start' });
+    g += txt(60, cy + 34, '逆时针', { size: 11, fill: C.blue, anchor: 'start' });
+    g += txt(60, cy + 52, '最近的是 3，距离 4', { size: 11, fill: C.dim, anchor: 'start' });
+    g += txt(560, cy - 8, '更远的', { size: 11, fill: C.gray, anchor: 'start' });
+    g += txt(560, cy + 10, '同字符位置不用枚', { size: 11, fill: C.dim, anchor: 'start' });
+    put('figRing', svgWrap(cy + r + 42, g) + '<figcaption>ring = godding，d 出现在 2 和 3。从 0 出发顺时针先碰到 2，逆时针先碰到 3，只有这两个值得算。</figcaption>');
+  })();
+
+  // ---------- 图 2：候选数对比 ----------
+  (function () {
+    var data = [[2, 300000, 1.020], [3, 198000, 0.530], [5, 120000, 0.244], [26, 18000, 0.053]];
+    var x0 = 90, y0 = 50, w = 520, h = 140, g = '';
+    g += line(x0, y0 + h, x0 + w, y0 + h, C.border, 1);
+    g += line(x0, y0 - 14, x0, y0 + h, C.border, 1);
+    var ticks = [0, 75000, 150000, 225000, 300000];
+    for (var t = 0; t < ticks.length; t++) {
+      var y = y0 + h - h * ticks[t] / 300000;
+      g += line(x0, y, x0 + w, y, C.border, 1, '3 3');
+      g += txt(x0 - 12, y + 4, (ticks[t] / 1000) + 'k', { size: 10, fill: C.dim, anchor: 'end' });
+    }
+    for (var i = 0; i < data.length; i++) {
+      var cx = x0 + 70 + i * 122;
+      var h1 = h * data[i][1] / 300000, h2 = h * 12000 / 300000;
+      g += rect(cx - 40, y0 + h - h1, 32, h1, C.gray, C.border);
+      g += txt(cx - 24, y0 + h - h1 - 8, String(data[i][1]), { size: 9, fill: C.dim });
+      g += rect(cx + 4, y0 + h - h2, 32, h2, C.blueBg, C.blue);
+      g += txt(cx + 20, y0 + h - h2 - 8, '12000', { size: 9, fill: C.blue });
+      g += txt(cx, y0 + h + 18, '字符集 ' + data[i][0], { size: 11, fill: C.text });
+      g += txt(cx, y0 + h + 36, data[i][2].toFixed(3) + ' ms', { size: 10, fill: C.dim });
+    }
+    g += txt(x0 + w - 190, y0 - 10, '■ 枚举全部匹配位置', { size: 10, fill: C.dim, anchor: 'start' });
+    g += txt(x0 + w - 190, y0 + 6, '■ 只枚顺逆最近两个（12000 = 6000 状态 × 2）', { size: 10, fill: C.dim, anchor: 'start' });
+    put('figCand', svgWrap(y0 + h + 56, g) + '<figcaption>ring 长 100、key 长 60，状态数 6000。字符集越小，同一个字符出现得越多，全枚的代价越高。</figcaption>');
+  })();
+
+  // ---------- 图 3：minSums 分段 ----------
+  (function () {
+    var nums = [1, -2, 3, 4, -1], minSums = [-1, -2, 3, 3, -1], ends = [1, 1, 2, 4, 4];
+    var x0 = 96, cw = 92, rh = 32, y0 = 62, g = '';
+    g += txt(x0 - 14, y0 + 20, 'nums', { size: 11, fill: C.dim, anchor: 'end' });
+    for (var i = 0; i < nums.length; i++) {
+      g += rect(x0 + i * cw, y0, cw - 10, rh, C.bg, C.border);
+      g += txt(x0 + i * cw + (cw - 10) / 2, y0 + 21, String(nums[i]), { size: 13, fill: C.text });
+      g += txt(x0 + i * cw + (cw - 10) / 2, y0 - 8, 'i=' + i, { size: 10, fill: C.dim });
+    }
+    var y1 = y0 + rh + 30;
+    g += txt(x0 - 14, y1 + 20, 'minSums', { size: 11, fill: C.dim, anchor: 'end' });
+    for (var i2 = 0; i2 < minSums.length; i2++) {
+      g += rect(x0 + i2 * cw, y1, cw - 10, rh, C.blueBg, C.blue);
+      g += txt(x0 + i2 * cw + (cw - 10) / 2, y1 + 21, String(minSums[i2]), { size: 13, fill: C.blue });
+    }
+    var y2 = y1 + rh + 30;
+    g += txt(x0 - 14, y2 + 20, 'minSumEnds', { size: 11, fill: C.dim, anchor: 'end' });
+    for (var i3 = 0; i3 < ends.length; i3++) {
+      g += rect(x0 + i3 * cw, y2, cw - 10, rh, C.bg, C.border);
+      g += txt(x0 + i3 * cw + (cw - 10) / 2, y2 + 21, String(ends[i3]), { size: 13, fill: C.text });
+    }
+    var segs = [[0, 1], [1, 1], [2, 2], [3, 4]];
+    for (var s = 0; s < segs.length; s++) {
+      var xa = x0 + segs[s][0] * cw, xb = x0 + segs[s][1] * cw + cw - 10;
+      var yb = y2 + rh + 14 + s * 24;
+      g += line(xa + 2, yb, xb - 2, yb, C.orange, 2);
+      g += line(xa + 2, yb - 5, xa + 2, yb + 5, C.orange, 2);
+      g += line(xb - 2, yb - 5, xb - 2, yb + 5, C.orange, 2);
+      g += txt(xb + 10, yb + 4, '第 ' + (s + 1) + ' 段，和 ' + minSums[segs[s][0]], { size: 10, fill: C.orange, anchor: 'start' });
+    }
+    put('figMinSums', svgWrap(y2 + rh + 14 + segs.length * 24 + 10, g) + '<figcaption>[1,−2,3,4,−1] 被切成四段。第 1 段是 [1,−2]，和 −1；第 3 段是 [3,4]，和 3（后面 −1 是负的，被并进来）。</figcaption>');
+  })();
+
+  // ---------- 图 4：窗口推进 ----------
+  (function () {
+    var nums = [1, -2, 3, 4, -1], k = 3;
+    var steps = [
+      { i: 0, end: 3, sum: 0, note: '吞第 1 段（和 −1），再吞第 2、3 段到 6 > 3 停住，长度 3' },
+      { i: 1, end: 4, sum: 2, note: '左端丢掉 1，sum 变 2，还能继续吞，长度 3' },
+      { i: 2, end: 5, sum: 6, note: '左端丢掉 −2，sum 变 6，已经超了，长度 3' }
+    ];
+    var x0 = 60, cw = 92, rh = 32, y0 = 58, g = '';
+    g += txt(x0 - 14, y0 + 20, 'nums', { size: 11, fill: C.dim, anchor: 'end' });
+    for (var i = 0; i < nums.length; i++) {
+      g += rect(x0 + i * cw, y0, cw - 10, rh, C.bg, C.border);
+      g += txt(x0 + i * cw + (cw - 10) / 2, y0 + 21, String(nums[i]), { size: 13, fill: C.text });
+      g += txt(x0 + i * cw + (cw - 10) / 2, y0 - 8, String(i), { size: 10, fill: C.dim });
+    }
+    for (var s = 0; s < steps.length; s++) {
+      var y = y0 + rh + 22 + s * 40;
+      var stp = steps[s];
+      g += txt(x0 - 14, y + 21, 'i=' + stp.i, { size: 11, fill: C.orange, anchor: 'end' });
+      for (var p = 0; p < nums.length; p++) {
+        var inW = p >= stp.i && p < stp.end;
+        g += rect(x0 + p * cw, y, cw - 10, rh, inW ? C.blueBg : C.bg, inW ? C.blue : C.border);
+        g += txt(x0 + p * cw + (cw - 10) / 2, y + 21, String(nums[p]), { size: 12, fill: inW ? C.blue : C.dim });
+      }
+      g += txt(x0 + 5 * cw + 4, y + 21, '长度 ' + (stp.end - stp.i), { size: 11, fill: C.orange, anchor: 'start' });
+    }
+    g += txt(24, y0 + rh + 22 + steps.length * 40 + 24, 'k = 3。窗口每次吞一整段，左端只走一步，答案取过的最大长度。', { size: 11, fill: C.dim, anchor: 'start' });
+    put('figWin', svgWrap(y0 + rh + 22 + steps.length * 40 + 40, g) + '<figcaption>窗口 [i, end) 的右端按段跳，左端按元素走。每个位置最多被吞一次、被丢一次。</figcaption>');
+  })();
+
+  // ---------- 图 5：性能 ----------
+  (function () {
+    var ns = [2000, 5000, 10000];
+    var b = [1.18, 6.98, 26.16], c1 = [0.046, 0.147, 0.295], c2 = [0.015, 0.032, 0.058];
+    var x0 = 84, y0 = 46, w = 520, h = 150, g = '';
+    g += line(x0, y0 + h, x0 + w, y0 + h, C.border, 1);
+    g += line(x0, y0 - 10, x0, y0 + h, C.border, 1);
+    var ticks = [0, 5, 10, 15, 20, 25, 30];
+    for (var t = 0; t < ticks.length; t++) {
+      var y = y0 + h - h * ticks[t] / 30;
+      g += line(x0, y, x0 + w, y, C.border, 1, '3 3');
+      g += txt(x0 - 10, y + 4, String(ticks[t]), { size: 10, fill: C.dim, anchor: 'end' });
+    }
+    g += txt(x0 - 52, y0 + h / 2, '毫秒', { size: 11, fill: C.dim, anchor: 'end' });
+    for (var i = 0; i < ns.length; i++) {
+      var cx = x0 + 90 + i * 160;
+      var h0 = h * b[i] / 30, h1 = h * c1[i] / 30, h2 = h * c2[i] / 30;
+      g += rect(cx - 50, y0 + h - h0, 26, h0, C.gray, C.border);
+      g += txt(cx - 37, y0 + h - h0 - 8, b[i].toFixed(2), { size: 9, fill: C.dim });
+      g += rect(cx - 20, y0 + h - h1, 26, h1, C.blueBg, C.blue);
+      g += txt(cx - 7, y0 + h - h1 - 8, c1[i].toFixed(3), { size: 9, fill: C.blue });
+      g += rect(cx + 10, y0 + h - h2, 26, h2, C.orangeBg, C.orange);
+      g += txt(cx + 23, y0 + h - h2 - 8, c2[i].toFixed(3), { size: 9, fill: C.orange });
+      g += txt(cx, y0 + h + 18, 'n = ' + ns[i], { size: 11, fill: C.text });
+    }
+    g += rect(x0 + w - 250, y0 - 8, 12, 12, C.gray, C.border);
+    g += txt(x0 + w - 232, y0 + 2, '枚举子数组 O(n²)', { size: 10, fill: C.dim, anchor: 'start' });
+    g += rect(x0 + w - 130, y0 - 8, 12, 12, C.blueBg, C.blue);
+    g += txt(x0 + w - 112, y0 + 2, '二分 O(n log n)', { size: 10, fill: C.dim, anchor: 'start' });
+    g += rect(x0 + w - 20, y0 - 8, 12, 12, C.orangeBg, C.orange);
+    g += txt(x0 + w - 2, y0 + 2, '窗口 O(n)', { size: 10, fill: C.dim, anchor: 'start' });
+    put('figPerf3', svgWrap(y0 + h + 44, g) + '<figcaption>三条柱差了两个数量级。n = 1000000 时二分版 41.268 ms、窗口版 5.693 ms。</figcaption>');
+  })();
+
+  // ---------- 演示 1：自由之路 ----------
+  (function () {
+    var DATA = [
+      { r: 'godding', k: 'gd' },
+      { r: 'godding', k: 'godding' },
+      { r: 'caotmcaataijjxi', k: 'oaaij' },
+      { r: 'abcde', k: 'edcba' }
+    ];
+    var body = document.getElementById('ringBody');
+    var note = document.getElementById('ringNote');
+    var ansEl = document.getElementById('ringAns');
+    var nxt = document.getElementById('ringNext');
+    var rst = document.getElementById('ringReset');
+    var sel = document.getElementById('ringSel');
+    var st = null;
+
+    function build() {
+      var d = DATA[+sel.value], r = d.r, key = d.k, n = r.length, m = key.length;
+      var where = {};
+      for (var i = 0; i < n; i++) {
+        if (!where[r[i]]) where[r[i]] = [];
+        where[r[i]].push(i);
+      }
+      var dp = [];
+      for (var i2 = 0; i2 < n; i2++) dp.push(new Array(m + 1).fill(-1));
+      function clk(i, v) {
+        var s = where[v] || [], l = 0, rr = s.length - 1, find = -1, mm;
+        while (l <= rr) { mm = Math.floor((l + rr) / 2); if (s[mm] > i) { find = mm; rr = mm - 1; } else l = mm + 1; }
+        return find !== -1 ? s[find] : s[0];
+      }
+      function cnt(i, v) {
+        var s = where[v] || [], l = 0, rr = s.length - 1, find = -1, mm;
+        while (l <= rr) { mm = Math.floor((l + rr) / 2); if (s[mm] < i) { find = mm; l = mm + 1; } else rr = mm - 1; }
+        return find !== -1 ? s[find] : s[s.length - 1];
+      }
+      function f(i, j) {
+        if (j === m) return 0;
+        if (dp[i][j] !== -1) return dp[i][j];
+        var ans;
+        if (r[i] === key[j]) ans = 1 + f(i, j + 1);
+        else {
+          var j1 = clk(i, key[j]), d1 = (j1 > i ? j1 - i : n - i + j1);
+          var j2 = cnt(i, key[j]), d2 = (i > j2 ? i - j2 : i + n - j2);
+          ans = Math.min(d1 + f(j1, j), d2 + f(j2, j));
+        }
+        dp[i][j] = ans;
+        return ans;
+      }
+      var total = f(0, 0);
+      var steps = [], pos = 0, cost = 0;
+      steps.push({ r: r, key: key, n: n, m: m, pos: 0, j: 0, cost: 0, kind: 'start' });
+      for (var j = 0; j < m; j++) {
+        if (r[pos] === key[j]) {
+          cost += 1;
+          steps.push({ r: r, key: key, n: n, m: m, pos: pos, j: j, cost: cost, kind: 'press', nxt: pos });
+        } else {
+          var j1 = clk(pos, key[j]), d1 = (j1 > pos ? j1 - pos : n - pos + j1);
+          var j2 = cnt(pos, key[j]), d2 = (pos > j2 ? pos - j2 : pos + n - j2);
+          var v1 = d1 + dp[j1][j], v2 = d2 + dp[j2][j];
+          var pick = v1 <= v2 ? j1 : j2, dd = v1 <= v2 ? d1 : d2;
+          cost += dd;
+          steps.push({ r: r, key: key, n: n, m: m, pos: pos, j: j, cost: cost, kind: 'move', c1: j1, d1: d1, v1: v1, c2: j2, d2: d2, v2: v2, pick: pick, nxt: pick });
+          pos = pick;
+        }
+      }
+      steps.push({ r: r, key: key, n: n, m: m, pos: pos, j: m, cost: cost, kind: 'done', total: total });
+      st = { steps: steps, step: 0 };
+    }
+
+    function draw() {
+      var s = st.steps[st.step], r = s.r, key = s.key, n = s.n, m = s.m;
+      var g = '';
+      var cw = Math.min(58, Math.floor(600 / n)), x0 = 40, y0 = 62, ch = 40;
+      for (var i = 0; i < n; i++) {
+        var x = x0 + i * cw;
+        var isPos = i === s.pos;
+        var isC1 = (s.kind === 'move') && i === s.c1;
+        var isC2 = (s.kind === 'move') && i === s.c2;
+        var isPick = (s.kind === 'move') && i === s.pick;
+        g += rect(x, y0, cw - 8, ch, isPick ? C.orangeBg : (isC1 || isC2 ? C.blueBg : (isPos ? C.blueBg : C.bg)),
+          isPick ? C.orange : (isC1 || isC2 ? C.blue : (isPos ? C.blue : C.border)));
+        g += txt(x + (cw - 8) / 2, y0 + 26, r[i], { size: 15, fill: C.text, weight: '600' });
+        g += txt(x + (cw - 8) / 2, y0 - 8, String(i), { size: 10, fill: C.dim });
+        if (isPos && s.kind !== 'done') g += txt(x + (cw - 8) / 2, y0 + ch + 16, '指针', { size: 10, fill: C.blue });
+        if (isC1) g += txt(x + (cw - 8) / 2, y0 + ch + 32, '顺', { size: 10, fill: C.blue });
+        if (isC2) g += txt(x + (cw - 8) / 2, y0 + ch + 32, '逆', { size: 10, fill: C.blue });
+      }
+      var yk = y0 + ch + 52;
+      g += txt(40, yk, 'key', { size: 11, fill: C.dim, anchor: 'end' });
+      for (var j = 0; j < m; j++) {
+        var xj = 56 + j * 46;
+        var done = j < s.j, cur = j === s.j;
+        g += rect(xj, yk - 18, 38, 28, cur ? C.orangeBg : (done ? C.blueBg : C.bg), cur ? C.orange : (done ? C.blue : C.border));
+        g += txt(xj + 19, yk + 2, key[j], { size: 13, fill: C.text });
+      }
+      body.innerHTML = svgWrap(yk + 34, g);
+
+      if (s.kind === 'start') {
+        note.innerHTML = '轮盘 ' + r + '（长度 ' + n + '），要拼 ' + key + '。指针从 0 出发。';
+        ansEl.textContent = '';
+      } else if (s.kind === 'press') {
+        note.innerHTML = '第 ' + (s.j + 1) + ' 个字符 ' + key[s.j] + '：指针就在 ' + s.pos + ' 上，按一下，代价 +1（累计 ' + s.cost + '）。';
+        ansEl.textContent = '';
+      } else if (s.kind === 'move') {
+        note.innerHTML = '第 ' + (s.j + 1) + ' 个字符 ' + key[s.j] + '：顺时针到 ' + s.c1 + ' 距离 ' + s.d1 + '，后续代价 ' + (s.v1 - s.d1) + '，合计 ' + s.v1 +
+          '；逆时针到 ' + s.c2 + ' 距离 ' + s.d2 + '，后续代价 ' + (s.v2 - s.d2) + '，合计 ' + s.v2 + '。取 ' + (s.pick === s.c1 ? '顺时针' : '逆时针') + '，累计 ' + s.cost + '。';
+        ansEl.textContent = '';
+      } else {
+        note.innerHTML = '拼完了。';
+        ansEl.textContent = '答案：' + s.total + '（本次路线代价 ' + s.cost + '）';
+      }
+      nxt.disabled = (st.step >= st.steps.length - 1);
+    }
+    function reset() { build(); draw(); }
+    nxt.addEventListener('click', function () { if (st.step < st.steps.length - 1) { st.step++; draw(); } });
+    rst.addEventListener('click', reset);
+    sel.addEventListener('change', reset);
+    reset();
+  })();
+
+  // ---------- 演示 2：最长子数组 ----------
+  (function () {
+    var DATA = [
+      { a: [1, -2, 3, 4, -1], k: 3 },
+      { a: [2, -1, 3, -4, 5, -2], k: -2 },
+      { a: [-1, -2, -3], k: 0 },
+      { a: [3, -2, 5, -1, 4], k: 5 }
+    ];
+    var body = document.getElementById('subBody');
+    var note = document.getElementById('subNote');
+    var ansEl = document.getElementById('subAns');
+    var nxt = document.getElementById('subNext');
+    var auto = document.getElementById('subAuto');
+    var rst = document.getElementById('subReset');
+    var sel = document.getElementById('subSel');
+    var st = null, timer = null;
+
+    function build() {
+      var d = DATA[+sel.value], a = d.a, k = d.k, n = a.length;
+      // compute1
+      var sums = [0], sum = 0;
+      for (var i = 0; i < n; i++) { sum += a[i]; sums.push(Math.max(sum, sums[i])); }
+      function findFirst(num) {
+        var l = 0, r = n, ans = -1, m;
+        while (l <= r) { m = Math.floor((l + r) / 2); if (sums[m] >= num) { ans = m; r = m - 1; } else l = m + 1; }
+        return ans;
+      }
+      var ans1 = 0, s2 = 0, steps1 = [];
+      for (var i2 = 0; i2 < n; i2++) {
+        s2 += a[i2];
+        var pre = findFirst(s2 - k);
+        var len = pre === -1 ? 0 : i2 - pre + 1;
+        ans1 = Math.max(ans1, len);
+        steps1.push({ pre: pre, len: len, ans: ans1, sum: s2 });
+      }
+      // compute2
+      var minSums = new Array(n), minEnds = new Array(n);
+      minSums[n - 1] = a[n - 1]; minEnds[n - 1] = n - 1;
+      for (var i3 = n - 2; i3 >= 0; i3--) {
+        if (minSums[i3 + 1] < 0) { minSums[i3] = a[i3] + minSums[i3 + 1]; minEnds[i3] = minEnds[i3 + 1]; }
+        else { minSums[i3] = a[i3]; minEnds[i3] = i3; }
+      }
+      var steps2 = [], ans2 = 0, end = 0, wsum = 0;
+      for (var i4 = 0; i4 < n; i4++) {
+        var eaten = [];
+        while (end < n && wsum + minSums[end] <= k) {
+          eaten.push([end, minEnds[end]]);
+          wsum += minSums[end];
+          end = minEnds[end] + 1;
+        }
+        if (end > i4) { ans2 = Math.max(ans2, end - i4); wsum -= a[i4]; }
+        else { end = i4 + 1; }
+        steps2.push({ i: i4, end: end, ans: ans2, sum: wsum, eaten: eaten });
+      }
+      st = { a: a, k: k, n: n, sums: sums, minSums: minSums, minEnds: minEnds, steps1: steps1, steps2: steps2, step: 0, ans1: ans1, ans2: ans2 };
+    }
+
+    function draw() {
+      var a = st.a, n = st.n, k = st.k;
+      var g = '';
+      var cw = Math.min(66, Math.floor(560 / n)), x0 = 92, rh = 30, y0 = 56;
+      var cur = st.step - 1;
+      g += txt(x0 - 14, y0 + 20, 'nums', { size: 11, fill: C.dim, anchor: 'end' });
+      for (var i = 0; i < n; i++) {
+        g += rect(x0 + i * cw, y0, cw - 8, rh, C.bg, C.border);
+        g += txt(x0 + i * cw + (cw - 8) / 2, y0 + 20, String(a[i]), { size: 13, fill: C.text });
+        g += txt(x0 + i * cw + (cw - 8) / 2, y0 - 8, String(i), { size: 10, fill: C.dim });
+      }
+      var y1 = y0 + rh + 34;
+      g += txt(x0 - 14, y1 + 20, '二分法', { size: 11, fill: C.dim, anchor: 'end' });
+      for (var i2 = 0; i2 < n; i2++) {
+        var vis1 = i2 <= cur;
+        var s1 = vis1 ? st.steps1[i2] : null;
+        var isCur1 = i2 === cur;
+        g += rect(x0 + i2 * cw, y1, cw - 8, rh, isCur1 ? C.orangeBg : (vis1 ? C.blueBg : C.bg), isCur1 ? C.orange : (vis1 ? C.blue : C.border));
+        g += txt(x0 + i2 * cw + (cw - 8) / 2, y1 + 20, s1 ? String(s1.len) : '', { size: 12, fill: C.blue });
+      }
+      g += txt(x0 + n * cw + 6, y1 + 20, '长度 / 答案 ' + (cur <= 0 ? 0 : (cur >= n ? st.ans1 : st.steps1[cur].ans)), { size: 11, fill: C.blue, anchor: 'start' });
+      var y2 = y1 + rh + 34;
+      g += txt(x0 - 14, y2 + 20, '整段窗口', { size: 11, fill: C.dim, anchor: 'end' });
+      for (var i3 = 0; i3 < n; i3++) {
+        var s2 = null, inW = false;
+        if (cur >= 0 && i3 <= cur) {
+          var s = st.steps2[i3];
+          inW = i3 >= s.i && i3 < s.end && i3 === cur;
+        }
+        var isCuri = i3 === cur;
+        g += rect(x0 + i3 * cw, y2, cw - 8, rh, isCuri ? C.orangeBg : (inW ? C.blueBg : C.bg), isCuri ? C.orange : (inW ? C.blue : C.border));
+        g += txt(x0 + i3 * cw + (cw - 8) / 2, y2 + 20, inW ? String(a[i3]) : (isCuri ? String(a[i3]) : ''), { size: 12, fill: C.blue });
+      }
+      g += txt(x0 + n * cw + 6, y2 + 20, '答案 ' + (cur <= 0 ? 0 : (cur >= n ? st.ans2 : st.steps2[cur].ans)), { size: 11, fill: C.orange, anchor: 'start' });
+      body.innerHTML = svgWrap(y2 + rh + 30, g);
+
+      if (st.step === 0) {
+        note.innerHTML = 'nums 长度 ' + n + '，k = ' + k + '。点「下一步」让 i 从 0 走到 ' + (n - 1) + '。';
+        ansEl.textContent = '';
+      } else if (st.step <= n) {
+        var i4 = st.step - 1, s1b = st.steps1[i4], s2b = st.steps2[i4];
+        var extra = '';
+        if (s2b.eaten.length) extra = '，本轮吞掉 ' + s2b.eaten.length + ' 段（' + s2b.eaten.map(function (e) { return e[0] + '→' + e[1]; }).join('，') + '）';
+        note.innerHTML = 'i = ' + i4 + '：二分法找到 pre = ' + s1b.pre + '，长度 ' + s1b.len + '，答案 ' + s1b.ans +
+          '。整段窗口的 end 走到 ' + s2b.end + '，长度 ' + (s2b.end - i4) + '，答案 ' + s2b.ans + extra + '。';
+        ansEl.textContent = '';
+      } else {
+        note.innerHTML = '两行都跑完了。每行格子是以该位置结尾的最长长度，右端是当前答案。';
+        ansEl.textContent = '答案：' + st.ans1 + '（二分法）/ ' + st.ans2 + '（整段窗口）';
+      }
+      nxt.disabled = (st.step > n);
+      if (nxt.disabled && timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+    }
+    function reset() { if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; } build(); draw(); }
+    nxt.addEventListener('click', function () { if (st.step <= st.n) { st.step++; draw(); } });
+    auto.addEventListener('click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step <= st.n) { st.step++; draw(); } else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 700);
+    });
+    rst.addEventListener('click', reset);
+    sel.addEventListener('change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

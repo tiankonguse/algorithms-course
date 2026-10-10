@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>优化枚举：规划兼职工作</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>优化枚举：规划兼职工作</h1>
+      <p class="intro">有 n 份兼职，每份从 <code>startTime[i]</code> 做到 <code>endTime[i]</code>，报酬 <code>profit[i]</code>，时间重叠的两份不能同时做，问最大报酬。带枚举的转移写出来是 O(n²)，但前驱的位置有单调性，一层二分就能把枚举整段拿掉。</p>
+
+      <h2>零、先把转移写出来</h2>
+      <p>这题的状态不好定义成「第 i 天」，因为时间是稀疏的。换个角度：把工作按结束时间从早到晚排序，<code>dp[i]</code> 表示「只在前 i + 1 个工作里挑，最多能拿多少」。之所以按结束时间排序，是因为只有排在前面的工作才可能排在它前面做。</p>
+      <p>转移有两条路：不选第 i 个工作，答案是 <code>dp[i−1]</code>；选它，那前面能接的只剩那些 <code>endTime ≤ startTime[i]</code> 的，挑其中 dp 最大的一个加上 <code>profit[i]</code>。</p>
+      <figure class="fig" id="figJobs"></figure>
+      <p>这里有个细节值得单独说：题目写「如果你选择的工作在时间 X 结束，那么你可以立刻进行在时间 X 开始的下一份工作」，所以条件是 <code>endTime ≤ startTime</code>，等号要留着。随机数据里「某份工作的结束时间正好等于另一份的开始时间」这种情况占 68.52%，等号写掉的后果比想象中严重。</p>
+              <pre class="code"><span class="cm">// 暴力版：工作按结束时间排好序，dp[i] 表示只考虑前 i+1 个工作能拿到的最大报酬</span>
+    <span class="kw">int</span> <span class="fn">jobBrute</span>(vector&lt;<span class="kw">int</span>&gt;&amp; st, vector&lt;<span class="kw">int</span>&gt;&amp; en, vector&lt;<span class="kw">int</span>&gt;&amp; pr) {
+        <span class="kw">int</span> n = st.size();
+        vector&lt;Job&gt; <span class="fn">jobs</span>(n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) jobs[i] = { st[i], en[i], pr[i] };
+        sort(jobs.begin(), jobs.end(), [](<span class="kw">const</span> Job&amp; a, <span class="kw">const</span> Job&amp; b) { <span class="kw">return</span> a.e &lt; b.e; });
+        vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt; <span class="fn">dp</span>(n, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">long</span> <span class="kw">long</span> best = jobs[i].p;                              <span class="cm">// 只做第 i 个工作</span>
+            <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; i; j++) {                            <span class="cm">// 枚举所有可能的前驱</span>
+                <span class="kw">if</span> (jobs[j].e &lt;= jobs[i].s) {
+                    best = max(best, dp[j] + jobs[i].p);
+                }
+            }
+            dp[i] = (i == 0) ? best : max(best, dp[i - 1]);          <span class="cm">// 不选第 i 个，继承前面的答案</span>
+        }
+        <span class="kw">return</span> (<span class="kw">int</span>)dp[n - 1];
+    }</pre>
+      <p>内层那个 <code>for (int j = 0; j &lt; i; j++)</code> 就是全部的代价来源。n = 20000 时它要走 199990000 次。</p>
+
+      <h2>一、观察：能接在前面的工作是一段前缀</h2>
+      <p>排完序之后 <code>endTime</code> 单调不降。对固定的第 i 个工作，条件「<code>endTime[j] ≤ startTime[i]</code>」在 j 从 0 往右走时，先是成立，某个位置之后一直不成立。所以满足条件的 j 是连续的一段前缀，不会中间断掉。</p>
+      <p>而这个前缀里的 dp 值，<code>dp[0..i−1]</code> 本身单调不降（<code>dp[i] = max(best, dp[i−1])</code>），所以「前缀里 dp 最大的」就是前缀的最右端那一个。</p>
+      <p>两件事合起来：内层扫描不需要看每个 j，只要找到「<code>endTime ≤ startTime[i]</code> 的最右下标」，这是有序数组上的经典二分。</p>
+      <figure class="fig" id="figBin"></figure>
+              <pre class="code"><span class="cm">// jobs[0...i] 上找结束时间 &lt;= start 的最右下标；排过序，endTime 单调不降，可以二分</span>
+    <span class="kw">int</span> <span class="fn">find</span>(vector&lt;Job&gt;&amp; jobs, <span class="kw">int</span> i, <span class="kw">int</span> start) {
+        <span class="kw">int</span> ans = 0, l = 0, r = i, m;
+        <span class="kw">while</span> (l &lt;= r) {
+            m = (l + r) / 2;
+            <span class="kw">if</span> (jobs[m].e &lt;= start) {                                <span class="cm">// 注意是 &lt;=，相接的工作可以连着做</span>
+                ans = m;
+                l = m + 1;
+            } <span class="kw">else</span> {
+                r = m - 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>外层循环把 <code>find</code> 换进去，<code>O(n²)</code> 变 <code>O(n log n)</code>。排序本身也是 <code>O(n log n)</code>，整体不变。</p>
+              <pre class="code"><span class="kw">struct</span> Job { <span class="kw">int</span> s, e, p; };
+
+    <span class="cm">// 最优解：排序 + 二分定位前驱，O(n*logn)</span>
+    <span class="kw">int</span> <span class="fn">jobScheduling</span>(vector&lt;<span class="kw">int</span>&gt;&amp; st, vector&lt;<span class="kw">int</span>&gt;&amp; en, vector&lt;<span class="kw">int</span>&gt;&amp; pr) {
+        <span class="kw">int</span> n = st.size();
+        vector&lt;Job&gt; <span class="fn">jobs</span>(n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) jobs[i] = { st[i], en[i], pr[i] };
+        sort(jobs.begin(), jobs.end(), [](<span class="kw">const</span> Job&amp; a, <span class="kw">const</span> Job&amp; b) { <span class="kw">return</span> a.e &lt; b.e; });
+        vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt; <span class="fn">dp</span>(n, 0);
+        dp[0] = jobs[0].p;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            <span class="kw">long</span> <span class="kw">long</span> best = jobs[i].p;
+            <span class="kw">if</span> (jobs[0].e &lt;= jobs[i].s) {
+                best += dp[find(jobs, i - 1, jobs[i].s)];            <span class="cm">// 一次二分替代整个前驱枚举</span>
+            }
+            dp[i] = max(best, dp[i - 1]);
+        }
+        <span class="kw">return</span> (<span class="kw">int</span>)dp[n - 1];
+    }</pre>
+      <p><code>if (jobs[0].e &lt;= jobs[i].s)</code> 这一句是省掉二分的一种写法：连最早结束的那个工作都接不上，后面更不可能。二分本身能正确处理这种情况（<code>ans</code> 初值 0 会给出错的值），所以这层判断不能省。</p>
+
+      <h2>二、几个写错的地方，以及它们能藏多久</h2>
+      <p>随机 2 万组小数据（n ≤ 9，时间 1 到 12，报酬 1 到 30）实测的抓取率：</p>
+      <table class="complexity">
+        <tr><th>写法</th><th>与正确解不一致的比例</th><th>为什么会错</th></tr>
+        <tr><td>二分的判断写成 <code>&lt;</code></td><td>44.47%</td><td>相接的两份工作被判成冲突</td></tr>
+        <tr><td>dp 不取 <code>max</code>，直接返回 <code>dp[n−1]</code></td><td>53.80%</td><td>后面的 dp 依赖前面的「累积最大」，不是「必选第 i 个」</td></tr>
+        <tr><td>按开始时间排序</td><td>32.76%</td><td>endTime 不再单调，二分的前提没了</td></tr>
+      </table>
+      <p>「二分的判断写成 <code>&lt;</code>」这一条受时间值域影响很大，因为值域越窄，端点撞在一起的机会越多：</p>
+      <figure class="fig" id="figEq"></figure>
+      <p>时间值域 V = 6 时抓取率 80.36%，V = 12 时 60.92%，V = 24 时 41.60%，V = 60 时 21.02%，V = 200 时只剩 7.23%。拿大值域的随机数据去验，这个错法几乎抓不到。</p>
+
+      <h2>三、演示：一次二分替代一整趟扫描</h2>
+      <p>下面这个演示里，上半部分是排序后的工作，中间是 <code>endTime</code> 数组上的查找指针，下面是 dp。切到「线性扫」可以看到同一个 i 上要走多少步。</p>
+      <div class="viz" id="vizJob">
+        <p class="viz-title">兼职工作的 dp 填表</p>
+        <div id="jobBody"></div>
+        <p class="viz-note" id="jobNote"></p>
+        <p class="viz-answer" id="jobAns"></p>
+        <div class="viz-controls">
+          <button id="jobNext">下一步</button>
+          <button id="jobAuto">自动播放</button>
+          <button id="jobReset">重置</button>
+          <label>数据 <select id="jobData">
+            <option value="0">样例一：[1,3,50] [2,4,10] [3,5,40] [3,6,70]</option>
+            <option value="1">样例二：五份工作，答案 150</option>
+            <option value="2">样例三：三份全冲突</option>
+            <option value="3">自定义：四份全不冲突</option>
+          </select></label>
+          <label>查找方式 <select id="jobMode">
+            <option value="bin">二分</option>
+            <option value="scan">线性扫</option>
+          </select></label>
+        </div>
+      </div>
+
+      <h2>四、代价对比</h2>
+      <p>同一台机器上，n 取几档，暴力内层扫描与二分的实测（g++ -O2）：</p>
+      <figure class="fig" id="figPerf"></figure>
+      <p>n = 20000 时暴力 104.13 ms、二分 1.317 ms，差 79 倍；内层次数 199990000 对 267247，差 748 倍。n = 100000 时二分版 7.867 ms，暴力在这个规模上要跑 2.6 秒往上，量一下就知道它已经不合适了。</p>
+
+      <h2>五、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>版本</th><th>时间</th><th>空间</th><th>说明</th></tr>
+        <tr><td>排序 + 枚举前驱</td><td>O(n²)</td><td>O(n)</td><td>排序 O(n log n) 被内层盖过</td></tr>
+        <tr><td>排序 + 二分定位</td><td>O(n log n)</td><td>O(n)</td><td>每个 i 一次二分，dp 只开一维</td></tr>
+      </table>
+      <p>空间只有 <code>jobs</code> 和 <code>dp</code> 两个数组，都是 O(n)。<code>dp</code> 只用到 <code>dp[i−1]</code> 和 <code>dp[find(...)]</code>，而 find 的结果不固定，压不成单个变量，一维数组是必要的。</p>
+
+      <h2>六、总结</h2>
+      <p>这题的优化链条是：先排序让 <code>endTime</code> 单调 → 前缀条件连成一段 → 段内的 dp 又单调 → 整个枚举退化成「找最右的合法位置」→ 二分。每一步观察都把搜索范围砍掉一半以上。</p>
+      <p>写的时候注意三处：条件是 <code>≤</code> 不是 <code>&lt;</code>；<code>dp[i]</code> 要与 <code>dp[i−1]</code> 取最大；排序依据必须是结束时间。用大值域随机数据验不出等号的问题，专门造几组端点相接的样本更省事。</p>
+      <p>后面几道题会继续用同样的路子：先写出带枚举的转移，再盯着枚举的那一段看它有没有规律。规律不一样，换的查询结构也不一样。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>规划兼职工作</td><td><a href="https://leetcode.cn/problems/maximum-profit-in-job-scheduling/" target="_blank">1235. Maximum Profit in Job Scheduling</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解083【必备】动态规划中用观察优化枚举的技巧-下</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, fill, stroke, rx) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx == null ? 4 : rx) +
+      '" fill="' + fill + '" stroke="' + (stroke || 'none') + '"/>';
+  }
+  function line(x1, y1, x2, y2, stroke, w, dash) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke +
+      '" stroke-width="' + (w || 1) + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
+  }
+  function put(id, inner) { var el = document.getElementById(id); if (el) el.innerHTML = inner; }
+  function svgWrap(h, body) { return '<svg viewBox="0 0 680 ' + h + '" role="img">' + body + '</svg>'; }
+
+  // ---------- 图 1：工作时间轴 ----------
+  (function () {
+    var jobs = [[1, 3, 50], [2, 4, 10], [3, 5, 40], [3, 6, 70]];
+    var x0 = 70, unit = 68, y0 = 52, bh = 26, gap = 14;
+    var g = '';
+    for (var t = 0; t <= 7; t++) {
+      g += line(x0 + t * unit, y0 - 16, x0 + t * unit, y0 + jobs.length * (bh + gap) - gap + 2, C.border, 1);
+      g += txt(x0 + t * unit, y0 - 22, String(t), { size: 10, fill: C.dim });
+    }
+    for (var i = 0; i < jobs.length; i++) {
+      var y = y0 + i * (bh + gap);
+      var x = x0 + jobs[i][0] * unit, w = (jobs[i][1] - jobs[i][0]) * unit;
+      g += rect(x, y, w, bh, i === 0 || i === 3 ? C.blueBg : C.bg, i === 0 || i === 3 ? C.blue : C.border);
+      g += txt(x + w / 2, y + bh / 2 + 4, '[' + jobs[i][0] + ',' + jobs[i][1] + '] 报酬 ' + jobs[i][2], { size: 11, fill: C.text });
+    }
+    g += txt(24, y0 + 16, '工作', { size: 11, fill: C.dim, anchor: 'start' });
+    var yb = y0 + jobs.length * (bh + gap) + 6;
+    g += txt(24, yb + 16, '答案', { size: 11, fill: C.dim, anchor: 'start' });
+    g += txt(80, yb + 16, '[1,3] 与 [3,6] 首尾相接，50 + 70 = 120；比单做 [3,6] 或 [1,3]+[3,5] 都好', { size: 11, fill: C.text, anchor: 'start' });
+    put('figJobs', svgWrap(yb + 40, g) + '<figcaption>四份工作在时间轴上的样子。竖虚线是整数时刻，相接的两份可以连着做。</figcaption>');
+  })();
+
+  // ---------- 图 2：endTime 单调，二分定位 ----------
+  (function () {
+    var ends = [3, 4, 5, 6], start = 3;
+    var x0 = 70, cw = 96, y0 = 76, ch = 40, g = '';
+    g += txt(x0 - 16, y0 + ch / 2 + 4, 'endTime', { size: 11, fill: C.dim, anchor: 'end' });
+    for (var i = 0; i < ends.length; i++) {
+      var x = x0 + i * cw;
+      g += rect(x, y0, cw - 14, ch, i === 0 ? C.orangeBg : (ends[i] <= start ? C.blueBg : C.bg), ends[i] <= start ? C.orange : C.border);
+      g += txt(x + (cw - 14) / 2, y0 + 26, String(ends[i]), { size: 14, fill: C.text, weight: '600' });
+      g += txt(x + (cw - 14) / 2, y0 + ch + 16, 'i=' + i, { size: 10, fill: C.dim });
+    }
+    g += txt(x0 - 16, y0 + ch + 16, '下标', { size: 11, fill: C.dim, anchor: 'end' });
+    g += line(x0, y0 - 26, x0 + ends.length * cw - 14, y0 - 26, C.orange, 1, '4 3');
+    g += txt(x0 + 10, y0 - 34, 'start = 3，要找 endTime ≤ 3 的最右一个', { size: 12, fill: C.orange, anchor: 'start' });
+    var rows = [
+      ['l=0 r=3 m=1', 'ends[1] = 4 > 3', 'r = 0'],
+      ['l=0 r=0 m=0', 'ends[0] = 3 ≤ 3', 'ans = 0，l = 1'],
+      ['l=1 r=0', '区间空了', '返回 ans = 0']
+    ];
+    var ry = y0 + ch + 40;
+    for (var r = 0; r < rows.length; r++) {
+      g += txt(70, ry + r * 26, rows[r][0], { size: 11, fill: C.text, anchor: 'start' });
+      g += txt(220, ry + r * 26, rows[r][1], { size: 11, fill: C.dim, anchor: 'start' });
+      g += txt(400, ry + r * 26, rows[r][2], { size: 11, fill: C.blue, anchor: 'start' });
+    }
+    put('figBin', svgWrap(ry + rows.length * 26 + 10, g) + '<figcaption>endTime 排过序之后单调不降，判断条件把数组切成「前面满足、后面不满足」两段，二分找分界点。</figcaption>');
+  })();
+
+  // ---------- 图 3：等号错法的抓取率随值域下降 ----------
+  (function () {
+    var data = [[6, 80.36], [12, 60.92], [24, 41.60], [60, 21.02], [200, 7.23]];
+    var x0 = 90, y0 = 40, w = 520, h = 150, g = '';
+    g += line(x0, y0 + h, x0 + w, y0 + h, C.border, 1);
+    g += line(x0, y0 - 10, x0, y0 + h, C.border, 1);
+    for (var p = 0; p <= 100; p += 25) {
+      var y = y0 + h - h * p / 100;
+      g += line(x0, y, x0 + w, y, C.border, 1, '3 3');
+      g += txt(x0 - 10, y + 4, p + '%', { size: 10, fill: C.dim, anchor: 'end' });
+    }
+    var bw = 56;
+    for (var i = 0; i < data.length; i++) {
+      var cx = x0 + 60 + i * 95;
+      var bh = h * data[i][1] / 100;
+      g += rect(cx - bw / 2, y0 + h - bh, bw, bh, C.orangeBg, C.orange);
+      g += txt(cx, y0 + h - bh - 8, data[i][1] + '%', { size: 11, fill: C.orange, weight: '600' });
+      g += txt(cx, y0 + h + 18, 'V = ' + data[i][0], { size: 11, fill: C.text });
+    }
+    g += txt(x0 + w / 2, y0 + h + 44, '时间值域 V 越大，端点撞在一起的机会越少，等号写掉越难被发现', { size: 11, fill: C.dim });
+    put('figEq', svgWrap(y0 + h + 66, g) + '<figcaption>每组 2 万条随机样本，统计「二分的判断写成 &lt;」与正确解答案不同的比例。</figcaption>');
+  })();
+
+  // ---------- 图 4：性能柱图 ----------
+  (function () {
+    var ns = [2000, 5000, 10000, 20000];
+    var brute = [1.66, 9.54, 31.14, 104.13], bin = [0.152, 0.394, 0.659, 1.317];
+    var x0 = 80, y0 = 40, w = 520, h = 150, g = '';
+    g += line(x0, y0 + h, x0 + w, y0 + h, C.border, 1);
+    g += line(x0, y0 - 10, x0, y0 + h, C.border, 1);
+    var ticks = [0, 25, 50, 75, 100, 125];
+    for (var t = 0; t < ticks.length; t++) {
+      var y = y0 + h - h * ticks[t] / 125;
+      g += line(x0, y, x0 + w, y, C.border, 1, '3 3');
+      g += txt(x0 - 10, y + 4, String(ticks[t]), { size: 10, fill: C.dim, anchor: 'end' });
+    }
+    g += txt(x0 - 52, y0 + h / 2, '毫秒', { size: 11, fill: C.dim, anchor: 'end' });
+    for (var i = 0; i < ns.length; i++) {
+      var cx = x0 + 70 + i * 120;
+      var h1 = h * brute[i] / 125, h2 = h * bin[i] / 125;
+      g += rect(cx - 40, y0 + h - h1, 30, h1, C.gray, C.border);
+      g += txt(cx - 25, y0 + h - h1 - 8, brute[i].toFixed(1), { size: 10, fill: C.dim });
+      g += rect(cx + 4, y0 + h - h2, 30, h2, C.blueBg, C.blue);
+      g += txt(cx + 19, y0 + h - h2 - 8, bin[i].toFixed(2), { size: 10, fill: C.blue });
+      g += txt(cx, y0 + h + 18, 'n = ' + ns[i], { size: 11, fill: C.text });
+    }
+    g += rect(x0 + w - 190, y0 - 6, 12, 12, C.gray, C.border);
+    g += txt(x0 + w - 172, y0 + 3, '枚举前驱 O(n²)', { size: 10, fill: C.dim, anchor: 'start' });
+    g += rect(x0 + w - 70, y0 - 6, 12, 12, C.blueBg, C.blue);
+    g += txt(x0 + w - 52, y0 + 3, '二分 O(n log n)', { size: 10, fill: C.dim, anchor: 'start' });
+    put('figPerf', svgWrap(y0 + h + 44, g) + '<figcaption>n = 20000 时 104.13 ms 对 1.317 ms。横轴按样本量等距，纵轴是实测毫秒。</figcaption>');
+  })();
+
+  // ---------- 演示：dp 填表 ----------
+  (function () {
+    var DATA = [
+      { name: '样例一', jobs: [[1, 3, 50], [2, 4, 10], [3, 5, 40], [3, 6, 70]] },
+      { name: '样例二', jobs: [[1, 3, 20], [2, 5, 20], [3, 10, 100], [4, 6, 70], [6, 9, 60]] },
+      { name: '样例三', jobs: [[1, 2, 5], [1, 3, 6], [1, 4, 4]] },
+      { name: '不冲突', jobs: [[1, 3, 10], [4, 6, 20], [7, 9, 30], [10, 12, 40]] }
+    ];
+    var body = document.getElementById('jobBody');
+    var note = document.getElementById('jobNote');
+    var ansEl = document.getElementById('jobAns');
+    var nxt = document.getElementById('jobNext');
+    var auto = document.getElementById('jobAuto');
+    var rst = document.getElementById('jobReset');
+    var dsel = document.getElementById('jobData');
+    var msel = document.getElementById('jobMode');
+    var st = null, timer = null;
+
+    function build() {
+      var jobs = DATA[+dsel.value].jobs.slice();
+      var raw = jobs.slice();
+      jobs.sort(function (a, b) { return a[1] - b[1]; });
+      var n = jobs.length, dp = new Array(n).fill(0), steps = [], total = 0;
+      dp[0] = jobs[0][2];
+      steps.push({ kind: 'init', i: 0, dp: dp.slice(), jobs: jobs, note: '第 0 个工作没有前驱，dp[0] = 报酬 ' + jobs[0][2] + '。' });
+      for (var i = 1; i < n; i++) {
+        var best = jobs[i][2], cnt = 0, ans = -1;
+        if (jobs[0][1] <= jobs[i][0]) {
+          if (msel.value === 'bin') {
+            var l = 0, r = i - 1, m;
+            while (l <= r) {
+              m = Math.floor((l + r) / 2); cnt++; total++;
+              var ok = jobs[m][1] <= jobs[i][0];
+              if (ok) { ans = m; }
+              steps.push({ kind: 'cmp', i: i, l: l, r: r, m: m, ok: ok, ans: ans, dp: dp.slice(), jobs: jobs });
+              if (ok) l = m + 1; else r = m - 1;
+            }
+          } else {
+            for (var j = 0; j < i; j++) {
+              cnt++; total++;
+              var ok2 = jobs[j][1] <= jobs[i][0];
+              if (ok2) ans = j;
+              steps.push({ kind: 'cmp', i: i, l: 0, r: i - 1, m: j, ok: ok2, ans: ans, dp: dp.slice(), jobs: jobs });
+            }
+          }
+          best += dp[ans];
+          steps.push({ kind: 'found', i: i, ans: ans, best: best, cnt: cnt, dp: dp.slice(), jobs: jobs });
+        } else {
+          steps.push({ kind: 'nofind', i: i, ans: -1, best: best, cnt: cnt, dp: dp.slice(), jobs: jobs });
+        }
+        dp[i] = Math.max(best, dp[i - 1]);
+        steps.push({ kind: 'set', i: i, dp: dp.slice(), jobs: jobs, best: best });
+      }
+      steps.push({ kind: 'done', ans: dp[n - 1], dp: dp.slice(), jobs: jobs, total: total });
+      st = { steps: steps, step: 0, total: total, jobs: jobs };
+    }
+
+    function draw() {
+      var s = st.steps[st.step], jobs = s.jobs, n = jobs.length;
+      var g = '';
+      var cw = Math.min(150, Math.floor(560 / n)), x0 = 78, y0 = 62, ch = 40;
+      g += txt(24, 22, '工作（按结束时间排序）', { size: 11, fill: C.dim, anchor: 'start' });
+      for (var i = 0; i < n; i++) {
+        var x = x0 + i * cw;
+        var cur = (s.kind !== 'done') && i === s.i;
+        g += rect(x, y0, cw - 10, ch, cur ? C.orangeBg : C.bg, cur ? C.orange : C.border);
+        g += txt(x + (cw - 10) / 2, y0 + 17, '[' + jobs[i][0] + ',' + jobs[i][1] + ']', { size: 11, fill: cur ? C.orange : C.text });
+        g += txt(x + (cw - 10) / 2, y0 + 33, '报酬 ' + jobs[i][2], { size: 10, fill: C.dim });
+        g += txt(x + (cw - 10) / 2, y0 - 6, 'i=' + i, { size: 10, fill: cur ? C.orange : C.dim });
+      }
+      var yEnd = y0 + ch + 26;
+      g += txt(x0 - 10, yEnd + 22, 'endTime', { size: 11, fill: C.dim, anchor: 'end' });
+      for (var i2 = 0; i2 < n; i2++) {
+        var x2 = x0 + i2 * cw, isM = (s.kind === 'cmp') && i2 === s.m;
+        var inRange = (s.kind === 'cmp') && i2 >= s.l && i2 <= s.r;
+        g += rect(x2, yEnd, cw - 10, 30, isM ? C.orangeBg : (inRange ? C.blueBg : C.bg), isM ? C.orange : (inRange ? C.blue : C.border));
+        g += txt(x2 + (cw - 10) / 2, yEnd + 20, String(jobs[i2][1]), { size: 12, fill: isM ? C.orange : C.text });
+        if (isM) g += txt(x2 + (cw - 10) / 2, yEnd + 44, 'm', { size: 11, fill: C.orange, weight: '600' });
+        if (s.kind === 'cmp' && i2 === s.l) g += txt(x2 + 2, yEnd + 44, 'l', { size: 10, fill: C.blue, anchor: 'start' });
+        if (s.kind === 'cmp' && i2 === s.r) g += txt(x2 + (cw - 10) - 2, yEnd + 44, 'r', { size: 10, fill: C.blue, anchor: 'end' });
+      }
+      var yDp = yEnd + 62;
+      g += txt(x0 - 10, yDp + 22, 'dp', { size: 11, fill: C.dim, anchor: 'end' });
+      for (var i3 = 0; i3 < n; i3++) {
+        var x3 = x0 + i3 * cw, filled = i3 <= (s.kind === 'done' ? n - 1 : s.i);
+        g += rect(x3, yDp, cw - 10, 30, filled ? C.blueBg : C.bg, filled ? C.blue : C.border);
+        g += txt(x3 + (cw - 10) / 2, yDp + 20, filled ? String(s.dp[i3]) : '', { size: 12, fill: C.blue, weight: '600' });
+      }
+      body.innerHTML = svgWrap(yDp + 50, g);
+
+      var modeName = msel.value === 'bin' ? '二分' : '线性扫';
+      if (s.kind === 'init') {
+        note.innerHTML = s.note; ansEl.textContent = '';
+      } else if (s.kind === 'cmp') {
+        note.innerHTML = '处理第 ' + s.i + ' 个工作（开始时间 ' + jobs[s.i][0] + '），' + modeName + '第 ' + (st.step) + ' 次比较：endTime[' + s.m + '] = ' + jobs[s.m][1] +
+          (s.ok ? ' ≤ ' : ' > ') + jobs[s.i][0] + (s.ok ? '，接得上，记为候选。' : '，接不上，往左找。');
+        ansEl.textContent = '';
+      } else if (s.kind === 'found') {
+        note.innerHTML = '第 ' + s.i + ' 个工作找到前驱 ' + s.ans + '，best = ' + jobs[s.i][2] + ' + dp[' + s.ans + '] = ' + s.best + '（本轮共 ' + s.cnt + ' 次比较）。';
+        ansEl.textContent = '';
+      } else if (s.kind === 'nofind') {
+        note.innerHTML = '第 ' + s.i + ' 个工作的最早结束时间 ' + jobs[0][1] + ' > ' + jobs[s.i][0] + '，一个前驱都没有，best = ' + s.best + '。';
+        ansEl.textContent = '';
+      } else if (s.kind === 'set') {
+        note.innerHTML = 'dp[' + s.i + '] = max(' + s.best + ', dp[' + (s.i - 1) + '] = ' + s.dp[s.i - 1] + ') = ' + s.dp[s.i] + '。';
+        ansEl.textContent = '';
+      } else {
+        note.innerHTML = '填完了。' + modeName + '全程比较 ' + s.total + ' 次。';
+        ansEl.textContent = '答案：' + s.ans;
+      }
+      nxt.disabled = (st.step >= st.steps.length - 1);
+      if (nxt.disabled && timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+    }
+
+    function reset() { if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; } build(); draw(); }
+    nxt.addEventListener('click', function () { if (st.step < st.steps.length - 1) { st.step++; draw(); } });
+    auto.addEventListener('click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step < st.steps.length - 1) { st.step++; draw(); } else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 700);
+    });
+    rst.addEventListener('click', reset);
+    dsel.addEventListener('change', reset);
+    msel.addEventListener('change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

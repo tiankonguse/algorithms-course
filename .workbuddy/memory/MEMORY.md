@@ -95,5 +95,5 @@
 - **首页左侧专题目录**：`index.html` 的 `#homeNav` 由 shared.js 8b-0 按 json groups 渲染（`#group-<i>` 锚点 + 序号/组名/篇数 + scrollspy 高亮），点击平滑定位（`.group` scroll-margin-top 76px）。改首页结构时保持 `homeNav + home-main` 的 flex 布局；900px 以下自动隐藏。
 
 ## 组顺序（2026-10-10 更新）
-- 「入门」之后的 DP 专题组按课号升序排：**树型 dp(078) → 状压 dp(080) → 优化枚举的 dp(082)**，再往后才是「序列与区间」。082 的「优化枚举的 dp」是 `dp-opt-stock-basic` / `dp-opt-stock-advanced` / `dp-opt-di-sequence` 三页。
+- 「入门」之后的 DP 专题组按课号升序排：**树型 dp(078) → 状压 dp(080) → 优化枚举的 dp(082) → 数位 dp(084)**，再往后才是「序列与区间」。082/083 的「优化枚举的 dp」是 6 页（dp-opt-stock-basic / dp-opt-stock-advanced / dp-opt-di-sequence / dp-opt-jobs / dp-opt-inverse / dp-opt-greedy）；084 的「数位 dp」是 3 页（digit-dp-basic / digit-dp-range / digit-dp-mask），插在「优化枚举的 dp」之后。
 - 新组位置规则仍按课号升序插进「入门」之后的那一段，不要追加到最末（末尾的历史组是倒序阶段的产物）。

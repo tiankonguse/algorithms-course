@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数位 dp：把用过的数字装进 status</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.digits { display: flex; gap: 6px; margin: 4px 0 8px; }
+.dcell { width: 40px; height: 40px; border: 1px solid var(--border); border-radius: 6px; display: flex;
+         align-items: center; justify-content: center; font-family: ui-monospace, Menlo, Consolas, monospace;
+         font-size: 17px; background: #fff; color: var(--text); }
+.dcell.on { border-color: #2563eb; background: #dbeafe; font-weight: 700; }
+.dcell.dim { color: var(--text-dim); background: var(--bg); }
+.maskrow { display: flex; gap: 6px; margin: 4px 0 10px; }
+.mcell { width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 6px; display: flex;
+         align-items: center; justify-content: center; font-family: ui-monospace, Menlo, Consolas, monospace;
+         font-size: 15px; background: var(--bg); color: var(--text-dim); }
+.mcell.on { border-color: #ea580c; background: #ffedd5; color: #ea580c; font-weight: 700; }
+.tagline { font-size: 13px; color: var(--text-dim); margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>数位 dp：把用过的数字装进 status</h1>
+      <p class="intro">「每一位都互不相同」这个约束和前面几题不一样。前面几题管的是「这一位不能超过某个数」，这里管的是「这个数字之前有没有出现过」。十进制只有 10 个数字，用过的那些正好塞进一个整数的低 10 位。有了这个 status，剩下还有几位能自由排，可以用排列数直接乘出来，不必逐位递归。</p>
+
+      <h2>零、状态里装一个集合</h2>
+      <p>题目给一个正整数 n，问 [1, n] 里每一位都互不相同的正整数有几个。n 最大到 10⁹ 减一，逐个数判断是 10⁹ 级别，不行。</p>
+      <p>拆成数位看，每个数是一个不超过 10 位的串。约束落在「用过的数字」上：填到某一位时，候选数字是「0 到 9 里没被前面用过的那些」。所以状态里除了走到第几位，还要知道用过哪些。</p>
+      <p>用过的数字最多 10 个，拿一个整数的第 d 位表示「数字 d 用过了」。前缀是 1、3、5 时，status 的第 1、第 3、第 5 位是 1，其余是 0。</p>
+      <figure class="fig" id="figMask"></figure>
+      <p>状态空间的容量一眼可见：<code>len × 2¹⁰ × 2</code>。len 到 10 也只是二十万个格子，比前一题的数位和状态还小。</p>
+
+      <h2>一、剩下的位能自由排，就先算出来</h2>
+      <p>记 <code>cnt[i]</code> 为「前缀已经确定（非空，一共 len−i 位），还剩 i 位要填，有几种填法」。前缀用掉了 <code>len−i</code> 个数字，可选数字还剩 <code>10−(len−i)</code> 个，往后每填一位可选数减一个，所以</p>
+      <p><code>cnt[i] = cnt[i−1] × (10 − len + i)</code>，边界 <code>cnt[0] = 1</code>。</p>
+      <p>以 len = 4 为例：<code>cnt[1] = 7</code>（前缀 3 位已定，最后一位还有 7 个数字可选），<code>cnt[2] = 8×7 = 56</code>，<code>cnt[3] = 9×8×7 = 504</code>。</p>
+      <figure class="fig" id="figCnt"></figure>
+      <p>这张表和第一页那个「9·9·8·…」是同一类乘积，区别在于这里的起点跟着「前缀已经用掉几个数字」走，而第一页的首位固定不能用 0。</p>
+
+      <h2>二、位数比 len 少的数先单独收</h2>
+      <p>链只负责位数正好等于 len 的那些数，位数更少的得另外算。1 位数是 1 到 9，共 9 个；k 位数首位 9 种，后面每位可选数递减，一共 <code>9·9·8·…·(10−k+1)</code> 个。k 从 2 累加到 len−1。</p>
+      <p>最高位那一层也能顺手处理：最高位可以在 1 到 <code>first−1</code> 里选（<code>first</code> 是 n 的最高位），每一位选完后面全是自由的，各贡献 <code>cnt[len−1]</code>。</p>
+      <pre class="code"><span class="cm">// cnt[i]：前缀已经确定（共 len - i 位，非空），还剩 i 位自由排，有几种</span>
+    <span class="cm">// len = 4 时：cnt[3] = 9*8*7，cnt[2] = 8*7，cnt[1] = 7，cnt[0] = 1</span>
+    vector&lt;<span class="kw">int</span>&gt; <span class="fn">cnt</span>(len, 0);
+    cnt[0] = 1;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1, k = 10 - len + 1; i &lt; len; i++, k++) {
+        cnt[i] = cnt[i - 1] * k;
+    }
+    <span class="kw">int</span> ans = 0;
+    <span class="kw">if</span> (len &gt;= 2) {
+        ans = 9;                                 <span class="cm">// 1 位数：1 到 9</span>
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2, a = 9, b = 9; i &lt; len; i++, b--) {   <span class="cm">// 2 位、3 位 … 全部累加</span>
+            a *= b;
+            ans += a;
+        }
+    }
+    <span class="kw">int</span> first = n / offset;                      <span class="cm">// n 的最高位</span>
+    ans += (first - 1) * cnt[len - 1];            <span class="cm">// 最高位选 1 到 first - 1，低位随便排</span>
+    ans += f(n, len - 1, offset / 10, 1 &lt;&lt; first); <span class="cm">// 最高位就选 first，往下走</span>
+    <span class="kw">return</span> ans;</pre>
+
+      <h2>三、逐位走，status 一路带着</h2>
+      <p>剩下的就是那条贴着 n 的链。走到第 i 位时，n 的这一位是 <code>first</code>，状态是 <code>status</code>：</p>
+      <p>1）从 0 到 <code>first−1</code> 里挑没被用过的数字，每个后面 <code>len−1</code> 位自由，贡献 <code>cnt[len−1]</code>。</p>
+      <p>2）如果 <code>first</code> 自己没被用过，就带着 <code>status | (1 &lt;&lt; first)</code> 往下走一位。</p>
+      <p>3）<code>first</code> 已经被用过，链就断了，返回 0。</p>
+      <pre class="code"><span class="cm">// 前缀已经和 n 完全相同，还剩 len 位；status 是前缀已经用掉的数字集合</span>
+    <span class="kw">int</span> <span class="fn">f</span>(<span class="kw">int</span> n, <span class="kw">int</span> len, <span class="kw">int</span> offset, <span class="kw">int</span> status) {
+        <span class="kw">if</span> (len == 0) <span class="kw">return</span> 1;                     <span class="cm">// n 自己</span>
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">int</span> first = (n / offset) % 10;               <span class="cm">// n 当前这一位</span>
+        <span class="kw">for</span> (<span class="kw">int</span> cur = 0; cur &lt; first; cur++) {
+            <span class="kw">if</span> ((status &amp; (1 &lt;&lt; cur)) == 0) ans += cnt[len - 1];
+        }
+        <span class="kw">if</span> ((status &amp; (1 &lt;&lt; first)) == 0) {           <span class="cm">// 这一位和 n 一样，但数字得没用过</span>
+            ans += f(n, len - 1, offset / 10, status | (1 &lt;&lt; first));
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>拿 n = 987 走一遍。最高位是 9，1 到 8 各贡献 <code>cnt[2] = 72</code>，共 576；9 没被用过，继续。第二位是 8，status 里只有 9，0 到 7 都没用过，各贡献 <code>cnt[1] = 8</code>，共 64；8 继续。第三位是 7，0 到 6 各贡献 <code>cnt[0] = 1</code>，共 7；7 继续，走完最后一位，987 自己再加 1。链上合计 648。</p>
+      <figure class="fig" id="figWalk"></figure>
+      <p>再加上位数更少的 9 + 81 = 90，总共 738。</p>
+
+      <h2>四、反过来的那一问</h2>
+      <p>「至少有 1 位重复的数字个数」不用另写一遍。区间 [1, n] 里要么每一位都不同，要么至少有两位重复，两者互补，所以答案是 <code>n − (每一位都不同的个数)</code>。同一份 <code>countSpecialNumbers</code> 直接复用。</p>
+      <p>两个题目名字不同、链接不同，落到的代码是同一段，这是这题的一个特点。</p>
+
+      <h2>五、写错的地方</h2>
+      <p>随机 2 万组小数据（n 不超过 300000）实测的抓取率：</p>
+      <table class="complexity">
+        <tr><th>写法</th><th>与正确解不一致的比例</th><th>为什么会错</th></tr>
+        <tr><td>cnt 的系数写成 <code>10 − i</code></td><td>98.15%</td><td>少算了「前缀已经用掉几个」这个偏移，位数越多差得越远</td></tr>
+        <tr><td>漏掉 <code>(first − 1) × cnt[len − 1]</code> 这一项</td><td>63.10%</td><td>只剩「和 n 同前缀」这一条链，最高位比 first 小的数全丢了</td></tr>
+        <tr><td>递归时忘了把当前位并进 status</td><td>80.11%</td><td>同一个数字会被重复使用，长数字里重复的都被当成了合法的</td></tr>
+      </table>
+      <figure class="fig" id="figBad"></figure>
+      <p>第一条错法值得多看一眼：<code>cnt[i] = cnt[i−1] × (10 − i)</code> 看着很像「每填一位少一个数字」，但它少算了前缀已经占掉的数量。len = 4 时算出来是 9、72、504，正确值是 7、56、504，只有最后一项恰好撞上。</p>
+
+      <h2>六、演示：status 一路亮灯</h2>
+      <p>下面逐位走。先把位数更少的收进来，再走贴着 n 的链，每走一位把用到的数字在 status 上点亮。链上某一位之后能自由排的位数会随之变少，<code>cnt</code> 表正好把这件事写死了。</p>
+      <div class="viz" id="vizMask">
+        <p class="viz-title">每一位都互不相同的数字个数</p>
+        <div id="mkBody"></div>
+        <p class="viz-note" id="mkNote"></p>
+        <p class="viz-answer" id="mkAns"></p>
+        <div class="viz-controls">
+          <button id="mkNext">下一步</button>
+          <button id="mkAuto">自动播放</button>
+          <button id="mkReset">重置</button>
+          <label>数据 <select id="mkData">
+            <option value="0">n = 987（答案 738）</option>
+            <option value="1">n = 20（答案 19）</option>
+            <option value="2">n = 100（答案 90）</option>
+            <option value="3">n = 5000（答案 2754）</option>
+          </select></label>
+        </div>
+      </div>
+
+      <h2>七、三种写法的代价</h2>
+      <p>同一台机器实测（g++ -O2）：</p>
+      <table class="complexity">
+        <tr><th>写法</th><th>耗时随 n 的变化</th><th>状态数</th></tr>
+        <tr><td>枚举 1 到 n</td><td>n=10⁷ 时 53.4 ms，线性增长</td><td>不适用</td></tr>
+        <tr><td>直接排列组合</td><td>n=10⁹ 也是 0.0000 ms（量不出来）</td><td>只开一张 len 项的 cnt 表</td></tr>
+        <tr><td>成体系的记忆化（status + free）</td><td>同样是微秒级</td><td>len=9 时实际访问 4089 个状态，上界 9×1024×2 = 18432</td></tr>
+      </table>
+      <figure class="fig" id="figPerf"></figure>
+      <p>两条数位 dp 路线都够用。直接排列组合走的是「能算的地方就用乘法算掉」，只在一条链上递归，代码短、常数小；带 status 的记忆化版本把 (i, status, free) 全挂进表里，写起来更机械，遇到新约束加维度就行。这题两种写法都跑得飞起，选哪个看顺手。</p>
+
+      <h2>八、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>写法</th><th>时间</th><th>空间</th><th>说明</th></tr>
+        <tr><td>枚举</td><td>O(n log n)</td><td>O(1)</td><td>每个数拆一遍位</td></tr>
+        <tr><td>直接排列组合</td><td>O(len · 10)</td><td>O(len)</td><td>链上每一位最多看十个数字，cnt 表 len 项</td></tr>
+        <tr><td>记忆化 status 版</td><td>O(len · 2¹⁰ · 10)</td><td>O(len · 2¹⁰)</td><td>状态数是位数乘掩码数乘 free 两态</td></tr>
+      </table>
+      <p>两条 dp 路线的复杂度里都只有 len，没有 n。掩码那一维是常数 2¹⁰，所以 status 版的复杂度实际写成 <code>O(len)</code> 也不过分，只是常数比直接乘的那版大一个量级。</p>
+
+      <h2>九、总结</h2>
+      <p>约束可以分成两类：一类是「这一位不能超过某个数」，用 free 管；一类是「这个数字之前有没有出现过」，用 status 这样的集合管。两类可以同时挂在状态里。</p>
+      <p>集合的大小决定这一维的容量。数字只有十种，status 就是一维 1024；字母是 26 种，同样的写法就要 2²⁶，那时候得换成别的记法。</p>
+      <p>能自由排的位数不要逐位递归，提前算一张「还剩 i 位、前缀已定」的表，链上每位乘一下就行。表里那个「前缀已定几位」的偏移最容易写漏，它是 <code>10 − len + i</code> 而不是 <code>10 − i</code>。</p>
+      <p>最后一件事是互补。问「至少有一位重复」时不用重写，拿总数减掉「全不重复」更快，也少一处出错的地方。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>统计特殊整数（每一位都互不相同）</td><td><a href="https://leetcode.cn/problems/count-special-integers/" target="_blank">2376. Count Special Integers</a></td></tr>
+        <tr><td>LeetCode</td><td>至少有 1 位重复的数字</td><td><a href="https://leetcode.cn/problems/numbers-with-repeated-digits/" target="_blank">1012. Numbers With Repeated Digits</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解084【必备】数位dp-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function box(x, y, w, h, fill, stroke, rx) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx == null ? 8 : rx) +
+           '" fill="' + fill + '" stroke="' + stroke + '"/>';
+  }
+  function tx(x, y, s, size, fill, anchor, weight) {
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (size || 13) + '" fill="' + fill +
+           '" text-anchor="' + (anchor || 'start') + '"' + (weight ? ' font-weight="' + weight + '"' : '') +
+           '>' + esc(s) + '</text>';
+  }
+  function ln(x1, y1, x2, y2, stroke, dash) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke +
+           '" stroke-width="1.4"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
+  }
+  function svg(h, inner) {
+    return '<svg viewBox="0 0 680 ' + h + '" xmlns="http://www.w3.org/2000/svg">' + inner + '</svg>';
+  }
+  function maskRow(x0, y, used, cell) {
+    var g = '', cw = cell || 52;
+    for (var d = 0; d < 10; d++) {
+      var on = used.indexOf(d) >= 0;
+      g += box(x0 + d * cw, y, cw - 8, 40, on ? C.orangeBg : C.bg, on ? C.orange : C.border, 6);
+      g += tx(x0 + d * cw + (cw - 8) / 2, y + 26, String(d), 14, on ? C.orange : C.gray, 'middle', on ? 700 : 400);
+    }
+    return g;
+  }
+
+  // ---------- 图 1：status 十位 ----------
+  (function () {
+    var g = '';
+    g += tx(20, 24, '前缀是 1、3、5 时，status 的低 10 位长这样', 13, C.dim);
+    g += maskRow(60, 40, [1, 3, 5], 56);
+    g += tx(20, 112, '第 d 位是 1 表示数字 d 已经用过；填下一位时，候选就是这些 0 里对应的数字', 12.5, C.dim);
+    g += tx(20, 138, 'status = 0b0000101010，也就是十进制的 42', 12.5, C.text);
+    g += box(60, 158, 140, 34, C.blueBg, C.blue, 6);
+    g += tx(130, 180, '十种数字 → 1024 个状态', 12.5, C.blue, 'middle', 600);
+    document.getElementById('figMask').innerHTML =
+      svg(212, g) + '<figcaption>用过的数字直接用位标记，查询一位有没有用过就是一次按位与</figcaption>';
+  })();
+
+  // ---------- 图 2：len = 4 的 cnt 表 ----------
+  (function () {
+    var g = '', data = [[3, 504, '前缀 1 位已定，还剩 3 位：9×8×7'],
+                        [2, 56, '前缀 2 位已定，还剩 2 位：8×7'],
+                        [1, 7, '前缀 3 位已定，还剩 1 位：7'],
+                        [0, 1, '前缀就是整个数，只有本身']];
+    g += tx(20, 24, 'len = 4 时的 cnt 表', 13, C.dim);
+    for (var i = 0; i < data.length; i++) {
+      var y = 44 + i * 42;
+      g += box(20, y, 74, 32, C.blueBg, C.blue, 6);
+      g += tx(57, y + 22, 'cnt[' + data[i][0] + ']', 13, C.blue, 'middle', 600);
+      g += tx(106, y + 22, '= ' + data[i][1], 13, C.text, 'start', 600);
+      g += tx(180, y + 22, data[i][2], 12.5, C.dim);
+    }
+    g += tx(20, 226, '每往下一行都乘一个递减的可选数字：7 → 56 → 504', 12.5, C.dim);
+    document.getElementById('figCnt').innerHTML =
+      svg(240, g) + '<figcaption>cnt 表把「剩下的位自由排」这一整块代价提前算完</figcaption>';
+  })();
+
+  // ---------- 图 3：n = 987 的走法 ----------
+  (function () {
+    var g = '';
+    g += tx(20, 24, 'n = 987 的三层贡献', 13, C.dim);
+    var rows = [['最高位，1 到 8', '8 × cnt[2] = 8 × 72', 576],
+                ['第二位，0 到 7（9 已用）', '8 × cnt[1] = 8 × 8', 64],
+                ['第三位，0 到 6（9、8 已用）', '7 × cnt[0] = 7 × 1', 7],
+                ['987 自己', '链走到底', 1]];
+    var acc = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var y = 42 + i * 40;
+      acc += rows[i][2];
+      g += box(20, y, 250, 32, C.blueBg, C.blue, 6);
+      g += tx(32, y + 22, rows[i][0], 12.5, C.blue);
+      g += tx(290, y + 22, rows[i][1], 12.5, C.text);
+      g += tx(510, y + 22, '累计 ' + acc, 12.5, C.dim);
+    }
+    g += tx(290, 216, '链上合计 576 + 64 + 7 + 1 = 648', 12.5, C.text, 'start', 600);
+    g += tx(290, 238, '再加位数更少的 9 + 81 = 90，答案 738', 12.5, C.orange, 'start', 600);
+    document.getElementById('figWalk').innerHTML =
+      svg(252, g) + '<figcaption>每一位上「比 first 小的没用过的数字」各贡献一次 cnt</figcaption>';
+  })();
+
+  // ---------- 图 4：三种错法的抓取率 ----------
+  (function () {
+    var g = '', rows = [['cnt 系数写成 10−i', 98.15], ['漏掉 (first−1)×cnt[len−1]', 63.10],
+                        ['递归忘并 status', 80.11]];
+    var x0 = 250, unit = 3.5, maxw = 100 * unit;
+    g += ln(x0, 44, x0 + maxw, 44, C.border);
+    for (var t = 0; t <= 100; t += 50) {
+      g += ln(x0 + t * unit, 40, x0 + t * unit, 176, C.border, '3 3');
+      g += tx(x0 + t * unit, 34, t + '%', 11.5, C.gray, 'middle');
+    }
+    for (var i = 0; i < rows.length; i++) {
+      var y = 56 + i * 42, w = rows[i][1] * unit;
+      g += tx(x0 - 12, y + 17, rows[i][0], 12.5, C.text, 'end');
+      g += box(x0, y, Math.max(w, 2), 24, C.orangeBg, C.orange, 5);
+      g += tx(x0 + w + 8, y + 17, rows[i][1].toFixed(2) + '%', 12.5, C.orange, 'start', 600);
+    }
+    document.getElementById('figBad').innerHTML =
+      svg(190, g) + '<figcaption>三种写法的抓取率，随机 2 万组小数据实测</figcaption>';
+  })();
+
+  // ---------- 图 5：三种写法的耗时 ----------
+  (function () {
+    var g = '', data = [['10⁵', 0.492, 0.0005, 0.0005], ['10⁶', 5.240, 0.0010, 0.0005],
+                        ['10⁷', 53.385, 0.0010, 0.0010]];
+    var base = 196, per = 22.0;
+    function yy(v) { return base - (Math.log(v) / Math.LN10 + 3.5) * per; }
+    g += ln(56, 28, 56, base, C.border);
+    var labs = [['10⁻³', -3], ['10⁻¹', -1], ['10¹', 1], ['10³', 3]];
+    for (var k = 0; k < labs.length; k++) {
+      g += ln(52, yy(Math.pow(10, labs[k][1])), 660, yy(Math.pow(10, labs[k][1])), C.border, '3 3');
+      g += tx(48, yy(Math.pow(10, labs[k][1])) + 4, labs[k][0], 11, C.gray, 'end');
+    }
+    g += tx(20, 20, '毫秒', 12, C.dim);
+    for (var i = 0; i < data.length; i++) {
+      var x = 110 + i * 170;
+      g += box(x, yy(data[i][1]), 26, base - yy(data[i][1]), C.orangeBg, C.orange, 4);
+      g += box(x + 34, yy(data[i][2]), 26, base - yy(data[i][2]), C.blueBg, C.blue, 4);
+      g += box(x + 68, yy(data[i][3]), 26, base - yy(data[i][3]), C.bg, C.gray, 4);
+      g += tx(x + 47, base + 18, 'n = ' + data[i][0], 11.5, C.dim, 'middle');
+    }
+    g += tx(600, 52, '橙：枚举', 12, C.orange);
+    g += tx(600, 72, '蓝：直接组合', 12, C.blue);
+    g += tx(600, 92, '灰：记忆化', 12, C.gray);
+    document.getElementById('figPerf').innerHTML =
+      svg(228, g) + '<figcaption>纵轴对数刻度。枚举线性涨，两条数位 dp 路线都贴着底</figcaption>';
+  })();
+
+  // ---------- 演示：status 一路亮灯 ----------
+  (function () {
+    var DATA = [{ n: '987', ans: 738 }, { n: '20', ans: 19 }, { n: '100', ans: 90 }, { n: '5000', ans: 2754 }];
+    var body = document.getElementById('mkBody'), note = document.getElementById('mkNote'),
+        ansEl = document.getElementById('mkAns'),
+        nxt = document.getElementById('mkNext'), auto = document.getElementById('mkAuto'),
+        rst = document.getElementById('mkReset'), dsel = document.getElementById('mkData');
+    var st = { step: 0, steps: [], n: '', ans: 0, cnt: [], len: 0 };
+    var timer = null;
+
+    function build() {
+      var d = DATA[+dsel.value], s = d.n, len = s.length, cnt = [1], k;
+      for (k = 1; k < len; k++) cnt[k] = cnt[k - 1] * (10 - len + k);
+      var steps = [], total = 0;
+      if (len >= 2) {
+        var a = 9, b = 9;
+        total = 9;
+        steps.push({ kind: 'short', k: 1, add: 9, total: 9, formula: '1 位数：1 到 9 共 9 个' });
+        for (k = 2; k < len; k++) { a = a * b; b--; total += a; steps.push({ kind: 'short', k: k, add: a, total: total, formula: k + ' 位数：' + '9×9' + (k > 2 ? '×8…' : '') }); }
+      }
+      var status = [], pos = 0, acc = total, dead = false;
+      while (pos < len) {
+        var first = +s[pos], cand = [], j;
+        for (j = (pos === 0 ? 1 : 0); j < first; j++) { if (status.indexOf(j) < 0) cand.push(j); }
+        var rem = len - pos - 1, add = cand.length * cnt[rem];
+        acc += add;
+        var used = status.indexOf(first) >= 0;
+        steps.push({ kind: 'pos', pos: pos, first: first, cand: cand, rem: rem, add: add, acc: acc, status: status.slice(), used: used });
+        if (used) { dead = true; break; }
+        status = status.concat([first]);
+        pos++;
+      }
+      if (!dead) { acc += 1; }
+      steps.push({ kind: 'done', acc: acc, len: len, status: status.slice() });
+      st.steps = steps; st.n = s; st.ans = d.ans; st.cnt = cnt; st.len = len; st.step = 0;
+    }
+
+    function rowsHTML(pos, status) {
+      var h = '<div class="digits">', k;
+      for (k = 0; k < st.n.length; k++) {
+        h += '<div class="dcell' + (k === pos ? ' on' : (pos >= 0 && k < pos ? ' dim' : '')) + '">' + st.n[k] + '</div>';
+      }
+      h += '</div><div class="maskrow">';
+      for (k = 0; k < 10; k++) {
+        h += '<div class="mcell' + (status && status.indexOf(k) >= 0 ? ' on' : '') + '">' + k + '</div>';
+      }
+      return h + '</div>';
+    }
+
+    function draw() {
+      var s = st.steps[Math.min(st.step, st.steps.length - 1)], html = '';
+      html += '<div class="tagline">n = ' + st.n + '　len = ' + st.len +
+              '　cnt 表：' + st.cnt.map(function (v, i) { return 'cnt[' + i + ']=' + v; }).join('，') + '</div>';
+      if (s.kind === 'short') {
+        html += rowsHTML(-1, []);
+        html += '<div class="breakdown"><div class="row">' + s.formula + '</div>' +
+                '<div class="row">位数比 len 少的数链上走不到，先单独累加</div>' +
+                '<div class="total">当前累计：' + s.total + '</div></div>';
+        note.innerHTML = '1 位数到 len−1 位数全部收进来，这一块和第一页那个乘积是同一套算法。';
+      } else if (s.kind === 'pos') {
+        html += rowsHTML(s.pos, s.status);
+        html += '<div class="breakdown"><div class="row">n 的这一位是 ' + s.first +
+                '，status 里还没用过的更小数字有 ' + (s.cand.length ? s.cand.join('、') : '（没有）') + '</div>' +
+                '<div class="row">每个候选贡献 cnt[' + s.rem + '] = ' + st.cnt[s.rem] +
+                '，共 ' + s.cand.length + ' 个 → +' + s.add + '</div>' +
+                '<div class="row">' + (s.used ? (s.first + ' 已经用过，链到这里断了')
+                                               : ('这一位取 ' + s.first + '，status 里点亮它，继续往下')) + '</div>' +
+                '<div class="total">当前累计：' + s.acc + '</div></div>';
+        note.innerHTML = 'status 每往下走一位就多亮一个数字，剩下的可选数字少一个，cnt 的下标也跟着减一。';
+      } else {
+        html += rowsHTML(-1, s.status);
+        html += '<div class="breakdown"><div class="row">链走完（走到底时 n 自己再加 1）</div>' +
+                '<div class="total">答案：' + s.acc + '</div></div>';
+        note.innerHTML = '整个过程没有枚举任何具体的数，只走了 ' + st.len + ' 步。';
+        ansEl.textContent = '答案：' + s.acc + (s.acc === st.ans ? '（与逐个数判断一致）' : '');
+      }
+      body.innerHTML = html;
+      nxt.disabled = (st.step >= st.steps.length - 1);
+      if (nxt.disabled && timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+    }
+
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      build(); draw();
+    }
+    nxt.addEventListener('click', function () { if (st.step < st.steps.length - 1) { st.step++; draw(); } });
+    auto.addEventListener('click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step < st.steps.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 700);
+    });
+    rst.addEventListener('click', reset);
+    dsel.addEventListener('change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>
