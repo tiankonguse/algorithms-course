@@ -22,3 +22,11 @@
 - 结果：提交 `ad3c7c6`，12 个文件变更（+2830 / -16），已推送 `c6924cc..ad3c7c6`。
 - 范围：新增 6 个算法课程页面（数位 dp 084 课：digit-dp-basic / digit-dp-range / digit-dp-mask；优化枚举的 dp 083 课：dp-opt-jobs / dp-opt-inverse / dp-opt-greedy）、更新 assets/data/algorithms.json（313 → 316，注册 6 页）、更新 prompt.md 进度表（083 / 084）、同步项目记忆文件（2026-10-10.md / MEMORY.md / 8259a37f 自动化记忆）。
 - 结论：成功，无冲突，远程已更新。
+
+---
+
+- 触发时间：2026-10-11 03:19 (GMT+8)
+- 动作：将工作区改动提交并推送到 origin/main。
+- 结果：提交 `436e092`，3 个文件变更（+625），已推送 `8200a2b..436e092`。
+- 范围：新增 `algorithms/dp-summary.html`（动态规划总结页）、`assets/data/algorithms.json` 注册该页并新增「动态规划总结」分组、同步自动化记忆文件。
+- 结论：成功，无冲突，远程已更新。
