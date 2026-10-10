@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>优化枚举：买卖股票（上）</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.legend-inline { font-size: 13px; color: var(--text-dim); margin: 6px 0 0; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>优化枚举：买卖股票（上）</h1>
+      <p class="intro">股票系列的题面都不绕，值钱的是转移里那层枚举怎么压掉。这一页讲前三道：一次交易、无限次交易、最多两笔。前两道一遍扫过去就完事，第三道的暴力转移是 O(n²)，看一眼转移式就能降成 O(n)。</p>
+
+      <h2>零、一次交易：记住前面见过的最低价</h2>
+      <p>买入日必须早于卖出日，且只做一笔。枚举卖出日 <code>i</code>，想让 <code>prices[i] − 买入价</code> 最大，买入价就得取 <code>0..i</code> 这一段里的最小值。</p>
+      <p>最小值可以边扫边更新，于是整个问题就是一次遍历。</p>
+          <pre class="code"><span class="cm">// 一次交易：枚举卖出日 i，这天能拿到的最大利润 = 价格[i] - 之前见过的最低价</span>
+    <span class="kw">int</span> <span class="fn">maxProfit</span>(vector&lt;<span class="kw">int</span>&gt;&amp; prices) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, mn = prices[0]; i &lt; (<span class="kw">int</span>)prices.size(); i++) {
+            mn = min(mn, prices[i]);          <span class="cm">// mn 是 0..i 的最低买入价</span>
+            ans = max(ans, prices[i] - mn);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>这里有个细节：<code>mn</code> 的初值取 <code>prices[0]</code>。价格允许取 0，如果把 <code>mn</code> 的初值写成 0，等于凭空允许在第 0 天之前用 0 元买入。价格全为正的随机数据上，这一处实测 91.70% 出错。</p>
+      <p>另一个容易顺手写错的地方是把「买入在卖出之前」这条约束丢了，退化成全局的最大值减最小值。数据单调递增时它俩答案一样，所以样例经常能过。随机小数据上实测 45.80% 出错，值域越宽越容易暴露。</p>
+
+      <figure class="fig" id="figOnce"></figure>
+
+      <h2>一、无限次：把每一段上坡加起来</h2>
+      <p>交易次数不限，但同一时刻最多持一股。既然想买随时能买、想卖随时能卖，那么任何一段下跌都不该扛着。价格涨到局部高点就卖，跌到局部低点再买回来，两段之间的落差全是白赚。</p>
+      <p>把这句话翻译成公式：只看相邻两天，<code>prices[i] &gt; prices[i−1]</code> 就把差记上。</p>
+          <pre class="code"><span class="cm">// 无限次交易：每一段上坡都能落袋，下坡直接跳过</span>
+    <span class="kw">int</span> <span class="fn">maxProfit</span>(vector&lt;<span class="kw">int</span>&gt;&amp; prices) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; (<span class="kw">int</span>)prices.size(); i++) {
+            ans += max(prices[i] - prices[i - 1], 0);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p><code>max(..., 0)</code> 不能省。少了它，下跌段会被当成负收益加进去，实测 94.42% 出错。写了它，一次遍历结束，答案正好是「所有上坡之和」。</p>
+      <p>这条结论和「用状态机一手持股一手现金」的写法对拍过 2 万组随机数据，完全一致。状态机是另一套思路，这里用不到，但可以拿来验证自己的直觉。</p>
+
+      <figure class="fig" id="figInf"></figure>
+
+      <h2>二、最多两笔：先写出会超时的枚举</h2>
+      <p>现在规定最多两笔。直接照着「第二次交易」往下拆：设 <code>dp1[i]</code> 是 <code>0..i</code> 里做一笔交易的最优值（不要求第 <code>i</code> 天卖出），设 <code>dp2[i]</code> 是「两笔交易、并且第二笔在第 <code>i</code> 天卖出」的最优值。</p>
+      <p>第二笔的买入日设为 <code>j</code>，<code>j ≤ i</code>。第一笔必须在第 <code>j</code> 天之前收干净，也就是 <code>dp1[j]</code>。于是：</p>
+      <p style="text-align:center"><code>dp2[i] = max over j≤i 的 ( dp1[j] + prices[i] − prices[j] )</code></p>
+      <p>这个 <code>j</code> 要靠枚举。两层循环套下来是 O(n²)，n = 2×10⁴ 实测 18.80 ms，而下面优化完的版本只要 0.034 ms，差五百多倍。</p>
+          <pre class="code"><span class="cm">// 最多两笔：dp1 是 0..i 一笔交易的最优，dp2 是第二次卖出必须在 i</span>
+    <span class="kw">int</span> <span class="fn">maxProfit</span>(vector&lt;<span class="kw">int</span>&gt;&amp; prices) {
+        <span class="kw">int</span> n = prices.size();
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp1</span>(n, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, mn = prices[0]; i &lt; n; i++) {
+            mn = min(mn, prices[i]);
+            dp1[i] = max(dp1[i - 1], prices[i] - mn);
+        }
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp2</span>(n, 0);
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt;= i; j++) {                       <span class="cm">// 枚举第二次的买入日 j</span>
+                dp2[i] = max(dp2[i], dp1[j] + prices[i] - prices[j]);
+            }
+            ans = max(ans, dp2[i]);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2>三、观察：内层枚举只和 j 有关</h2>
+      <p>把内层的括号拆开看：</p>
+      <p style="text-align:center"><code>dp1[j] + prices[i] − prices[j] = prices[i] + ( dp1[j] − prices[j] )</code></p>
+      <p>右边括号里那一项只跟 <code>j</code> 有关。外层 <code>i</code> 往前挪一格，这些值一个都没变，只是候选集合多了一个 <code>j = i</code>。既然要的是最大值，那就没必要每次重算一遍，记一个「到目前为止 <code>dp1[j] − prices[j]</code> 的最大值」就够了。</p>
+      <p>设 <code>best[i] = max( dp1[j] − prices[j] )</code>，<code>j</code> 取遍 <code>0..i</code>。转移变成一句话：</p>
+      <p style="text-align:center"><code>dp2[i] = best[i] + prices[i]</code></p>
+      <p>内层循环没了。这就是这一类优化的全部内容：看清内层枚举在求什么，然后发现这个量在上一格已经算过。</p>
+          <pre class="code"><span class="cm">// 观察：内层枚举的式子拆开，dp1[j] - prices[j] 与 j 之后的 i 无关</span>
+    <span class="kw">int</span> <span class="fn">maxProfit</span>(vector&lt;<span class="kw">int</span>&gt;&amp; prices) {
+        <span class="kw">int</span> n = prices.size();
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp1</span>(n, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, mn = prices[0]; i &lt; n; i++) {
+            mn = min(mn, prices[i]);
+            dp1[i] = max(dp1[i - 1], prices[i] - mn);
+        }
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">best</span>(n, 0);                       <span class="cm">// best[i] = max(dp1[j] - prices[j]), j in 0..i</span>
+        best[0] = dp1[0] - prices[0];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            best[i] = max(best[i - 1], dp1[i] - prices[i]);
+        }
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            ans = max(ans, best[i] + prices[i]);       <span class="cm">// 内层枚举没了</span>
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>拿 <code>[3,3,5,0,0,3,1,4]</code> 走一遍：</p>
+      <figure class="fig" id="figBest"></figure>
+      <p>注意 <code>best</code> 的初值是 <code>dp1[0] − prices[0] = −prices[0]</code>，也就是第 0 天买入这一个候选。把它写成 0，等于允许以 0 元买入，实测 57.25% 出错。反过来，<code>best</code> 忘了取前缀最大（只留 <code>dp1[i] − prices[i]</code>）会漏掉「第一笔早早结束」的情况，实测 58.91% 出错。两种写法一个偏高一个偏低，都会被抓出来。</p>
+
+      <h2>四、合并循环与空间压缩</h2>
+      <p>三个递推都跟着 <code>i</code> 往前走，谁也不等谁，完全可以塞进同一个循环。</p>
+      <p>再看依赖：<code>dp1[i]</code> 只用到 <code>dp1[i−1]</code> 和前缀最小值，<code>best[i]</code> 只用到 <code>best[i−1]</code>，<code>ans</code> 只跟当前这格比一次。三个数组全是上一格起作用的，那就都不必留。</p>
+          <pre class="code"><span class="cm">// 三个量滚动就够了，dp1、best、ans 都可以边算边丢</span>
+    <span class="kw">int</span> <span class="fn">maxProfit</span>(vector&lt;<span class="kw">int</span>&gt;&amp; prices) {
+        <span class="kw">int</span> dp1 = 0, best = -prices[0], ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, mn = prices[0]; i &lt; (<span class="kw">int</span>)prices.size(); i++) {
+            mn = min(mn, prices[i]);
+            dp1 = max(dp1, prices[i] - mn);
+            best = max(best, dp1 - prices[i]);
+            ans = max(ans, best + prices[i]);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>这是等义改写，不需要新的观察，但它是这题最后交上去的样子：O(1) 空间，一个循环。</p>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>空间</th></tr>
+        <tr><td>一次交易（题 1）</td><td>O(n)</td><td>O(1)</td></tr>
+        <tr><td>无限次交易（题 2）</td><td>O(n)</td><td>O(1)</td></tr>
+        <tr><td>最多两笔·枚举第二次买入日</td><td>O(n²)</td><td>O(n)</td></tr>
+        <tr><td>最多两笔·best 数组</td><td>O(n)</td><td>O(n)</td></tr>
+        <tr><td>最多两笔·滚动变量</td><td>O(n)</td><td>O(1)</td></tr>
+      </table>
+      <p>空间一路压到常数。题 1 的答案需要前缀最小值，题 2 只需要相邻两天的差，题 3 的四个量（<code>mn</code>、<code>dp1</code>、<code>best</code>、<code>ans</code>）都是滚动变量。</p>
+
+      <figure class="fig" id="figPerf"></figure>
+
+      <h2>总结</h2>
+      <p>题 1 的抓手是前缀最小值，题 2 的抓手是「每一段上坡都能落袋」，两道都是一次遍历。</p>
+      <p>题 3 才是这一页的主角。它的暴力转移里 <code>j</code> 在枚举，但看拆开的式子会发现内层要的东西根本不含 <code>i</code>，于是可以前一个格子算好、当前格子直接读。这套动作在本站其它 dp 题里反复出现：先写出带枚举的转移，再把枚举项单独拎出来看它依赖谁。</p>
+      <p>还有两处数值得记住。<code>best</code> 的初值写成 0 会错 57%，忘了前缀最大会错 59%，都是「样例能过、随机数据必挂」的类型。<code>mn</code> 初值写成 0 更狠，价格为正时 92% 出错。</p>
+      <p>后面几道股票题把规则改复杂：交易次数变成参数 <code>k</code>、加手续费、加冷冻期。优化不动的时候，观察的对象会从「内层的 max」换成「状态怎么设」。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>买卖股票的最佳时机</td><td><a href="https://leetcode.cn/problems/best-time-to-buy-and-sell-stock/" target="_blank">best-time-to-buy-and-sell-stock</a></td></tr>
+        <tr><td>LeetCode</td><td>买卖股票的最佳时机 II</td><td><a href="https://leetcode.cn/problems/best-time-to-buy-and-sell-stock-ii/" target="_blank">best-time-to-buy-and-sell-stock-ii</a></td></tr>
+        <tr><td>LeetCode</td><td>买卖股票的最佳时机 III</td><td><a href="https://leetcode.cn/problems/best-time-to-buy-and-sell-stock-iii/" target="_blank">best-time-to-buy-and-sell-stock-iii</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解082【必备】动态规划中用观察优化枚举的技巧-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, fill, stroke, rx) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx == null ? 4 : rx) +
+      '" fill="' + fill + '" stroke="' + (stroke || 'none') + '"/>';
+  }
+  function line(x1, y1, x2, y2, stroke, w, dash) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke +
+      '" stroke-width="' + (w || 1) + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
+  }
+  function poly(pts, stroke, w, dash) {
+    return '<polyline points="' + pts + '" fill="none" stroke="' + stroke + '" stroke-width="' + w + '"' +
+      (dash ? ' stroke-dasharray="' + dash + '"' : '') + ' stroke-linejoin="round"/>';
+  }
+  function circ(cx, cy, r, fill, stroke) {
+    return '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + fill + '" stroke="' + (stroke || 'none') + '"/>';
+  }
+  function put(id, inner) { var el = document.getElementById(id); if (el) el.innerHTML = inner; }
+  function svgWrap(h, body) { return '<svg viewBox="0 0 680 ' + h + '" role="img">' + body + '</svg>'; }
+
+  // ---------- 图 1：一次交易的前缀最低价 ----------
+  (function () {
+    var P = [7, 1, 5, 3, 6, 4, 8, 2];
+    var X0 = 60, Y0 = 200, W = 560, H = 150, VW = 9;
+    function px(i) { return X0 + i * (W / (P.length - 1)); }
+    function py(v) { return Y0 - v / VW * H; }
+    var g = '';
+    for (var v = 0; v <= 8; v += 2) {
+      g += line(X0, py(v), X0 + W, py(v), C.border, 1);
+      g += txt(X0 - 8, py(v) + 4, String(v), { size: 11, fill: C.dim, anchor: 'end' });
+    }
+    g += line(X0, Y0, X0 + W, Y0, C.gray, 1);
+    g += txt(X0 + W, Y0 + 18, '天数 0 → 7', { size: 11, fill: C.dim, anchor: 'end' });
+    var pts = [];
+    for (var i = 0; i < P.length; i++) pts.push(px(i) + ',' + py(P[i]));
+    g += poly(pts.join(' '), C.blue, 2);
+    // 前缀最低价的阶梯线
+    var mn = P[0], st = [];
+    for (var j = 0; j < P.length; j++) { mn = Math.min(mn, P[j]); st.push(px(j) + ',' + py(mn)); }
+    g += poly(st.join(' '), C.orange, 2, '5 4');
+    g += txt(X0 + W, py(1) - 10, '前缀最低价', { size: 11, fill: C.orange, anchor: 'end' });
+    for (var k = 0; k < P.length; k++) {
+      g += circ(px(k), py(P[k]), 3.5, '#fff', C.blue);
+      g += txt(px(k), py(P[k]) - 9, String(P[k]), { size: 11, fill: C.blue });
+    }
+    // 标注最优卖出日
+    var bx = px(1), by = py(1), sx = px(6), sy = py(8);
+    g += line(bx, by, sx, sy, C.orange, 2, '6 4');
+    g += circ(bx, by, 5, C.orange); g += circ(sx, sy, 5, C.orange);
+    g += txt(sx, sy - 27, '赚 8 − 1 = 7', { size: 12, fill: C.orange, weight: '600' });
+    put('figOnce', svgWrap(232, g) + '<figcaption>第 1 天价格 1 是前 2 天的最低点，第 6 天卖在 8。卖出日只要扫过去，前缀最低价自己会跟着降。</figcaption>');
+  })();
+
+  // ---------- 图 2：无限次 = 累加上坡 ----------
+  (function () {
+    var P = [7, 1, 5, 3, 6, 4, 8, 2];
+    var X0 = 60, Y0 = 200, W = 560, H = 150, VW = 9;
+    function px(i) { return X0 + i * (W / (P.length - 1)); }
+    function py(v) { return Y0 - v / VW * H; }
+    var g = '';
+    for (var v = 0; v <= 8; v += 2) { g += line(X0, py(v), X0 + W, py(v), C.border, 1); g += txt(X0 - 8, py(v) + 4, String(v), { size: 11, fill: C.dim, anchor: 'end' }); }
+    g += line(X0, Y0, X0 + W, Y0, C.gray, 1);
+    var pts = [];
+    for (var i = 0; i < P.length; i++) pts.push(px(i) + ',' + py(P[i]));
+    g += poly(pts.join(' '), C.gray, 2, '5 4');
+    var sum = 0;
+    for (var j = 1; j < P.length; j++) {
+      var d = P[j] - P[j - 1];
+      if (d > 0) {
+        sum += d;
+        g += line(px(j - 1), py(P[j - 1]), px(j), py(P[j]), C.orange, 4);
+        g += txt((px(j - 1) + px(j)) / 2 + 12, (py(P[j - 1]) + py(P[j])) / 2 - 8, '+' + d, { size: 12, fill: C.orange, weight: '600' });
+      } else {
+        g += txt(px(j - 1) + (px(j) - px(j - 1)) / 2, py(Math.max(P[j], P[j - 1])) - 8, '0', { size: 11, fill: C.dim });
+      }
+    }
+    for (var k = 0; k < P.length; k++) { g += circ(px(k), py(P[k]), 3, '#fff', C.gray); }
+    g += txt(60, 26, '橙段相加：+4 +3 +4 = 11', { size: 13, fill: C.orange, weight: '600', anchor: 'start' });
+    put('figInf', svgWrap(232, g) + '<figcaption>每段上坡单独领走，中间的下坡不参与。总收益等于所有正差价之和。</figcaption>');
+  })();
+
+  // ---------- 图 3：暴力 vs best 数组 ----------
+  (function () {
+    var P = [3, 3, 5, 0, 0, 3, 1, 4];
+    var n = P.length, dp1 = [], mn = P[0], best = [], dp2 = [];
+    for (var i = 0; i < n; i++) { mn = Math.min(mn, P[i]); dp1[i] = i ? Math.max(dp1[i - 1], P[i] - mn) : 0; }
+    best[0] = dp1[0] - P[0];
+    for (var q = 1; q < n; q++) best[q] = Math.max(best[q - 1], dp1[q] - P[q]);
+    for (var r = 0; r < n; r++) dp2[r] = best[r] + P[r];
+    var g = '';
+    var rows = [['价格', P], ['dp1', dp1], ['dp1 − 价格', P.map(function (v, k) { return dp1[k] - v; })], ['best（前缀最大）', best], ['dp2 = best + 价格', dp2]];
+    var x0 = 152, cw = 60, y0 = 44, rh = 34;
+    for (var c = 0; c < n; c++) {
+      g += txt(x0 + c * cw + cw / 2, y0 - 12, 'i=' + c, { size: 11, fill: C.dim });
+    }
+    var highlights = [3, 7];
+    for (var ri = 0; ri < rows.length; ri++) {
+      var y = y0 + ri * rh;
+      g += txt(x0 - 12, y + rh / 2 + 4, rows[ri][0], { size: 12, fill: C.text, anchor: 'end' });
+      for (var c2 = 0; c2 < n; c2++) {
+        var hot = (ri === 3 || ri === 4) && highlights.indexOf(c2) >= 0;
+        g += rect(x0 + c2 * cw, y, cw - 4, rh - 4, hot ? C.orangeBg : (ri === 4 ? C.blueBg : C.bg), hot ? C.orange : C.border, 4);
+        g += txt(x0 + c2 * cw + (cw - 4) / 2, y + rh / 2 + 2, String(rows[ri][1][c2]), { size: 12, fill: hot ? C.orange : C.text });
+      }
+    }
+    g += txt(12, 16, 'best 一列把内层枚举压成了一个「看一眼」', { size: 13, fill: C.blue, weight: '600', anchor: 'start' });
+    g += txt(12, y0 + 5 * rh + 20, '答案 max dp2 = 6', { size: 12, fill: C.orange, weight: '600', anchor: 'start' });
+    put('figBest', svgWrap(276, g) + '<figcaption>[3,3,5,0,0,3,1,4]：best 在第 3 天涨到 2 之后就再没动过，dp2 直接读它加当天价格。第 7 天给出 2 + 4 = 6。</figcaption>');
+  })();
+
+  // ---------- 图 4：O(n²) 与 O(n) 实测 ----------
+  (function () {
+    var data = [[5000, 1.737, 0.011], [10000, 5.707, 0.021], [20000, 18.797, 0.034]];
+    var g = '';
+    var X0 = 80, Y0 = 210, W = 520, H = 150;
+    var maxV = 30; // log 刻度：0.01 → 30
+    function py(v) { return Y0 - (Math.log10(v / 0.01) + 2) / (Math.log10(30 / 0.01) + 2) * H; }
+    g += line(X0, Y0, X0 + W, Y0, C.gray, 1);
+    var ticks = [0.01, 0.1, 1, 10];
+    for (var t = 0; t < ticks.length; t++) {
+      g += line(X0, py(ticks[t]), X0 + W, py(ticks[t]), C.border, 1);
+      g += txt(X0 - 8, py(ticks[t]) + 4, ticks[t] + '', { size: 11, fill: C.dim, anchor: 'end' });
+    }
+    g += txt(12, 26, '毫秒（对数轴）', { size: 11, fill: C.dim, anchor: 'start' });
+    var gw = W / data.length, bw = 62;
+    for (var i = 0; i < data.length; i++) {
+      var cx = X0 + gw * i + gw / 2;
+      var yA = py(data[i][1]), yB = py(data[i][2]);
+      g += rect(cx - bw - 6, yA, bw, Y0 - yA, C.orangeBg, C.orange);
+      g += txt(cx - bw / 2 - 6, yA - 6, data[i][1] + '', { size: 11, fill: C.orange, weight: '600' });
+      g += rect(cx + 6, yB, bw, Y0 - yB, C.blueBg, C.blue);
+      g += txt(cx + bw / 2 + 6, yB - 6, data[i][2] + '', { size: 11, fill: C.blue, weight: '600' });
+      g += txt(cx, Y0 + 18, 'n = ' + data[i][0], { size: 12, fill: C.text });
+    }
+    g += rect(X0 + 4, 34, 12, 12, C.orangeBg, C.orange, 3); g += txt(X0 + 22, 44, '枚举第二次买入日 O(n²)', { size: 11, fill: C.text, anchor: 'start' });
+    g += rect(X0 + 200, 34, 12, 12, C.blueBg, C.blue, 3); g += txt(X0 + 218, 44, 'best 数组 O(n)', { size: 11, fill: C.text, anchor: 'start' });
+    put('figPerf', svgWrap(244, g) + '<figcaption>同一台机器、同一批数据：n 从 5000 到 20000，O(n²) 从 1.7 ms 涨到 18.8 ms，O(n) 一路在 0.03 ms 以下。</figcaption>');
+  })();
+
+  // ---------- 演示：买卖股票操作台 ----------
+  (function () {
+    var DATA = {
+      '锯齿：7,1,5,3,6,4,8,2': [7, 1, 5, 3, 6, 4, 8, 2],
+      '两段峰：3,3,5,0,0,3,1,4': [3, 3, 5, 0, 0, 3, 1, 4],
+      '单调涨：1,2,3,4,5,6': [1, 2, 3, 4, 5, 6],
+      '随机（固定种子）': null
+    };
+    function mulberry32(a) {
+      return function () {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        var t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    function randArr() {
+      var r = mulberry32(8213), a = [], i;
+      for (i = 0; i < 10; i++) a.push(1 + Math.floor(r() * 9));
+      return a;
+    }
+    var host = document.createElement('div');
+    host.className = 'viz';
+    host.innerHTML =
+      '<p class="viz-title">买卖股票操作台</p>' +
+      '<div id="vizBody"></div>' +
+      '<p class="viz-note" id="vizNote"></p>' +
+      '<p class="viz-answer" id="vizAns"></p>' +
+      '<div class="viz-controls">' +
+      '<label>数据 <select id="vizData"></select></label>' +
+      '<label>模式 <select id="vizMode">' +
+      '<option value="once">一次交易</option><option value="inf">无限次</option><option value="two">最多两笔</option>' +
+      '</select></label>' +
+      '<button id="vizNext" type="button">下一步</button>' +
+      '<button id="vizReset" type="button">重置</button>' +
+      '</div>';
+    var anchor = document.getElementById('figPerf');
+    anchor.parentNode.insertBefore(host, anchor.nextSibling);
+
+    var dsel = host.querySelector('#vizData'), msel = host.querySelector('#vizMode');
+    Object.keys(DATA).forEach(function (k) { var o = document.createElement('option'); o.value = k; o.textContent = k; dsel.appendChild(o); });
+    var body = host.querySelector('#vizBody'), note = host.querySelector('#vizNote'), ansEl = host.querySelector('#vizAns');
+    var nxt = host.querySelector('#vizNext'), rst = host.querySelector('#vizReset');
+
+    var st = null;
+    function build() {
+      var arr = DATA[dsel.value] || randArr();
+      var mode = msel.value;
+      var steps = [];
+      if (mode === 'once') {
+        var ans = 0, mn = arr[0];
+        for (var i = 1; i < arr.length; i++) { mn = Math.min(mn, arr[i]); ans = Math.max(ans, arr[i] - mn); steps.push({ i: i, mn: mn, ans: ans }); }
+      } else if (mode === 'inf') {
+        var a2 = 0;
+        for (var j = 1; j < arr.length; j++) { a2 += Math.max(arr[j] - arr[j - 1], 0); steps.push({ i: j, add: Math.max(arr[j] - arr[j - 1], 0), ans: a2 }); }
+      } else {
+        var dp1 = 0, best = -arr[0], mn2 = arr[0], a3 = 0;
+        for (var k = 1; k < arr.length; k++) {
+          mn2 = Math.min(mn2, arr[k]);
+          dp1 = Math.max(dp1, arr[k] - mn2);
+          best = Math.max(best, dp1 - arr[k]);
+          a3 = Math.max(a3, best + arr[k]);
+          steps.push({ i: k, mn: mn2, dp1: dp1, best: best, ans: a3 });
+        }
+      }
+      st = { arr: arr, mode: mode, steps: steps, step: 0 };
+    }
+    function draw() {
+      var arr = st.arr, mode = st.mode, i = st.step;
+      var W = 660, X0 = 12, bw = (W - 2 * X0) / arr.length;
+      var maxV = Math.max.apply(null, arr), H = 120, Y0 = 150;
+      var g = '';
+      for (var d = 0; d < arr.length; d++) {
+        var h = arr[d] / maxV * H, x = X0 + d * bw;
+        var cur = i > 0 && d === st.steps[i - 1].i;
+        var used = i > 0 && d <= st.steps[i - 1].i;
+        g += rect(x + 6, Y0 - h, bw - 12, h, cur ? C.orangeBg : (used ? C.blueBg : C.bg), cur ? C.orange : C.border, 3);
+        g += txt(x + bw / 2, Y0 - h - 6, String(arr[d]), { size: 11, fill: cur ? C.orange : C.text });
+        g += txt(x + bw / 2, Y0 + 16, String(d), { size: 10, fill: C.dim });
+      }
+      g += line(X0, Y0, X0 + W - 2 * X0 + X0, Y0, C.gray, 1);
+      body.innerHTML = svgWrap(178, g);
+      if (i === 0) { note.innerHTML = '还没开始。点「下一步」从第 1 天开始。'; ansEl.textContent = ''; nxt.disabled = false; }
+      else {
+        var s = st.steps[i - 1];
+        if (mode === 'once') note.innerHTML = '第 ' + s.i + ' 天卖出：前缀最低价 mn = ' + s.mn + '，当前收益 ' + (arr[s.i] - s.mn) + '，累计答案 ' + s.ans;
+        else if (mode === 'inf') note.innerHTML = '第 ' + s.i + ' 天：上坡 ' + s.add + ' 计入，累计 ' + s.ans;
+        else note.innerHTML = '第 ' + s.i + ' 天：mn = ' + s.mn + '，dp1 = ' + s.dp1 + '，best = ' + s.best;
+        if (i === st.steps.length) { ansEl.textContent = '答案：' + s.ans; nxt.disabled = true; }
+        else { ansEl.textContent = ''; nxt.disabled = false; }
+      }
+    }
+    function reset() { build(); draw(); }
+    nxt.addEventListener('click', function () { if (st.step < st.steps.length) { st.step++; draw(); } });
+    rst.addEventListener('click', reset);
+    dsel.addEventListener('change', reset);
+    msel.addEventListener('change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

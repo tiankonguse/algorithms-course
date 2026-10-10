@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>解码方法与解码方法 II：切分型一维动态规划</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; margin: 6px 0; color: #334155; }
+.cell { display: inline-block; min-width: 38px; padding: 5px 6px; margin-right: 5px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; text-align: center; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+.cell .idx { display: block; font-size: 10px; color: #94a3b8; }
+.cell.fill { background: var(--full-bg); border-color: var(--full); }
+.cell.cur { outline: 2px solid var(--partial); }
+.cell.bad { background: #fee2e2; border-color: #dc2626; color: #dc2626; }
+.cell.none { color: #cbd5e1; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>解码方法与解码方法 II：切分型一维动态规划</h1>
+      <p class="intro">'A' 到 'Z' 编成 1 到 26，一串数字反过来能拆出几种字母组合？这两个题把一维动态规划最常见的形状摆得很清楚：位置 i 上只有「自己单独算」和「拉着 i+1 一起算」两种选择，剩下的就是处理哪些组合合法。</p>
+
+      <h2 id="s0">零、把切法画出来</h2>
+      <p>数字串 "226"。第一位可以单独切成 "2"，也可以和第二位凑成 "22"，只要这个两位数不超过 26 就行。每种切法对应一种字母组合：</p>
+      <figure class="fig" id="figSplit"></figure>
+      <p>所以递归的定义一句话就出来了：f(i) 是 s[i...] 这后半段的切分种数。i 位置只有两个分支：单独切一位，走到 f(i+1)；和后面凑两位（前提是凑出来的数在 1 到 26 之间），走到 f(i+2)。两个分支的答案加起来。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// s[i...] 这部分有多少种有效切分</span>
+    <span class="kw">int</span> <span class="fn">f1</span>(<span class="kw">string</span>&amp; s, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == s.size()) <span class="kw">return</span> 1;
+        <span class="kw">int</span> ans;
+        <span class="kw">if</span> (s[i] == '0') {
+            ans = 0;
+        } <span class="kw">else</span> {
+            ans = f1(s, i + 1);
+            <span class="kw">if</span> (i + 1 &lt; s.size() &amp;&amp; ((s[i] - '0') * 10 + s[i + 1] - '0') &lt;= 26) {
+                ans += f1(s, i + 2);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">numDecodings1</span>(<span class="kw">string</span>&amp; s) {
+        <span class="kw">return</span> f1(s, 0);
+    }</pre>
+      <p>这版是纯暴力。实测调用次数（全 '1' 的串，每个位置都能凑两位，重复调用最多）：长度 5 是 20 次，长度 10 是 232 次，长度 20 是 28656 次，长度 25 是 317810 次。和斐波那契一个量级地涨。</p>
+
+      <h2 id="s1">一、'0' 是死路，不是「跳过」</h2>
+      <p>映射表里没有 0，所以 '0' 不能单独成组，也不能当两位数的开头。碰上它的那一条路直接断掉，返回 0 种。</p>
+      <figure class="fig" id="figZero"></figure>
+      <p>"11106" 只有两种合法切法：1|1|10|6 和 11|10|6。凡是切出 "06" 的都不算，题目里那句「'6' 和 '06' 在映射中并不等价」说的就是这件事。</p>
+      <p>实测的错法抓取率（2 万组随机数字串，对照组是枚举所有切法的暴力）：把 '0' 当普通数字继续往后算，41.33% 的样本答案偏大；两位数的判定写成 &lt; 26，2.70% 的样本偏小（只有恰好出现 26 时才现形，所以随机数据不容易抓到，得专门造）；dp[n] 初始成 0 而不是 1，64.02% 的样本直接变成 0。最后那个最狠，也最好查：答案恒为 0 的时候先看边界。</p>
+
+      <h2 id="s2">二、从底到顶：dp[n] = 1</h2>
+      <p>f(i) 依赖 i+1 和 i+2，倒着填。边界是 dp[n] = 1：切到末尾时正好切完，算一种方案。这个 1 是整条递推的种子，写漏了后面全是 0。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// dp[i] : s[i...] 的切分种数，dp[n] = 1 是那个「切完了」的空串</span>
+    <span class="kw">int</span> <span class="fn">numDecodings3</span>(<span class="kw">string</span>&amp; s) {
+        <span class="kw">int</span> n = s.size();
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(n + 1, 0);
+        dp[n] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = n - 1; i &gt;= 0; i--) {
+            <span class="kw">if</span> (s[i] == '0') {
+                dp[i] = 0;
+            } <span class="kw">else</span> {
+                dp[i] = dp[i + 1];
+                <span class="kw">if</span> (i + 1 &lt; n &amp;&amp; ((s[i] - '0') * 10 + s[i + 1] - '0') &lt;= 26) {
+                    dp[i] += dp[i + 2];
+                }
+            }
+        }
+        <span class="kw">return</span> dp[0];
+    }</pre>
+      <figure class="fig" id="figDp"></figure>
+      <p>dp[i] 的含义要一直挂在嘴边：s[i...] 的切分种数，不是 s[0...i] 的。含义定成后者的话，'0' 那句判断就得挪到 i−1 上去写，绕一圈。</p>
+
+      <h2 id="s3">三、空间压缩：两个变量</h2>
+      <p>dp[i] 只看 dp[i+1] 和 dp[i+2]，和斐波那契一样，两个变量滚动即可。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 空间压缩：next 是 dp[i+1]，nextNext 是 dp[i+2]</span>
+    <span class="kw">int</span> <span class="fn">numDecodings4</span>(<span class="kw">string</span>&amp; s) {
+        <span class="kw">int</span> next = 1, nextNext = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = s.size() - 1, cur; i &gt;= 0; i--) {
+            <span class="kw">if</span> (s[i] == '0') {
+                cur = 0;
+            } <span class="kw">else</span> {
+                cur = next;
+                <span class="kw">if</span> (i + 1 &lt; s.size() &amp;&amp; ((s[i] - '0') * 10 + s[i + 1] - '0') &lt;= 26) {
+                    cur += nextNext;
+                }
+            }
+            nextNext = next;
+            next = cur;
+        }
+        <span class="kw">return</span> next;
+    }</pre>
+      <p>实测（长度 10⁶ 的全 '1' 串，答案会溢出 int，只比时间）：dp 数组版 2.03ms，滚动变量版 0.50ms。省掉的不只是内存，还有一整片顺序写。</p>
+      <div class="viz">
+        <p class="viz-title">演示 · 解码方法：从右往左逐位填 dp</p>
+        <div class="viz-controls">
+          <select id="dcPreset">
+            <option>1123</option>
+            <option>226</option>
+            <option>11106</option>
+            <option>2101</option>
+            <option>10</option>
+            <option>101</option>
+            <option>随机 8 位</option>
+          </select>
+        </div>
+        <div id="dcBoard"></div>
+        <p class="viz-note" id="dcNote"></p>
+        <p class="viz-answer" id="dcAns"></p>
+        <div class="viz-controls">
+          <button id="dcPrev">上一步</button>
+          <button id="dcNext">下一步</button>
+          <button id="dcReset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="s4">四、解码方法 II：'*' 带来的倍数</h2>
+      <p>题目允许 '*'，它可以当 1 到 9 里任意一个数字（不含 0）。这样一来每个位置的两个分支都要乘上一个倍数，「有或没有」变成了「有几种」。</p>
+      <figure class="fig" id="figStar"></figure>
+      <p>五类组合要分开想。最容易出错的是 '*' 加数字那一类：'*7' 只有 17 合法（27 超过 26），所以倍数是 1；'*3' 有 13 和 23 两种，倍数是 2。另一处是 '*' 加 '*'：11 到 19 九种、21 到 26 六种，一共 15 种，不是 25 也不是 100。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// s[i...] 有多少种有效转化（先不取模，看清结构）</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">f1</span>(<span class="kw">string</span>&amp; s, <span class="kw">int</span> i) {
+        <span class="kw">int</span> n = s.size();
+        <span class="kw">if</span> (i == n) <span class="kw">return</span> 1;
+        <span class="kw">if</span> (s[i] == '0') <span class="kw">return</span> 0;
+        <span class="cm">// i 位置单独转：是 '*' 就有 9 种取法</span>
+        <span class="kw">long</span> <span class="kw">long</span> ans = f1(s, i + 1) * (s[i] == '*' ? 9 : 1);
+        <span class="kw">if</span> (i + 1 &lt; n) {
+            <span class="kw">if</span> (s[i] != '*') {
+                <span class="kw">if</span> (s[i + 1] != '*') {
+                    <span class="kw">if</span> ((s[i] - '0') * 10 + s[i + 1] - '0' &lt;= 26) ans += f1(s, i + 2);
+                } <span class="kw">else</span> {
+                    <span class="kw">if</span> (s[i] == '1') ans += f1(s, i + 2) * 9;   <span class="cm">// 11 ~ 19</span>
+                    <span class="kw">if</span> (s[i] == '2') ans += f1(s, i + 2) * 6;   <span class="cm">// 21 ~ 26</span>
+                }
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (s[i + 1] != '*') {
+                    <span class="cm">// '*' 只能取 1 或 2 才可能和后面凑成 &lt;= 26</span>
+                    <span class="kw">if</span> (s[i + 1] &lt;= '6') ans += f1(s, i + 2) * 2;
+                    <span class="kw">else</span> ans += f1(s, i + 2);
+                } <span class="kw">else</span> {
+                    ans += f1(s, i + 2) * 15;                    <span class="cm">// 11~19、21~26</span>
+                }
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>实测两处错法的抓取率（2 万组随机串，对照组是「枚举 '*' 的所有取值再枚举所有切法」的暴力）：把 '*' 单转的 9 写成 10，22.66% 的样本偏大；把 '*'+'*' 的 15 写成 25，1.89% 的样本偏大（要串里出现连续的 '*' 才现形）。</p>
+      <p>不取模的话数字涨得飞快：全 '*' 的串，长度 2 是 96，长度 4 是 10431，长度 6 是 1136241，长度 8 是 123775776，长度 10 是 13483456911。所以从递归到 dp 的每一步都要取模。</p>
+
+      <h2 id="s5">五、解码方法 II 的填表</h2>
+      <p>递归体照抄成从底到顶，每步取模。dp[i] 还是「s[i...] 的转化种数」。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">long</span> <span class="kw">long</span> MOD = 1000000007;
+
+    <span class="cm">// 把上面那个递归照抄成从底到顶，每步取模</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">numDecodings3</span>(<span class="kw">string</span>&amp; s) {
+        <span class="kw">int</span> n = s.size();
+        vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt; <span class="fn">dp</span>(n + 1, 0);
+        dp[n] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = n - 1; i &gt;= 0; i--) {
+            <span class="kw">if</span> (s[i] != '0') {
+                dp[i] = (s[i] == '*' ? 9 : 1) * dp[i + 1];
+                <span class="kw">if</span> (i + 1 &lt; n) {
+                    <span class="kw">if</span> (s[i] != '*') {
+                        <span class="kw">if</span> (s[i + 1] != '*') {
+                            <span class="kw">if</span> ((s[i] - '0') * 10 + s[i + 1] - '0' &lt;= 26) dp[i] += dp[i + 2];
+                        } <span class="kw">else</span> {
+                            <span class="kw">if</span> (s[i] == '1') dp[i] += dp[i + 2] * 9;
+                            <span class="kw">if</span> (s[i] == '2') dp[i] += dp[i + 2] * 6;
+                        }
+                    } <span class="kw">else</span> {
+                        <span class="kw">if</span> (s[i + 1] != '*') {
+                            <span class="kw">if</span> (s[i + 1] &lt;= '6') dp[i] += dp[i + 2] * 2;
+                            <span class="kw">else</span> dp[i] += dp[i + 2];
+                        } <span class="kw">else</span> {
+                            dp[i] += dp[i + 2] * 15;
+                        }
+                    }
+                }
+                dp[i] %= MOD;
+            }
+        }
+        <span class="kw">return</span> dp[0];
+    }</pre>
+      <p>样例：'1*' 得 18（单转 9 种 + 合起来 11~19 共 9 种），'2*' 得 15（9 + 6），'**' 得 96（81 + 15），'1*2' 得 20，'*0' 得 2（'0' 只能跟前面的 '*' 凑成 10 或 20）。</p>
+      <figure class="fig" id="figStarDp"></figure>
+      <p>压缩版同样是三个变量，注意每轮结束要把 cur 清零：s[i] 是 '0' 时这一轮不改 cur，不清零就会把上一轮的值带下来。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">long</span> <span class="kw">long</span> MOD = 1000000007;
+
+    <span class="cm">// 空间压缩：next = dp[i+1]，nextNext = dp[i+2]</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">numDecodings4</span>(<span class="kw">string</span>&amp; s) {
+        <span class="kw">int</span> n = s.size();
+        <span class="kw">long</span> <span class="kw">long</span> cur = 0, next = 1, nextNext = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = n - 1; i &gt;= 0; i--) {
+            <span class="kw">if</span> (s[i] != '0') {
+                cur = (s[i] == '*' ? 9 : 1) * next;
+                <span class="kw">if</span> (i + 1 &lt; n) {
+                    <span class="kw">if</span> (s[i] != '*') {
+                        <span class="kw">if</span> (s[i + 1] != '*') {
+                            <span class="kw">if</span> ((s[i] - '0') * 10 + s[i + 1] - '0' &lt;= 26) cur += nextNext;
+                        } <span class="kw">else</span> {
+                            <span class="kw">if</span> (s[i] == '1') cur += nextNext * 9;
+                            <span class="kw">if</span> (s[i] == '2') cur += nextNext * 6;
+                        }
+                    } <span class="kw">else</span> {
+                        <span class="kw">if</span> (s[i + 1] != '*') {
+                            <span class="kw">if</span> (s[i + 1] &lt;= '6') cur += nextNext * 2;
+                            <span class="kw">else</span> cur += nextNext;
+                        } <span class="kw">else</span> {
+                            cur += nextNext * 15;
+                        }
+                    }
+                }
+                cur %= MOD;
+            }
+            nextNext = next;
+            next = cur;
+            cur = 0;
+        }
+        <span class="kw">return</span> next;
+    }</pre>
+      <p>实测（长度 10⁶ 的全 '*' 串，取模版）：dp 数组 4.16ms，滚动变量 3.47ms。这里的分支比题 1 多，压缩省下来的比例没那么夸张，但空间从 O(n) 降到 O(1)。</p>
+      <div class="viz">
+        <p class="viz-title">演示 · 解码方法 II：每个位置的两个倍数从哪来</p>
+        <div class="viz-controls">
+          <select id="dc2Preset">
+            <option>1*</option>
+            <option>2*</option>
+            <option>**</option>
+            <option>1*2</option>
+            <option>*0</option>
+            <option>*1</option>
+            <option>3*</option>
+          </select>
+        </div>
+        <div id="dc2Board"></div>
+        <p class="viz-note" id="dc2Note"></p>
+        <p class="viz-answer" id="dc2Ans"></p>
+        <div class="viz-controls">
+          <button id="dc2Prev">上一步</button>
+          <button id="dc2Next">下一步</button>
+          <button id="dc2Reset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="s6">六、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间复杂度</th><th>额外空间</th><th>实测</th></tr>
+        <tr><td>解码方法 · 暴力递归</td><td>指数级，全 '1' 串调用约 2·F(n+1) 次</td><td>O(n) 栈深</td><td>长度 25 调用 317810 次</td></tr>
+        <tr><td>解码方法 · 从底到顶</td><td>O(n)</td><td>O(n)</td><td>长度 10⁶ 用 2.03ms</td></tr>
+        <tr><td>解码方法 · 空间压缩</td><td>O(n)</td><td>O(1)</td><td>长度 10⁶ 用 0.50ms</td></tr>
+        <tr><td>解码方法 II · 从底到顶</td><td>O(n)</td><td>O(n)</td><td>长度 10⁶ 用 4.16ms</td></tr>
+        <tr><td>解码方法 II · 空间压缩</td><td>O(n)</td><td>O(1)</td><td>长度 10⁶ 用 3.47ms</td></tr>
+      </table>
+      <p>每个位置只做常数次判断，所以都是 O(n)。两题的差别全在「分支合法吗、合法的话有几种」这件事上，结构一点没变。</p>
+
+      <h2 id="s7">七、总结</h2>
+      <p>切分型一维动态规划的定义长一个样：f(i) 是后缀 s[i...] 的答案，i 上枚举「切一位」和「切两位」，两个分支相加。</p>
+      <p>'0' 的处理是两个题的共同坑：它既不能单独成组，也不能当两位数的开头，碰到就返回 0。边界 dp[n] = 1 是递推的种子，写漏了答案恒为 0。</p>
+      <p>'*' 把「有没有」改成了「有几种」，倍数是分类讨论出来的：单独 9 种、'1' 接 '*' 9 种、'2' 接 '*' 6 种、'*' 接小数字 2 种、两个 '*' 15 种。把这些倍数摆成一张表，代码就是照抄。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/decode-ways/" target="_blank">解码方法</a></td><td><a href="https://leetcode.cn/problems/decode-ways/" target="_blank">leetcode.cn</a></td></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/decode-ways-ii/" target="_blank">解码方法 II</a></td><td><a href="https://leetcode.cn/problems/decode-ways-ii/" target="_blank">leetcode.cn</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解066【必备】从递归入手一维动态规划</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+/* ===== figSplit：226 的三种切法 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 900 280" xmlns="http://www.w3.org/2000/svg">';
+  s += '<rect x="0" y="0" width="900" height="280" fill="#f6f7f9"/>';
+  s += '<text x="24" y="26" font-size="13" fill="#1f2328">"226" 的三种切法，对应三种字母串</text>';
+  var rows = [
+    { g: ['2', '2', '6'], ch: 'B B F', ok: true },
+    { g: ['2', '26'], ch: 'B Z', ok: true },
+    { g: ['22', '6'], ch: 'V F', ok: true }
+  ];
+  for (var r = 0; r < rows.length; r++) {
+    var y = 60 + r * 62;
+    var x = 40;
+    for (var i = 0; i < rows[r].g.length; i++) {
+      var w = rows[r].g[i].length > 1 ? 62 : 40;
+      s += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="40" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>';
+      s += '<text x="' + (x + w / 2) + '" y="' + (y + 26) + '" text-anchor="middle" font-size="14" fill="#1f2328">' + rows[r].g[i] + '</text>';
+      x += w + 10;
+    }
+    s += '<text x="' + (x + 12) + '" y="' + (y + 26) + '" font-size="13" fill="#16a34a">→ ' + rows[r].ch + '</text>';
+  }
+  s += '<text x="24" y="266" font-size="12" fill="#6b7280">每次只决定「这一位单独切」还是「拉着下一位一起切」，两个分支加起来</text>';
+  s += '</svg>';
+  document.getElementById('figSplit').innerHTML = s +
+    '<figcaption>切一位走到 i+1，切两位走到 i+2，且两位那个数必须落在 1 到 26</figcaption>';
+})();
+
+/* ===== figZero：11106 的合法与非法切法 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">';
+  s += '<rect x="0" y="0" width="900" height="300" fill="#f6f7f9"/>';
+  s += '<text x="24" y="26" font-size="13" fill="#1f2328">"11106"：切出 "06" 的一律不算</text>';
+  var rows = [
+    { g: ['1', '1', '10', '6'], ch: 'A A J F', ok: true, tag: '合法' },
+    { g: ['11', '10', '6'], ch: 'K J F', ok: true, tag: '合法' },
+    { g: ['1', '11', '06'], ch: 'A K ?', ok: false, tag: '"06" 不能映射' },
+    { g: ['1', '1', '1', '06'], ch: 'A A A ?', ok: false, tag: '"06" 不能映射' }
+  ];
+  for (var r = 0; r < rows.length; r++) {
+    var y = 52 + r * 58;
+    var x = 40;
+    for (var i = 0; i < rows[r].g.length; i++) {
+      var w = rows[r].g[i].length > 1 ? 62 : 40;
+      var bad = rows[r].g[i][0] === '0';
+      s += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="38" rx="5" fill="' + (bad ? '#fee2e2' : '#dbeafe') + '" stroke="' + (bad ? '#dc2626' : '#2563eb') + '" stroke-width="1.5"/>';
+      s += '<text x="' + (x + w / 2) + '" y="' + (y + 25) + '" text-anchor="middle" font-size="14" fill="' + (bad ? '#dc2626' : '#1f2328') + '">' + rows[r].g[i] + '</text>';
+      x += w + 10;
+    }
+    var col = rows[r].ok ? '#16a34a' : '#dc2626';
+    s += '<text x="' + (x + 12) + '" y="' + (y + 24) + '" font-size="13" fill="' + col + '">' + (rows[r].ok ? ('→ ' + rows[r].ch + '，' + rows[r].tag) : ('× ' + rows[r].tag)) + '</text>';
+  }
+  s += '<text x="24" y="288" font-size="12" fill="#6b7280">答案 2 种。递归里表现为 s[i] == \'0\' 时直接返回 0，不再往下展开</text>';
+  s += '</svg>';
+  document.getElementById('figZero').innerHTML = s +
+    '<figcaption>红框那两组就是被 f(i) 里那句「s[i] == 0 返回 0」拦下来的路径</figcaption>';
+})();
+
+/* ===== figDp：1123 的填表 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">';
+  s += '<rect x="0" y="0" width="900" height="300" fill="#f6f7f9"/>';
+  s += '<text x="24" y="26" font-size="13" fill="#1f2328">"1123"：dp[i] = dp[i+1] + （能凑两位 ? dp[i+2] : 0）</text>';
+  var ch = ['1', '1', '2', '3'];
+  var dp = [5, 3, 2, 1, 1];
+  for (var i = 0; i < 4; i++) {
+    var x = 60 + i * 88;
+    s += '<rect x="' + x + '" y="46" width="60" height="38" rx="5" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>';
+    s += '<text x="' + (x + 30) + '" y="' + (46 + 25) + '" text-anchor="middle" font-size="15" fill="#1f2328">' + ch[i] + '</text>';
+    s += '<text x="' + (x + 30) + '" y="' + (46 - 6) + '" text-anchor="middle" font-size="11" fill="#94a3b8">i=' + i + '</text>';
+  }
+  for (var j = 0; j <= 4; j++) {
+    var x2 = 30 + j * 88;
+    var hl = (j === 0);
+    s += '<rect x="' + x2 + '" y="140" width="60" height="46" rx="5" fill="' + (hl ? '#ffedd5' : (j === 1 || j === 2 ? '#dbeafe' : '#ffffff')) + '" stroke="' + (hl ? '#ea580c' : (j === 1 || j === 2 ? '#2563eb' : '#cbd5e1')) + '" stroke-width="1.6"/>';
+    s += '<text x="' + (x2 + 30) + '" y="' + (140 + 29) + '" text-anchor="middle" font-size="15" fill="#1f2328">' + dp[j] + '</text>';
+    s += '<text x="' + (x2 + 30) + '" y="' + (140 - 7) + '" text-anchor="middle" font-size="11" fill="#94a3b8">dp[' + j + ']</text>';
+  }
+  s += '<path d="M148 192 C 148 226, 44 226, 44 190" fill="none" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arD)"/>';
+  s += '<path d="M236 192 C 236 236, 76 236, 76 190" fill="none" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arD)"/>';
+  s += '<defs><marker id="arD" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2563eb"/></marker></defs>';
+  s += '<text x="480" y="176" font-size="12" fill="#1f2328">dp[0] = dp[1] + dp[2] = 3 + 2 = 5</text>';
+  s += '<text x="480" y="200" font-size="12" fill="#6b7280">"11" ≤ 26，所以第二个分支存在</text>';
+  s += '<text x="480" y="224" font-size="12" fill="#6b7280">dp[4] = 1 是边界：切完了算一种</text>';
+  s += '<text x="24" y="282" font-size="12" fill="#6b7280">"1123" 答案 5：AABC(1,1,2,3)、AAC(1,1,23)、ALC(1,12,3)、KBC(11,2,3)、KC(11,23)</text>';
+  s += '</svg>';
+  document.getElementById('figDp').innerHTML = s +
+    '<figcaption>每个格子只用到右边两格，倒着填一路到底</figcaption>';
+})();
+
+/* ===== figStar：'*' 的五类组合 ===== */
+(function(){
+  var rows = [
+    ['s[i] 单独转 = \'*\'', '*', '9', '1 到 9，不含 0'],
+    ['数字 + 数字', '12', '1', '凑出来的数 ≤ 26 才算'],
+    ['数字 + \'*\'', '1*', '9', '11 到 19 共 9 种'],
+    ['数字 + \'*\'', '2*', '6', '21 到 26 共 6 种'],
+    ['\'*\' + 数字（≤ 6）', '*3', '2', '13 和 23'],
+    ['\'*\' + 数字（&gt; 6）', '*7', '1', '只有 17，27 超过 26'],
+    ['\'*\' + \'*\'', '**', '15', '11~19 九种加 21~26 六种']
+  ];
+  var s = '<svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">';
+  s += '<rect x="0" y="0" width="900" height="320" fill="#f6f7f9"/>';
+  s += '<text x="24" y="26" font-size="13" fill="#1f2328">每个位置的两种选择各带一个倍数</text>';
+  var cols = [40, 260, 420, 560];
+  var head = ['情形', '例子', '倍数', '为什么'];
+  for (var c = 0; c < 4; c++) s += '<text x="' + cols[c] + '" y="54" font-size="12" fill="#6b7280">' + head[c] + '</text>';
+  s += '<line x1="34" y1="62" x2="880" y2="62" stroke="#c9ced4" stroke-width="1.2"/>';
+  for (var r = 0; r < rows.length; r++) {
+    var y = 90 + r * 32;
+    if (r % 2 === 0) s += '<rect x="34" y="' + (y - 18) + '" width="846" height="28" rx="4" fill="#ffffff"/>';
+    for (var c2 = 0; c2 < 4; c2++) {
+      var fillc = c2 === 2 ? '#ea580c' : '#1f2328';
+      s += '<text x="' + cols[c2] + '" y="' + y + '" font-size="13" fill="' + fillc + '">' + rows[r][c2] + '</text>';
+    }
+  }
+  s += '<text x="24" y="310" font-size="12" fill="#6b7280">单转的倍数乘 dp[i+1]，两位的倍数乘 dp[i+2]，两部分的和就是 dp[i]</text>';
+  s += '</svg>';
+  document.getElementById('figStar').innerHTML = s +
+    '<figcaption>五类情形背下来比现场推快，其中 \'*\'+\'*\' 的 15 最容易记错</figcaption>';
+})();
+
+/* ===== figStarDp：1*2 的填表 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 900 280" xmlns="http://www.w3.org/2000/svg">';
+  s += '<rect x="0" y="0" width="900" height="280" fill="#f6f7f9"/>';
+  s += '<text x="24" y="26" font-size="13" fill="#1f2328">"1*2"：dp[1] = 9 × dp[2] + 2 × dp[3]，dp[0] = 1 × dp[1] + 9 × dp[2]</text>';
+  var rows = [
+    ['3', '（边界）', '—', '—', '1'],
+    ['2', '2', '1', '后面没位置', '1'],
+    ['1', '*', '9', '"*2" 是 12 或 22，2 种', '11'],
+    ['0', '1', '1', '"1*" 是 11~19，9 种', '20']
+  ];
+  var cols = [40, 150, 300, 470, 760];
+  var head = ['i', 's[i]', '单独转的倍数', '两位的倍数与来源', 'dp[i]'];
+  for (var c = 0; c < 5; c++) s += '<text x="' + cols[c] + '" y="54" font-size="12" fill="#6b7280">' + head[c] + '</text>';
+  s += '<line x1="34" y1="62" x2="880" y2="62" stroke="#c9ced4" stroke-width="1.2"/>';
+  for (var r = 0; r < rows.length; r++) {
+    var y = 96 + r * 42;
+    if (r === 3) s += '<rect x="34" y="' + (y - 20) + '" width="846" height="32" rx="5" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>';
+    for (var c2 = 0; c2 < 5; c2++) {
+      s += '<text x="' + cols[c2] + '" y="' + y + '" font-size="13" fill="' + (r === 3 ? '#ea580c' : '#1f2328') + '">' + rows[r][c2] + '</text>';
+    }
+  }
+  s += '<text x="24" y="278" font-size="12" fill="#6b7280">dp[0] = 1 × 11 + 9 × 1 = 20；dp[1] = 9 × 1 + 2 × 1 = 11；单转的倍数乘 dp[i+1]，两位倍数乘 dp[i+2]</text>';
+  s += '</svg>';
+  document.getElementById('figStarDp').innerHTML = s +
+    '<figcaption>两位组合的倍数是分类查表来的，别和「单独转的倍数」混在一起</figcaption>';
+})();
+
+/* ===== 演示一：解码方法逐位填 dp ===== */
+(function(){
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), a | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  var PRESETS = ['1123', '226', '11106', '2101', '10', '101', '随机 8 位'];
+  var sel = document.getElementById('dcPreset');
+  var board = document.getElementById('dcBoard');
+  var note = document.getElementById('dcNote');
+  var ans = document.getElementById('dcAns');
+  var st = { steps: [], step: 0, s: '' };
+
+  function makeRandom() {
+    var rnd = mulberry32(66066);
+    var out = '';
+    for (var i = 0; i < 8; i++) out += String(Math.floor(rnd() * 10));
+    return out;
+  }
+
+  function build() {
+    var s = (sel.selectedIndex === PRESETS.length - 1) ? makeRandom() : PRESETS[sel.selectedIndex];
+    st.s = s;
+    var n = s.length, dp = [];
+    for (var i = 0; i <= n; i++) dp.push(null);
+    dp[n] = 1;
+    var steps = [{ kind: 'init', dp: dp.slice(), i: -1 }];
+    for (var i2 = n - 1; i2 >= 0; i2--) {
+      if (s[i2] === '0') {
+        dp[i2] = 0;
+        steps.push({ kind: 'zero', i: i2, dp: dp.slice(), v: 0 });
+        continue;
+      }
+      var one = dp[i2 + 1];
+      var two = 0, pair = null;
+      if (i2 + 1 < n) {
+        pair = (s[i2] - '0') * 10 + (s[i2 + 1] - '0');
+        if (pair <= 26) two = dp[i2 + 2];
+      }
+      dp[i2] = one + two;
+      steps.push({ kind: 'calc', i: i2, dp: dp.slice(), one: one, two: two, pair: pair, v: dp[i2] });
+    }
+    steps.push({ kind: 'done', dp: dp.slice(), v: dp[0] });
+    st.steps = steps; st.step = 0;
+    render();
+  }
+
+  function render() {
+    var s = st.steps[st.step], str = st.s;
+    var head = '第 ' + (st.step + 1) + ' / ' + st.steps.length + ' 步：';
+    var line = '';
+    var chars = '';
+    for (var i = 0; i < str.length; i++) {
+      var cls = 'cell fill' + (i === s.i ? ' cur' : '');
+      chars += '<span class="' + cls + '"><span class="idx">' + i + '</span>' + str[i] + '</span>';
+    }
+    var dps = '';
+    for (var j = 0; j < s.dp.length; j++) {
+      var c2 = 'cell', v = s.dp[j];
+      if (v === null) { c2 += ' none'; v = '—'; } else c2 += ' fill';
+      if (j === s.i) c2 += ' cur';
+      dps += '<span class="' + c2 + '"><span class="idx">' + j + '</span>' + v + '</span>';
+    }
+    board.innerHTML = '<div>数字串：' + chars + '</div><div>dp 数组：' + dps + '</div>';
+    if (s.kind === 'init') line = head + 'dp[' + str.length + '] = 1，从最后一个位置倒着填';
+    else if (s.kind === 'zero') line = head + 's[' + s.i + '] = \'0\'，这条路断了，dp[' + s.i + '] = 0';
+    else {
+      var two = s.pair === null ? '后面没位置了' : ('"' + str.substr(s.i, 2) + '" = ' + s.pair + (s.pair <= 26 ? ' ≤ 26，可以凑' : ' &gt; 26，不能凑'));
+      line = head + 'dp[' + s.i + '] = dp[' + (s.i + 1) + '] + ' + (s.two ? 'dp[' + (s.i + 2) + ']' : '0') + ' = ' + s.one + ' + ' + s.two + ' = ' + s.v + '（' + two + '）';
+    }
+    if (st.step >= st.steps.length - 1) line = head + '填完，dp[0] 就是答案';
+    note.textContent = line;
+    if (st.step >= st.steps.length - 1) ans.textContent = '"' + str + '" 的解码方法数 = ' + s.v;
+    else ans.textContent = '';
+    document.getElementById('dcPrev').disabled = (st.step === 0);
+    document.getElementById('dcNext').disabled = (st.step >= st.steps.length - 1);
+  }
+
+  sel.addEventListener('change', build);
+  document.getElementById('dcPrev').addEventListener('click', function () { if (st.step > 0) { st.step--; render(); } });
+  document.getElementById('dcNext').addEventListener('click', function () { if (st.step < st.steps.length - 1) { st.step++; render(); } });
+  document.getElementById('dcReset').addEventListener('click', function () { st.step = 0; render(); });
+  build();
+})();
+
+/* ===== 演示二：解码方法 II 逐位填 dp ===== */
+(function(){
+  var PRESETS = ['1*', '2*', '**', '1*2', '*0', '*1', '3*'];
+  var MOD = 1000000007;
+  var sel = document.getElementById('dc2Preset');
+  var board = document.getElementById('dc2Board');
+  var note = document.getElementById('dc2Note');
+  var ans = document.getElementById('dc2Ans');
+  var st = { steps: [], step: 0, s: '' };
+
+  function single(c) { return c === '*' ? 9 : 1; }
+  function pairMul(a, b) {
+    if (a !== '*' && b !== '*') {
+      var v = (a.charCodeAt(0) - 48) * 10 + (b.charCodeAt(0) - 48);
+      return v <= 26 ? 1 : 0;
+    }
+    if (a !== '*' && b === '*') {
+      if (a === '1') return 9;
+      if (a === '2') return 6;
+      return 0;
+    }
+    if (a === '*' && b !== '*') return b <= '6' ? 2 : 1;
+    return 15;
+  }
+
+  function build() {
+    var s = PRESETS[sel.selectedIndex];
+    st.s = s;
+    var n = s.length, dp = [];
+    for (var i = 0; i <= n; i++) dp.push(null);
+    dp[n] = 1;
+    var steps = [{ kind: 'init', dp: dp.slice(), i: -1 }];
+    for (var i2 = n - 1; i2 >= 0; i2--) {
+      if (s[i2] === '0') {
+        dp[i2] = 0;
+        steps.push({ kind: 'zero', i: i2, dp: dp.slice(), v: 0 });
+        continue;
+      }
+      var m1 = single(s[i2]);
+      var m2 = 0;
+      var d2 = 0;
+      if (i2 + 1 < n) { m2 = pairMul(s[i2], s[i2 + 1]); d2 = dp[i2 + 2]; }
+      var v = (m1 * dp[i2 + 1] + m2 * d2) % MOD;
+      dp[i2] = v;
+      steps.push({ kind: 'calc', i: i2, dp: dp.slice(), m1: m1, m2: m2, v: v });
+    }
+    steps.push({ kind: 'done', dp: dp.slice(), v: dp[0] });
+    st.steps = steps; st.step = 0;
+    render();
+  }
+
+  function render() {
+    var s = st.steps[st.step], str = st.s;
+    var head = '第 ' + (st.step + 1) + ' / ' + st.steps.length + ' 步：';
+    var line = '';
+    var chars = '';
+    for (var i = 0; i < str.length; i++) {
+      chars += '<span class="cell fill' + (i === s.i ? ' cur' : '') + '"><span class="idx">' + i + '</span>' + str[i] + '</span>';
+    }
+    var dps = '';
+    for (var j = 0; j < s.dp.length; j++) {
+      var c2 = 'cell', v = s.dp[j];
+      if (v === null) { c2 += ' none'; v = '—'; } else c2 += ' fill';
+      if (j === s.i) c2 += ' cur';
+      dps += '<span class="' + c2 + '"><span class="idx">' + j + '</span>' + v + '</span>';
+    }
+    board.innerHTML = '<div>字符串：' + chars + '</div><div>dp 数组：' + dps + '</div>';
+    if (s.kind === 'init') line = head + 'dp[' + str.length + '] = 1，倒着开始填';
+    else if (s.kind === 'zero') line = head + 's[' + s.i + '] = \'0\'，dp[' + s.i + '] = 0，它只能等前面那位来凑';
+    else {
+      var twoTxt = s.i + 1 < str.length ? ('"' + str.substr(s.i, 2) + '" 的倍数 ' + s.m2) : '后面没位置，两位倍数 0';
+      line = head + 'dp[' + s.i + '] = ' + s.m1 + ' × dp[' + (s.i + 1) + '] + ' + s.m2 + ' × dp[' + (s.i + 2) + '] = ' + s.v + '（单转倍数 ' + s.m1 + '，' + twoTxt + '）';
+    }
+    if (st.step >= st.steps.length - 1) line = head + '填完，dp[0] 取模后就是答案';
+    note.textContent = line;
+    if (st.step >= st.steps.length - 1) ans.textContent = '"' + str + '" 的解码方法数 = ' + s.v + '（对 10⁹+7 取模）';
+    else ans.textContent = '';
+    document.getElementById('dc2Prev').disabled = (st.step === 0);
+    document.getElementById('dc2Next').disabled = (st.step >= st.steps.length - 1);
+  }
+
+  sel.addEventListener('change', build);
+  document.getElementById('dc2Prev').addEventListener('click', function () { if (st.step > 0) { st.step--; render(); } });
+  document.getElementById('dc2Next').addEventListener('click', function () { if (st.step < st.steps.length - 1) { st.step++; render(); } });
+  document.getElementById('dc2Reset').addEventListener('click', function () { st.step = 0; render(); });
+  build();
+})();
+</script>
+</body>
+</html>

@@ -2,6 +2,14 @@
 
 进度表在 `algorithms-course/prompt.md`，本文件只记每次执行的概要，方便下次接手。
 
+## 2026-10-10（本次）
+
+- 读了 prompt.md，下一课 = 081（状压dp-下，`src/class081/` 4 份低号课 Java）。抢锁 LOCK_OK，无残留半成品。
+- 产出 3 页：`bitmask-dp-hats.html`（题 1 帽子 + 题 2 账单平衡）、`bitmask-dp-good-subsets.html`（题 3 好子集）、`bitmask-dp-subset-enum.html`（题 4 分配重复整数 + 子集枚举），并入「状压 dp」组、追加在 bitmask-dp-tsp 之后，json 304 → 307、六字段全齐。
+- 四题 /tmp/cpp081 手写 C++ 编译 + 各 6000 组随机对拍 0 mismatch；正文数字全部实测（BK 提取比 for 枚举省 4~15 倍、账单 sum==0 时 break 省 59.11% 分支且答案不变、debt 不剔零 100% 偏大、好子集 status 正序遍历 0 差异、漏 1 的倍率 15.37%、贪心 4.08% 假阴性、子集枚举漏 j==status 48.20%、3^m = Σ C(m,k)·2^k、n=10 硬实例枚举 272746）。
+- 自检：自写 CDP 探针（verify_pages.js 本环境对任何页报全 0）三页 PASS，6 演示 × 22 select 组合逐帧到末帧 ALL COMBO OK，pager 链 tsp→三新页→树状数组 正确，首页 307 卡片 PASS，杂字/AI 味扫描 CLEAN。修掉 4 处 svg 越界与 3 处「不是X而是Y」修辞。
+- 收口：prompt.md 下一课改成 **082**、081 写入已完成；daily log（2026-10-10.md）追加细节；锁已释放（只删 owner）。
+
 ## 2026-10-06（本次）
 
 - 读了 prompt.md，下一课 = 033（位运算实现加减乘除，`src/class033/BitOperationAddMinusMultiplyDivide.java`，低号课单 Java）。开工前探过 /tmp 与 algorithms/，无 033 残留。

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>双向广搜：从数量小的一侧展开</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.wset { font-family: ui-monospace,Menlo,Consolas,monospace; font-size: 12px; margin: 4px 0; }
+.wchip { display: inline-block; padding: 3px 9px; border: 1px solid #cbd5e1; border-radius: 5px; margin-right: 6px; background: #fff; }
+.wchip.small { background: #fef9c3; border-color: #ca8a04; }
+.wchip.big { background: #dbeafe; border-color: #2563eb; }
+.wchip.next { background: #dcfce7; border-color: #16a34a; }
+.wchip.hit { background: #fee2e2; border-color: #dc2626; outline: 2px solid #dc2626; }
+.wrow { margin: 5px 0; }
+.wlab { display: inline-block; width: 92px; font-size: 12px; color: #64748b; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>双向广搜：从数量小的一侧展开</h1>
+      <p class="intro">普通 BFS 从起点一层层扩到终点；双向广搜把终点也当起点，两侧同时扩、每轮只扩数量少的一侧，中途一碰就停。展开量从 b^d 压到大约 2·b^(d/2)。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>单向 BFS 的问题是波前膨胀：起点到终点距离 d、每个词平均 b 个邻居时，第 d 层要展开约 b^d 个状态。很多图的 b 不小（单词接龙里每个词 26×len 个候选），d 到 5、6 层就吃不消。</p>
+      <p>双向广搜改一个动作：把终点侧也维护一层「目标集」，每轮只从数量少的那一侧展开，展开出的状态去另一侧里查。两个波前各自走一半距离就碰头，展开量从 b^d 掉到 2·b^(d/2)。</p>
+      <p>它不是新算法，是普通 BFS 的剪枝改造。代价是空间多一倍（两侧的层都要存），换来的是展开量少一个数量级。</p>
+
+      <h2 id="ladder">一、单词接龙：三个集合的交换</h2>
+      <figure class="fig" id="figWave"></figure>
+      <p>LeetCode 127 题：begin 到 end 每次只差一个字母，中间词都在 wordList 里，问最短转换序列的单词数。数据里词表上千、词长 8，单向 BFS 从 begin 一侧硬扩，展开量很快就爆炸。</p>
+      <p>双向的做法维持三个集合：smallLevel（数量小的一侧）、bigLevel（数量大的一侧）、nextLevel（本轮从 smallLevel 扩出来的下一层）。初始 smallLevel 只有 begin、bigLevel 只有 end，len 从 2 开始计数（begin 和 end 算两个词）。</p>
+      <p>每一轮只扩 smallLevel：对每个词逐位换 a~z，换出的词如果命中 bigLevel，说明两侧碰头，直接返回 len；如果换出的词在 dict 里，就把它移出 dict 并塞进 nextLevel（移出是为了防止回头的环）。</p>
+      <p>整层扩完后做交换：nextLevel 就是这轮之后「小侧的新一层」，但下一轮扩谁还要再比一次大小。比的是 nextLevel 和 bigLevel 谁小：nextLevel 小，smallLevel = nextLevel、bigLevel 不变；nextLevel 大，smallLevel = bigLevel（另一侧成了小侧，下一轮掉头扩它）、bigLevel = nextLevel。这就是「哪侧数量少从哪侧展开」的落地写法。</p>
+      <figure class="fig" id="figSwap"></figure>
+      <div class="viz">
+        <p class="viz-title">演示 · hit→cog 双向逐层：黄=小侧、蓝=大侧、绿=本轮新层，命中变红</p>
+        <div id="tbGrid"></div>
+        <p class="viz-note" id="tbNote"></p>
+        <p class="viz-answer" id="tbAns"></p>
+        <div class="viz-controls">
+          <button id="tbPrev">上一步</button>
+          <button id="tbNext">下一步</button>
+          <button id="tbReset">重置</button>
+        </div>
+      </div>
+      <p>两个细节值得注意。一是 begin 不需要在 wordList 里，代码直接把它放进 smallLevel，不查 dict；end 必须在 dict 里，不在就直接返回 0。二是命中 bigLevel 的检查放在 dict 检查之前：bigLevel 里的词是「另一侧已经占过的层」，命中就说明路径已经接上，不用管它是不是还在 dict。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 单词接龙：双向 BFS</span>
+    <span class="cm">// smallLevel 是数量小的一侧，bigLevel 是数量大的一侧，nextLevel 是本轮从小侧扩出的下一层</span>
+    <span class="cm">// 每轮只扩 smallLevel：换出的词命中 bigLevel 就返回 len，在 dict 里就移除并入 nextLevel</span>
+    <span class="cm">// 换层时若 nextLevel 比 bigLevel 小，小侧 = nextLevel；否则小侧 = bigLevel（大侧换成 nextLevel）</span>
+    <span class="kw">int</span> <span class="fn">ladderLength</span>(<span class="kw">string</span> begin, <span class="kw">string</span> end, vector&lt;<span class="kw">string</span>&gt;&amp; wordList) {
+        unordered_set&lt;<span class="kw">string</span>&gt; <span class="fn">dict</span>(wordList.begin(), wordList.end());
+        <span class="kw">if</span> (!dict.count(end)) {
+            <span class="kw">return</span> 0;
+        }
+        unordered_set&lt;<span class="kw">string</span>&gt; smallLevel, bigLevel, nextLevel;
+        smallLevel.insert(begin);
+        bigLevel.insert(end);
+        <span class="kw">for</span> (<span class="kw">int</span> len = 2; !smallLevel.empty(); len++) {
+            <span class="kw">for</span> (<span class="kw">const</span> <span class="kw">string</span>&amp; w : smallLevel) {
+                <span class="kw">string</span> word = w;
+                <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; (<span class="kw">int</span>)word.size(); j++) {
+                    <span class="kw">char</span> old = word[j];
+                    <span class="kw">for</span> (<span class="kw">char</span> change = 'a'; change &lt;= 'z'; change++) {
+                        <span class="kw">if</span> (change != old) {
+                            word[j] = change;
+                            <span class="kw">if</span> (bigLevel.count(word)) {
+                                <span class="kw">return</span> len;
+                            }
+                            <span class="kw">if</span> (dict.count(word)) {
+                                dict.erase(word);
+                                nextLevel.insert(word);
+                            }
+                        }
+                    }
+                    word[j] = old;
+                }
+            }
+            <span class="kw">if</span> (nextLevel.size() &lt;= bigLevel.size()) {
+                smallLevel.swap(nextLevel);
+            } <span class="kw">else</span> {
+                smallLevel.swap(bigLevel);
+                bigLevel.swap(nextLevel);
+            }
+            nextLevel.clear();
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+      <p>复杂度：每一层只扩数量小的一侧，总展开量约为 2·b^(d/2)，空间存两侧各 d/2 层，同样压到根号级。比单向的 b^d 少一个数量级；单词接龙这类「两个端点都好找邻居」的题，双向是常规武器。</p>
+
+      <h2 id="when">二、什么时候值得用</h2>
+      <p>双向广搜的定位是剪枝优化，解决的问题是波前膨胀。值得用的条件有两个：图里的边可逆（从终点也能往回扩）、两个端点的波前都会膨胀（单向扩到第 d 层要炸，双向各走 d/2 就稳）。</p>
+      <p>反过来，如果图不是无向的（从终点往回走不合法），或者终点侧邻居稀少，双向就没有收益，单向就行。判断标准就一句话：两侧都「有的扩」，才轮换着扩。</p>
+
+      <h2 id="sum">总结</h2>
+      <p>双向广搜的核心不是「两个 BFS 同时跑」，而是「每轮只扩数量小的一侧」：smallLevel/bigLevel/nextLevel 三个集合轮换，命中另一侧立即返回，展开量从 b^d 降到 2·b^(d/2)。</p>
+      <p>它解决的是「波前膨胀」这一类性能问题，属于剪枝策略。下一类问题换了个思路：不是优化展开过程，而是让「全量展不开、半量能展开」的题目变得可做，这就是折半搜索。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/word-ladder/" target="_blank">单词接龙</a></td><td><a href="https://leetcode.cn/problems/word-ladder/" target="_blank">leetcode.cn</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解063【必备】双向广搜</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+
+// ===== 图 1：单向 vs 双向波前 =====
+(function(){
+  var W = 720, H = 250;
+  var body = '';
+  body += txt(W/2, 20, '单向 BFS：从 begin 一侧扩到第 d 层，展开 b^d 个状态', {fs:13});
+  body += '<circle cx="120" cy="120" r="90" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4"/>';
+  body += '<circle cx="120" cy="120" r="62" fill="none" stroke="#94a3b8" stroke-width="1.5"/>';
+  body += '<circle cx="120" cy="120" r="30" fill="#eef4ff" stroke="#2563eb" stroke-width="1.5"/>';
+  body += txt(120, 124, 'begin', {fs:12});
+  body += txt(214, 88, '第1层', {fs:11, fill:'#64748b', an:'start'});
+  body += txt(228, 150, '第2层', {fs:11, fill:'#64748b', an:'start'});
+  body += txt(236, 218, '第3层…', {fs:11, fill:'#64748b', an:'start'});
+  body += txt(580, 46, '终点在第 d 层，', {fs:12, fill:'#334155'});
+  body += txt(580, 66, '波前要先胀到 b^d', {fs:12, fill:'#334155'});
+  body += '<circle cx="600" cy="150" r="22" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>';
+  body += txt(600, 154, 'end', {fs:11, fill:'#dc2626'});
+  body += '<line x1="210" y1="105" x2="575" y2="142" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4 3"/>';
+  body += txt(W/2, 240, '双向：begin 与 end 各扩 d/2 层，中途碰头，总展开约 2·b^(d/2)', {fs:12, fill:'#334155'});
+  document.getElementById('figWave').innerHTML = svg(W, H, body) + '<figcaption>波前是指数膨胀的：距离从 1 涨到 d，展开量从 b 涨到 b^d。双向把两个波前各走一半。</figcaption>';
+})();
+
+// ===== 图 2：三集合交换流程 =====
+(function(){
+  var W = 720, H = 250;
+  var body = '';
+  body += txt(W/2, 20, '每轮：扩 smallLevel → 得 nextLevel → 比大小，决定下一轮扩哪侧', {fs:13});
+  var y0 = 55, ch = 40;
+  var boxes = [['smallLevel', 90, '#fef9c3', '#ca8a04'], ['bigLevel', 260, '#dbeafe', '#2563eb'], ['nextLevel', 430, '#dcfce7', '#16a34a'], ['命中返回', 520, '#fee2e2', '#dc2626']];
+  boxes.forEach(function(b){
+    body += '<rect x="'+(b[1]-70)+'" y="'+y0+'" width="140" height="'+ch+'" fill="'+b[2]+'" stroke="'+b[3]+'" rx="5"/>';
+    body += txt(b[1], y0 + ch/2 + 4, b[0], {fs:13, fill:'#1f2937'});
+  });
+  body += '<line x1="160" y1="'+(y0+ch)+'" x2="160" y2="'+(y0+ch+24)+'" stroke="#94a3b8"/>';
+  body += '<line x1="160" y1="'+(y0+ch+24)+'" x2="430" y2="'+(y0+ch+24)+'" stroke="#94a3b8"/>';
+  body += '<line x1="430" y1="'+(y0+ch+24)+'" x2="430" y2="'+(y0+ch+6)+'" stroke="#94a3b8"/>';
+  body += txt(430, y0 + ch + 40, '换出的词：命中 bigLevel 直接返回；在 dict 里则移除并入 nextLevel', {fs:12, fill:'#334155'});
+  body += '<line x1="330" y1="'+(y0+ch+6)+'" x2="520" y2="'+(y0+ch+6)+'" stroke="#94a3b8" stroke-dasharray="4 3"/>';
+  body += txt(455, y0 + ch + 62, '比大小：谁小下一轮扩谁', {fs:12, fill:'#334155'});
+  body += txt(420, y0 + ch + 88, 'nextLevel 更大时：small=big，big=next', {fs:12, fill:'#334155', an:'start'});
+  document.getElementById('figSwap').innerHTML = svg(W, H, body) + '<figcaption>nextLevel 永远是小侧扩出来的下一层；bigLevel 是另一侧已经占的层。交换规则保证下一轮扩的是当前最小的波前。</figcaption>';
+})();
+
+// ===== 演示：hit→cog 双向展开 =====
+(function(){
+  var dictAll = ['hot','dot','dog','lot','log','cog'];
+  // 预演算每一步：记录 small/big/nextLevel 与命中信息
+  var steps = [];
+  var dict = {};
+  dictAll.forEach(function(w){ dict[w] = true; });
+  var small = {}, big = {}, nxt = {};
+  small['hit'] = true;
+  big['cog'] = true;
+  var len = 2;
+  function snap(tag){
+    steps.push({tag:tag, small:Object.keys(small), big:Object.keys(big), nxt:Object.keys(nxt), len:len});
+  }
+  function neighbors(w){
+    var out = [];
+    for (var j = 0; j < w.length; j++) {
+      var old = w[j];
+      for (var c = 97; c <= 122; c++) {
+        var ch = String.fromCharCode(c);
+        if (ch !== old) {
+          out.push(w.slice(0,j) + ch + w.slice(j+1));
+        }
+      }
+    }
+    return out;
+  }
+  snap('初始：begin 进小侧，end 进大侧');
+  while (Object.keys(small).length) {
+    var n2 = {};
+    var hit = null;
+    var smallList = Object.keys(small);
+    for (var idx = 0; idx < smallList.length; idx++) {
+      var w = smallList[idx];
+      var ns = neighbors(w);
+      for (var k = 0; k < ns.length; k++) {
+        var nb = ns[k];
+        if (big[nb]) { hit = nb; break; }
+        if (dict[nb]) { delete dict[nb]; n2[nb] = true; }
+      }
+      if (hit) break;
+    }
+    if (hit) { steps.push({tag:'层 '+len+'：扩 '+smallList.join(',')+' 命中 '+hit+'，返回 '+len, small:smallList, big:Object.keys(big), nxt:Object.keys(n2), len:len, hit:hit}); break; }
+    steps.push({tag:'层 '+len+'：扩 '+smallList.join(',')+' → 新层 '+Object.keys(n2).join(','), small:smallList, big:Object.keys(big), nxt:Object.keys(n2), len:len});
+    if (Object.keys(n2).length <= Object.keys(big).length) {
+      small = n2;
+    } else {
+      small = big;
+      big = n2;
+    }
+    nxt = {};
+    len++;
+  }
+  // 手工构造一个干净的最终步：small 中任意词命中 big
+  var step = 0;
+  function draw(){
+    var f = steps[Math.min(step, steps.length - 1)];
+    var html = '<div class="wrow"><span class="wlab">小侧 small</span>';
+    (f.small.length ? f.small : ['(空)']).forEach(function(w){ html += '<span class="wchip small">'+esc(w)+'</span>'; });
+    html += '</div><div class="wrow"><span class="wlab">大侧 big</span>';
+    (f.big.length ? f.big : ['(空)']).forEach(function(w){ html += '<span class="wchip big">'+esc(w)+'</span>'; });
+    html += '</div><div class="wrow"><span class="wlab">新层 next</span>';
+    (f.nxt.length ? f.nxt : ['(空)']).forEach(function(w){ html += '<span class="wchip next">'+esc(w)+'</span>'; });
+    if (f.hit) html += '<div class="wrow"><span class="wlab">命中</span><span class="wchip hit">'+esc(f.hit)+'</span></div>';
+    document.getElementById('tbGrid').innerHTML = html;
+    document.getElementById('tbNote').textContent = f.tag + '　（len = ' + f.len + '）';
+    var ans = f.hit ? f.len : (steps.length - 1 === step ? '—' : '—');
+    document.getElementById('tbAns').textContent = f.hit ? '答案 ' + f.len + '：hit→hot→dot→dog→cog（或经 lot→log）' : '尚未相遇';
+  }
+  document.getElementById('tbNext').addEventListener('click', function(){ if (step < steps.length - 1) step++; draw(); });
+  document.getElementById('tbPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('tbReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+})();
+</script>
+</body>
+</html>

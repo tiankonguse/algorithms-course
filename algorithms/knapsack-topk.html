@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>前 k 小子序列和：背包做不了，换堆</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); min-height: 22px; }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); min-height: 22px; }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.kv { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; color: var(--text-dim); margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>前 k 小子序列和：背包做不了，换堆</h1>
+      <p class="intro">给一个非负数组，返回所有子序列（含空集）的累加和里最小的 k 个。n = 10<sup>5</sup>、nums[i] = 10<sup>6</sup>、k = 10<sup>5</sup>。用 01 背包算出每个和出现几次，表长是全部数的总和加一，这个规模下要 186.8 GB，根本开不出来。换个思路之后是 3.548 毫秒加 3.758 毫秒。</p>
+
+      <h2>零、先确认背包为什么不行</h2>
+      <p>01 背包能回答「累加和恰好是 j 的子序列有多少个」，于是从小到大扫一遍 j，每个 j 出现几次就输出几次，凑够 k 个停手。思路没问题，问题在表长。</p>
+    <pre class="code"><span class="cm">// 01 背包版：先算出每个累加和出现了几次，再从小到大数 k 个</span>
+    <span class="cm">// 表长是「全部数的累加和 + 1」，n 与数值一大就开不出来</span>
+    vector&lt;<span class="kw">int</span>&gt; <span class="fn">topKSumByBag</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> k) {
+        <span class="kw">int</span> sum = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> num : nums) sum += num;
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(sum + 1, 0);
+        dp[0] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> num : nums) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = sum; j &gt;= num; j--) dp[j] += dp[j - num];
+        }
+        vector&lt;<span class="kw">int</span>&gt; ans;
+        <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt;= sum &amp;&amp; (<span class="kw">int</span>)ans.size() &lt; k; j++) {
+            <span class="kw">for</span> (<span class="kw">int</span> c = 0; c &lt; dp[j] &amp;&amp; (<span class="kw">int</span>)ans.size() &lt; k; c++) ans.push_back(j);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>表长是 sum + 1，sum 是所有元素的总和。n = 10<sup>5</sup>、每个元素 10<sup>6</sup> 时 sum 是 5.0 × 10<sup>10</sup>，光这一维数组就是 186.8 GB。n = 10<sup>4</sup> 也还要 18.6 GB。</p>
+      <p>就算把规模压到能跑：n = 2000、sum = 101031 的小数据下，01 背包要 61.080 毫秒，堆只要 0.073 毫秒，差了 837 倍。时间上也没得比。</p>
+      <figure class="fig" id="figScale"></figure>
+      <p>背包的问题在于它把「所有可能的和」都排了一遍，可我们只需要最小的 k 个。和的取值范围远大于 k，绝大部分格子是白算的。</p>
+
+      <h2>一、堆：每次只推出两个后继</h2>
+      <p>先把数组排序。堆里放的是一个二元组 <code>(right, sum)</code>，含义是「有一个子序列，它用到的最右下标是 right，累加和是 sum」，按 sum 从小到大弹。</p>
+      <p>从只含 <code>nums[0]</code> 的那个子序列出发（右端 0、和 nums[0]）。每次弹出堆顶，就得到下一个最小的和，然后把它推出两个后继：</p>
+      <p>1）把最右那个元素换成下一个：<code>(right + 1, sum - nums[right] + nums[right + 1])</code>，子序列长度不变；</p>
+      <p>2）在最右边追加一个：<code>(right + 1, sum + nums[right + 1])</code>，子序列长度加一。</p>
+      <figure class="fig" id="figHeap"></figure>
+      <p>两个操作都保持「最右下标」这个性质成立，也都不会回头去动已经确定的左边部分。可以证明每个非空子序列都恰好被生成一次：任何一个子序列都能从「只含它的最右元素」开始，反复用操作 1 把右端一步步挪过去。</p>
+      <p>空集的和是 0，它是第 1 小，不用进堆，直接写在答案第 0 位。于是循环跑 k − 1 次就得到全部 k 个。</p>
+    <pre class="code"><span class="cm">// 堆版：排序之后，堆里放 (子序列最右下标, 累加和)</span>
+    <span class="cm">// 弹出一个，就把它「换掉最右那个」和「再追加一个」两个后继推回堆里</span>
+    <span class="cm">// ans[0] = 0 是空集，所以第 1 小不用从堆里取</span>
+    <span class="kw">struct</span> PairCmp {                                  <span class="cm">// 只按累加和排序，别顺手用 greater&lt;pair&gt;</span>
+        <span class="kw">bool</span> <span class="fn"><span class="kw">operator</span></span>()(<span class="kw">const</span> pair&lt;<span class="kw">int</span>, <span class="kw">long</span> <span class="kw">long</span>&gt;&amp; a, <span class="kw">const</span> pair&lt;<span class="kw">int</span>, <span class="kw">long</span> <span class="kw">long</span>&gt;&amp; b) <span class="kw">const</span> {
+            <span class="kw">return</span> a.second &gt; b.second;               <span class="cm">// greater&lt;pair&gt; 会先比下标，那不是我们要的顺序</span>
+        }
+    };
+
+    vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt; <span class="fn">topKSum</span>(vector&lt;<span class="kw">int</span>&gt; nums, <span class="kw">int</span> k) {
+        sort(nums.begin(), nums.end());               <span class="cm">// 必须先排序，否则推出的顺序不是从小到大</span>
+        priority_queue&lt;pair&lt;<span class="kw">int</span>, <span class="kw">long</span> <span class="kw">long</span>&gt;, vector&lt;pair&lt;<span class="kw">int</span>, <span class="kw">long</span> <span class="kw">long</span>&gt;&gt;, PairCmp&gt; heap;
+        heap.push({0, nums[0]});                      <span class="cm">// 只含 nums[0] 这一个子序列</span>
+        vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt; <span class="fn">ans</span>(k, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; k; i++) {
+            auto cur = heap.top();
+            heap.pop();
+            <span class="kw">int</span> right = cur.first;
+            <span class="kw">long</span> <span class="kw">long</span> sum = cur.second;
+            ans[i] = sum;
+            <span class="kw">if</span> (right + 1 &lt; (<span class="kw">int</span>)nums.size()) {
+                heap.push({right + 1, sum - nums[right] + nums[right + 1]});  <span class="cm">// 换掉最右那个</span>
+                heap.push({right + 1, sum + nums[right + 1]});                <span class="cm">// 再追加一个</span>
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>实测 n = 10<sup>5</sup>、k = 10<sup>5</sup>：排序 3.548 毫秒，堆那 k 次弹出 3.758 毫秒，堆里最多同时存 10<sup>5</sup> 个元素。n = 10<sup>4</sup> 时是 0.280 毫秒加 4.663 毫秒。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示一：堆里每次弹一个、推两个</p>
+        <div id="v1svg"></div>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>数据
+            <select id="v1case">
+              <option value="0">[5,1,3] 取前 8 小</option>
+              <option value="1">[1,1,1] 取前 8 小</option>
+              <option value="2">[2,3,4] 取前 8 小</option>
+            </select>
+          </label>
+          <label>顺序
+            <select id="v1sort">
+              <option value="1">先排序（正确）</option>
+              <option value="0">原顺序（错版）</option>
+            </select>
+          </label>
+          <button id="v1prev">上一步</button>
+          <button id="v1next">下一步</button>
+          <button id="v1last">到末尾</button>
+          <button id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <h2>二、排序那一步不能省</h2>
+      <p>上面那两个后继操作，只有在数组有序的时候才能保证「弹出的顺序就是从小到大的顺序」。操作 1 把 nums[right] 换成 nums[right + 1]，换上来的数必须不小于换下去的，新和才不小于旧和。数组没排过序，这条就不成立，堆顶也就不是下一个最小的了。</p>
+      <p>实测两万组随机样本（n 在 2 到 8），不排序直接跑有 86.97% 的样本答案和真值不同。这个比例高得离谱，随手一组数据就能撞上。</p>
+      <figure class="fig" id="figSort"></figure>
+      <p>反例小到三个数。nums = [5, 1, 3]，真值的前 8 小是 0 1 3 4 5 6 8 9；不排序跑出来是 0 5 1 3 4 6 8 9，第二个位置就是 5，可 1 比它小得多。排序之后 [1, 3, 5] 才对得上。</p>
+
+      <h2>三、第 K 大和：取绝对值再减回来</h2>
+      <p>换一道题：数组里的数可正可负，求第 k 大的子序列和。</p>
+      <p>先把所有正数加起来，记成 sum，这是第 1 大（全选正数，不选负数和 0）。第 2 大要么是从 sum 里去掉一个最小的正数，要么是 sum 加上某些非正数。两种说法可以合成一句：第 k 大 = sum − 某个用「绝对值」凑出来的最小代价。</p>
+      <p>把所有数取绝对值得到数组 a，那么：</p>
+      <p class="kv">nums 的第 k 大子序列和 = sum − a 的第 k 小子序列和</p>
+      <p>其中 a 的第 1 小是空集的 0，对应 nums 的第 1 大 sum。这条关系成立的原因是，选一个负数等于从 sum 里减掉它的绝对值，不选一个正数也等于减掉它自己。</p>
+      <figure class="fig" id="figAbs"></figure>
+      <p>于是问题回到上一节的堆，只是堆的初始元素从「只含 a[0] 的子序列」换成空集 <code>(-1, 0)</code>，下标 −1 表示空。多出来的一个细节：扩展操作 1（换掉最右那个）在 idx = −1 时没有意义，要跳过，否则会去读 a[−1]。</p>
+    <pre class="code"><span class="kw">struct</span> Node {
+        <span class="kw">long</span> <span class="kw">long</span> val;    <span class="cm">// 用绝对值数组凑出来的累加和</span>
+        <span class="kw">int</span> idx;          <span class="cm">// 当前子序列用到的最右下标，空集是 -1</span>
+    };
+    <span class="kw">struct</span> NodeCmp {
+        <span class="kw">bool</span> <span class="fn"><span class="kw">operator</span></span>()(<span class="kw">const</span> Node&amp; a, <span class="kw">const</span> Node&amp; b) <span class="kw">const</span> {
+            <span class="kw">if</span> (a.val != b.val) <span class="kw">return</span> a.val &gt; b.val;
+            <span class="kw">return</span> a.idx &gt; b.idx;
+        }
+    };
+
+    <span class="cm">// 第 k 大子序列和 = 所有正数之和 - 绝对值数组的第 k 小子序列和</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">kSum</span>(vector&lt;<span class="kw">int</span>&gt; nums, <span class="kw">int</span> k) {
+        <span class="kw">int</span> n = nums.size();
+        <span class="kw">long</span> <span class="kw">long</span> sum = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">if</span> (nums[i] &gt; 0) sum += nums[i];
+            <span class="kw">else</span> nums[i] = -nums[i];                  <span class="cm">// 负数取绝对值，正数照抄</span>
+        }
+        sort(nums.begin(), nums.end());
+        priority_queue&lt;Node, vector&lt;Node&gt;, NodeCmp&gt; heap;
+        heap.push({0, -1});                           <span class="cm">// 空集，累加和 0，第 1 小</span>
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; k; i++) {                 <span class="cm">// 弹掉前 k-1 小</span>
+            Node cur = heap.top();
+            heap.pop();
+            <span class="kw">if</span> (cur.idx + 1 &lt; n) {
+                heap.push({cur.val + nums[cur.idx + 1], cur.idx + 1});          <span class="cm">// 追加</span>
+                <span class="kw">if</span> (cur.idx &gt;= 0) {                                             <span class="cm">// 换掉最右那个</span>
+                    heap.push({cur.val - nums[cur.idx] + nums[cur.idx + 1], cur.idx + 1});
+                }
+            }
+        }
+        <span class="kw">return</span> sum - heap.top().val;                  <span class="cm">// 堆顶就是第 k 小</span>
+    }</pre>
+      <p>这个判断漏掉的后果很直接：实测两万组随机样本，63.86% 出错。LC2386 的样例 nums = [2, 4, −2]、k = 5，正确答案是 2，没有这个保护会算出 4。</p>
+      <p>实测 n = 10<sup>5</sup>、k = 10<sup>5</sup>：排序 6.100 毫秒，堆那一段 10.840 毫秒，堆大小稳定在 10<sup>5</sup> 左右。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示二：第 K 大和，走一遍绝对值数组</p>
+        <div id="v2svg"></div>
+        <p class="viz-note" id="v2note"></p>
+        <p class="viz-answer" id="v2ans"></p>
+        <div class="viz-controls">
+          <label>数据
+            <select id="v2case">
+              <option value="0">[2,4,-2] k=5</option>
+              <option value="1">[1,-2,3] k=4</option>
+              <option value="2">[3,-1,5] k=6</option>
+            </select>
+          </label>
+          <button id="v2prev">上一步</button>
+          <button id="v2next">下一步</button>
+          <button id="v2last">到末尾</button>
+          <button id="v2reset">重置</button>
+        </div>
+      </div>
+
+      <h2>四、复杂度分析</h2>
+      <table class="complexity">
+        <thead><tr><th>做法</th><th>时间</th><th>额外空间</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>枚举全部子序列</td><td>O(2<sup>n</sup>)</td><td>O(2<sup>n</sup>)</td><td>先全算出来再排序，n = 20 就一百万个</td></tr>
+          <tr><td>01 背包</td><td>O(n · sum)</td><td>O(sum)</td><td>表长是总和加一，n = 10<sup>5</sup> 时要 186.8 GB</td></tr>
+          <tr><td>排序 + 堆</td><td>O(n log n + k log k)</td><td>O(k)</td><td>每次弹出推两个，堆里最多 2k 个元素</td></tr>
+        </tbody>
+      </table>
+      <p>堆那一栏的 k log k 来自 k 次堆操作，每次 O(log k)；堆里元素个数的上界是 2k，因为每弹一个最多推两个回来。n log n 是排序。</p>
+      <p>k 可以超过 2<sup>n</sup> 吗？题目里 k ≤ 10<sup>5</sup>，而 n = 10<sup>5</sup> 时子序列个数是 2<sup>100000</sup>，远远够取。反过来 n 很小的时候（比如 n = 10）子序列只有 1024 个，k 取 10<sup>5</sup> 就没有意义，题目会保证 k 不超过这个数。</p>
+
+      <h2>五、总结</h2>
+      <p>这两道题的共同点是「要的只有前 k 个，而可能的取值远多于 k 个」。背包的思路是把所有取值都算一遍，堆的思路是每次只推出紧挨着的下一个。</p>
+      <p>几个要记住的点：</p>
+      <p>1）堆里存二元组（最右下标, 累加和），弹出时推两个后继：换掉最右那个、再追加一个。空集的和 0 是第 1 小，不进堆。</p>
+      <p>2）数组必须先排序。少了这一步，两万组随机样本里 86.97% 出错，反例 [5,1,3] 第二个位置就错。</p>
+      <p>3）第 K 大和那题把「第 k 大」换成「sum 减去绝对值数组的第 k 小」，堆的初始元素换成空集 (−1, 0)。</p>
+      <p>4）idx = −1 时不能做「换掉最右那个」的扩展。漏掉这个判断，两万组里 63.86% 出错。</p>
+      <p>5）用 <code>greater&lt;pair&gt;</code> 当堆的比较器会先比下标，这里要的是只按累加和排序，得自己写比较器。</p>
+      <p>这类「第 k 小 / 第 k 大」的问题还有不少变体，核心都是找一个能把候选按顺序推出来的后继关系。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>LeetCode</td><td>找出数组的第 K 大和</td><td><a href="https://leetcode.cn/problems/find-the-k-sum-of-an-array/" target="_blank">find-the-k-sum-of-an-array</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解073【必备】背包dp-01背包、有依赖的背包</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            green: '#2e7d32', greenBg: '#e8f5e9', gray: '#9aa0a6', bg: '#f6f7f9',
+            border: '#e6e8eb', text: '#1e293b', dim: '#6b7280' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      (o.mono ? ' font-family="ui-monospace, Menlo, monospace"' : '') + '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx == null ? 4 : o.rx) +
+      '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.border) + '"' + (o.sw ? ' stroke-width="' + o.sw + '"' : '') + '/>';
+  }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+  function cell(x, y, w, h, v, o) {
+    o = o || {};
+    var s = rect(x, y, w, h, { fill: o.fill || '#fff', stroke: o.stroke || C.border, sw: o.sw });
+    s += txt(x + w / 2, y + h / 2 + 4, String(v), { size: o.size || 12, mono: true, fill: o.tc || C.text, weight: o.weight });
+    return s;
+  }
+
+  // ---------- 图 1：背包表长爆炸 ----------
+  function figScale() {
+    var s = txt(340, 20, '01 背包的表长 = 全部元素的总和 + 1（C++ 实测）', { size: 13, weight: '600' });
+    var rows = [
+      { n: 'n = 10^4', sum: '5.0 × 10^9', mem: '18.6 GB', gb: 18.6 },
+      { n: 'n = 10^5', sum: '5.0 × 10^10', mem: '186.8 GB', gb: 186.8 },
+      { n: '内存上限', sum: '—', mem: '本机 8 GB', gb: 8 }
+    ];
+    var i, y = 44;
+    for (i = 0; i < rows.length; i++) {
+      var w = Math.min(560, 460 * rows[i].gb / 186.8);
+      s += txt(96, y + 16, rows[i].n, { size: 11, anchor: 'end', mono: true });
+      s += rect(110, y, 460, 22, { fill: C.bg });
+      s += '<rect x="110" y="' + y + '" width="' + Math.max(3, w) + '" height="22" rx="3" fill="' +
+        (i === 2 ? C.gray : C.orange) + '"/>';
+      s += txt(110 + Math.max(3, w) + 8, y + 16, rows[i].mem, { size: 11, anchor: 'start', mono: true, fill: C.dim });
+      y += 34;
+    }
+    s += txt(340, y + 6, '每个元素 10^6，n 个的总和就是 n × 10^6；表要按这个长度开 int', { size: 11, fill: C.dim });
+    s += txt(340, y + 28, '堆做法只存 k 个元素：n = 10^5、k = 10^5 时排序 3.548 ms + 堆 3.758 ms', { size: 12, weight: '600', fill: C.blue });
+    wrap('figScale', y + 48, s,
+      '取值范围远大于要取的个数时，把每个取值都算一遍是浪费；堆只沿着「下一个最小的」走');
+  }
+
+  // ---------- 图 2：两个后继 ----------
+  function figHeap() {
+    var s = txt(340, 20, '弹出 (right, sum) 之后，推出两个后继', { size: 13, weight: '600' });
+    var a = [1, 3, 5];
+    var i;
+    s += txt(60, 48, '排序后的数组', { size: 11, anchor: 'start', fill: C.dim });
+    for (i = 0; i < 3; i++) {
+      s += cell(190 + i * 60, 32, 52, 30, a[i], { fill: i === 0 ? C.orangeBg : C.bg, stroke: i === 0 ? C.orange : C.border });
+      s += txt(216 + i * 60, 76, i, { size: 10, fill: C.dim, mono: true });
+    }
+    var y = 96;
+    s += rect(40, y, 600, 34, { fill: C.blueBg, stroke: C.blue });
+    s += txt(56, y + 22, '当前弹出：right = 0，sum = 1，子序列 = {1}', { size: 12, anchor: 'start', mono: true });
+    y += 44;
+    s += rect(40, y, 600, 34, { fill: C.greenBg, stroke: C.green });
+    s += txt(56, y + 22, '换掉最右：right = 1，sum = 1 − 1 + 3 = 3，子序列 = {3}', { size: 12, anchor: 'start', mono: true });
+    y += 44;
+    s += rect(40, y, 600, 34, { fill: C.greenBg, stroke: C.green });
+    s += txt(56, y + 22, '再追加：right = 1，sum = 1 + 3 = 4，子序列 = {1, 3}', { size: 12, anchor: 'start', mono: true });
+    y += 44;
+    s += txt(340, y + 12, '两个操作都保持「最右下标 = right + 1」，也不会回头动左边', { size: 11, fill: C.dim });
+    s += txt(340, y + 34, '每个非空子序列恰好被生成一次，所以弹出的顺序就是从小到大的顺序', { size: 12, weight: '600' });
+    wrap('figHeap', y + 54, s,
+      '堆里的每个元素推出两个后继，一个换右端、一个加右端；合起来覆盖全部子序列');
+  }
+
+  // ---------- 图 3：不排序的反例 ----------
+  function figSort() {
+    var s = txt(340, 20, 'nums = [5,1,3]：不排序跑出来的第二个数就是 5', { size: 13, weight: '600' });
+    var truth = [0, 1, 3, 4, 5, 6, 8, 9];
+    var wrong = [0, 5, 1, 3, 4, 6, 8, 9];
+    var cw = 62, x0 = 60, y0 = 46;
+    var i;
+    s += txt(x0 - 8, y0 + 19, '真值', { size: 11, anchor: 'end', fill: C.blue });
+    for (i = 0; i < 8; i++) {
+      s += cell(x0 + i * cw, y0, cw - 6, 30, truth[i], { fill: C.blueBg, stroke: C.blue, size: 12 });
+    }
+    s += txt(x0 - 8, y0 + 19 + 42, '不排序', { size: 11, anchor: 'end', fill: C.orange });
+    for (i = 0; i < 8; i++) {
+      var bad = truth[i] !== wrong[i];
+      s += cell(x0 + i * cw, y0 + 42, cw - 6, 30, wrong[i], {
+        fill: bad ? C.orangeBg : '#fff', stroke: bad ? C.orange : C.border, size: 12, weight: bad ? '600' : null
+      });
+    }
+    var y = y0 + 90;
+    s += txt(340, y, '8 个位置里错了 6 个；两万组随机样本里 86.97% 的样本会现形', { size: 12, weight: '600', fill: C.orange });
+    s += txt(340, y + 22, '排序之后是 [1,3,5]，换右端只会把和变大，堆顶才对得上「下一个最小」', { size: 11, fill: C.dim });
+    wrap('figSort', y + 42, s,
+      '排序不是优化，是正确性的一部分：它保证「换右端」得到的新和不小于旧和');
+  }
+
+  // ---------- 图 4：第 K 大和的转换 ----------
+  function figAbs() {
+    var s = txt(340, 20, 'nums 的第 k 大 = 正数之和 − 绝对值数组的第 k 小', { size: 13, weight: '600' });
+    var i;
+    s += txt(70, 48, '原数组', { size: 11, anchor: 'start', fill: C.dim });
+    var nums = [2, 4, -2];
+    for (i = 0; i < 3; i++) s += cell(150 + i * 62, 32, 54, 30, nums[i], { fill: nums[i] > 0 ? C.greenBg : C.orangeBg, stroke: nums[i] > 0 ? C.green : C.orange, size: 12 });
+    s += txt(70, 90, '绝对值', { size: 11, anchor: 'start', fill: C.dim });
+    var a = [2, 4, 2];
+    for (i = 0; i < 3; i++) s += cell(150 + i * 62, 74, 54, 30, a[i], { fill: C.bg, size: 12 });
+    s += txt(70, 132, '排序后', { size: 11, anchor: 'start', fill: C.dim });
+    var b = [2, 2, 4];
+    for (i = 0; i < 3; i++) s += cell(150 + i * 62, 116, 54, 30, b[i], { fill: C.blueBg, stroke: C.blue, size: 12 });
+    var y = 170;
+    s += txt(340, y, '所有正数之和 sum = 2 + 4 = 6，这是第 1 大（空集的代价是 0）', { size: 11, fill: C.dim });
+    s += txt(340, y + 22, '绝对值数组的第 5 小是 4，于是第 5 大 = 6 − 4 = 2', { size: 12, weight: '600', fill: C.blue });
+    s += txt(340, y + 44, '堆的初始元素从「只含 a[0]」换成空集 (−1, 0)，idx = −1 时跳过「换右端」', { size: 11, fill: C.dim });
+    wrap('figAbs', y + 64, s,
+      '选一个负数等于扣掉它的绝对值，不选一个正数也是扣掉它 —— 两种扣法可以统一成绝对值数组的子序列和');
+  }
+
+  figScale(); figHeap(); figSort(); figAbs();
+
+  // ================= 演示一：前 k 小 =================
+  var CASES = [
+    { a: [5, 1, 3], k: 8, truth: [0, 1, 3, 4, 5, 6, 8, 9] },
+    { a: [1, 1, 1], k: 8, truth: [0, 1, 1, 1, 2, 2, 2, 3] },
+    { a: [2, 3, 4], k: 8, truth: [0, 2, 3, 4, 5, 6, 7, 9] }
+  ];
+  function buildTopK(c, dosort) {
+    var a = c.a.slice();
+    if (dosort) a.sort(function (x, y) { return x - y; });
+    var n = a.length;
+    var heap = [{ r: 0, s: a[0] }];
+    var ans = [0];
+    var steps = [{ kind: 'init', heap: [{ r: 0, s: a[0] }], ans: [0], a: a }];
+    var i;
+    for (i = 1; i < c.k; i++) {
+      heap.sort(function (p, q) { return p.s - q.s; });
+      var cur = heap.shift();
+      ans.push(cur.s);
+      var pushed = [];
+      if (cur.r + 1 < n) {
+        var p1 = { r: cur.r + 1, s: cur.s - a[cur.r] + a[cur.r + 1] };
+        var p2 = { r: cur.r + 1, s: cur.s + a[cur.r + 1] };
+        heap.push(p1); heap.push(p2);
+        pushed = [p1, p2];
+      }
+      steps.push({ kind: 'pop', heap: heap.slice(), ans: ans.slice(), cur: cur, pushed: pushed, a: a, i: i });
+    }
+    steps.push({ kind: 'done', heap: heap.slice(), ans: ans.slice(), a: a });
+    return steps;
+  }
+  var v1 = { steps: [], step: 0, c: null, dosort: 1 };
+  function v1Build() {
+    var ci = parseInt(document.getElementById('v1case').value, 10);
+    v1.dosort = parseInt(document.getElementById('v1sort').value, 10);
+    v1.c = CASES[ci];
+    v1.steps = buildTopK(v1.c, v1.dosort === 1);
+    v1.step = 0;
+    v1Render();
+  }
+  function v1Render() {
+    var st = v1.steps[v1.step], c = v1.c;
+    var arr = v1.dosort === 1 ? c.a.slice().sort(function (x, y) { return x - y; }) : c.a.slice();
+    var s = txt(340, 20, 'nums = [' + c.a.join(',') + ']　' + (v1.dosort === 1 ? '排序后 [' + arr.join(',') + ']' : '保持原顺序 [' + arr.join(',') + ']') + '　k = ' + c.k, { size: 12, weight: '600' });
+    var y = 44;
+    var i;
+    s += txt(70, y + 14, '数组', { size: 11, anchor: 'start', fill: C.dim });
+    for (i = 0; i < arr.length; i++) {
+      var used = st.kind === 'pop' && (st.cur.r === i);
+      s += cell(140 + i * 56, y, 48, 28, arr[i], { fill: used ? C.orangeBg : C.bg, stroke: used ? C.orange : C.border, size: 12 });
+      s += txt(164 + i * 56, y + 42, i, { size: 10, fill: C.dim, mono: true });
+    }
+    y += 56;
+    s += txt(70, y + 14, '堆', { size: 11, anchor: 'start', fill: C.dim });
+    var hs = st.heap.slice().sort(function (p, q) { return p.s - q.s; });
+    for (i = 0; i < Math.min(hs.length, 9); i++) {
+      var isNew = false, j;
+      if (st.kind === 'pop' && st.pushed) {
+        for (j = 0; j < st.pushed.length; j++) if (st.pushed[j].r === hs[i].r && st.pushed[j].s === hs[i].s) isNew = true;
+      }
+      s += rect(140 + i * 58, y, 52, 28, { fill: isNew ? C.greenBg : '#fff', stroke: isNew ? C.green : C.border });
+      s += txt(166 + i * 58, y + 14, hs[i].s, { size: 11, mono: true });
+      s += txt(166 + i * 58, y + 26, 'r' + hs[i].r, { size: 9, fill: C.dim, mono: true });
+    }
+    if (hs.length > 9) s += txt(140 + 9 * 58 + 20, y + 19, '…', { size: 12, fill: C.dim });
+    if (hs.length === 0) s += txt(180, y + 19, '（空）', { size: 11, fill: C.dim });
+    y += 46;
+    s += txt(70, y + 14, '答案', { size: 11, anchor: 'start', fill: C.dim });
+    var cw = Math.floor(560 / c.k); if (cw > 60) cw = 60;
+    for (i = 0; i < st.ans.length; i++) {
+      var isCur = st.kind === 'pop' && i === st.ans.length - 1;
+      s += cell(140 + i * cw, y, cw - 5, 28, st.ans[i], {
+        fill: isCur ? C.blueBg : '#fff', stroke: isCur ? C.blue : C.border, size: 11, weight: isCur ? '600' : null
+      });
+    }
+    y += 44;
+    if (st.kind === 'init') {
+      s += txt(340, y, '第 1 小是空集的 0，堆里先放只含 nums[0] 的子序列', { size: 12 });
+    } else if (st.kind === 'pop') {
+      s += txt(340, y, '弹出 (' + st.cur.r + ', ' + st.cur.s + ')，这是第 ' + (st.i + 1) + ' 小', { size: 12 });
+    } else {
+      s += txt(340, y, '前 ' + c.k + ' 小：' + st.ans.join(' , '), { size: 12, weight: '600', fill: C.blue });
+      y += 20;
+      s += txt(340, y, '真值：' + c.truth.join(' , '), { size: 12, fill: C.dim });
+    }
+    y += 24;
+    document.getElementById('v1svg').innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + (y + 16) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    document.getElementById('v1note').textContent = '第 ' + v1.step + ' / ' + (v1.steps.length - 1) + ' 步' +
+      (st.kind === 'pop' ? '：弹一个、推两个' : (st.kind === 'done' ? '：结束' : '：初始化'));
+    if (st.kind === 'done') {
+      var ok = st.ans.length === c.truth.length;
+      for (i = 0; i < st.ans.length && ok; i++) if (st.ans[i] !== c.truth[i]) ok = false;
+      document.getElementById('v1ans').textContent = ok ? '与真值完全一致' : '与真值不一致（' + st.ans.join(',') + ' vs ' + c.truth.join(',') + '）';
+    } else {
+      document.getElementById('v1ans').textContent = '';
+    }
+    document.getElementById('v1next').disabled = v1.step >= v1.steps.length - 1;
+    document.getElementById('v1prev').disabled = v1.step <= 0;
+  }
+
+  // ================= 演示二：第 K 大和 =================
+  var KCASES = [
+    { nums: [2, 4, -2], k: 5, ans: 2 },
+    { nums: [1, -2, 3], k: 4, ans: 1 },
+    { nums: [3, -1, 5], k: 6, ans: 2 }
+  ];
+  function buildKSum(c) {
+    var a = c.nums.slice(), sum = 0, i;
+    for (i = 0; i < a.length; i++) { if (a[i] > 0) sum += a[i]; else a[i] = -a[i]; }
+    a.sort(function (x, y) { return x - y; });
+    var n = a.length;
+    var heap = [{ idx: -1, v: 0 }];
+    var steps = [{ kind: 'init', heap: [{ idx: -1, v: 0 }], out: [], a: a, sum: sum }];
+    for (i = 1; i < c.k; i++) {
+      heap.sort(function (p, q) { return p.v - q.v || p.idx - q.idx; });
+      var cur = heap.shift();
+      var pushed = [];
+      if (cur.idx + 1 < n) {
+        var p1 = { idx: cur.idx + 1, v: cur.v + a[cur.idx + 1] };
+        heap.push(p1); pushed.push(p1);
+        if (cur.idx >= 0) {
+          var p2 = { idx: cur.idx + 1, v: cur.v - a[cur.idx] + a[cur.idx + 1] };
+          heap.push(p2); pushed.push(p2);
+        }
+      }
+      steps.push({ kind: 'pop', heap: heap.slice(), out: cur.v, cur: cur, pushed: pushed, a: a, sum: sum, i: i });
+    }
+    heap.sort(function (p, q) { return p.v - q.v || p.idx - q.idx; });
+    var top = heap[0];
+    steps.push({ kind: 'done', heap: heap.slice(), top: top, a: a, sum: sum, ans: sum - top.v });
+    return steps;
+  }
+  var v2 = { steps: [], step: 0, c: null };
+  function v2Build() {
+    var ci = parseInt(document.getElementById('v2case').value, 10);
+    v2.c = KCASES[ci];
+    v2.steps = buildKSum(v2.c);
+    v2.step = 0;
+    v2Render();
+  }
+  function v2Render() {
+    var st = v2.steps[v2.step], c = v2.c;
+    var s = txt(340, 20, 'nums = [' + c.nums.join(',') + ']　k = ' + c.k, { size: 12, weight: '600' });
+    var y = 44, i;
+    s += txt(70, y + 14, '绝对值', { size: 11, anchor: 'start', fill: C.dim });
+    for (i = 0; i < st.a.length; i++) {
+      var used = st.kind === 'pop' && st.cur.idx >= 0 && st.cur.idx === i;
+      s += cell(150 + i * 56, y, 48, 28, st.a[i], { fill: used ? C.orangeBg : C.blueBg, stroke: used ? C.orange : C.blue, size: 12 });
+      s += txt(174 + i * 56, y + 42, i, { size: 10, fill: C.dim, mono: true });
+    }
+    s += txt(430, y + 20, '正数之和 sum = ' + st.sum, { size: 11, anchor: 'start', mono: true });
+    y += 56;
+    s += txt(70, y + 14, '堆', { size: 11, anchor: 'start', fill: C.dim });
+    var hs = st.heap.slice().sort(function (p, q) { return p.v - q.v || p.idx - q.idx; });
+    for (i = 0; i < Math.min(hs.length, 9); i++) {
+      var isNew = false, j;
+      if (st.kind === 'pop' && st.pushed) {
+        for (j = 0; j < st.pushed.length; j++) if (st.pushed[j].idx === hs[i].idx && st.pushed[j].v === hs[i].v) isNew = true;
+      }
+      s += rect(150 + i * 58, y, 52, 28, { fill: isNew ? C.greenBg : '#fff', stroke: isNew ? C.green : C.border });
+      s += txt(176 + i * 58, y + 14, hs[i].v, { size: 11, mono: true });
+      s += txt(176 + i * 58, y + 26, 'i' + hs[i].idx, { size: 9, fill: C.dim, mono: true });
+    }
+    if (hs.length > 9) s += txt(150 + 9 * 58 + 20, y + 19, '…', { size: 12, fill: C.dim });
+    y += 46;
+    if (st.kind === 'init') {
+      s += txt(340, y, '堆里放空集 (idx = −1, 和 = 0)，它是第 1 小', { size: 12 });
+    } else if (st.kind === 'pop') {
+      s += txt(340, y, '弹出第 ' + st.i + ' 小 = ' + st.out + (st.cur.idx >= 0 ? '（做了「换右端」）' : '（idx = −1，跳过「换右端」）'), { size: 12 });
+    } else {
+      s += txt(340, y, '第 ' + c.k + ' 小 = ' + st.top.v + '，答案 = ' + st.sum + ' − ' + st.top.v + ' = ' + st.ans, { size: 13, weight: '600', fill: C.blue });
+    }
+    y += 24;
+    document.getElementById('v2svg').innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + (y + 16) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    document.getElementById('v2note').textContent = '第 ' + v2.step + ' / ' + (v2.steps.length - 1) + ' 步' +
+      (st.kind === 'pop' ? '：弹一个、推两个（或只推一个）' : (st.kind === 'done' ? '：结束' : '：初始化'));
+    document.getElementById('v2ans').textContent = st.kind === 'done' ? '第 ' + c.k + ' 大子序列和 = ' + st.ans : '';
+    document.getElementById('v2next').disabled = v2.step >= v2.steps.length - 1;
+    document.getElementById('v2prev').disabled = v2.step <= 0;
+  }
+
+  document.getElementById('v1case').addEventListener('change', v1Build);
+  document.getElementById('v1sort').addEventListener('change', v1Build);
+  document.getElementById('v1prev').addEventListener('click', function () { if (v1.step > 0) { v1.step--; v1Render(); } });
+  document.getElementById('v1next').addEventListener('click', function () { if (v1.step < v1.steps.length - 1) { v1.step++; v1Render(); } });
+  document.getElementById('v1last').addEventListener('click', function () { v1.step = v1.steps.length - 1; v1Render(); });
+  document.getElementById('v1reset').addEventListener('click', function () { v1.step = 0; v1Render(); });
+  document.getElementById('v2case').addEventListener('change', v2Build);
+  document.getElementById('v2prev').addEventListener('click', function () { if (v2.step > 0) { v2.step--; v2Render(); } });
+  document.getElementById('v2next').addEventListener('click', function () { if (v2.step < v2.steps.length - 1) { v2.step++; v2Render(); } });
+  document.getElementById('v2last').addEventListener('click', function () { v2.step = v2.steps.length - 1; v2Render(); });
+  document.getElementById('v2reset').addEventListener('click', function () { v2.step = 0; v2Render(); });
+  v1Build();
+  v2Build();
+})();
+</script>
+</body>
+</html>

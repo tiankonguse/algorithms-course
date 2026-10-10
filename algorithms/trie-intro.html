@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>前缀树：按前缀建树</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz-ctl{margin:8px 0 4px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;}
+.viz-ctl label{font-size:13px;color:var(--text-dim);white-space:nowrap;}
+.viz-ctl select{font-size:13px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:#fff;}
+.viz-note{margin:10px 0 4px;font-size:13px;color:var(--text);}
+.viz-answer{margin-top:6px;font-size:15px;font-weight:600;}
+.tnode circle{stroke:#9aa0a6;stroke-width:1.4;fill:#fff;}
+.tnode.cur circle{stroke:#2563eb;stroke-width:2.6;fill:#dbeafe;}
+.tnode.new circle{stroke:#ea580c;stroke-width:2.6;fill:#ffedd5;}
+.tnode text.ch{font-size:14px;font-weight:600;}
+.tnode text.pe{font-size:10.5px;fill:#444;}
+.edge{stroke:#9aa0a6;stroke-width:1.4;}
+.edge.cur{stroke:#2563eb;stroke-width:2.2;}
+.edge.new{stroke:#ea580c;stroke-width:2.2;}
+.edge-tag{font-size:11.5px;fill:#555;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>前缀树：按前缀建树</h1>
+      <p class="intro">词典里 100 万个单词，问「以 app 开头的有几个」。逐词比对要扫一整本词典，哈希表把单词压成整体、前缀信息直接丢了，两个都答不利索。前缀树把每个单词按字符拆成一条条边，走完一个前缀，答案就挂在走到的那个节点上。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>词典有 100 万词，要查「以某个前缀开头的单词数」。最直接的做法：把每个单词拉出来，比对一遍前缀。</p>
+      <p>本机实测：100 万词、查 200 次前缀，逐词比对要 0.47 秒。词典再大、查得再密，这个数线性涨，200 次已经摸到半秒，几千次查询就是几十秒。</p>
+      <p>哈希表答不了这个问题。它能答「apple 出现几次」，因为它把整个单词散列成一个键；可「以 app 开头的有几个」问的是前缀，单词在哈希表里是一整块，前缀信息存进去的时候就没了。为了答一个前缀问题，还是得把所有单词拉出来重新比对。</p>
+      <p>前缀查询要的是一件事：把「前缀」本身变成查询的索引。前缀树干的正是这个。</p>
+
+      <h2 id="trie">一、前缀树</h2>
+      <p>每个单词从根开始，按字符走一条路。第一个字符 a 走 a 路，第二个字符 p 走 p 路，路是字符到字符的边。</p>
+      <p>建树只有两条规则：<strong>没有路就新建一个节点，有路就复用</strong>。</p>
+      <p>插入 app、apple、apply 三个词：前三个字符 app 完全一样，走的是一条路；第四个字符 apple 和 apply 都是 l，还是一条路；到第五个字符 e 和 y 才分叉。</p>
+      <figure class="fig" id="figBuild"></figure>
+      <p>从根走到某个节点，路径上的字符拼起来恰好是一个前缀。树建好之后，「app 这个前缀在词典里存不存在、有多少词经过它」就变成一个节点上的数字。</p>
+
+      <div class="viz" id="vizBuild"></div>
+
+      <h2 id="pass">二、pass 和 end</h2>
+      <p>每个节点挂两个计数器。pass：有多少个单词从这条路经过，也就是「以这个前缀开头的单词数」；end：有多少个单词在这个节点结束，也就是「这个单词出现了几次」。</p>
+      <p>插 app、apple、apply 各一次：走 a-p-p 的单词有 3 个，第二个 p 的 pass 是 3；app 自己在这个节点结束，end 是 1；apple 和 apply 继续走到 l，l 的 pass 是 2，e 和 y 的 end 各是 1。</p>
+      <figure class="fig" id="figPassEnd"></figure>
+      <p>查询就两句话：问前缀，走完读 pass；问单词，走完读 end。走到半路发现没有路，答案是 0。</p>
+
+      <div class="viz" id="vizQuery"></div>
+
+      <h2 id="impl">三、类描述实现</h2>
+      <p>最直观的写法：一个节点一个对象。节点里存 pass、end，再加 26 条路。</p>
+      <p>路的存法有两种。字符范围小，比如 26 个小写字母，用固定数组，下标就是字符减 'a'；字符范围大，比如任意字符、数字，26 个槽位会浪费，用哈希表，键就是字符本身。</p>
+      <figure class="fig" id="figRoute"></figure>
+      <p>插入的每一处都在做同一件事：检查路在不在，不在就建，在就走过去；走过去之后 pass 加一。差别只在「查路」那一步，数组是下标访问，哈希表是查键。</p>
+    <pre class="code"><span class="cm">// 节点：pass 是经过次数，end 是结束次数，nexts 是 26 条路</span>
+    <span class="kw">struct</span> TrieNode {
+        <span class="kw">int</span> pass;
+        <span class="kw">int</span> end;
+        TrieNode* nexts[26];
+        TrieNode() {
+            pass = 0;
+            end = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 26; i++) nexts[i] = <span class="kw">nullptr</span>;
+        }
+    };
+
+    <span class="cm">// 插入：没路就新建，有路就复用；沿途 pass++，结尾 end++</span>
+    <span class="kw">void</span> <span class="fn">insert</span>(<span class="kw">string</span> word) {
+        TrieNode* node = root;
+        node-&gt;pass++;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, path; i &lt; word.size(); i++) {
+            path = word[i] - 'a';   <span class="cm">// 字符对应成第几条路</span>
+            <span class="kw">if</span> (node-&gt;nexts[path] == <span class="kw">nullptr</span>) {
+                node-&gt;nexts[path] = <span class="kw">new</span> TrieNode();
+            }
+            node = node-&gt;nexts[path];
+            node-&gt;pass++;
+        }
+        node-&gt;end++;
+    }
+
+    <span class="cm">// word 出现几次：走完返回 end</span>
+    <span class="kw">int</span> <span class="fn">countWordsEqualTo</span>(<span class="kw">string</span> word) {
+        TrieNode* node = root;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, path; i &lt; word.size(); i++) {
+            path = word[i] - 'a';
+            <span class="kw">if</span> (node-&gt;nexts[path] == <span class="kw">nullptr</span>) {
+                <span class="kw">return</span> 0;
+            }
+            node = node-&gt;nexts[path];
+        }
+        <span class="kw">return</span> node-&gt;end;
+    }
+
+    <span class="cm">// 以 pre 开头的单词数：走完返回 pass</span>
+    <span class="kw">int</span> <span class="fn">countWordsStartingWith</span>(<span class="kw">string</span> pre) {
+        TrieNode* node = root;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, path; i &lt; pre.size(); i++) {
+            path = pre[i] - 'a';
+            <span class="kw">if</span> (node-&gt;nexts[path] == <span class="kw">nullptr</span>) {
+                <span class="kw">return</span> 0;
+            }
+            node = node-&gt;nexts[path];
+        }
+        <span class="kw">return</span> node-&gt;pass;
+    }
+
+    <span class="cm">// 删一次：沿途 pass--，减到 0 就断开；结尾 end--</span>
+    <span class="kw">void</span> <span class="fn">erase</span>(<span class="kw">string</span> word) {
+        <span class="kw">if</span> (countWordsEqualTo(word) &gt; 0) {
+            TrieNode* node = root;
+            node-&gt;pass--;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0, path; i &lt; word.size(); i++) {
+                path = word[i] - 'a';
+                <span class="kw">if</span> (--node-&gt;nexts[path]-&gt;pass == 0) {
+                    node-&gt;nexts[path] = <span class="kw">nullptr</span>;
+                    <span class="kw">return</span>;
+                }
+                node = node-&gt;nexts[path];
+            }
+            node-&gt;end--;
+        }
+    }</pre>
+      <p>哈希路的版本只换路的容器，其余逻辑原样照搬：</p>
+    <pre class="code"><span class="cm">// 路换成哈希表：字符范围大、26 个槽位会浪费时用</span>
+    <span class="kw">struct</span> TrieNode {
+        <span class="kw">int</span> pass;
+        <span class="kw">int</span> end;
+        unordered_map&lt;<span class="kw">char</span>, TrieNode*&gt; nexts;
+        TrieNode() {
+            pass = 0;
+            end = 0;
+        }
+    };
+
+    <span class="kw">void</span> <span class="fn">insert</span>(<span class="kw">string</span> word) {
+        TrieNode* node = root;
+        node-&gt;pass++;
+        <span class="kw">for</span> (<span class="kw">char</span> c : word) {
+            <span class="kw">if</span> (node-&gt;nexts.count(c) == 0) {
+                node-&gt;nexts[c] = <span class="kw">new</span> TrieNode();
+            }
+            node = node-&gt;nexts[c];
+            node-&gt;pass++;
+        }
+        node-&gt;end++;
+    }
+
+    <span class="cm">// 删词：pass 减到 0 就把键从哈希表里去掉</span>
+    <span class="kw">void</span> <span class="fn">erase</span>(<span class="kw">string</span> word) {
+        <span class="kw">if</span> (countWordsEqualTo(word) &gt; 0) {
+            TrieNode* node = root;
+            node-&gt;pass--;
+            <span class="kw">for</span> (<span class="kw">char</span> c : word) {
+                TrieNode* next = node-&gt;nexts[c];
+                <span class="kw">if</span> (--next-&gt;pass == 0) {
+                    node-&gt;nexts.erase(c);
+                    <span class="kw">return</span>;
+                }
+                node = next;
+            }
+            node-&gt;end--;
+        }
+    }</pre>
+      <p>这套写法逻辑最清楚，但每个字符都要 new 一个节点。为什么说它不推荐，下一页给实测数字。</p>
+
+      <h2 id="complexity">复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>操作</th><th>时间</th><th>说明</th></tr>
+        <tr><td>insert</td><td>O(len)</td><td>走 len 个字符，每步 O(1) 查路</td></tr>
+        <tr><td>countWordsEqualTo / countWordsStartingWith</td><td>O(len)</td><td>走完读 end / pass</td></tr>
+        <tr><td>erase</td><td>O(len)</td><td>先查一次确认存在，再沿路减计数</td></tr>
+      </table>
+      <p>空间 O(总字符数 × 字符集大小)：数组路每个节点固定 26 个槽，哈希路按实际用到的字符占键。单词越长、字符种类越多，节点越费。</p>
+
+      <h2 id="sum">总结</h2>
+      <p>前缀树把「前缀查询」变成沿树走一趟，代价只跟单词长度有关，跟词典大小无关。</p>
+      <p>节点上挂什么计数可以按需定制，pass 和 end 是最常见的一对：一个回答前缀数，一个回答出现次数。</p>
+      <p>类描述实现结构直观，代价是每个字符一次堆分配。下一讲换静态数组，把 new 换成数组下标。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>实现 Trie（前缀树）II</td><td><a href="https://leetcode.cn/problems/implement-trie-ii-prefix-tree/" target="_blank">leetcode.cn/problems/implement-trie-ii-prefix-tree</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解044【必备】前缀树原理和代码详解</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-wiki</td><td>Trie</td><td><a href="https://oi-wiki.org/string/trie/" target="_blank">oi-wiki.org/string/trie</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+/* ===== 树绘制共用 ===== */
+function makeTree(){
+  return { ch:'', pass:0, end:0, children:{}, x:0, y:0 };
+}
+function layoutTree(root){
+  var levels = [];
+  (function dfs(u,d){
+    if(!levels[d]) levels[d] = [];
+    levels[d].push(u);
+    for(var k in u.children) dfs(u.children[k], d+1);
+  })(root,0);
+  var W = 760;
+  levels.forEach(function(lv,d){
+    lv.sort(function(a,b){ return a.ch < b.ch ? -1 : a.ch > b.ch ? 1 : 0; });
+    var y = d===0 ? 56 : 66 + d*58;
+    lv.forEach(function(u,i){
+      u.y = y;
+      u.x = lv.length===1 ? W/2 : 30 + i*(W-60)/(lv.length-1);
+    });
+  });
+  return levels.length;
+}
+function drawTree(svg, root, opts){
+  opts = opts || {};
+  var cur = opts.cur || null;      // 当前高亮节点
+  var fresh = opts.fresh || null;  // 新建高亮节点
+  var edgeCur = opts.edgeCur || null; // 当前走的边 {from,to}
+  var edgeNew = opts.edgeNew || null;
+  var ns = 'http://www.w3.org/2000/svg';
+  var s = '';
+  (function walk(u){
+    for(var k in u.children){
+      var v = u.children[k];
+      var cls = 'edge';
+      if(edgeCur && edgeCur[0]===u && edgeCur[1]===v) cls='edge cur';
+      if(edgeNew && edgeNew[0]===u && edgeNew[1]===v) cls='edge new';
+      s += '<line class="'+cls+'" x1="'+u.x+'" y1="'+u.y+'" x2="'+v.x+'" y2="'+v.y+'"/>';
+      s += '<text class="edge-tag" x="'+((u.x+v.x)/2)+'" y="'+((u.y+v.y)/2-7)+'" text-anchor="middle">'+k+'</text>';
+      walk(v);
+    }
+  })(root);
+  (function walk2(u){
+    var cls = 'tnode';
+    if(u===fresh) cls='tnode new';
+    else if(u===cur) cls='tnode cur';
+    s += '<g class="'+cls+'">';
+    s += '<circle cx="'+u.x+'" cy="'+u.y+'" r="19"/>';
+    if(u.ch) s += '<text class="ch" x="'+u.x+'" y="'+ (u.y+5) +'" text-anchor="middle">'+u.ch+'</text>';
+    else s += '<text class="ch" x="'+u.x+'" y="'+ (u.y+5) +'" text-anchor="middle" style="font-size:11px">根</text>';
+    s += '<text class="pe" x="'+u.x+'" y="'+ (u.y+34) +'" text-anchor="middle">pass '+u.pass+'</text>';
+    s += '<text class="pe" x="'+u.x+'" y="'+ (u.y+48) +'" text-anchor="middle">end '+u.end+'</text>';
+    s += '</g>';
+    for(var k in u.children) walk2(u.children[k]);
+  })(root);
+  svg.innerHTML = s;
+}
+
+/* ===== 图：figBuild ===== */
+(function(){
+  var root = makeTree();
+  ['app','apple','apply'].forEach(function(w){
+    var u = root; u.pass++;
+    for(var i=0;i<w.length;i++){
+      var c = w[i];
+      if(!u.children[c]) u.children[c] = { ch:c, pass:0, end:0, children:{}, x:0, y:0 };
+      u = u.children[c]; u.pass++;
+    }
+    u.end++;
+  });
+  var svg = document.getElementById('figBuild');
+  var svgNS = 'http://www.w3.org/2000/svg';
+  var S = document.createElementNS(svgNS,'svg');
+  S.setAttribute('viewBox','0 0 760 430');
+  svg.appendChild(S);
+  var dep = layoutTree(root);
+  drawTree(S, root);
+  var cap = document.createElement('figcaption');
+  cap.textContent = '插入 app、apple、apply：前三步同一条路，l 之后分叉。节点下方两行是 pass 和 end。';
+  svg.appendChild(cap);
+})();
+
+/* ===== 图：figPassEnd ===== */
+(function(){
+  var root = makeTree();
+  ['app','apple','apply'].forEach(function(w){
+    var u = root; u.pass++;
+    for(var i=0;i<w.length;i++){
+      var c = w[i];
+      if(!u.children[c]) u.children[c] = { ch:c, pass:0, end:0, children:{}, x:0, y:0 };
+      u = u.children[c]; u.pass++;
+    }
+    u.end++;
+  });
+  var svg = document.getElementById('figPassEnd');
+  var svgNS = 'http://www.w3.org/2000/svg';
+  var S = document.createElementNS(svgNS,'svg');
+  S.setAttribute('viewBox','0 0 760 240');
+  svg.appendChild(S);
+  // 左侧小树：a->p->p
+  var nodes = [
+    {ch:'a', x:150, y:70, pass:3, end:0},
+    {ch:'p', x:280, y:70, pass:3, end:0},
+    {ch:'p', x:410, y:70, pass:3, end:1}
+  ];
+  S.innerHTML =
+    '<line class="edge" x1="80" y1="70" x2="120" y2="70"/>' +
+    '<line class="edge" x1="180" y1="70" x2="250" y2="70"/>' +
+    '<line class="edge" x1="310" y1="70" x2="380" y2="70"/>' +
+    '<text class="edge-tag" x="100" y="60" text-anchor="middle">a</text>' +
+    '<text class="edge-tag" x="215" y="60" text-anchor="middle">p</text>' +
+    '<text class="edge-tag" x="345" y="60" text-anchor="middle">p</text>' +
+    '<circle cx="80" cy="70" r="19" fill="#fff" stroke="#9aa0a6" stroke-width="1.4"/>' +
+    '<text x="80" y="75" text-anchor="middle" style="font-size:11px">根</text>' +
+    '<text x="80" y="104" text-anchor="middle" style="font-size:10.5px" fill="#444">pass 3</text>' +
+    '<text x="80" y="118" text-anchor="middle" style="font-size:10.5px" fill="#444">end 0</text>';
+  nodes.forEach(function(n){
+    S.innerHTML +=
+      '<circle cx="'+n.x+'" cy="'+n.y+'" r="19" fill="#fff" stroke="#9aa0a6" stroke-width="1.4"/>' +
+      '<text x="'+n.x+'" y="'+(n.y+5)+'" text-anchor="middle" style="font-size:14px;font-weight:600">'+n.ch+'</text>' +
+      '<text x="'+n.x+'" y="'+(n.y+34)+'" text-anchor="middle" style="font-size:10.5px" fill="#444">pass '+n.pass+'</text>' +
+      '<text x="'+n.x+'" y="'+(n.y+48)+'" text-anchor="middle" style="font-size:10.5px" fill="#444">end '+n.end+'</text>';
+  });
+  var x0 = 500;
+  S.innerHTML +=
+    '<g style="font-size:13px;fill:#333">' +
+    '<text x="'+x0+'" y="60">pass：经过这个节点的单词数</text>' +
+    '<text x="'+x0+'" y="84">查「以 app 开头的有几个」→ 走完读 pass</text>' +
+    '<text x="'+x0+'" y="116">end：在这个节点结束的单词数</text>' +
+    '<text x="'+x0+'" y="140">查「app 出现几次」→ 走完读 end</text>' +
+    '<text x="'+x0+'" y="176" style="fill:#c2410c">走到半路没有路 → 答案 0</text>' +
+    '</g>';
+  var cap = document.createElement('figcaption');
+  cap.textContent = 'pass 和 end 各回答一类问题。树上有多少词经过 app，看第二个 p 的 pass。';
+  svg.appendChild(cap);
+})();
+
+/* ===== 图：figRoute ===== */
+(function(){
+  var svg = document.getElementById('figRoute');
+  var svgNS = 'http://www.w3.org/2000/svg';
+  var S = document.createElementNS(svgNS,'svg');
+  S.setAttribute('viewBox','0 0 760 260');
+  svg.appendChild(S);
+  var s = '';
+  // 上方：数组路
+  s += '<text x="30" y="30" style="font-size:13px;font-weight:600">固定数组：26 个槽位，下标就是字符</text>';
+  var letters = ['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'];
+  letters.forEach(function(L,i){
+    var x = 30 + i*27;
+    var on = (L==='a'||L==='p'||L==='l');
+    s += '<rect x="'+x+'" y="44" width="25" height="28" rx="4" fill="'+(on?'#ffedd5':'#fff')+'" stroke="'+(on?'#ea580c':'#9aa0a6')+'" stroke-width="1.2"/>';
+    s += '<text x="'+(x+12.5)+'" y="63" text-anchor="middle" style="font-size:12px;fill:'+(on?'#c2410c':'#555')+'">'+L+'</text>';
+    if(on) s += '<line x1="'+(x+12.5)+'" y1="76" x2="'+(x+12.5)+'" y2="96" stroke="#ea580c" stroke-width="1.6"/><polygon points="'+(x+8.5)+',92 '+(x+16.5)+',92 '+(x+12.5)+',100" fill="#ea580c"/>';
+  });
+  s += '<text x="730" y="63" text-anchor="middle" style="font-size:12px;fill:#999">…</text>';
+  // 下方：哈希路
+  s += '<text x="30" y="150" style="font-size:13px;font-weight:600">哈希表：只有用到的字符占键</text>';
+  ['a','p','l'].forEach(function(L,i){
+    var x = 120 + i*140;
+    s += '<rect x="'+x+'" y="164" width="70" height="30" rx="5" fill="#fff" stroke="#2563eb" stroke-width="1.4"/>';
+    s += '<text x="'+(x+35)+'" y="183" text-anchor="middle" style="font-size:12.5px" fill="#2563eb">'+L+' → 节点</text>';
+    s += '<line x1="'+(x+90)+'" y1="179" x2="'+(x+118)+'" y2="179" stroke="#9aa0a6" stroke-width="1.4" stroke-dasharray="4 3"/>';
+    s += '<circle cx="'+(x+126)+'" cy="179" r="14" fill="#fff" stroke="#9aa0a6" stroke-width="1.4"/>';
+  });
+  S.innerHTML = s;
+  var cap = document.createElement('figcaption');
+  cap.textContent = '字符范围小时用数组，范围大时用哈希表。查路的动作不变，容器换一下。';
+  svg.appendChild(cap);
+})();
+
+/* ===== 演示：vizBuild 构建台 ===== */
+(function(){
+  var box = document.getElementById('vizBuild');
+  box.innerHTML =
+    '<p class="viz-title">演示：前缀树构建台（插入单词，观察新建 / 复用与 pass / end 变化）</p>' +
+    '<div class="viz-ctl"><label>单词序列</label><select id="vbSel"></select></div>' +
+    '<svg id="vbSvg" viewBox="0 0 760 430" style="width:100%;height:auto"></svg>' +
+    '<p class="viz-note" id="vbNote"></p>' +
+    '<div class="viz-controls"><button type="button" id="vbNext">下一步</button><button type="button" id="vbReset">重置</button></div>';
+  var PRESETS = [
+    ['app','apple','apply'],
+    ['app','app','apple'],
+    ['cat','car','dog','do'],
+    ['ab','abc','abd','ac']
+  ];
+  var sel = box.querySelector('#vbSel');
+  PRESETS.forEach(function(p,i){ sel.add(new Option(p.join('、'), String(i))); });
+  var svg = box.querySelector('#vbSvg');
+  var root, steps, step;
+
+  function buildFrames(words){
+    root = makeTree();
+    steps = [];
+    var st = { label:'开始：空树，只有一个根节点', word:'', i:-1, act:'', cur:root, fresh:null, edgeCur:null, edgeNew:null };
+    words.forEach(function(w){
+      var u = root;
+      st = { label:'插入「'+w+'」：从根出发，pass 先加一', word:w, i:-1, act:'', cur:u, fresh:null, edgeCur:null, edgeNew:null };
+      steps.push(st);
+      u.pass++;
+      for(var i=0;i<w.length;i++){
+        var c = w[i];
+        var isNew = !u.children[c];
+        if(isNew){
+          u.children[c] = { ch:c, pass:1, end:0, children:{}, x:0, y:0 };
+          steps.push({ label:'字符「'+c+'」：没有这条路，新建节点', word:w, i:i, act:'new', cur:u.children[c], fresh:u.children[c], edgeCur:null, edgeNew:[u, u.children[c]] });
+        } else {
+          u.children[c].pass++;
+          steps.push({ label:'字符「'+c+'」：有这条路，复用，pass++', word:w, i:i, act:'reuse', cur:u.children[c], fresh:null, edgeCur:[u, u.children[c]], edgeNew:null });
+        }
+        u = u.children[c];
+      }
+      u.end++;
+      steps.push({ label:'「'+w+'」结束：end++，现在 end = '+u.end, word:w, i:w.length, act:'end', cur:u, fresh:null, edgeCur:null, edgeNew:null });
+    });
+    steps.push({ label:'全部插完。pass 回答前缀数，end 回答出现次数', word:'', i:-1, act:'done', cur:null, fresh:null, edgeCur:null, edgeNew:null });
+  }
+
+  function redraw(){
+    var st = steps[step];
+    layoutTree(root);
+    drawTree(svg, root, { cur:st.cur, fresh:st.fresh, edgeCur:st.edgeCur, edgeNew:st.edgeNew });
+    box.querySelector('#vbNote').textContent = st.label;
+  }
+  function load(){
+    buildFrames(PRESETS[+sel.value]);
+    step = 0; redraw();
+  }
+  sel.addEventListener('change', load);
+  box.querySelector('#vbNext').addEventListener('click', function(){
+    step = Math.min(step+1, steps.length-1); redraw();
+  });
+  box.querySelector('#vbReset').addEventListener('click', function(){ step = 0; redraw(); });
+  load();
+})();
+
+/* ===== 演示：vizQuery 查询台 ===== */
+(function(){
+  var box = document.getElementById('vizQuery');
+  box.innerHTML =
+    '<p class="viz-title">演示：前缀查询（先插入 app、apple、apply、app，再沿前缀走）</p>' +
+    '<div class="viz-ctl"><label>查询</label><select id="vqSel"></select></div>' +
+    '<svg id="vqSvg" viewBox="0 0 760 430" style="width:100%;height:auto"></svg>' +
+    '<p class="viz-note" id="vqNote"></p>' +
+    '<div class="viz-controls"><button type="button" id="vqNext">下一步</button><button type="button" id="vqReset">重置</button></div>';
+  var QUERIES = [
+    ['a','前缀'],
+    ['ap','前缀'],
+    ['app','前缀'],
+    ['appl','前缀'],
+    ['apple','单词'],
+    ['apply','单词'],
+    ['xyz','前缀']
+  ];
+  var sel = box.querySelector('#vqSel');
+  QUERIES.forEach(function(q,i){ sel.add(new Option(q[0]+'（'+q[1]+'）', String(i))); });
+  var svg = box.querySelector('#vqSvg');
+  var root, steps, step;
+
+  function build(){
+    root = makeTree();
+    ['app','apple','apply','app'].forEach(function(w){
+      var u = root; u.pass++;
+      for(var i=0;i<w.length;i++){
+        var c = w[i];
+        if(!u.children[c]) u.children[c] = { ch:c, pass:0, end:0, children:{}, x:0, y:0 };
+        u = u.children[c]; u.pass++;
+      }
+      u.end++;
+    });
+  }
+  function load(){
+    build();
+    var q = QUERIES[+sel.value][0];
+    steps = [];
+    var u = root;
+    steps.push({ label:'从根出发，查「'+q+'」', cur:u, last:false });
+    var ok = true;
+    for(var i=0;i<q.length;i++){
+      var c = q[i];
+      if(!u.children[c]){
+        steps.push({ label:'走到字符「'+c+'」：没有这条路，答案 0', cur:u, last:false });
+        ok = false; break;
+      }
+      u = u.children[c];
+      steps.push({ label:'走到「'+c+'」：pass '+u.pass+'，end '+u.end, cur:u, last:false });
+    }
+    if(ok){
+      var isWord = QUERIES[+sel.value][1]==='单词';
+      steps.push({ label:'走完「'+q+'」：'+(isWord?'出现 '+u.end+' 次（读 end）':'以它开头的有 '+u.pass+' 个（读 pass）'), cur:u, last:true });
+    }
+    step = 0; redraw();
+  }
+  function redraw(){
+    var st = steps[step];
+    layoutTree(root);
+    drawTree(svg, root, { cur:st.cur });
+    box.querySelector('#vqNote').textContent = st.label;
+  }
+  sel.addEventListener('change', load);
+  box.querySelector('#vqNext').addEventListener('click', function(){
+    step = Math.min(step+1, steps.length-1); redraw();
+  });
+  box.querySelector('#vqReset').addEventListener('click', function(){ step = 0; redraw(); });
+  load();
+})();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>离散化 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>离散化：把大坐标压成小下标</h1>
+      <p class="intro">坐标值域到 10^9 时数组开不出来，但「真正用到的坐标」往往只有几条。把用到的坐标排序、去重、编成 1..k 的小编号，所有操作换到编号上做，这就是离散化。配合二维差分，它能处理坐标 10^9、个数只有 100 的覆盖问题。</p>
+
+      <h2>零、背景</h2>
+      <p>「最强祝福力场」这道题：有 n 个正方形力场，第 i 个以 (x, y) 为中心、边长 side，边缘也算覆盖。问整片区域里力场强度最大值，也就是「被最多力场覆盖的那个点，被多少个力场盖着」。</p>
+      <p>n ≤ 100，但 x、y、side 都能到 10^9。直接开 (10^9)×(10^9) 的数组，10^18 个格子，任何机器都装不下。</p>
+      <p>换个角度看：n 个正方形，总共只有 2n 个不同的左/右 x 边界、2n 个不同的下/上 y 边界。矩形之间的相对位置只由这些边界决定，中间的点没人关心。把这些边界收集起来排序去重，编成 1..k 的小编号，网格瞬间缩到 k_x × k_y。</p>
+
+      <h2>一、先处理一个细节：乘 2</h2>
+      <p>覆盖范围是 [x − side/2, x + side/2]。side 可能是奇数，比如 (0,0) 边长 1，覆盖 [−0.5, 0.5]。边界落在半整数上，离散化拿浮点数也能做，但麻烦。</p>
+      <p>全部坐标乘 2：中心 2x、2y，范围 [2x − side, 2x + side]。边界变成整数，闭区间语义不变。代价是坐标到 2×10^9，超出 int，要用 long long。</p>
+
+      <figure class="fig" id="figTimes2"></figure>
+
+      <h2>二、离散化：收集、排序去重、二分查编号</h2>
+      <p>把 2n 个 x 边界收进数组 X，2n 个 y 边界收进 Y。对 X、Y 各自排序去重，得到 sizex、sizey 个不同坐标。每个坐标在排序数组里的下标就是它的新编号（从 1 开始，给差分数组留出 0 下标）。</p>
+      <p>查编号用二分：rank(nums, v) 返回 v 在去重数组里的位置。代码里 v 一定在数组里，所以二分找「第一个 ≥ v 的位置」就是 v 本身。</p>
+
+      <figure class="fig" id="figRank"></figure>
+
+      <h2>三、压缩网格上跑二维差分</h2>
+      <p>每个力场在压缩网格上对应一个矩形：[rank(2x−side), rank(2x+side)] × [rank(2y−side), rank(2y+side)]。对每个矩形做二维差分 add 四点，全部做完后 build 一遍前缀和，扫出最大值。</p>
+      <p>这里 build 出来的每个格子是「覆盖这一小格的力场数量」。格子内部力场覆盖情况相同，所以格子里的任意一点都能代表它；最大值一定出现在某条矩形边界上，压缩网格把边界全保留了。</p>
+
+      <figure class="fig" id="figFlow"></figure>
+
+      <h2>四、复杂度：为什么 n ≤ 100 才敢开网格</h2>
+      <p>排序 O(n log n)，网格 sizex × sizey ≤ (2n)×(2n) = 4n²，差分和 build 都在网格大小内。总时间 O(n log n + n²)，空间 O(n²)。</p>
+      <p>n = 100 时网格约 200×200 = 4 万格，随便跑。但网格随 n 平方增长：n = 10^3 就 400 万格，n = 10^5 是 400 亿格，光遍历一遍就要几十秒（本机实测 400 亿格 build 一遍约 85 秒）。所以这题 n ≤ 100 不是拍脑袋定的，离散化后 O(n²) 网格就是这个规模才划算。</p>
+
+      <figure class="fig" id="figScale"></figure>
+
+      <h2>五、代码</h2>
+      <p>compress 排序去重返回有效长度；rank 二分查编号；add 是标准二维差分四点；主流程收集坐标 → 压缩 → 每个力场 add → build 扫最大。</p>
+              <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">long</span> <span class="kw">long</span> X[200005], Y[200005];
+
+    <span class="cm">// 排序 + 去重，返回有效长度</span>
+    <span class="kw">int</span> <span class="fn">compress</span>(<span class="kw">long</span> <span class="kw">long</span>* nums, <span class="kw">int</span> len) {
+        sort(nums, nums + len);
+        <span class="kw">int</span> size = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; len; i++)
+            <span class="kw">if</span> (nums[i] != nums[size - 1])
+                nums[size++] = nums[i];
+        <span class="kw">return</span> size;
+    }
+
+    <span class="cm">// 有序数组 nums[0..size-1] 无重复，v 一定在里面，返回编号</span>
+    <span class="kw">int</span> <span class="fn">rank</span>(<span class="kw">long</span> <span class="kw">long</span>* nums, <span class="kw">long</span> <span class="kw">long</span> v, <span class="kw">int</span> size) {
+        <span class="kw">int</span> l = 0, r = size - 1, m, ans = 0;
+        <span class="kw">while</span> (l &lt;= r) {
+            m = (l + r) / 2;
+            <span class="kw">if</span> (nums[m] &gt;= v) {
+                ans = m;
+                r = m - 1;
+            } <span class="kw">else</span> {
+                l = m + 1;
+            }
+        }
+        <span class="kw">return</span> ans + 1;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; diff, <span class="kw">int</span> a, <span class="kw">int</span> b, <span class="kw">int</span> c, <span class="kw">int</span> d) {
+        diff[a][b] += 1;
+        diff[c + 1][d + 1] += 1;
+        diff[c + 1][b] -= 1;
+        diff[a][d + 1] -= 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">fieldOfGreatestBlessing</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; fields) {
+        <span class="kw">int</span> n = fields.size();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, k = 0, p = 0; i &lt; n; i++) {
+            <span class="kw">long</span> <span class="kw">long</span> x = fields[i][0], y = fields[i][1], r = fields[i][2];
+            X[k++] = (x &lt;&lt; 1) - r;
+            X[k++] = (x &lt;&lt; 1) + r;
+            Y[p++] = (y &lt;&lt; 1) - r;
+            Y[p++] = (y &lt;&lt; 1) + r;
+        }
+        <span class="kw">int</span> sizex = compress(X, n &lt;&lt; 1);
+        <span class="kw">int</span> sizey = compress(Y, n &lt;&lt; 1);
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">diff</span>(sizex + 2, vector&lt;<span class="kw">int</span>&gt;(sizey + 2, 0));
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">long</span> <span class="kw">long</span> x = fields[i][0], y = fields[i][1], r = fields[i][2];
+            <span class="kw">int</span> a = rank(X, (x &lt;&lt; 1) - r, sizex);
+            <span class="kw">int</span> b = rank(Y, (y &lt;&lt; 1) - r, sizey);
+            <span class="kw">int</span> c = rank(X, (x &lt;&lt; 1) + r, sizex);
+            <span class="kw">int</span> d = rank(Y, (y &lt;&lt; 1) + r, sizey);
+            add(diff, a, b, c, d);
+        }
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; (<span class="kw">int</span>)diff.size(); i++)
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt; (<span class="kw">int</span>)diff[0].size(); j++) {
+                diff[i][j] += diff[i - 1][j] + diff[i][j - 1] - diff[i - 1][j - 1];
+                ans = max(ans, diff[i][j]);
+            }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2>六、一个可点的操作台</h2>
+
+      <h2>总结</h2>
+      <p>离散化三步：收集所有可能用到的坐标 → 排序去重 → 二分把原坐标换成编号。之后数组大小从值域降到「用到过的坐标个数」，差分、前缀和、树状数组这些数据结构全都能上。</p>
+      <p>这题三个坑：坐标乘 2 对付半整数边界；边缘算覆盖所以是闭区间；网格 O(n²)，题目数据范围决定它可行。接下来就按这个套路，凡是「值域大、点数少」的题都先想一遍离散化。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/xepqZ5/" target="_blank">最强祝福力场</a></td><td>leetcode.cn/problems/xepqZ5/</td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解048【必备】二维前缀和、二维差分、离散化技巧</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-wiki</td><td>离散化</td><td><a href="https://oi-wiki.org/misc/discrete/" target="_blank">oi-wiki.org/misc/discrete/</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+/* ===== figTimes2：乘 2 处理半整数边界 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 860 300" xmlns="http://www.w3.org/2000/svg">';
+  var y0 = 100, x0 = 60, unit = 60;
+  // 数轴：原始 [-1, 1]，力场 (0,0) side=1 覆盖 [-0.5, 0.5]
+  s += '<text x="40" y="40" font-size="14" fill="#444">(0,0) 边长 1：覆盖 [−0.5, 0.5]，边界是半整数</text>';
+  s += '<line x1="40" y1="'+y0+'" x2="640" y2="'+y0+'" stroke="#999" stroke-width="2"/>';
+  for (var v = -1; v <= 1; v++) {
+    var x = x0 + (v + 1) * unit * 2;
+    s += '<text x="'+x+'" y="'+(y0+24)+'" text-anchor="middle" font-size="13" fill="#888">'+v+'</text>';
+    s += '<circle cx="'+x+'" cy="'+y0+'" r="3" fill="#888"/>';
+  }
+  // 覆盖区间 [-0.5, 0.5]
+  var xl = x0 + (0.5 + 1) * unit * 2, xr = x0 + (1.5 + 1) * unit * 2;
+  s += '<line x1="'+xl+'" y1="'+(y0-18)+'" x2="'+xr+'" y2="'+(y0-18)+'" stroke="#2563eb" stroke-width="5"/>';
+  s += '<text x="'+(x0+120)+'" y="'+(y0-28)+'" font-size="13" fill="#2563eb">覆盖 [−0.5, 0.5]</text>';
+  // 乘 2 后数轴
+  var y1 = 210;
+  s += '<text x="40" y="'+(y1-28)+'" font-size="14" fill="#444">坐标乘 2：中心 0、范围 [−1, 1]，边界是整数</text>';
+  s += '<line x1="40" y1="'+y1+'" x2="640" y2="'+y1+'" stroke="#999" stroke-width="2"/>';
+  for (var v = -1; v <= 1; v++) {
+    var x = x0 + (v + 1) * unit * 2;
+    s += '<text x="'+x+'" y="'+(y1+24)+'" text-anchor="middle" font-size="13" fill="#888">'+(v*2)+'</text>';
+    s += '<circle cx="'+x+'" cy="'+y1+'" r="3" fill="#888"/>';
+  }
+  var xl = x0 + (1 + 1) * unit * 2, xr = x0 + (3 + 1) * unit * 2;
+  s += '<line x1="'+x0+'" y1="'+(y1-18)+'" x2="'+xr+'" y2="'+(y1-18)+'" stroke="#2563eb" stroke-width="5"/>';
+  s += '<text x="'+(x0+180)+'" y="'+(y1-28)+'" font-size="13" fill="#2563eb">[−1, 1]</text>';
+  s += '<text x="40" y="'+(y1+52)+'" font-size="13" fill="#888">统一乘 2 后所有边界为整数，闭区间覆盖判定不变</text>';
+  s += '</svg>';
+  document.getElementById('figTimes2').innerHTML = s;
+})();
+
+/* ===== figRank：二分查编号 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 860 260" xmlns="http://www.w3.org/2000/svg">';
+  var arr = [-3, 1, 2, 2, 5, 5, 5, 7];
+  // 去重后：[-3, 1, 2, 5, 7] 编号 1..5
+  var uniq = [-3, 1, 2, 5, 7];
+  var x0 = 140, y0 = 70, cell = 110;
+  s += '<text x="40" y="40" font-size="14" fill="#444">排序去重后 X = [-3, 1, 2, 5, 7]，查 2 的编号</text>';
+  for (var i = 0; i < uniq.length; i++) {
+    var hl = (uniq[i] === 2);
+    s += '<rect x="'+(x0+i*cell)+'" y="'+y0+'" width="'+(cell-10)+'" height="60" fill="'+(hl?'#d6efd8':'#f2f5fa')+'" stroke="#ccc" stroke-width="'+(hl?3:1)+'"/>';
+    s += '<text x="'+(x0+i*cell+(cell-10)/2)+'" y="'+(y0+38)+'" text-anchor="middle" font-size="16">'+uniq[i]+'</text>';
+  }
+  s += '<text x="40" y="'+(y0+100)+'" font-size="13" fill="#888">编号（1 起）</text>';
+  for (var i = 0; i < uniq.length; i++) {
+    s += '<text x="'+(x0+i*cell+(cell-10)/2)+'" y="'+(y0+118)+'" text-anchor="middle" font-size="13" fill="#2b6cb0">'+(i+1)+'</text>';
+  }
+  s += '<text x="40" y="'+(y0+160)+'" font-size="14" fill="#2b6cb0">rank(2) = 3，矩形右边界映射到编号 3</text>';
+  s += '</svg>';
+  document.getElementById('figRank').innerHTML = s;
+})();
+
+/* ===== figFlow：整体流程 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 900 220" xmlns="http://www.w3.org/2000/svg">';
+  var steps = ['收集 2n 个 x、2n 个 y 边界', '各自排序去重 → sizex、sizey', 'rank 二分：坐标 → 编号', '每个矩形二维差分 add', 'build 前缀和 → 扫最大值'];
+  var x0 = 30, y0 = 60, w = 160, h = 90;
+  for (var i = 0; i < steps.length; i++) {
+    var x = x0 + i * 172;
+    s += '<rect x="'+x+'" y="'+y0+'" width="'+w+'" height="'+h+'" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>';
+    s += '<text x="'+(x+w/2)+'" y="'+(y0+30)+'" text-anchor="middle" font-size="14" fill="#2b6cb0">'+(i+1)+'</text>';
+    s += '<text x="'+(x+w/2)+'" y="'+(y0+60)+'" text-anchor="middle" font-size="12" fill="#444">'+steps[i]+'</text>';
+    if (i < steps.length - 1)
+      s += '<line x1="'+(x+w+6)+'" y1="'+(y0+h/2)+'" x2="'+(x+w+60)+'" y2="'+(y0+h/2)+'" stroke="#aaa" stroke-width="2"/>';
+  }
+  s += '<text x="30" y="'+(y0+h+30)+'" font-size="13" fill="#888">网格大小 = sizex × sizey ≤ (2n)²，n=100 时约 4 万格</text>';
+  s += '</svg>';
+  document.getElementById('figFlow').innerHTML = s;
+})();
+
+/* ===== figScale：网格大小随 n ===== */
+(function(){
+  var s = '<svg viewBox="0 0 860 300" xmlns="http://www.w3.org/2000/svg">';
+  var x0 = 140, y0 = 60, bw = 120, base = 230, bh = 120;
+  var data = [
+    {n: 'n=100', cells: '4 万格', h: 4},
+    {n: 'n=1000', cells: '400 万格', h: 20},
+    {n: 'n=10000', cells: '4 亿格', h: 60},
+    {n: 'n=100000', cells: '400 亿格', h: 110}
+  ];
+  s += '<text x="40" y="40" font-size="14" fill="#444">网格大小 sizex×sizey ≈ 4n²（对数刻度）</text>';
+  for (var i = 0; i < data.length; i++) {
+    var x = x0 + i * 160;
+    var d = data[i];
+    s += '<rect x="'+x+'" y="'+(base-d.h)+'" width="'+bw+'" height="'+d.h+'" fill="#2563eb" rx="4"/>';
+    s += '<text x="'+(x+bw/2)+'" y="'+(base-d.h-8)+'" text-anchor="middle" font-size="13" fill="#444">'+d.cells+'</text>';
+    s += '<text x="'+(x+bw/2)+'" y="'+(base+24)+'" text-anchor="middle" font-size="13" fill="#888">'+d.n+'</text>';
+  }
+  s += '<text x="40" y="'+(base+52)+'" font-size="13" fill="#ea580c">n=10^5 时 400 亿格，本机 build 一遍约 85 秒 → 题目 n≤100 才可行</text>';
+  s += '</svg>';
+  document.getElementById('figScale').innerHTML = s;
+})();
+
+/* ===== 演示：力场操作台 ===== */
+(function(){
+  var presets = {
+    p1: {name: '两个重叠力场', rects: [[0,0,2],[1,0,2]]},
+    p2: {name: '示例 2（4 个力场）', rects: [[4,4,6],[7,5,3],[1,6,2],[5,6,3]]},
+    p3: {name: '三个并排力场', rects: [[0,0,2],[3,0,2],[6,0,2]]}
+  };
+  var wrap = document.createElement('div');
+  wrap.className = 'viz';
+  var title = document.createElement('p');
+  title.className = 'viz-title';
+  title.textContent = '操作台：力场 → 离散化 → 差分 → 最大值（预设可切）';
+  var ctrl = document.createElement('div');
+  ctrl.className = 'viz-controls';
+  var sel = document.createElement('select');
+  var stepBtn = document.createElement('button');
+  stepBtn.type = 'button'; stepBtn.textContent = '下一步';
+  var resetBtn = document.createElement('button');
+  resetBtn.type = 'button'; resetBtn.textContent = '重置';
+  Object.keys(presets).forEach(function(k){ var o = document.createElement('option'); o.value = k; o.textContent = presets[k].name; sel.appendChild(o); });
+  ctrl.appendChild(sel); ctrl.appendChild(stepBtn); ctrl.appendChild(resetBtn);
+  var note = document.createElement('p');
+  note.className = 'stepnote';
+  var board = document.createElement('div');
+  wrap.appendChild(title); wrap.appendChild(ctrl); wrap.appendChild(note); wrap.appendChild(board);
+  document.querySelector('.algo-section').appendChild(wrap);
+
+  var p, st, state;
+  function steps(p){
+    var out = [];
+    // 收集边界（乘 2）
+    var xs = [], ys = [];
+    p.rects.forEach(function(r){ var x=r[0], y=r[1], side=r[2];
+      xs.push(2*x - side, 2*x + side); ys.push(2*y - side, 2*y + side); });
+    out.push({t:'collect', desc:'收集边界（乘 2）：x = ['+xs.join(', ')+']，y = ['+ys.join(', ')+']'});
+    xs.sort(function(a,b){return a-b;}); ys.sort(function(a,b){return a-b;});
+    var ux = [], uy = [];
+    xs.forEach(function(v){ if (!ux.length || ux[ux.length-1] !== v) ux.push(v); });
+    ys.forEach(function(v){ if (!uy.length || uy[uy.length-1] !== v) uy.push(v); });
+    out.push({t:'uniq', xs:ux, ys:uy, desc:'排序去重：X = ['+ux.join(', ')+']（'+ux.length+' 个），Y = ['+uy.join(', ')+']（'+uy.length+' 个）'});
+    function rank(arr, v){
+      var l = 0, r = arr.length - 1, ans = 0;
+      while (l <= r) { var m = (l + r) >> 1; if (arr[m] >= v) { ans = m; r = m - 1; } else l = m + 1; }
+      return ans + 1;
+    }
+    p.rects.forEach(function(r, idx){
+      var x=r[0], y=r[1], side=r[2];
+      var a = rank(ux, 2*x - side), c = rank(ux, 2*x + side);
+      var b = rank(uy, 2*y - side), d = rank(uy, 2*y + side);
+      out.push({t:'rect', idx:idx, a:a, b:b, c:c, d:d, ux:ux, uy:uy, desc:'力场 '+(idx+1)+' ('+x+','+y+') 边长 '+side+' → 压缩网格矩形 ('+a+','+b+')-('+c+','+d+')，add 四点'});
+    });
+    out.push({t:'build', desc:'build 前缀和：每格 = 覆盖该格的力场数量'});
+    return out;
+  }
+  function render(){
+    var step = Math.min(state, st.length - 1);
+    var f = st[step];
+    var ux, uy, rects = [];
+    if (f.t === 'uniq') { ux = f.xs; uy = f.ys; }
+    else if (f.t === 'rect') { ux = f.ux; uy = f.uy; }
+    // 已处理的矩形
+    var done = 0;
+    if (f.t === 'uniq') done = 0;
+    else if (f.t === 'rect') done = f.idx + 1;
+    else done = p.rects.length;
+    var allSteps = steps(p);
+    // 重新算当前 ux uy（到当前步为止）
+    var cs = [];
+    for (var k = 0; k <= step; k++) cs.push(allSteps[k]);
+    var curUx = [], curUy = [];
+    for (var k = 0; k < cs.length; k++) { if (cs[k].t === 'uniq') { curUx = cs[k].xs; curUy = cs[k].ys; } }
+    if (!curUx.length && f.t !== 'collect' && f.t !== 'uniq') { /* 保持 */ }
+    var cell = 52, x0 = 60, y0 = 50;
+    var n = Math.max(curUx.length, curUy.length, 1);
+    var s = '<svg viewBox="0 0 860 400" xmlns="http://www.w3.org/2000/svg">';
+    if (f.t === 'collect') {
+      s += '<text x="40" y="40" font-size="13" fill="#444">把每个力场的左右 x、上下 y 边界收集起来（坐标已乘 2）</text>';
+      p.rects.forEach(function(r, idx){
+        var x=r[0], y=r[1], side=r[2];
+        s += '<text x="60" y="'+(y0+idx*40)+'" font-size="13" fill="#444">力场 '+(idx+1)+': x ∈ ['+(2*x-side)+', '+(2*x+side)+']，y ∈ ['+(2*y-side)+', '+(2*y+side)+']</text>';
+      });
+    } else {
+      s += '<text x="40" y="40" font-size="13" fill="#444">压缩网格：X（'+curUx.length+' 个坐标）'+(f.t==='rect'||f.t==='build' ? '，Y（'+curUy.length+' 个坐标）' : '')+'</text>';
+      // 画 X 编号列
+      var gx = 180;
+      s += '<text x="'+(gx-20)+'" y="'+(y0+24)+'" font-size="12" fill="#888">y/x</text>';
+      for (var i = 0; i < curUx.length; i++) {
+        s += '<text x="'+(gx+i*cell+cell/2)+'" y="'+(y0-6)+'" text-anchor="middle" font-size="11" fill="#888">'+(i+1)+'</text>';
+        s += '<text x="'+(gx+i*cell+cell/2)+'" y="'+(y0+14)+'" text-anchor="middle" font-size="10" fill="#aaa">'+curUx[i]+'</text>';
+      }
+      for (var j = 0; j < curUy.length; j++) {
+        s += '<text x="'+(gx-26)+'" y="'+(y0+j*cell+cell/2+4)+'" text-anchor="middle" font-size="11" fill="#888">'+(j+1)+'</text>';
+        s += '<text x="'+(gx-50)+'" y="'+(y0+j*cell+cell/2+4)+'" text-anchor="end" font-size="10" fill="#aaa">'+curUy[j]+'</text>';
+        for (var i = 0; i < curUx.length; i++) {
+          var covered = false;
+          // 检查已处理的矩形
+          var doneRects = [];
+          for (var k = 0; k < allSteps.length && allSteps[k].t !== 'build'; k++) {
+            if (allSteps[k].t === 'rect' && allSteps[k].idx < done) doneRects.push(allSteps[k]);
+          }
+          for (var k = 0; k < doneRects.length; k++) {
+            var r = doneRects[k];
+            if (i+1 >= r.a && i+1 <= r.c && j+1 >= r.b && j+1 <= r.d) covered = true;
+          }
+          var fill = covered ? '#d6efd8' : '#f2f5fa';
+          s += '<rect x="'+(gx+i*cell)+'" y="'+(y0+j*cell)+'" width="'+(cell-4)+'" height="'+(cell-4)+'" fill="'+fill+'" stroke="#ccc"/>';
+        }
+      }
+      if (f.t === 'build') {
+        // 算差分值
+        var diff = [], acc = [];
+        var nx = curUx.length + 2, ny = curUy.length + 2;
+        for (var i = 0; i < nx; i++) { diff.push([]); for (var j = 0; j < ny; j++) diff[i].push(0); }
+        function rank2(arr, v){ var l=0, r=arr.length-1, ans=0; while(l<=r){var m=(l+r)>>1; if(arr[m]>=v){ans=m;r=m-1;} else l=m+1;} return ans+1; }
+        p.rects.forEach(function(r){
+          var x=r[0], y=r[1], side=r[2];
+          var a=rank2(curUx, 2*x-side), c=rank2(curUx, 2*x+side);
+          var b=rank2(curUy, 2*y-side), d=rank2(curUy, 2*y+side);
+          diff[a][b] += 1; diff[c+1][d+1] += 1; diff[c+1][b] -= 1; diff[a][d+1] -= 1;
+        });
+        for (var i = 0; i < nx; i++) { acc.push([]); for (var j = 0; j < ny; j++) acc[i].push(0); }
+        var maxv = 0;
+        for (var i = 1; i < nx; i++)
+          for (var j = 1; j < ny; j++) {
+            acc[i][j] = diff[i][j] + acc[i-1][j] + acc[i][j-1] - acc[i-1][j-1];
+            if (acc[i][j] > maxv) maxv = acc[i][j];
+          }
+        for (var j = 0; j < curUy.length; j++)
+          for (var i = 0; i < curUx.length; i++) {
+            var v = acc[i+1][j+1];
+            s += '<text x="'+(gx+i*cell+cell/2)+'" y="'+(y0+j*cell+cell/2+4)+'" text-anchor="middle" font-size="12" font-weight="'+(v===maxv?'bold':'normal')+'" fill="'+(v===maxv?'#ea580c':'#444')+'">'+v+'</text>';
+          }
+        s += '<text x="40" y="'+(y0+curUy.length*cell+36)+'" font-size="14" fill="#2b6cb0">最大值 = '+maxv+'（力场强度最强处）</text>';
+      }
+    }
+    note.textContent = f.desc;
+    board.innerHTML = s;
+    stepBtn.disabled = (state >= st.length - 1);
+  }
+  function upd(){ p = presets[sel.value]; st = steps(p); state = 0; render(); }
+  sel.addEventListener('change', upd);
+  stepBtn.addEventListener('click', function(){ if (state < st.length - 1) state++; render(); });
+  resetBtn.addEventListener('click', upd);
+  upd();
+})();
+})();
+</script>
+</body>
+</html>

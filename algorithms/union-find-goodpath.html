@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>好路径的数目：代表节点当集合的最值</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { font-weight: 600; margin-bottom: 10px; font-size: 15px; }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
+.viz-controls button { margin-right: 6px; }
+.mp { display: inline-block; min-width: 30px; padding: 2px 6px; margin: 2px; border: 1px solid #e6e8eb; border-radius: 4px; background: #fff; font-size: 13px; }
+.mp.hit { background: #ffedd5; border-color: #ea580c; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>好路径的数目：代表节点当集合的最值</h1>
+      <p class="intro">树上两点之间只有一条路。给每个点一个值，把「两端值相同、路上每个点的值都不超过端点的值」的路径叫好路径，数总数。做法是给并查集加一条规矩：谁的值大谁当代表，于是代表节点的值就是整个集合的最大值。</p>
+
+      <h2 id="bg">零、问题</h2>
+      <p>一棵 n 个点的树，vals[i] 是点 i 的值。路径的起终点值要相同，路径上所有点的值都要 ≤ 起点的值。反向路径算同一条，单个点也算一条。求好路径数。</p>
+      <figure class="fig" id="figDef"></figure>
+      <p>朴素的数法是把所有点对都拿出来，端点值相等就沿着树上的唯一路径走一遍，看最大值是不是等于端点的值。点对是 O(n²) 个，每个点对走一遍路径最坏 O(n)，n 到 30000 就完全跑不动了。</p>
+      <p>换个角度。假设我们现在有一堆「值 ≤ w 的点」，只在这些点之间连边，能互相到达的点，路径上的值肯定都 ≤ w。反过来也成立：路径上的值都 ≤ w，那条路上的每条边自然都满足「两端最大值 ≤ w」，边全在。所以：</p>
+      <p>两个值都是 w 的点之间是好路径 ⟺ 把所有「两端最大值 ≤ w」的边都加起来之后，这两个点连通。</p>
+
+      <h2 id="grow">一、按边的最大值从小到大加边</h2>
+      <p>把边按 <code>max(vals[u], vals[v])</code> 升序排好，依次加入并查集。加完所有键值 ≤ w 的边之后，连通块恰好就是「路径上的值都 ≤ w」的点集。</p>
+      <figure class="fig" id="figGrow"></figure>
+      <p>于是每条边被处理时只要看一件事：它两端所在集合的最大值是不是相等。不相等，这条边不会产生任何好路径；相等，说明两边各有一批值等于这个最大值的点，这批点和那批点两两配起来就是新的好路径。</p>
+      <p>树的特殊性在这里很关键：树上没有环，每条边处理时两端一定在**不同**的集合里，合并必然发生，不会像一般图那样出现「两端已经连通、这条边白加」的情况。也因此，键值相同的边谁先谁后不影响答案。</p>
+
+      <h2 id="rep">二、谁的值大谁当代表</h2>
+      <figure class="fig" id="figCount"></figure>
+      <p>并查集一般用「小挂大」控制树高，这里不能这么干。这题需要代表节点的值等于整个集合的最大值，所以要按值来决定方向：</p>
+      <p>（1）<code>vals[fx] &gt; vals[fy]</code>，让 fx 当代表；</p>
+      <p>（2）<code>vals[fx] &lt; vals[fy]</code>，让 fy 当代表；</p>
+      <p>（3）相等，谁当都行，此时产生 <code>maxcnt[fx] × maxcnt[fy]</code> 条新路径，然后把 maxcnt 相加。</p>
+      <p>maxcnt 记的是这个集合里值等于最大值的点有几个。前两种情况下 maxcnt 不用动，因为被挂上去的那棵树里根本没有值更大的点。只有第三种情况才要相乘再相加。</p>
+      <p>代价是这棵树可能长歪，所以扁平化必须写，好在均摊下来还是 O(α)。少了小挂大，树高最坏能到 O(n)，但每次合并都扁平化到根，实测 n = 10 万随机树跑 10.73 ms，n = 3 万跑 3.01 ms，压力不大。</p>
+      <p>四种写法最容易错的地方：按 <code>min</code> 排序（31.15% 的样例出错）、相等时不累加 maxcnt（65.16%）、贡献写成加法而不是乘法（84.46%）、代表节点取小值的那个（41.48%）。</p>
+      <figure class="fig" id="figWrong"></figure>
+<pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 代表节点一定是整个集合里值最大的那个点</span>
+    vector&lt;<span class="kw">int</span>&gt; father;
+    <span class="cm">// maxcnt[代表] : 这个集合里最大值出现了几次</span>
+    vector&lt;<span class="kw">int</span>&gt; maxcnt;
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n) {
+        father.resize(n);
+        maxcnt.assign(n, 1);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            father[i] = i;
+            maxcnt[i] = 1;
+        }
+    }
+
+    <span class="cm">// 这个并查集只有扁平化，没有小挂大 : 谁做代表由值说了算</span>
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (i != father[i]) {
+            father[i] = find(father[i]);
+        }
+        <span class="kw">return</span> father[i];
+    }
+
+    <span class="cm">// 返回这次合并新产生的好路径条数</span>
+    <span class="kw">int</span> <span class="fn">unionSet</span>(<span class="kw">int</span> x, <span class="kw">int</span> y, vector&lt;<span class="kw">int</span>&gt;&amp; vals) {
+        <span class="kw">int</span> fx = find(x);
+        <span class="kw">int</span> fy = find(y);
+        <span class="kw">int</span> path = 0;
+        <span class="kw">if</span> (vals[fx] &gt; vals[fy]) {
+            father[fy] = fx;
+        } <span class="kw">else</span> <span class="kw">if</span> (vals[fx] &lt; vals[fy]) {
+            father[fx] = fy;
+        } <span class="kw">else</span> {
+            <span class="cm">// 两个集合的最大值一样 : 左边每个最大值配右边每个最大值</span>
+            path = maxcnt[fx] * maxcnt[fy];
+            father[fy] = fx;
+            maxcnt[fx] += maxcnt[fy];
+        }
+        <span class="kw">return</span> path;
+    }
+
+    <span class="kw">int</span> <span class="fn">numberOfGoodPaths</span>(vector&lt;<span class="kw">int</span>&gt;&amp; vals, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; edges) {
+        <span class="kw">int</span> n = vals.size();
+        build(n);
+        <span class="cm">// 单个节点自己是合法路径</span>
+        <span class="kw">int</span> ans = n;
+        <span class="cm">// 边按「两端较大的那个值」从小到大处理</span>
+        sort(edges.begin(), edges.end(), [&amp;](<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; a, <span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; b) {
+            <span class="kw">return</span> max(vals[a[0]], vals[a[1]]) &lt; max(vals[b[0]], vals[b[1]]);
+        });
+        <span class="kw">for</span> (auto&amp; e : edges) {
+            ans += unionSet(e[0], e[1], vals);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <div class="viz" id="vizGood">
+        <div class="viz-title">逐边合并操作台</div>
+        <div id="goodSvg"></div>
+        <div class="viz-note" id="goodNote"></div>
+        <div class="breakdown" id="goodInfo"></div>
+        <div class="viz-answer" id="goodAns"></div>
+        <div class="viz-controls">
+          <label>数据 <select id="goodSel"></select></label>
+          <label>版本 <select id="goodVer"><option value="0">正确版</option><option value="1">错版：按 min 排序</option><option value="2">错版：相等时 maxcnt 不累加</option></select></label>
+          <button id="goodNext">下一步</button>
+          <button id="goodPrev">上一步</button>
+          <button id="goodReset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="thr">三、换个角度看阈值</h2>
+      <p>上面那套流程等价于：把阈值 w 从最小的值一路抬上去。抬到某一档 w，所有「两端最大值 ≤ w」的边都已经在并查集里了，这时候数一数值恰好等于 w 的点：它们在连通块里两两配对，每一对就是一条新的好路径。</p>
+      <p>为什么不重复：两个值都是 w 的点如果在更小的阈值 w′ 下就连通了，那它们路径上的值都 ≤ w′ &lt; w，和两端都是 w 矛盾。所以每个等值点对只会在自己那一档被数到一次。</p>
+      <p><code>ans</code> 初值取 n，代表 n 个单点路径；把每一档新数出来的对加进去，扫完所有边答案就出来了。下面这个演示可以直接切换阈值，看每一档新增多少对。</p>
+      <div class="viz" id="vizThr">
+        <div class="viz-title">阈值视图</div>
+        <div id="thrSvg"></div>
+        <div class="viz-note" id="thrNote"></div>
+        <div class="viz-answer" id="thrAns"></div>
+        <div class="viz-controls">
+          <label>阈值 w <select id="thrSel"></select></label>
+          <button id="thrPrev">减一档</button>
+          <button id="thrNext">加一档</button>
+        </div>
+      </div>
+
+      <h2 id="comp">四、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>指标</th><th>值</th></tr>
+        <tr><td>时间复杂度</td><td>O(n·log n + n·α(n))，n 个点 n−1 条边</td></tr>
+        <tr><td>额外空间</td><td>O(n)（father 与 maxcnt）</td></tr>
+      </table>
+      <p>大头在给边排序 O(n·log n)，之后每条边常数次并查集操作，均摊 O(α)。点数 30000 时排序 1 万次比较级别，实测整段跑 3.01 ms。</p>
+
+      <h2 id="sum">五、总结</h2>
+      <p>这题的钥匙是「按边的最大值排序 + 代表节点存集合最大值」。排序决定了并查集在什么时机长大，代表节点决定了合并时怎么读出「两边最大值一样」这个信号，maxcnt 决定了两边各有多少个值相等的点可以配对。</p>
+      <p>好路径从单点开始数，每合并一次加一批，没有重复也没有遗漏。想让并查集带上别的统计量，套路是一样的：想清楚信息挂在哪个节点上（代表节点）、合并时怎么把两边的信息合成一个、查询时怎么读。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>好路径的数目</td><td><a href="https://leetcode.cn/problems/number-of-good-paths/" target="_blank">leetcode.cn/problems/number-of-good-paths</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解057【必备】并查集-下</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+var NS = 'http://www.w3.org/2000/svg';
+function E(t, a, x){ var e = document.createElementNS(NS, t); for (var k in a) e.setAttribute(k, a[k]); if (x != null) e.textContent = x; return e; }
+function SV(w, h){ var s = document.createElementNS(NS, 'svg'); s.setAttribute('viewBox', '0 0 ' + w + ' ' + h); return s; }
+function box(s, x, y, w, h, fill, stroke){ s.appendChild(E('rect', {x:x, y:y, width:w, height:h, rx:6, fill:fill, stroke:stroke || '#e6e8eb', 'stroke-width':1.2})); }
+function tx(s, x, y, str, o){ o = o || {}; s.appendChild(E('text', {x:x, y:y, 'font-size':o.size || 13, fill:o.fill || '#333', 'text-anchor':o.anchor || 'start', 'font-weight':o.bold ? '600' : 'normal'}, str)); }
+function line(s, x1, y1, x2, y2, c, dash, w){ s.appendChild(E('line', {x1:x1, y1:y1, x2:x2, y2:y2, stroke:c || BLUE, 'stroke-width':w || 1.6, 'stroke-dasharray':dash || ''})); }
+function fig(id, svg, cap){ var f = document.getElementById(id); if (!f) return; f.appendChild(svg); var c = document.createElement('figcaption'); c.textContent = cap; f.appendChild(c); }
+var BLUE = '#2563eb', BLUEBG = '#dbeafe', OR = '#ea580c', ORBG = '#ffedd5', GRAY = '#9aa0a6', BG = '#f6f7f9';
+
+var SAMPLE = {vals:[1,3,2,1,3], edges:[[0,1],[0,2],[2,3],[2,4]], pos:[[110,60],[300,60],[200,150],[110,240],[300,240]]};
+
+/* ---------- 图 1 : 一条合法一条不合法 ---------- */
+(function(){
+  var s = SV(680, 320), P = SAMPLE.pos, V = SAMPLE.vals;
+  var es = SAMPLE.edges;
+  for (var i = 0; i < es.length; i++) {
+    var isGood = (es[i][0] === 2 && es[i][1] === 4);
+    line(s, P[es[i][0]][0], P[es[i][0]][1], P[es[i][1]][0], P[es[i][1]][1], isGood ? OR : '#cbd5e1', '', isGood ? 3 : 1.6);
+  }
+  for (var j = 0; j < V.length; j++) {
+    var on = (j === 1 || j === 2 || j === 4);
+    s.appendChild(E('circle', {cx:P[j][0], cy:P[j][1], r:22, fill:on ? ORBG : '#fff', stroke:on ? OR : '#cbd5e1', 'stroke-width':1.6}));
+    tx(s, P[j][0], P[j][1] + 1, String(j), {anchor:'middle', fill:on ? OR : GRAY, bold:true});
+    tx(s, P[j][0], P[j][1] + 15, 'val ' + V[j], {anchor:'middle', size:10, fill:on ? OR : GRAY});
+  }
+  tx(s, 360, 130, '路径 1 → 2 → 4', {bold:true, fill:OR, size:14});
+  tx(s, 360, 154, '两端值都是 3，路上 2 的值是 2', {size:12, fill:'#555'});
+  tx(s, 360, 174, '都 ≤ 3，是一条好路径', {size:12, fill:'#555'});
+  box(s, 360, 200, 290, 76, BG, '#e6e8eb');
+  tx(s, 374, 224, '再看 3 → 2 → 4', {bold:true, size:13});
+  tx(s, 374, 246, '两端值是 1 和 3，不相等', {size:12, fill:'#555'});
+  tx(s, 374, 266, '值不同，直接出局', {size:12, fill:'#555'});
+  tx(s, 40, 300, '单点也算好路径，所以答案的下界是 n = 5', {size:12, fill:GRAY});
+  fig('figDef', s, '好路径要求两端值相等，且路上每个点的值都不超过它');
+})();
+
+/* ---------- 图 2 : 阈值抬高，并查集长大 ---------- */
+(function(){
+  var s = SV(680, 300), P = SAMPLE.pos, V = SAMPLE.vals, es = SAMPLE.edges;
+  var stages = [
+    {w:1, keep:[], title:'阈值 w = 1'},
+    {w:2, keep:[1,2], title:'阈值 w = 2'},
+    {w:3, keep:[0,1,2,3], title:'阈值 w = 3'}
+  ];
+  for (var t = 0; t < stages.length; t++) {
+    var ox = 30 + t * 225, scale = 0.42;
+    tx(s, ox + 90, 28, stages[t].title, {anchor:'middle', bold:true, size:13, fill:stages[t].w === 3 ? OR : '#333'});
+    var sh = [];
+    for (var k = 0; k < es.length; k++) sh.push(stages[t].keep.indexOf(k) >= 0);
+    for (var i = 0; i < es.length; i++)
+      line(s, ox + P[es[i][0]][0] * scale, 40 + P[es[i][0]][1] * scale, ox + P[es[i][1]][0] * scale, 40 + P[es[i][1]][1] * scale,
+        sh[i] ? BLUE : '#e6e8eb', sh[i] ? '' : '4 4', sh[i] ? 2.2 : 1.2);
+    for (var j = 0; j < V.length; j++) {
+      var on = sh.some(function(v, idx){ return v && (es[idx][0] === j || es[idx][1] === j); });
+      s.appendChild(E('circle', {cx:ox + P[j][0] * scale, cy:40 + P[j][1] * scale, r:14, fill:on ? BLUEBG : '#fff', stroke:on ? BLUE : '#e6e8eb', 'stroke-width':1.4}));
+      tx(s, ox + P[j][0] * scale, 40 + P[j][1] * scale + 4, String(V[j]), {anchor:'middle', size:11, fill:on ? BLUE : GRAY});
+    }
+  }
+  tx(s, 40, 286, '圈里的数字是点的值。阈值抬到哪一档，所有「两端最大值 ≤ 它」的边就都进来了', {size:12, fill:GRAY});
+  fig('figGrow', s, '阈值从 1 抬到 3：边的集合一层层变大，连通块跟着长大');
+})();
+
+/* ---------- 图 3 : maxcnt 相乘 ---------- */
+(function(){
+  var s = SV(680, 220);
+  box(s, 40, 50, 200, 110, BLUEBG, BLUE);
+  tx(s, 140, 76, '集合 A 的代表', {anchor:'middle', size:12, fill:BLUE});
+  tx(s, 140, 104, '代表值 = 3', {anchor:'middle', bold:true, size:14, fill:BLUE});
+  tx(s, 140, 130, 'maxcnt = 1', {anchor:'middle', size:13, fill:'#555'});
+  tx(s, 140, 150, '（值 3 的点有 1 个）', {anchor:'middle', size:11, fill:GRAY});
+  box(s, 440, 50, 200, 110, BLUEBG, BLUE);
+  tx(s, 540, 76, '集合 B 的代表', {anchor:'middle', size:12, fill:BLUE});
+  tx(s, 540, 104, '代表值 = 3', {anchor:'middle', bold:true, size:14, fill:BLUE});
+  tx(s, 540, 130, 'maxcnt = 1', {anchor:'middle', size:13, fill:'#555'});
+  tx(s, 540, 150, '（值 3 的点有 1 个）', {anchor:'middle', size:11, fill:GRAY});
+  tx(s, 340, 100, '=', {anchor:'middle', size:22, fill:GRAY});
+  tx(s, 340, 132, '两边最大值相等', {anchor:'middle', size:11, fill:GRAY});
+  tx(s, 340, 150, '才产生路径', {anchor:'middle', size:11, fill:GRAY});
+  box(s, 240, 168, 200, 38, ORBG, OR);
+  tx(s, 340, 193, '新增 1 × 1 = 1 条', {anchor:'middle', bold:true, fill:OR, size:14});
+  fig('figCount', s, '两边最大值一样时，两批最大值点两两配对');
+})();
+
+/* ---------- 图 4 : 四种错版 ---------- */
+(function(){
+  var s = SV(680, 280);
+  var data = [
+    {label:'按 min 排序', v:31.15},
+    {label:'代表节点取小值', v:41.48},
+    {label:'相等时不累加 maxcnt', v:65.16},
+    {label:'贡献写成加法', v:84.46}
+  ];
+  var base = 220, H = 170;
+  line(s, 90, base, 660, base, '#cbd5e1', '', 1);
+  tx(s, 82, base + 4, '0', {anchor:'end', size:11, fill:GRAY});
+  tx(s, 82, base - H + 4, '100%', {anchor:'end', size:11, fill:GRAY});
+  for (var i = 0; i < data.length; i++) {
+    var x = 130 + i * 130, h = H * data[i].v / 100;
+    s.appendChild(E('rect', {x:x, y:base - h, width:74, height:h, rx:4, fill:ORBG, stroke:OR, 'stroke-width':1.4}));
+    tx(s, x + 37, base - h - 8, data[i].v.toFixed(2) + '%', {anchor:'middle', bold:true, size:12, fill:OR});
+    tx(s, x + 37, base + 20, data[i].label, {anchor:'middle', size:11, fill:'#555'});
+  }
+  tx(s, 90, 262, '5000 组随机小树，与暴力枚举所有点对的结果比较', {size:12, fill:GRAY});
+  fig('figWrong', s, '四种错写法的出错比例，最狠的「贡献写加法」错到八成六');
+})();
+
+/* ---------- 数据与算法 ---------- */
+function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+var PRESETS = [
+  {name:'样例一 5 点（答案 6）', vals:[1,3,2,1,3], edges:[[0,1],[0,2],[2,3],[2,4]]},
+  {name:'课上例一 8 点（答案 17）', vals:[2,1,1,2,2,1,1,2], edges:[[0,1],[0,2],[1,3],[2,4],[2,5],[5,6],[6,7]]},
+  {name:'链 3 点同值（答案 6）', vals:[2,2,2], edges:[[0,1],[1,2]]},
+  {name:'课上例二 13 点（答案 27）', vals:[1,2,2,3,1,2,2,1,1,3,3,3,3], edges:[[0,1],[0,2],[0,3],[1,4],[4,7],[4,8],[3,5],[3,6],[6,9],[6,10],[6,11],[9,12]]}
+];
+
+function layout(n, edges){
+  var adj = []; for (var i = 0; i < n; i++) adj.push([]);
+  for (var e = 0; e < edges.length; e++) { adj[edges[e][0]].push(edges[e][1]); adj[edges[e][1]].push(edges[e][0]); }
+  var level = [], par = [], seen = [];
+  for (var k = 0; k < n; k++) { level[k] = 0; par[k] = -1; seen[k] = 0; }
+  var q = [0]; seen[0] = 1;
+  while (q.length) {
+    var u = q.shift();
+    for (var m = 0; m < adj[u].length; m++) if (!seen[adj[u][m]]) { seen[adj[u][m]] = 1; par[adj[u][m]] = u; level[adj[u][m]] = level[u] + 1; q.push(adj[u][m]); }
+  }
+  var byLevel = {};
+  for (var y = 0; y < n; y++) { if (!byLevel[level[y]]) byLevel[level[y]] = []; byLevel[level[y]].push(y); }
+  var maxL = 0; for (var z = 0; z < n; z++) maxL = Math.max(maxL, level[z]);
+  var pos = [];
+  var rowH = Math.min(80, 250 / Math.max(1, maxL + 1));
+  for (var L = 0; L <= maxL; L++) {
+    var arr = byLevel[L] || [];
+    for (var a = 0; a < arr.length; a++) {
+      pos[arr[a]] = [120 + (a + 1) * (440 / (arr.length + 1)), 60 + L * rowH];
+    }
+  }
+  return pos;
+}
+
+function runGood(vals, edges, ver){
+  var n = vals.length, f = [], mx = [];
+  for (var i = 0; i < n; i++) { f[i] = i; mx[i] = 1; }
+  function find(x){ while (f[x] !== x) x = f[x]; return x; }
+  var list = edges.map(function(e, idx){ return {e:e, idx:idx, key: (ver === 1 ? Math.min(vals[e[0]], vals[e[1]]) : Math.max(vals[e[0]], vals[e[1]]))}; });
+  list.sort(function(a, b){ return a.key - b.key || a.idx - b.idx; });
+  var ans = n, frames = [], done = [];
+  frames.push({note:'第 0 / ' + (list.length + 1) + ' 步：ans 初值 = n = ' + n + '，每个单点自己就是一条好路径', f:f.slice(), mx:mx.slice(), ans:ans, done:[], cur:-1});
+  for (var q = 0; q < list.length; q++) {
+    var e = list[q].e, fx = find(e[0]), fy = find(e[1]), path = 0, tag = '';
+    if (ver === 2) {
+      if (vals[fx] > vals[fy]) { f[fy] = fx; tag = '代表换成 ' + fx; }
+      else if (vals[fx] < vals[fy]) { f[fx] = fy; tag = '代表换成 ' + fy; }
+      else { path = mx[fx] * mx[fy]; f[fy] = fx; tag = '最大值都是 ' + vals[fx] + '，但 maxcnt 没有累加'; }
+    } else {
+      if (vals[fx] > vals[fy]) { f[fy] = fx; tag = '左边值大，代表是 ' + fx; }
+      else if (vals[fx] < vals[fy]) { f[fx] = fy; tag = '右边值大，代表是 ' + fy; }
+      else { path = mx[fx] * mx[fy]; f[fy] = fx; mx[fx] += mx[fy]; tag = '两边最大值都等于 ' + vals[fx] + '，新增 ' + mx[fx] + ' 条'; }
+    }
+    ans += path;
+    done.push(q);
+    frames.push({note:'第 ' + (q + 1) + ' / ' + (list.length + 1) + ' 步：处理边 (' + e[0] + ',' + e[1] + ')，最大值 ' + list[q].key + '；' + tag,
+      f:f.slice(), mx:mx.slice(), ans:ans, done:done.slice(), cur:q, path:path, edge:list[q].idx});
+  }
+  frames.push({note:'第 ' + (list.length + 1) + ' / ' + (list.length + 1) + ' 步：边用完了，答案 = ' + ans,
+    f:f.slice(), mx:mx.slice(), ans:ans, done:done.slice(), cur:-1, final:true});
+  return {frames:frames, order:list};
+}
+
+(function(){
+  var sel = document.getElementById('goodSel'), ver = document.getElementById('goodVer');
+  for (var i = 0; i < PRESETS.length; i++) {
+    var o = document.createElement('option'); o.value = String(i); o.textContent = PRESETS[i].name; sel.appendChild(o);
+  }
+  var o2 = document.createElement('option'); o2.value = 'rand'; o2.textContent = '随机小树（固定种子）'; sel.appendChild(o2);
+
+  var cur = {p:null, pos:null, r:null, step:0};
+  function rebuild(){
+    if (sel.value === 'rand') {
+      var rnd = mulberry32(57), n = 6 + Math.floor(rnd() * 4), vals = [], edges = [];
+      for (var i = 0; i < n; i++) vals.push(1 + Math.floor(rnd() * 3));
+      for (var j = 1; j < n; j++) edges.push([Math.floor(rnd() * j), j]);
+      cur.p = {vals:vals, edges:edges};
+    } else {
+      cur.p = PRESETS[Number(sel.value)];
+    }
+    cur.pos = layout(cur.p.vals.length, cur.p.edges);
+    cur.r = runGood(cur.p.vals, cur.p.edges, Number(ver.value));
+    cur.step = 0;
+    draw();
+  }
+  function draw(){
+    var fr = cur.r.frames[Math.min(cur.step, cur.r.frames.length - 1)];
+    var vals = cur.p.vals, edges = cur.p.edges, P = cur.pos, n = vals.length;
+    var maxY = 0; for (var mm = 0; mm < n; mm++) maxY = Math.max(maxY, P[mm][1]);
+    var s = SV(680, maxY + 116);
+    var doneSet = fr.done.map(function(q){ return cur.r.order[q].idx; });
+    for (var i = 0; i < edges.length; i++) {
+      var d = doneSet.indexOf(i) >= 0, isCur = (fr.cur >= 0 && cur.r.order[fr.cur].idx === i);
+      line(s, P[edges[i][0]][0], P[edges[i][0]][1], P[edges[i][1]][0], P[edges[i][1]][1], isCur ? OR : (d ? BLUE : '#e6e8eb'), d || isCur ? '' : '4 4', isCur ? 3 : (d ? 2 : 1.2));
+    }
+    for (var j = 0; j < n; j++) {
+      var root = j; while (fr.f[root] !== root) root = fr.f[root];
+      var rep = (j === root);
+      s.appendChild(E('circle', {cx:P[j][0], cy:P[j][1], r:22, fill:rep ? BLUEBG : '#fff', stroke:rep ? BLUE : '#cbd5e1', 'stroke-width':1.6}));
+      tx(s, P[j][0], P[j][1] - 1, String(j), {anchor:'middle', fill:rep ? BLUE : GRAY, bold:true});
+      tx(s, P[j][0], P[j][1] + 14, 'val ' + vals[j], {anchor:'middle', size:10, fill:GRAY});
+      if (rep && fr.mx[j] > 1) tx(s, P[j][0] + 26, P[j][1] - 18, 'x' + fr.mx[j], {size:11, fill:OR, bold:true});
+    }
+    box(s, 40, maxY + 36, 600, 66, BG, '#e6e8eb');
+    tx(s, 54, maxY + 60, 'ans = ' + fr.ans, {bold:true, size:16, fill:OR});
+    tx(s, 170, maxY + 60, 'father：', {size:12, fill:'#555'});
+    for (var w = 0; w < Math.min(n, 12); w++) tx(s, 226 + w * 34, maxY + 60, String(fr.f[w]), {size:12, fill:'#333'});
+    tx(s, 54, maxY + 88, 'maxcnt：', {size:12, fill:'#555'});
+    tx(s, 170, maxY + 88, '（值 = 集合最大值的点有几个）', {size:11, fill:GRAY});
+    for (var z = 0; z < Math.min(n, 12); z++) {
+      var rt = z; while (fr.f[rt] !== rt) rt = fr.f[rt];
+      tx(s, 226 + z * 34, maxY + 60 + 28, String(fr.mx[rt]), {size:12, fill:'#555'});
+    }
+    document.getElementById('goodSvg').innerHTML = '';
+    document.getElementById('goodSvg').appendChild(s);
+    document.getElementById('goodNote').textContent = fr.note;
+    var ord = cur.r.order.map(function(o){ return '(' + o.e[0] + ',' + o.e[1] + ')=' + o.key; }).join(' ');
+    document.getElementById('goodInfo').innerHTML = '处理顺序（边 = 最大值）：' + ord + (fr.path ? '　本次新增 <span class="num">' + fr.path + '</span> 条' : '');
+    document.getElementById('goodAns').textContent = fr.final ? ('好路径总数 = ' + fr.ans) : ('当前 ans = ' + fr.ans);
+  }
+  document.getElementById('goodNext').addEventListener('click', function(){ if (cur.step < cur.r.frames.length - 1) { cur.step++; draw(); } });
+  document.getElementById('goodPrev').addEventListener('click', function(){ if (cur.step > 0) { cur.step--; draw(); } });
+  document.getElementById('goodReset').addEventListener('click', function(){ cur.step = 0; draw(); });
+  sel.addEventListener('change', rebuild);
+  ver.addEventListener('change', rebuild);
+  rebuild();
+})();
+
+/* ---------- 演示 2 : 阈值视图 ---------- */
+(function(){
+  var p = PRESETS[0], sel = document.getElementById('thrSel');
+  var keys = [];
+  for (var i = 0; i < p.edges.length; i++) keys.push(Math.max(p.vals[p.edges[i][0]], p.vals[p.edges[i][1]]));
+  var levels = [];
+  for (var k = 0; k < keys.length; k++) if (levels.indexOf(keys[k]) < 0) levels.push(keys[k]);
+  levels.sort(function(a, b){ return a - b; });
+  var minV = Math.min.apply(null, p.vals);
+  var opts = [minV - 1].concat(levels);
+  for (var o = 0; o < opts.length; o++) {
+    var op = document.createElement('option'); op.value = String(o); op.textContent = 'w = ' + opts[o]; sel.appendChild(op);
+  }
+  var P = SAMPLE.pos, V = SAMPLE.vals, es = SAMPLE.edges;
+  var idx = 0;
+  function draw(){
+    var w = opts[idx], keep = [];
+    for (var i = 0; i < es.length; i++) if (Math.max(V[es[i][0]], V[es[i][1]]) <= w) keep.push(i);
+    var f = []; for (var j = 0; j < V.length; j++) f[j] = j;
+    function find(x){ while (f[x] !== x) x = f[x]; return x; }
+    for (var a = 0; a < keep.length; a++) { var fx = find(es[keep[a]][0]), fy = find(es[keep[a]][1]); if (fx !== fy) f[fx] = fy; }
+    var s = SV(680, 275);
+    for (var b = 0; b < es.length; b++) {
+      var on = keep.indexOf(b) >= 0;
+      line(s, P[es[b][0]][0] + 60, P[es[b][0]][1], P[es[b][1]][0] + 60, P[es[b][1]][1], on ? BLUE : '#e6e8eb', on ? '' : '4 4', on ? 2.4 : 1.2);
+    }
+    for (var c = 0; c < V.length; c++) {
+      var root = find(c), isRoot = (root === c), ok = V[c] <= w;
+      s.appendChild(E('circle', {cx:P[c][0] + 60, cy:P[c][1], r:22, fill:ok ? (isRoot ? BLUEBG : '#fff') : '#f6f7f9', stroke:ok ? BLUE : '#e6e8eb', 'stroke-width':1.6}));
+      tx(s, P[c][0] + 60, P[c][1] - 1, String(c), {anchor:'middle', fill:ok ? BLUE : GRAY, bold:true});
+      tx(s, P[c][0] + 60, P[c][1] + 14, 'val ' + V[c], {anchor:'middle', size:10, fill:ok ? BLUE : GRAY});
+    }
+    box(s, 420, 40, 230, 150, BG, '#e6e8eb');
+    tx(s, 436, 66, '阈值 w = ' + w + ' 下', {bold:true, size:13});
+    var cnt = 0;
+    if (levels.indexOf(w) >= 0) {
+      var blk = {};
+      for (var d = 0; d < V.length; d++) {
+        if (V[d] !== w) continue;
+        var r = d; while (f[r] !== r) r = f[r];
+        if (!blk[r]) blk[r] = 0;
+        blk[r]++;
+      }
+      for (var rb in blk) cnt += blk[rb] * (blk[rb] - 1) / 2;
+    }
+    tx(s, 436, 96, '值等于 ' + w + ' 的点里', {size:12, fill:'#555'});
+    tx(s, 436, 118, '连通好的配成 ' + cnt + ' 对', {size:12, fill:'#555'});
+    tx(s, 436, 152, '这一档新增 ' + cnt + ' 对', {size:13, fill:OR, bold:true});
+    tx(s, 436, 176, '各档相加再加 n 条单点路径', {size:11, fill:GRAY});
+    document.getElementById('thrSvg').innerHTML = '';
+    document.getElementById('thrSvg').appendChild(s);
+    document.getElementById('thrNote').textContent = '阈值 = ' + w + '：' + keep.length + ' 条边进来了（全部 ' + es.length + ' 条）';
+    document.getElementById('thrAns').textContent = 'w = ' + w + ' 这一档新增 ' + cnt + ' 对' + (idx === opts.length - 1 ? '；三档合计 1 对，加 n = 5 得 6，就是答案' : '');
+  }
+  document.getElementById('thrNext').addEventListener('click', function(){ if (idx < opts.length - 1) { idx++; sel.value = String(idx); draw(); } });
+  document.getElementById('thrPrev').addEventListener('click', function(){ if (idx > 0) { idx--; sel.value = String(idx); draw(); } });
+  sel.addEventListener('change', function(){ idx = Number(sel.value); draw(); });
+  draw();
+})();
+})();
+</script>
+</body>
+</html>

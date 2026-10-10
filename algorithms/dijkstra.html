@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dijkstra 算法：普通堆与反向索引堆</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.sarr { font-family: ui-monospace,Menlo,Consolas,monospace; font-size: 12px; margin: 5px 0; }
+.scell { display: inline-block; min-width: 34px; padding: 3px 7px; border: 1px solid #cbd5e1; border-radius: 5px; margin-right: 5px; background: #fff; text-align: center; }
+.scell.cur { outline: 2px solid #ea580c; }
+.scell.done { background: #dcfce7; border-color: #16a34a; }
+.slab { display: inline-block; width: 90px; font-size: 12px; color: #64748b; }
+.gr { display: inline-block; min-width: 34px; padding: 3px 7px; border: 1px solid #cbd5e1; border-radius: 5px; margin: 3px 5px 3px 0; background: #fff; text-align: center; font-size: 13px; }
+.gr.cur { outline: 2px solid #ea580c; }
+.gr.done { background: #dcfce7; border-color: #16a34a; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>Dijkstra 算法：普通堆与反向索引堆</h1>
+      <p class="intro">单源最短路径，最常用的是普通堆实现的 Dijkstra：小根堆按距离组织，谁近先弹谁，弹过的点距离定死。要求边权非负，有向无向都行。反向索引堆是极致版，堆里每个点只占一条记录。</p>
+
+      <h2 id="why">零、为什么边权不能是负数</h2>
+      <p>Dijkstra 的合法性建立在一条性质上：从堆里弹出记录 (u, d) 时，d 就是源点到 u 的最短距离，之后不会再变小。理由：堆里所有记录的 d 都比 d 大，任何没弹出的路径想绕到 u，都要先经过某个记录（距离 ≥ d），再加非负边权，只会更大。</p>
+      <p>边权是负数这条性质就塌了：已经弹过的 u，可能经一条负边回头把某个距离再变小，而 u 已经标记过、不会再处理。负环更没救，绕一圈距离越来越小。所以负权单源最短路要交给别的算法（SPFA、Bellman-Ford），Dijkstra 只接非负权。</p>
+      <p>注意 0 边权没问题：多走一条 0 权边不会让距离变小，弹出即定死的性质还在。</p>
+
+      <h2 id="heap">一、普通堆实现的 Dijkstra</h2>
+      <figure class="fig" id="figWave"></figure>
+      <p>流程五步：1）distance[i] 记源点到 i 的最短距离，visited[i] 记 i 是否弹出过；2）小根堆放记录 (点, 源点到该点距离)，按距离组织；3）distance[源点] = 0，(源点, 0) 入堆；4）弹出 (u, 源点到 u 的距离)：u 弹过就跳过；没弹过就标记 u，考察 u 的每条边 (v, w)，如果 v 没弹过且 distance[u] + w < distance[v]，更新 distance[v] 并把 (v, distance[u] + w) 入堆；5）堆空结束，distance 就是答案。</p>
+      <p>冗余记录是普通堆的特点：同一个点可能先后以不同距离多次入堆，弹出来发现 visited 已标记就直接跳过。堆里最多同时躺着 O(m) 条记录，每次操作 O(log m)，总复杂度 O(m log m)。</p>
+      <div class="viz">
+        <p class="viz-title">演示 · 普通堆逐帧：5 点 6 边，源点 1，弹出顺序与距离表</p>
+        <div id="djGrid"></div>
+        <p class="viz-note" id="djNote"></p>
+        <p class="viz-answer" id="djAns"></p>
+        <div class="viz-controls">
+          <button id="djPrev">上一步</button>
+          <button id="djNext">下一步</button>
+          <button id="djReset">重置</button>
+        </div>
+      </div>
+      <p>网络延迟时间（LC743）就是模版题：信号从 s 出发沿有向边传播，问全部节点收到信号要多久，就是 distance 的最大值；有节点不可达返回 -1。实现照上面的流程，一个 priority_queue 的事。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 普通堆实现的 Dijkstra（LC743 网络延迟时间）</span>
+    <span class="kw">int</span> <span class="fn">networkDelayTime</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; times, <span class="kw">int</span> n, <span class="kw">int</span> s) {
+        vector&lt;vector&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;&gt; <span class="fn">graph</span>(n + 1);
+        <span class="kw">for</span> (auto&amp; e : times) {
+            graph[e[0]].push_back({e[1], e[2]});
+        }
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">distance</span>(n + 1, INT_MAX);
+        vector&lt;<span class="kw">bool</span>&gt; <span class="fn">visited</span>(n + 1, <span class="kw">false</span>);
+        distance[s] = 0;
+        priority_queue&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;, vector&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;, greater&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;&gt; heap;
+        heap.push({0, s});
+        <span class="kw">while</span> (!heap.empty()) {
+            <span class="kw">int</span> u = heap.top().second;
+            heap.pop();
+            <span class="kw">if</span> (visited[u]) {
+                <span class="kw">continue</span>;
+            }
+            visited[u] = <span class="kw">true</span>;
+            <span class="kw">for</span> (auto [v, w] : graph[u]) {
+                <span class="kw">if</span> (!visited[v] &amp;&amp; distance[u] + w &lt; distance[v]) {
+                    distance[v] = distance[u] + w;
+                    heap.push({distance[v], v});
+                }
+            }
+        }
+        <span class="kw">int</span> ans = INT_MIN;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (distance[i] == INT_MAX) {
+                <span class="kw">return</span> -1;
+            }
+            ans = max(ans, distance[i]);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2 id="indexheap">二、反向索引堆：堆里每个点只有一条记录</h2>
+      <figure class="fig" id="figWhere"></figure>
+      <p>冗余记录能不能去掉？普通堆里 (v, 5) 和 (v, 7) 同时存在，其中一条注定被丢弃。反向索引堆让每个点永远只占一个堆位置：where[v] 记 v 在堆上的下标，距离变小就原地更新、上滤，不再新增记录。</p>
+      <p>where[v] 三个值：-1 表示 v 从没进过堆；-2 表示 v 已经弹出过、以后忽略；i（≥ 0）表示 v 在堆的 i 位置。弹出堆顶后 where[弹出的点] 置 -2。松弛边 (v, w) 时分三种情况：v 没进过堆，新增记录入堆；v 弹出过，忽略；v 在堆里，看看 distance[v] 能不能更小，能就原地改值上滤，不能就忽略。</p>
+      <p>堆规模恒为 n，每次操作 O(log n)，总复杂度 O(m log n)，比普通堆的 O(m log m) 理论上限好。代价是每一处都要维护 where 数组的同步：swap 时两个点的 where 一起换，弹完置 -2。</p>
+      <p>实测（本机 clang，n = 10^5、m = 2×10^5 强连通随机图）：-O0 下反向索引堆 22.3ms，普通堆 52.8ms，快约 2.4 倍；稀疏图 m = n 时 3.7ms 对 13.0ms，约 3.6 倍。但 -O2 下普通堆反而 9.6ms 对 19.6ms：STL 的 priority_queue 被编译器优化得很彻底，而手写数组堆的 where 维护开销省不掉。反向索引堆的价值在堆规模恒 n 这个结构性优势，常数上别指望稳赢。</p>
+      <p>洛谷 P4779 用链式前向星建图 + 反向索引堆跑单源最短路，是这版实现的完整提交形态。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 链式前向星 + 反向索引堆实现的 Dijkstra（洛谷 P4779）</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 200001;
+
+    <span class="kw">int</span> head[MAXN], nxt[MAXM], to[MAXM], weight[MAXM], cnt;
+    <span class="kw">int</span> heapArr[MAXN], whereArr[MAXN], heapSize;
+    <span class="kw">int</span> distanceArr[MAXN];
+    <span class="kw">int</span> n, m, s;
+
+    <span class="kw">void</span> <span class="fn">build</span>() {
+        cnt = 1;
+        heapSize = 0;
+        fill(head, head + n + 1, 0);
+        fill(whereArr, whereArr + n + 1, -1);
+        fill(distanceArr, distanceArr + n + 1, INT_MAX);
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nxt[cnt] = head[u];
+        to[cnt] = v;
+        weight[cnt] = w;
+        head[u] = cnt++;
+    }
+
+    <span class="kw">void</span> <span class="fn">swapNode</span>(<span class="kw">int</span> i, <span class="kw">int</span> j) {
+        <span class="kw">int</span> tmp = heapArr[i];
+        heapArr[i] = heapArr[j];
+        heapArr[j] = tmp;
+        whereArr[heapArr[i]] = i;
+        whereArr[heapArr[j]] = j;
+    }
+
+    <span class="cm">// whereArr[v] = -1 从未进过堆，-2 已弹出，i 在堆上 i 位置</span>
+    <span class="kw">void</span> <span class="fn">addOrUpdateOrIgnore</span>(<span class="kw">int</span> v, <span class="kw">int</span> c) {
+        <span class="kw">if</span> (whereArr[v] == -1) {
+            heapArr[heapSize] = v;
+            whereArr[v] = heapSize++;
+            distanceArr[v] = c;
+            heapInsert(whereArr[v]);
+        } <span class="kw">else</span> <span class="kw">if</span> (whereArr[v] &gt;= 0) {
+            distanceArr[v] = min(distanceArr[v], c);
+            heapInsert(whereArr[v]);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">heapInsert</span>(<span class="kw">int</span> i) {
+        <span class="kw">while</span> (distanceArr[heapArr[i]] &lt; distanceArr[heapArr[(i - 1) / 2]]) {
+            swapNode(i, (i - 1) / 2);
+            i = (i - 1) / 2;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">pop</span>() {
+        <span class="kw">int</span> ans = heapArr[0];
+        swapNode(0, --heapSize);
+        heapify(0);
+        whereArr[ans] = -2;
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">heapify</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> l = i * 2 + 1;
+        <span class="kw">while</span> (l &lt; heapSize) {
+            <span class="kw">int</span> best = l + 1 &lt; heapSize &amp;&amp; distanceArr[heapArr[l + 1]] &lt; distanceArr[heapArr[l]] ? l + 1 : l;
+            best = distanceArr[heapArr[best]] &lt; distanceArr[heapArr[i]] ? best : i;
+            <span class="kw">if</span> (best == i) {
+                <span class="kw">break</span>;
+            }
+            swapNode(best, i);
+            i = best;
+            l = i * 2 + 1;
+        }
+    }
+
+    <span class="kw">bool</span> <span class="fn">isEmpty</span>() {
+        <span class="kw">return</span> heapSize == 0;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; s;
+        build();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, u, v, w; i &lt; m; i++) {
+            cin &gt;&gt; u &gt;&gt; v &gt;&gt; w;
+            addEdge(u, v, w);
+        }
+        addOrUpdateOrIgnore(s, 0);
+        <span class="kw">while</span> (!isEmpty()) {
+            <span class="kw">int</span> u = pop();
+            <span class="kw">for</span> (<span class="kw">int</span> ei = head[u]; ei &gt; 0; ei = nxt[ei]) {
+                addOrUpdateOrIgnore(to[ei], distanceArr[u] + weight[ei]);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cout &lt;&lt; distanceArr[i] &lt;&lt; " ";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2 id="grid">三、二维格子上的 Dijkstra：代价取 max（最小体力）</h2>
+      <figure class="fig" id="figEffort"></figure>
+      <p>最小体力消耗路径（LC1631）：从左上到右下，代价是路径上相邻格子高度差绝对值的最大值，求最小代价。这题的边权不是「一步的差」，而是「整条路径上的最大差」，但 Dijkstra 照跑：distance[x][y] 记到 (x, y) 的最优路径上最大差，转移时新代价 = max(当前代价, 这一步的高度差)。</p>
+      <p>max 型代价同样满足「弹出即定死」：已经弹出的 (x, y, c)，别的路径想以更小代价到 (x, y)，必须经过某个代价 ≥ c 的格子，max 只会更大。终点弹出直接返回，不用等全部跑完。</p>
+      <div class="viz">
+        <p class="viz-title">演示 · 3×3 高度网格，max 代价传播，终点弹出返回 2</p>
+        <div id="efGrid"></div>
+        <p class="viz-note" id="efNote"></p>
+        <p class="viz-answer" id="efAns"></p>
+        <div class="viz-controls">
+          <button id="efPrev">上一步</button>
+          <button id="efNext">下一步</button>
+          <button id="efReset">重置</button>
+        </div>
+      </div>
+      <p>实测 200×200 随机高度网格 3.63ms，100×100 是 1.15ms。二维格子题把每个格子当图上的点、四邻当边，Dijkstra 直接落上去，区别只在代价怎么定义。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 最小体力消耗路径（LC1631）：代价 = 路径上相邻高度差绝对值的最大值</span>
+    <span class="kw">int</span> <span class="fn">minimumEffortPath</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; heights) {
+        <span class="kw">int</span> n = heights.size(), m = heights[0].size();
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">distance</span>(n, vector&lt;<span class="kw">int</span>&gt;(m, INT_MAX));
+        distance[0][0] = 0;
+        vector&lt;vector&lt;<span class="kw">bool</span>&gt;&gt; <span class="fn">visited</span>(n, vector&lt;<span class="kw">bool</span>&gt;(m, <span class="kw">false</span>));
+        priority_queue&lt;tuple&lt;<span class="kw">int</span>, <span class="kw">int</span>, <span class="kw">int</span>&gt;,
+                       vector&lt;tuple&lt;<span class="kw">int</span>, <span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;,
+                       greater&lt;tuple&lt;<span class="kw">int</span>, <span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;&gt; heap;
+        heap.push({0, 0, 0});
+        <span class="kw">int</span> move[5] = {-1, 0, 1, 0, -1};
+        <span class="kw">while</span> (!heap.empty()) {
+            auto [c, x, y] = heap.top();
+            heap.pop();
+            <span class="kw">if</span> (visited[x][y]) {
+                <span class="kw">continue</span>;
+            }
+            <span class="kw">if</span> (x == n - 1 &amp;&amp; y == m - 1) {
+                <span class="kw">return</span> c;
+            }
+            visited[x][y] = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 4; i++) {
+                <span class="kw">int</span> nx = x + move[i], ny = y + move[i + 1];
+                <span class="kw">if</span> (nx &gt;= 0 &amp;&amp; nx &lt; n &amp;&amp; ny &gt;= 0 &amp;&amp; ny &lt; m &amp;&amp; !visited[nx][ny]) {
+                    <span class="kw">int</span> nc = max(c, abs(heights[x][y] - heights[nx][ny]));
+                    <span class="kw">if</span> (nc &lt; distance[nx][ny]) {
+                        distance[nx][ny] = nc;
+                        heap.push({nc, nx, ny});
+                    }
+                }
+            }
+        }
+        <span class="kw">return</span> -1;
+    }</pre>
+
+      <h2 id="swim">四、水位上升的泳池：把「时间」当边权</h2>
+      <figure class="fig" id="figSwim"></figure>
+      <p>水位上升的泳池中游泳（LC778）：水位 t 时，高度 ≤ t 的平台才能站。最少时间 = 从左上到右下某条路径上所有平台高度的最大值（起点高度也要算进去）。这题没有边权，代价就压在点上：distance[0][0] 直接是 grid[0][0]，转移时新代价 = max(当前代价, 新平台高度)。</p>
+      <p>和上一题只差一个字：上一题 max 的是「高度差」，这题 max 的是「平台高度本身」。同样终点弹出直接返回。</p>
+      <p>实测 200×200 随机网格 3.32ms，100×100 是 0.65ms。两道二维题合起来的结论：Dijkstra 的「距离」可以是任何非负、可累积的量，max 型代价照样成立。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 水位上升的泳池中游泳（LC778）：代价 = 途经平台高度的最大值</span>
+    <span class="kw">int</span> <span class="fn">swimInWater</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; grid) {
+        <span class="kw">int</span> n = grid.size(), m = grid[0].size();
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">distance</span>(n, vector&lt;<span class="kw">int</span>&gt;(m, INT_MAX));
+        distance[0][0] = grid[0][0];
+        vector&lt;vector&lt;<span class="kw">bool</span>&gt;&gt; <span class="fn">visited</span>(n, vector&lt;<span class="kw">bool</span>&gt;(m, <span class="kw">false</span>));
+        priority_queue&lt;tuple&lt;<span class="kw">int</span>, <span class="kw">int</span>, <span class="kw">int</span>&gt;,
+                       vector&lt;tuple&lt;<span class="kw">int</span>, <span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;,
+                       greater&lt;tuple&lt;<span class="kw">int</span>, <span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;&gt; heap;
+        heap.push({grid[0][0], 0, 0});
+        <span class="kw">int</span> move[5] = {-1, 0, 1, 0, -1};
+        <span class="kw">while</span> (!heap.empty()) {
+            auto [c, x, y] = heap.top();
+            heap.pop();
+            <span class="kw">if</span> (visited[x][y]) {
+                <span class="kw">continue</span>;
+            }
+            visited[x][y] = <span class="kw">true</span>;
+            <span class="kw">if</span> (x == n - 1 &amp;&amp; y == m - 1) {
+                <span class="kw">return</span> c;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 4; i++) {
+                <span class="kw">int</span> nx = x + move[i], ny = y + move[i + 1];
+                <span class="kw">if</span> (nx &gt;= 0 &amp;&amp; nx &lt; n &amp;&amp; ny &gt;= 0 &amp;&amp; ny &lt; m &amp;&amp; !visited[nx][ny]) {
+                    <span class="kw">int</span> nc = max(c, grid[nx][ny]);
+                    <span class="kw">if</span> (nc &lt; distance[nx][ny]) {
+                        distance[nx][ny] = nc;
+                        heap.push({nc, nx, ny});
+                    }
+                }
+            }
+        }
+        <span class="kw">return</span> -1;
+    }</pre>
+
+      <h2 id="sum">总结</h2>
+      <p>Dijkstra 三件事：堆按距离组织、弹出即定死、只接非负权。普通堆实现 O(m log m)，堆里点会重复；反向索引堆 O(m log n)，where 三态保证每点一条记录；二维题把格子和四邻当图，代价换成 max 型照跑。本机实测：普通堆与反向索引堆在 -O0 下差 2.4~3.6 倍，-O2 下 STL 堆常数反超。</p>
+      <p>下一类题把「状态」也当进点里：一个实际位置带一个状态组合，这就是分层图最短路，见下一页。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/network-delay-time/" target="_blank">网络延迟时间</a></td><td><a href="https://leetcode.cn/problems/network-delay-time/" target="_blank">leetcode.cn</a></td></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P4779" target="_blank">单源最短路径</a></td><td><a href="https://www.luogu.com.cn/problem/P4779" target="_blank">luogu.com.cn</a></td></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/path-with-minimum-effort/" target="_blank">最小体力消耗路径</a></td><td><a href="https://leetcode.cn/problems/path-with-minimum-effort/" target="_blank">leetcode.cn</a></td></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/swim-in-rising-water/" target="_blank">水位上升的泳池中游泳</a></td><td><a href="https://leetcode.cn/problems/swim-in-rising-water/" target="_blank">leetcode.cn</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解064【必备】Dijkstra算法、分层图最短路</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+
+// ===== 图 1：普通堆流程 =====
+(function(){
+  var W = 720, H = 300;
+  var body = '';
+  body += txt(W/2, 22, '5 点 6 边：弹出顺序 1 → 2 → 3 → 4 → 5，每轮只松弛弹出点的出边', {fs:13});
+  var pos = {1:[120,100], 2:[300,60], 3:[300,180], 4:[480,120], 5:[630,220]};
+  var edges = [[1,2,3],[1,3,5],[2,3,2],[2,4,7],[3,4,1],[4,5,6]];
+  for (var i = 0; i < edges.length; i++) {
+    var u = edges[i][0], v = edges[i][1], w = edges[i][2];
+    var x1 = pos[u][0], y1 = pos[u][1], x2 = pos[v][0], y2 = pos[v][1];
+    var mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    body += '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="#94a3b8" stroke-width="1.5"/>';
+    body += txt(mx, my - 4, String(w), {fs:11, fill:'#2563eb'});
+  }
+  var order = [1, 2, 3, 4, 5];
+  var dist = {1:0, 2:3, 3:5, 4:6, 5:12};
+  for (var k = 0; k < order.length; k++) {
+    var u = order[k];
+    body += '<circle cx="'+pos[u][0]+'" cy="'+pos[u][1]+'" r="22" fill="#fff" stroke="#16a34a" stroke-width="2"/>';
+    body += txt(pos[u][0], pos[u][1] - 2, String(u), {fs:14});
+    body += txt(pos[u][0], pos[u][1] + 18, 'd=' + dist[u], {fs:10, fill:'#64748b'});
+    body += txt(pos[u][0], pos[u][1] - 34, '第' + (k+1) + '弹', {fs:10, fill:'#ea580c'});
+  }
+  body += txt(W/2, H - 16, 'd2=3 由 1→2 松弛；d3=5 由 1→3 直接得到（2→3 的 3+2=5 不更新）；d4 先 10 后被 3→4 压到 6；d5=12', {fs:12, fill:'#334155'});
+  document.getElementById('figWave').innerHTML = svg(W, H, body) + '<figcaption>普通堆允许同一节点重复入堆：(4, 10) 先入，弹出时 (4, 6) 已经更新过，直接被跳过。</figcaption>';
+})();
+
+// ===== 图 2：where 三态 =====
+(function(){
+  var W = 720, H = 300;
+  var body = '';
+  body += txt(W/2, 22, '反向索引堆的 where 三态：堆下标即节点，距离更新原地改值再上滤', {fs:13});
+  var cols = [
+    {t:'where[v] = -1', d:'没进过堆：松弛到 v 就新增记录入堆', c:'#f59e0b'},
+    {t:'where[v] = i (>=0)', d:'在堆上：距离变小原地改值上滤', c:'#2563eb'},
+    {t:'where[v] = -2', d:'已弹出：最短距离定死，忽略', c:'#16a34a'}
+  ];
+  for (var i = 0; i < 3; i++) {
+    var x = 20 + i * 235, y = 55;
+    body += '<rect x="'+x+'" y="'+y+'" width="220" height="180" fill="#fff" stroke="'+cols[i].c+'" rx="8"/>';
+    body += txt(x + 110, y + 30, cols[i].t, {fs:13, fill:cols[i].c});
+    body += txt(x + 14, y + 62, cols[i].d, {fs:11, fill:'#334155', an:'start'});
+  }
+  body += txt(W/2, H - 14, 'swap 时两个节点的 where 同步互换；弹出后 where[v] = -2。堆里永远每个点至多一条记录', {fs:12, fill:'#334155'});
+  document.getElementById('figWhere').innerHTML = svg(W, H, body) + '<figcaption>普通堆靠「重复记录 + 弹出跳过」兜底，反向索引堆靠 where 数组把冗余直接掐掉。</figcaption>';
+})();
+
+// ===== 图 3：体力网格 =====
+(function(){
+  var W = 720, H = 300;
+  var body = '';
+  body += txt(W/2, 22, '3×3 高度网格：代价是路径上相邻高度差的最大值，最优路径 max = 2', {fs:13});
+  var h = [[1,2,2],[3,8,2],[5,3,5]];
+  var d = [[0,1,1],[2,5,1],[2,2,2]];
+  var cx0 = 220, cy0 = 60, cw = 66, ch = 56, gap = 6;
+  for (var i = 0; i < 3; i++) {
+    for (var j = 0; j < 3; j++) {
+      var x = cx0 + j * (cw + gap), y = cy0 + i * (ch + gap);
+      var path = (i === 0 && j === 0) || (i === 1 && j === 0) || (i === 2 && j === 0) || (i === 2 && j === 1) || (i === 2 && j === 2);
+      body += '<rect x="'+x+'" y="'+y+'" width="'+cw+'" height="'+ch+'" fill="'+(path?'#dcfce7':'#fff')+'" stroke="'+(path?'#16a34a':'#cbd5e1')+'" rx="4"/>';
+      body += txt(x + cw/2, y + ch/2 - 2, String(h[i][j]), {fs:15});
+      body += txt(x + cw/2, y + ch/2 + 16, 'd=' + d[i][j], {fs:10, fill:'#64748b'});
+    }
+  }
+  body += txt(W/2, cy0 + 3 * (ch + gap) + 18, '路径 (0,0)→(1,0)→(2,0)→(2,1)→(2,2)：差 2、2、2、2，max = 2；d(1,1)=5 是走 (0,1) 的代价', {fs:12, fill:'#334155'});
+  document.getElementById('figEffort').innerHTML = svg(W, H, body) + '<figcaption>max 型代价里，弹出即定死照样成立：绕到任何格子的代价只会更大。</figcaption>';
+})();
+
+// ===== 图 4：泳池 5×5 =====
+(function(){
+  var W = 720, H = 300;
+  var body = '';
+  body += txt(W/2, 22, '5×5 泳池官方样例：从 (0,0) 出发，代价是路径上平台高度的最大值，答案 16', {fs:13});
+  var g = [[0,1,2,3,4],[24,23,22,21,5],[12,13,14,15,16],[11,17,18,19,20],[10,9,8,7,6]];
+  var cw = 48, ch = 40, gap = 4;
+  var cx0 = 160, cy0 = 55;
+  for (var i = 0; i < 5; i++) {
+    for (var j = 0; j < 5; j++) {
+      var x = cx0 + j * (cw + gap), y = cy0 + i * (ch + gap);
+      var path = (i === 0 && j <= 3) || (i === 1 && j === 4) || (i === 2 && j === 4) || (i === 3 && j === 4) || (i === 4 && j === 4);
+      body += '<rect x="'+x+'" y="'+y+'" width="'+cw+'" height="'+ch+'" fill="'+(path?'#dcfce7':'#fff')+'" stroke="'+(path?'#16a34a':'#cbd5e1')+'" rx="3"/>';
+      body += txt(x + cw/2, y + ch/2 + 4, String(g[i][j]), {fs:12});
+    }
+  }
+  body += txt(W/2, cy0 + 5 * (ch + gap) + 16, '路径 0→1→2→3→4→5→16→20→6 的 max = 16；水位 16 时这条线全部淹没', {fs:12, fill:'#334155'});
+  document.getElementById('figSwim').innerHTML = svg(W, H, body) + '<figcaption>泳池的边权是「点的平台高度」：转移时 max 的对象不是差值而是新点本身。</figcaption>';
+})();
+
+// ===== 演示 1：普通堆流程 =====
+(function(){
+  var n = 5;
+  var g = {};
+  g[1] = [[2,3],[3,5]];
+  g[2] = [[3,2],[4,7]];
+  g[3] = [[4,1]];
+  g[4] = [[5,6]];
+  var dist = [0, 0, 3, 5, 6, 12];   // 1..5
+  var steps = [];
+  steps.push({done:[], cur:0, dist:[null,0,null,null,null,null], note:'初始化：distance[1] = 0，(1, 0) 入堆。'});
+  steps.push({done:[], cur:1, dist:[null,0,3,5,null,null], note:'弹出 1（d=0）：松弛 1→2 得 d2=3，1→3 得 d3=5，入堆。'});
+  steps.push({done:[1], cur:2, dist:[null,0,3,5,10,null], note:'弹出 2（d=3）：松弛 2→3 的 3+2=5 不更新，2→4 得 d4=10，入堆。'});
+  steps.push({done:[1,2], cur:3, dist:[null,0,3,5,6,null], note:'弹出 3（d=5）：松弛 3→4 的 5+1=6 < 10，d4 压到 6，入堆。'});
+  steps.push({done:[1,2,3], cur:4, dist:[null,0,3,5,6,12], note:'弹出 4（d=6，旧记录 (4,10) 弹出时被 visited 跳过）：松弛 4→5 得 d5=12。'});
+  steps.push({done:[1,2,3,4], cur:5, dist:[null,0,3,5,6,12], note:'弹出 5（d=12）：堆空，结束。答案是 distance 表 0 3 5 6 12。'});
+  var step = 0;
+  function draw(){
+    var f = steps[Math.min(step, steps.length - 1)];
+    var html = '<div class="sarr"><span class="slab">节点距离</span>';
+    for (var u = 1; u <= n; u++) {
+      var cls = 'scell';
+      if (f.done.indexOf(u) >= 0) cls += ' done';
+      if (u === f.cur) cls += ' cur';
+      html += '<span class="'+cls+'">'+u+':'+(f.dist[u] === null ? '∞' : f.dist[u])+'</span>';
+    }
+    html += '</div>';
+    document.getElementById('djGrid').innerHTML = html;
+    document.getElementById('djNote').textContent = f.note;
+    var ans = f.dist[5];
+    document.getElementById('djAns').textContent = '当前弹出：节点 ' + (f.cur === 0 ? '（未开始）' : f.cur);
+  }
+  document.getElementById('djNext').addEventListener('click', function(){ if (step < steps.length - 1) step++; draw(); });
+  document.getElementById('djPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('djReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+
+// ===== 演示 2：体力网格 =====
+(function(){
+  var h = [[1,2,2],[3,8,2],[5,3,5]];
+  var n = 3, m = 3;
+  var order = [[0,0],[0,1],[0,2],[1,2],[1,0],[2,0],[2,1],[1,1],[2,2]];
+  var d = {};
+  d['0,0'] = 0; d['0,1'] = 1; d['0,2'] = 1;
+  d['1,0'] = 2; d['1,1'] = 2; d['1,2'] = 1;
+  d['2,0'] = 2; d['2,1'] = 2; d['2,2'] = 2;
+  var notes = [
+    '初始：distance(0,0) = 0，入堆。',
+    '弹出 (0,0) c=0：松弛 (0,1) 得 d=1、(1,0) 得 d=2。',
+    '弹出 (0,1) c=1：松弛 (0,2) 得 d=1、(1,1) 得 d=7。',
+    '弹出 (0,2) c=1：松弛 (1,2) 得 d=1。',
+    '弹出 (1,2) c=1：松弛 (2,2) 得 d=3（max(1,|2-5|)）。',
+    '弹出 (1,0) c=2：松弛 (1,1) 压到 5、(2,0) 得 d=2。',
+    '弹出 (2,0) c=2：松弛 (2,1) 得 d=2。',
+    '弹出 (2,1) c=2：松弛 (2,2) 压到 2、(1,1) 压到 2。',
+    '弹出 (1,1) c=2：两个邻居都不更新。',
+    '弹出 (2,2) c=2：终点弹出 → 返回 2。'
+  ];
+  var step = 0;
+  function draw(){
+    var f = Math.min(step, notes.length - 1);
+    var html = '<div class="sarr"><span class="slab">高度 / d</span>';
+    for (var i = 0; i < n; i++) {
+      for (var j = 0; j < m; j++) {
+        var cur = order[f][0] === i && order[f][1] === j;
+        var done = false;
+        for (var k = 0; k <= f; k++) if (order[k][0] === i && order[k][1] === j) done = true;
+        html += '<span class="gr' + (cur ? ' cur' : '') + (done ? ' done' : '') + '">'+h[i][j]+'/'+d[i+','+j]+'</span>';
+      }
+      html += '<br>';
+    }
+    html += '</div>';
+    document.getElementById('efGrid').innerHTML = html;
+    document.getElementById('efNote').textContent = notes[f];
+    document.getElementById('efAns').textContent = '已弹出 ' + (f + 1) + '/' + order.length + ' 格';
+  }
+  document.getElementById('efNext').addEventListener('click', function(){ if (step < notes.length - 1) step++; draw(); });
+  document.getElementById('efPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('efReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+})();
+</script>
+</body>
+</html>

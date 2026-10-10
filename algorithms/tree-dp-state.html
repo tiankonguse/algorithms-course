@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>树型 dp：每个节点的几种状态</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.legend-inline { font-size: 13px; color: var(--text-dim); margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>树型 dp：每个节点的几种状态</h1>
+      <p class="intro">上一页的返回值装的是客观量：最大值、最小值、子树和。这一页的题型关心的是决策，节点选不选、摄像头放不放，于是返回值从一个数变成「每种决策各一个答案」。</p>
+
+      <h2>零、状态就是决策的枚举</h2>
+      <p>前一类题里，父节点想知道子树「是什么」；这一类的父节点想知道子树「在某种安排下最好能到什么程度」。</p>
+      <p>「某种安排」能枚举几个，返回值就分几个分量。职员只有来和不来两种，答案就分两份；监控里的节点有没覆盖、被覆盖没摄像头、有摄像头三种，答案就分三份。</p>
+      <p>分完之后，把「父节点在每种安排下取哪些孩子的哪一种」写清楚，转移方程通常只有两三行。难的地方不在写，在于状态分得对不对：少一个状态，有些局面就没法表达。</p>
+
+      <h2>一、没有上司的舞会</h2>
+      <p>某大学有 n 个职员，每人有一个快乐指数。他们的从属关系是一棵树，父亲是儿子的直接上司。宴会上，如果一个职员的直接上司来了，他就不来。求邀请哪些职员能使快乐指数总和最大。</p>
+      <p>每个职员只有来和不来两种选择，于是定义两个数组：</p>
+      <ul>
+        <li><code>yes[u]</code>：u 来，以 u 为头的子树能拿到的最大快乐指数；</li>
+        <li><code>no[u]</code>：u 不来，以 u 为头的子树能拿到的最大快乐指数。</li>
+      </ul>
+      <p>转移就两行：</p>
+      <ul>
+        <li><code>yes[u] = happy[u] + Σ no[v]</code>。u 来了，每个直接下属都不能来，只能取他们「不来」的那份；</li>
+        <li><code>no[u] = Σ max(no[v], yes[v])</code>。u 不来，下属随意，各取大的那份。</li>
+      </ul>
+      <p>答案取 <code>max(no[root], yes[root])</code>。树的根是输入里唯一没有被标成「下属」的那个职员。</p>
+      <p>两处高频写错都在累加的那一边。<code>yes</code> 里写成 <code>max(no[v], yes[v])</code>，实测在两万个随机小树上 58.03% 出错；<code>no</code> 里写成 <code>min(no[v], yes[v])</code>，93.50% 出错。第二处更隐蔽，因为 <code>min</code> 看上去像是在「避免冲突」，其实冲突已经被 <code>yes</code> 那一边挡掉了，这里只负责挑好的。</p>
+
+      <figure class="fig" id="figDance"></figure>
+
+          <pre class="code">vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; g;
+    vector&lt;<span class="kw">int</span>&gt; happy;
+    <span class="kw">int</span> no[MAXN];
+    <span class="kw">int</span> yes[MAXN];
+
+    <span class="kw">void</span> <span class="fn">f</span>(<span class="kw">int</span> u) {
+        no[u] = 0;
+        yes[u] = happy[u];
+        <span class="kw">for</span> (<span class="kw">int</span> v : g[u]) {
+            f(v);
+            no[u] += max(no[v], yes[v]);
+            yes[u] += no[v];
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">bestHappy</span>(<span class="kw">int</span> root) {
+        f(root);
+        <span class="kw">return</span> max(no[root], yes[root]);
+    }</pre>
+
+      <h2>二、监控二叉树</h2>
+      <p>给一棵二叉树，在节点上装摄像头。每个摄像头监视它的父节点、自己、以及直接子节点。求覆盖全部节点所需的最少摄像头数量。</p>
+      <p>先想贪心的方向。叶子自己装最亏，一个摄像头只罩住两个节点；装在自己的父亲身上，就能顺带罩住兄弟。所以从叶子往上推：谁的某个孩子没被覆盖，谁就必须装。</p>
+      <p>把这个「往上推」写成返回值，每个节点有三种状态：</p>
+      <ol>
+        <li><code>0</code>：这个节点没被覆盖（但它下面的节点都覆盖了）；</li>
+        <li><code>1</code>：这个节点被覆盖，它身上没有摄像头；</li>
+        <li><code>2</code>：这个节点被覆盖，它身上有摄像头。</li>
+      </ol>
+      <p>转移三条：</p>
+      <ol>
+        <li>两个孩子里有 <code>0</code>，自己必须装，<code>ans++</code>，返回 <code>2</code>；</li>
+        <li>两个孩子都是 <code>1</code>，自己被覆盖着但没有摄像头，只能指望父亲，返回 <code>0</code>；</li>
+        <li>其余情况返回 <code>1</code>（说明至少有一个孩子带着摄像头，把自己也罩住了）。</li>
+      </ol>
+      <p>空节点返回 <code>1</code>。它把「这个位置没有孩子」当成「这个位置已经被覆盖」，父节点就不会因为一个空缺位置去装摄像头。</p>
+      <p>递归里有个前提假设：x 的上方一定有父亲。没有这句，「返回 0 等着上面管」就无从谈起，根节点也正是靠它才需要最后补一刀。</p>
+      <p>收尾别忘了：算完根之后，如果根返回 <code>0</code>，说明没人管它，得自己装一个。漏掉这一步实测 13.72% 出错。</p>
+      <p>另外两处更狠。空节点返回 <code>0</code> 的版本 100% 出错，它会误判「这里必须有人来管」，一路往上多装一堆；漏掉「两个孩子都是 <code>1</code>」这一支也 100% 出错，因为这一支正是把「等着父亲」表达出来的唯一出口。三个状态少一个都转不动。</p>
+
+      <figure class="fig" id="figCam"></figure>
+
+          <pre class="code"><span class="kw">int</span> ans;
+
+    <span class="kw">int</span> <span class="fn">f</span>(Node* x) {
+        <span class="kw">if</span> (x == <span class="kw">nullptr</span>) <span class="kw">return</span> 1;
+        <span class="kw">int</span> L = f(x-&gt;left);
+        <span class="kw">int</span> R = f(x-&gt;right);
+        <span class="kw">if</span> (L == 0 || R == 0) {
+            ans++;
+            <span class="kw">return</span> 2;
+        }
+        <span class="kw">if</span> (L == 1 &amp;&amp; R == 1) <span class="kw">return</span> 0;
+        <span class="kw">return</span> 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">minCameraCover</span>(Node* root) {
+        ans = 0;
+        <span class="kw">if</span> (f(root) == 0) ans++;
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2>三、结构决定答案</h2>
+      <p>三状态的转移里，节点只要能「指望父亲」，就不会急着装摄像头。这直接决定了答案跟着树形走。</p>
+
+      <figure class="fig" id="figCamShape"></figure>
+
+      <p>链和完全二叉树给出的数值一样，都是「一个摄像头管三个节点」的密度。随机树的答案落在这两者附近，因为它既有长链又有分叉，两种机会都能用上。</p>
+
+      <h2>四、两个演示</h2>
+      <p>第一个演示按后序遍历，逐个把职员的 <code>no</code> 和 <code>yes</code> 算出来。注意校验一下：<code>yes</code> 那一行只会去要孩子 <code>no</code> 的值，从不碰孩子的 <code>yes</code>。</p>
+
+      <div class="viz" id="viz1">
+        <p class="viz-title">演示一：舞会的两种状态</p>
+        <div id="v1board"></div>
+        <p class="legend-inline">节点下方依次是 no、yes 两个答案。</p>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>树 <select id="v1s"></select></label>
+          <button type="button" id="v1prev">上一步</button>
+          <button type="button" id="v1next">下一步</button>
+          <button type="button" id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <p>第二个演示是监控。每个节点算完就写回自己的状态编号，橙色的是这一步新装上的摄像头。走完全程还要看根的状态：根返回 0 才需要再补一个。</p>
+
+      <div class="viz" id="viz2">
+        <p class="viz-title">演示二：监控的三状态</p>
+        <div id="v2board"></div>
+        <p class="legend-inline">节点下方是该节点返回的状态编号：0 没被覆盖，1 被覆盖没摄像头，2 有摄像头。</p>
+        <p class="viz-note" id="v2note"></p>
+        <p class="viz-answer" id="v2ans"></p>
+        <div class="viz-controls">
+          <label>树 <select id="v2s"></select></label>
+          <button type="button" id="v2prev">上一步</button>
+          <button type="button" id="v2next">下一步</button>
+          <button type="button" id="v2reset">重置</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>时间</th><th>空间</th></tr>
+        <tr><td>没有上司的舞会</td><td>O(n)</td><td>O(h)</td></tr>
+        <tr><td>监控二叉树</td><td>O(n)</td><td>O(h)</td></tr>
+      </table>
+      <p>两题都是每个节点进一次出一次，每个孩子只看一眼，时间 O(n)；空间是递归栈，深度等于树高 h。多叉树用邻接表建图，边数是 n − 1，也是 O(n)。</p>
+      <p>规模实测：n = 10⁶ 的多叉随机树上跑舞会，<code>vector</code> 邻接表 57.68 ms；同样是 10⁶ 个节点的随机二叉树，监控一遍 12.87 ms。</p>
+
+      <h2>总结</h2>
+      <p>状态就是把节点的决策枚举出来。两种决策两个分量，三种决策三个分量，少一个就有局面表达不了。</p>
+      <p>写转移时只问一句：父节点在这种安排下，能取到孩子的哪一种安排。舞会的 <code>yes</code> 要孩子的 <code>no</code>，<code>no</code> 要孩子的最大值；监控里孩子有 <code>0</code> 就必须装，孩子全是 <code>1</code> 就往上推。</p>
+      <p>空节点的返回值是哨兵，要挑一个「不逼着父节点做多余动作」的值。舞会里空节点不存在，不用管；监控里空节点返回 <code>1</code>，把空位当成已覆盖。</p>
+      <p>三状态这类写法里，「指望父亲」是一条真实存在的转移。只要题目允许父节点替子节点兜底，状态 0 就必须留着。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>没有上司的舞会</td><td><a href="https://www.luogu.com.cn/problem/P1352" target="_blank">luogu.com.cn/problem/P1352</a></td></tr>
+        <tr><td>LeetCode</td><td>打家劫舍 III</td><td><a href="https://leetcode.cn/problems/house-robber-iii/" target="_blank">leetcode.cn/problems/house-robber-iii</a></td></tr>
+        <tr><td>LeetCode</td><td>监控二叉树</td><td><a href="https://leetcode.cn/problems/binary-tree-cameras/" target="_blank">leetcode.cn/problems/binary-tree-cameras</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解078【必备】树型dp-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280',
+            green: '#15803d', greenBg: '#dcfce7' };
+
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') + '>' +
+      esc(s) + '</text>';
+  }
+  function box(x, y, w, h, fill, stroke, r) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (r === undefined ? 6 : r) +
+      '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.2"/>';
+  }
+  function line(x1, y1, x2, y2, col, dash, w) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + col +
+      '" stroke-width="' + (w || 1.6) + '"' + (dash ? ' stroke-dasharray="5 3"' : '') + '/>';
+  }
+  function circ(x, y, r, fill, stroke, w) {
+    return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke +
+      '" stroke-width="' + (w || 1.4) + '"/>';
+  }
+  // 多叉树布局：叶子定槽位，父节点取首尾孩子的中点
+  function layoutT(root, x0, x1, y0, dy) {
+    var arr = [], leaves = 0, maxD = 0;
+    (function go(n, d) {
+      n._d = d; maxD = Math.max(maxD, d); arr.push(n);
+      if (!n.ch.length) { n._slot = leaves++; }
+      else {
+        for (var i = 0; i < n.ch.length; i++) go(n.ch[i], d + 1);
+        n._slot = (n.ch[0]._slot + n.ch[n.ch.length - 1]._slot) / 2;
+      }
+    })(root, 0);
+    var L = Math.max(leaves, 2);
+    for (var i = 0; i < arr.length; i++) {
+      arr[i]._x = x0 + arr[i]._slot * (x1 - x0) / (L - 1);
+      arr[i]._y = y0 + arr[i]._d * dy;
+    }
+    if (leaves === 1) {
+      for (var i2 = 0; i2 < arr.length; i2++) arr[i2]._x = x0 + arr[i2]._d * (x1 - x0) / Math.max(maxD, 1);
+    }
+    arr.depth = maxD;
+    return arr;
+  }
+  function postOrder(root) {
+    var out = [];
+    (function dfs(n) { for (var i = 0; i < n.ch.length; i++) dfs(n.ch[i]); out.push(n); })(root);
+    return out;
+  }
+  function T(v, ch) { return { v: v, ch: ch || [] }; }
+
+  // ---------- 图 1：两种状态 ----------
+  (function () {
+    var g = '';
+    g += box(40, 34, 280, 150, C.blueBg, C.blue, 8);
+    g += txt(180, 60, 'u 来', { size: 14, weight: 700, fill: C.blue });
+    g += circ(180, 100, 18, '#fff', C.blue, 1.6) + txt(180, 105, 'u', { size: 13, fill: C.blue });
+    g += circ(110, 152, 15, '#fff', C.blue, 1.4) + txt(110, 156, 'v1', { size: 11, fill: C.blue });
+    g += circ(250, 152, 15, '#fff', C.blue, 1.4) + txt(250, 156, 'v2', { size: 11, fill: C.blue });
+    g += line(180, 118, 114, 140, C.blue, true, 1.4) + line(180, 118, 246, 140, C.blue, true, 1.4);
+    g += txt(180, 176, 'yes[u] = happy[u] + no[v1] + no[v2]', { size: 11, fill: C.blue });
+
+    g += box(360, 34, 280, 150, C.orangeBg, C.orange, 8);
+    g += txt(500, 60, 'u 不来', { size: 14, weight: 700, fill: C.orange });
+    g += circ(500, 100, 18, C.orangeBg, C.orange, 1.6) + txt(500, 105, 'u', { size: 13, fill: C.orange });
+    g += circ(430, 152, 15, '#fff', C.orange, 1.4) + txt(430, 156, 'v1', { size: 11, fill: C.orange });
+    g += circ(570, 152, 15, '#fff', C.orange, 1.4) + txt(570, 156, 'v2', { size: 11, fill: C.orange });
+    g += line(500, 118, 434, 140, C.orange, true, 1.4) + line(500, 118, 566, 140, C.orange, true, 1.4);
+    g += txt(500, 176, 'no[u] = max(no[v1], yes[v1]) + max(no[v2], yes[v2])', { size: 11, fill: C.orange });
+
+    g += txt(340, 212, '虚线：这一支能取到哪些值。上来的时候孩子只剩 no 可挑；不来的时候两边都能挑。', { size: 12, fill: C.dim });
+    wrap('figDance', 232, g, '舞会的两种状态，以及它们各自能取孩子的那一份。');
+  })();
+
+  // ---------- 图 2：三状态 -----------------
+  (function () {
+    var g = '';
+    var half = 250, x0 = 8;
+    var z = VW - 16;
+    g += line(z / 2 + x0, 16, z / 2 + x0, 212, C.border, false, 1.4);
+    var cols = [
+      { x: 170, code: '0', title: '没被覆盖', note: '下面覆盖好了，自己还裸着', col: C.orange, bg: C.orangeBg },
+      { x: 510, code: '1', title: '被覆盖，没摄像头', note: '孩子里的摄像头照到了自己', col: C.blue, bg: C.blueBg }
+    ];
+    for (var i = 0; i < 2; i++) {
+      var c0 = cols[i];
+      g += circ(c0.x, 62, 20, c0.bg, c0.col, 1.8);
+      g += txt(c0.x, 68, c0.code, { size: 16, weight: 700, fill: c0.col });
+      g += txt(c0.x, 104, c0.title, { size: 13, weight: 700, fill: c0.col });
+      g += txt(c0.x, 124, c0.note, { size: 11, fill: C.dim });
+    }
+    g += circ(170, 62 + 92, 20, C.greenBg, C.green, 1.8);
+    g += txt(170, 62 + 98, '2', { size: 16, weight: 700, fill: C.green });
+    g += txt(170, 62 + 134, '有摄像头', { size: 13, weight: 700, fill: C.green });
+    g += txt(170, 62 + 154, '自己装了一个，向上向下都照到', { size: 11, fill: C.dim });
+    g += box(360, 130, 300, 78, '#fff', C.border, 8);
+    g += txt(510, 152, '转移只看孩子的编号', { size: 12, weight: 700 });
+    g += txt(510, 174, '有孩子是 0 → 自己装，返回 2', { size: 11, fill: C.dim });
+    g += txt(510, 192, '孩子全是 1 → 返回 0，等父亲；否则返回 1', { size: 11, fill: C.dim });
+    g += txt(340, 232, '三个状态各管一件事：表达「这里还缺一个摄像头」、表达「已经有人管」、表达「我就是那个摄像头」', { size: 12, fill: C.dim });
+    wrap('figCam', 252, g, '监控的三状态。少了 0 就没法向上求助，少了 1 就没法说明自己已经安全。');
+  })();
+
+  // ---------- 图 3：摄像头数量随 n ----------
+  (function () {
+    var g = '';
+    var rows = [
+      { name: '链', ans: [1, 2, 3, 4, 5] },
+      { name: '完全二叉树', ans: [1, 2, 3, 4, 5] },
+      { name: '随机树', ans: [1, 3, 4, 5, 5] }
+    ];
+    var nsh = [3, 6, 9, 12, 15];
+    var x0 = 40, w = 62, gap = 10;
+    g += txt(x0, 26, '树形', { size: 12, anchor: 'start', weight: 700 });
+    for (var j = 0; j < 5; j++) g += txt(x0 + 120 + j * (w + gap) + w / 2, 26, 'n=' + nsh[j], { size: 12, weight: 700 });
+    for (var i = 0; i < 3; i++) {
+      var y = 40 + i * 46;
+      g += box(x0, y, 100, 34, i === 1 ? C.blueBg : '#fff', i === 1 ? C.blue : C.border, 6);
+      g += txt(x0 + 50, y + 22, rows[i].name, { size: 13, weight: i === 1 ? 700 : 400, fill: i === 1 ? C.blue : C.text });
+      for (var j2 = 0; j2 < 5; j2++) {
+        var isLast = j2 === 4;
+        g += box(x0 + 120 + j2 * (w + gap), y, w, 34, isLast ? C.orangeBg : '#fff', isLast ? C.orange : C.border, 4);
+        g += txt(x0 + 120 + j2 * (w + gap) + w / 2, y + 22, String(rows[i].ans[j2]), { size: 14, weight: 700, fill: isLast ? C.orange : C.text });
+      }
+    }
+    g += txt(340, 194, '一个摄像头覆盖自己加左右两边共三个位置，所以链和完全二叉树都是每三个节点放一个', { size: 12, fill: C.dim });
+    wrap('figCamShape', 214, g, '三种树形下的最少摄像头数量。橙色列是 n = 15 时的数值。');
+  })();
+
+  // ---------- 演示一：舞会 ----------
+  var DANCES = [
+    { name: '3 人', happy: [10, 20, 30], ch: [[1, 2], [], []] },
+    { name: '7 人', happy: [100, 50, 60, 20, 30, 40, 10], ch: [[1, 2], [3, 4], [5, 6], [], [], [], []] },
+    { name: '5 人', happy: [10, 20, 30, 40, 50], ch: [[1, 2], [3, 4], [], [], []] }
+  ];
+  var v1 = { idx: 0, step: 0, order: [], arr: [], info: {} };
+  function v1BuildTree() {
+    var d = DANCES[v1.idx];
+    var nodes = [];
+    for (var i = 0; i < d.happy.length; i++) nodes.push(T(i, []));
+    for (var i2 = 0; i2 < d.happy.length; i2++) for (var k = 0; k < d.ch[i2].length; k++) nodes[i2].ch.push(nodes[d.ch[i2][k]]);
+    return nodes[0];
+  }
+  function v1Build() {
+    var root = v1BuildTree();
+    v1.order = postOrder(root);
+    v1.arr = layoutT(root, 80, 600, 46, 66);
+    v1.happy = DANCES[v1.idx].happy;
+    v1.info = {};
+    for (var i = 0; i < v1.order.length; i++) {
+      var n = v1.order[i];
+      var no = 0, yes = v1.happy[n.v];
+      for (var k = 0; k < n.ch.length; k++) {
+        no += Math.max(v1.info[n.ch[k].v].no, v1.info[n.ch[k].v].yes);
+        yes += v1.info[n.ch[k].v].no;
+      }
+      v1.info[n.v] = { no: no, yes: yes };
+    }
+    v1.step = 0;
+    v1Render();
+  }
+  function v1Render() {
+    var g = '';
+    var arr = v1.arr;
+    for (var i = 0; i < arr.length; i++) {
+      var p = arr[i];
+      for (var k = 0; k < p.ch.length; k++) g += line(p._x, p._y + 17, p.ch[k]._x, p.ch[k]._y - 17, C.border, false, 1.6);
+    }
+    for (var i2 = 0; i2 < arr.length; i2++) {
+      var q = arr[i2];
+      var done = v1.order.indexOf(q) <= v1.step;
+      var cur = v1.order[v1.step] === q;
+      var inf = v1.info[q.v];
+      g += circ(q._x, q._y, 17, cur ? C.orangeBg : (done ? C.blueBg : '#fff'), cur ? C.orange : (done ? C.blue : C.gray), cur ? 2 : 1.4);
+      g += txt(q._x, q._y + 5, String(q.v), { size: 14, weight: 700, fill: cur ? C.orange : (done ? C.blue : C.dim) });
+      g += txt(q._x, q._y - 24, 'w=' + v1.happy[q.v], { size: 10, fill: C.dim });
+      if (done) {
+        g += box(q._x - 48, q._y + 22, 96, 20, cur ? C.orangeBg : C.bg, cur ? C.orange : C.border, 4);
+        g += txt(q._x, q._y + 36, 'no=' + inf.no + ' yes=' + inf.yes, { size: 10, fill: cur ? C.orange : C.dim });
+      }
+    }
+    var host = document.getElementById('v1board');
+    var H = 46 + (arr.depth + 1) * 66 + 34;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img">' + g + '</svg>';
+    var cur = v1.order[v1.step];
+    var terms = [];
+    for (var k2 = 0; k2 < cur.ch.length; k2++) {
+      terms.push('no[' + cur.ch[k2].v + ']=' + v1.info[cur.ch[k2].v].no + ', yes[' + cur.ch[k2].v + ']=' + v1.info[cur.ch[k2].v].yes);
+    }
+    document.getElementById('v1note').textContent = '第 ' + (v1.step + 1) + ' / ' + v1.order.length + ' 步：职员 ' + cur.v +
+      '，w=' + v1.happy[cur.v] + '，下属 ' + (terms.length ? terms.join('；') : '无') + '。' +
+      ' no = ' + v1.info[cur.v].no + '（下属各取大的），yes = ' + v1.info[cur.v].yes + '（下属只取 no）。';
+    var rootInfo = v1.info[v1.order[v1.order.length - 1].v];
+    document.getElementById('v1ans').textContent = (v1.step === v1.order.length - 1)
+      ? ('最大快乐指数 = ' + Math.max(rootInfo.no, rootInfo.yes)) : '';
+    document.getElementById('v1prev').disabled = v1.step === 0;
+    document.getElementById('v1next').disabled = v1.step >= v1.order.length - 1;
+  }
+
+  // ---------- 演示二：监控 ----------
+  var CAMS = [
+    { name: '链 5 个', root: { v: 0, l: { v: 1, l: { v: 2, l: { v: 3, l: { v: 4 } } } } } },
+    { name: '完全二叉树 7 个', root: { v: 0, l: { v: 1, l: { v: 3 }, r: { v: 4 } }, r: { v: 2, l: { v: 5 }, r: { v: 6 } } } },
+    { name: '稀疏 6 个', root: { v: 0, l: { v: 1, l: { v: 3 } }, r: { v: 2, r: { v: 4, l: { v: 5 } } } } }
+  ];
+  var v2 = { idx: 0, step: 0, order: [], arr: [], info: {}, ans: 0, ansAt: [], finalExtra: 0 };
+  function convBinary(n) {
+    if (!n) return null;
+    var node = { v: n.v };
+    node.l = convBinary(n.l);
+    node.r = convBinary(n.r);
+    node.ch = [node.l, node.r].filter(function (x) { return !!x; });
+    return node;
+  }
+  function v2Build() {
+    var root = convBinary(CAMS[v2.idx].root);
+    v2.order = postOrder(root);
+    v2.arr = layoutT(root, 80, 600, 46, 62);
+    v2.info = {}; v2.ans = 0; v2.ansAt = [];
+    for (var i = 0; i < v2.order.length; i++) {
+      var n = v2.order[i];
+      var L = n.l ? v2.info[n.l.v] : 1;
+      var R = n.r ? v2.info[n.r.v] : 1;
+      var code;
+      if (L === 0 || R === 0) { v2.ans++; code = 2; }
+      else if (L === 1 && R === 1) code = 0;
+      else code = 1;
+      v2.info[n.v] = code;
+      v2.ansAt.push(v2.ans);
+    }
+    v2.finalExtra = (v2.info[v2.order[v2.order.length - 1].v] === 0) ? 1 : 0;
+    v2.step = 0;
+    v2Render();
+  }
+  function v2Render() {
+    var g = '';
+    var arr = v2.arr;
+    var cur = v2.order[v2.step];
+    var curAns = v2.ansAt[v2.step];
+    var prevAns = v2.step > 0 ? v2.ansAt[v2.step - 1] : 0;
+    var justAdded = curAns > prevAns;
+    for (var i = 0; i < arr.length; i++) {
+      var p = arr[i];
+      for (var k = 0; k < p.ch.length; k++) {
+        var child = p.ch[k];
+        var hasCam = v2.info[child.v] === 2 && v2.order.indexOf(child) <= v2.step;
+        g += line(p._x, p._y + 17, child._x, child._y - 17, hasCam ? C.orange : C.border, false, hasCam ? 2 : 1.6);
+      }
+    }
+    for (var i2 = 0; i2 < arr.length; i2++) {
+      var q = arr[i2];
+      var done = v2.order.indexOf(q) <= v2.step;
+      var isCur = q === cur;
+      var code = v2.info[q.v];
+      var fill = '#fff', st = C.gray;
+      if (done) { fill = code === 2 ? C.orangeBg : (code === 0 ? '#fef3c7' : C.blueBg); st = code === 2 ? C.orange : (code === 0 ? '#b45309' : C.blue); }
+      if (isCur) { st = justAdded ? C.orange : C.blue; fill = justAdded ? C.orangeBg : C.blueBg; }
+      g += circ(q._x, q._y, 17, fill, st, isCur ? 2.2 : 1.4);
+      g += txt(q._x, q._y + 5, String(q.v), { size: 13, weight: 700, fill: st === C.gray ? C.dim : st });
+      if (done) {
+        g += box(q._x - 30, q._y + 22, 60, 20, isCur ? fill : C.bg, isCur ? st : C.border, 4);
+        g += txt(q._x, q._y + 36, '→ ' + code, { size: 10, fill: st });
+      }
+    }
+    var host = document.getElementById('v2board');
+    var H = 46 + (arr.depth + 1) * 62 + 34;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img">' + g + '</svg>';
+    var kids2 = [cur.l ? v2.info[cur.l.v] : 1, cur.r ? v2.info[cur.r.v] : 1];
+    var has0 = kids2[0] === 0 || kids2[1] === 0;
+    var all1 = kids2[0] === 1 && kids2[1] === 1;
+    var why = has0 ? '有孩子返回 0，这里必须装一个，摄像头数 +1，返回 2'
+      : (all1 ? '两个孩子都返回 1（空位置也当 1），自己还没被覆盖，返回 0 等父亲' : '至少一个孩子带着摄像头，把自己也罩住了，返回 1');
+    document.getElementById('v2note').textContent = '第 ' + (v2.step + 1) + ' / ' + v2.order.length + ' 步：节点 ' + cur.v +
+      '，孩子的返回值是 ' + kids2.join('、') + '。' + why + '。当前摄像头总数 ' + curAns + '。';
+    document.getElementById('v2ans').textContent = (v2.step === v2.order.length - 1)
+      ? ('最少摄像头 = ' + (v2.ans + v2.finalExtra) + (v2.finalExtra ? '（根返回 0，最后补一个）' : '')) : '';
+    document.getElementById('v2prev').disabled = v2.step === 0;
+    document.getElementById('v2next').disabled = v2.step >= v2.order.length - 1;
+  }
+
+  (function () {
+    var s1 = document.getElementById('v1s');
+    for (var i = 0; i < DANCES.length; i++) { var o = document.createElement('option'); o.value = String(i); o.textContent = DANCES[i].name; s1.appendChild(o); }
+    s1.addEventListener('change', function () { v1.idx = +s1.value; v1Build(); });
+    document.getElementById('v1prev').addEventListener('click', function () { if (v1.step > 0) { v1.step--; v1Render(); } });
+    document.getElementById('v1next').addEventListener('click', function () { if (v1.step < v1.order.length - 1) { v1.step++; v1Render(); } });
+    document.getElementById('v1reset').addEventListener('click', function () { v1.step = 0; v1Render(); });
+    v1Build();
+
+    var s2 = document.getElementById('v2s');
+    for (var j = 0; j < CAMS.length; j++) { var o2 = document.createElement('option'); o2.value = String(j); o2.textContent = CAMS[j].name; s2.appendChild(o2); }
+    s2.addEventListener('change', function () { v2.idx = +s2.value; v2Build(); });
+    document.getElementById('v2prev').addEventListener('click', function () { if (v2.step > 0) { v2.step--; v2Render(); } });
+    document.getElementById('v2next').addEventListener('click', function () { if (v2.step < v2.order.length - 1) { v2.step++; v2Render(); } });
+    document.getElementById('v2reset').addEventListener('click', function () { v2.step = 0; v2Render(); });
+    v2Build();
+  })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>状压 dp：用一个整数装下集合</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.legend-inline { font-size: 13px; color: var(--text-dim); margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>状压 dp：用一个整数装下集合</h1>
+      <p class="intro">动态规划的可变参数通常是一个数、两个下标、一个区间。可有一类题要问「这一堆东西里，哪些还没用过」。这个参数没法直接当数值，却可以塞进一个整数的二进制位里。塞进去之后表就建得起来了，代价是表的长度是 2 的样本数次方。</p>
+
+      <h2>零、样本的「还能不能用」压成一位</h2>
+      <p>设一个整型可变参数 <code>status</code>，用它的第 i 位表示第 i 个样本的状态。位是 1 还是 0，看这道题想要哪种语义：可以表示「还能用」，也可以表示「已经用过」。选哪一种都行，全篇统一就好。</p>
+      <p>k 个样本，就有 2<sup>k</sup> 种 status，取值范围 0 到 2<sup>k</sup> − 1。样本每多一个，状态数翻一倍。这就是状压 dp 的题样本量都很小的原因：一般不超过 20 个，2<sup>20</sup> 约等于 10<sup>6</sup>。再往上，光是把这些状态走一遍，指令条数就奔着 10<sup>7</sup> 到 10<sup>8</sup> 去了。</p>
+      <p>如果样本多到状压也放不下，那说明这题不该用动态规划，这时候双向广搜是个备选。</p>
+
+      <figure class="fig" id="figStatus"></figure>
+
+      <p>代码的推进顺序和别的 dp 没有区别：写出尝试的递归函数，加记忆化，改成严格位置依赖的表，最后看能不能做空间压缩。变的只是「状态」这个概念的形状：从一个数变成了一串二进制位。</p>
+
+      <h2>一、两个可变参数，只缓存一个</h2>
+      <p>先看题。给两个整数 n 和 m，两个玩家轮流从 1 到 n 里挑一个还没被挑走的整数，把挑走的数加到公共累加和里（两边都算）。谁在自己的回合把累加和推到不小于 m，谁赢。两个人都绝顶聪明，问先手能不能稳赢。</p>
+      <p>递归函数长这样：<code>f(status, rest)</code>。status 表示 1 到 n 里还剩哪些数能挑，rest 表示距离 m 还差多少。答案就是 <code>f(全 1 的 status, m)</code>。</p>
+      <p>这里有个可以直接省掉一维的地方。<code>rest</code> 不用当可变参数。已经挑走的数之和就是 1 到 n 的总和减去 status 里剩下的数之和，status 一确定，rest 就定了。既然它被 status 唯一决定，就只对 status 建表。</p>
+
+      <figure class="fig" id="figParams"></figure>
+
+      <p>这条不限于这道题，所有动态规划都这么看：抓住唯一的关键可变参数，被它决定的那几个不用管。</p>
+
+      <figure class="fig" id="figEarly"></figure>
+
+      <p>第二句提前返回看着像个纯粹的剪枝，其实它修的是一处正确性。递归的写法是「只要存在一步走法，让对手的 f 返回 false，我就赢」。而 f 返回 false 有两种完全不同的原因：对手真的必败，和对手根本没得走。池子被掏空、却谁都没到 m，那是平局，先手不算赢。1 到 n 全加起来都到不了 m 时，局面必然是这样，所以必须先挡掉。</p>
+      <p>随手写个对拍用的暴力，很容易把「没得走」直接当成「对手输了」，结果在 20000 组随机 (n, m) 上跟正解差出 2305 组。把暴力改成「赢 / 平 / 输」三值之后归零。</p>
+
+      <p>代码里还有一处容易写错的地方：取走数字 i 的时候，要同时把 status 的第 i 位清掉，并把 rest 减 i。只减 rest 不清位，等于允许同一个人把同一个数挑两遍；只清位不减 rest，等于那一步白拿。</p>
+
+      <pre class="code"><span class="kw">bool</span> <span class="fn">canIWin</span>(<span class="kw">int</span> n, <span class="kw">int</span> m) {
+        <span class="kw">if</span> (m == 0) <span class="kw">return</span> <span class="kw">true</span>;
+        <span class="cm">// 1~n 全加起来都到不了 m，谁也没法赢，先手当然不算赢</span>
+        <span class="kw">if</span> ((<span class="kw">long</span> <span class="kw">long</span>)n * (n + 1) / 2 &lt; m) <span class="kw">return</span> <span class="kw">false</span>;
+        dp.assign(1 &lt;&lt; (n + 1), 0);
+        <span class="kw">return</span> f(n, (1 &lt;&lt; (n + 1)) - 1, m);
+    }</pre>
+
+      <pre class="code"><span class="cm">// status 的第 i 位是 1，表示数字 i 还能选；第 0 位弃而不用</span>
+    <span class="cm">// rest 是双方累加和还差多少到 m，它由 status 唯一决定，所以只缓存 status</span>
+    <span class="kw">bool</span> <span class="fn">f</span>(<span class="kw">int</span> n, <span class="kw">int</span> status, <span class="kw">int</span> rest) {
+        <span class="kw">if</span> (rest &lt;= 0) <span class="kw">return</span> <span class="kw">false</span>;
+        <span class="kw">if</span> (dp[status] != 0) <span class="kw">return</span> dp[status] == 1;
+        <span class="kw">bool</span> ans = <span class="kw">false</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> ((status &amp; (1 &lt;&lt; i)) != 0 &amp;&amp; !f(n, status ^ (1 &lt;&lt; i), rest - i)) {
+                ans = <span class="kw">true</span>;
+                <span class="kw">break</span>;
+            }
+        }
+        dp[status] = ans ? 1 : -1;
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <p>状态数是 2<sup>n+1</sup>，多出来的那一位是第 0 位，从头到尾弃而不用。n = 20 时表长 2<sup>21</sup> 个状态，每个状态一个字节，2 MB。<code>0</code> 表示没算过，<code>1</code> 和 <code>-1</code> 分别表示 true 和 false。用 <code>signed char</code> 存就够了，用 <code>int</code> 也行，就是浪费三倍内存。</p>
+
+      <p>记忆化能省多少，取决于 m 落在哪。把 n 固定成 20，让 m 从总和的 20% 走到 100%，实测访问过的状态数是这样的：</p>
+
+      <figure class="fig" id="figReach"></figure>
+
+      <p>中间那段最费。m 取到总和的七成左右时访问了 704658 个状态，22.8 ms；贴着总和（m = 210）只要 28655 个状态、0.64 ms，因为先手随便挑一个，剩下的路很快就被对手封死了。顺带说一句，n = 20 时这些 m 全部是先手必败，答案都是 false。</p>
+      <p>把 n 从 1 到 14、m 从 0 扫到「总和 + 2」全部跑一遍，共 602 组，先手能赢的占 73.92%。</p>
+
+      <h2>二、两个演示</h2>
+      <p>第一个演示把状态表摊在平面上。每一格是一个 status，格子上面是二进制写法（从左到右是第 n 位到第 1 位），下面是它当前的状态。按真实递归顺序一格一格点亮，能看见记忆化是怎么把重复子树拦下来的。</p>
+
+      <div class="viz" id="viz1">
+        <p class="viz-title">演示一：状态表按递归顺序点亮</p>
+        <div id="v1board"></div>
+        <p class="legend-inline">白格还没走到；橙格是正在展开的；蓝格算完且答案是 win；灰格算完且答案是 lose；浅橙格是 rest 已经不大于 0、不进表的。</p>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>n <select id="v1n"></select></label>
+          <label>m <select id="v1m"></select></label>
+          <button type="button" id="v1prev">上一步</button>
+          <button type="button" id="v1next">下一步</button>
+          <button type="button" id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <p>第二个演示是同一道题的一局实况。从空局面出发，轮到谁、谁挑几号、累加和推到多少，一步步走到有人过线。</p>
+
+      <div class="viz" id="viz2">
+        <p class="viz-title">演示二：一局实况</p>
+        <div id="v2board"></div>
+        <p class="legend-inline">横条是累加和从 0 走到 m 的过程，每格是一次选择。</p>
+        <p class="viz-note" id="v2note"></p>
+        <p class="viz-answer" id="v2ans"></p>
+        <div class="viz-controls">
+          <label>n <select id="v2n"></select></label>
+          <label>m <select id="v2m"></select></label>
+          <button type="button" id="v2prev">上一步</button>
+          <button type="button" id="v2next">下一步</button>
+          <button type="button" id="v2reset">重置</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>时间</th><th>空间</th></tr>
+        <tr><td>我能赢吗</td><td>O(2<sup>n+1</sup> · n)</td><td>O(2<sup>n+1</sup>)</td></tr>
+      </table>
+      <p>status 有 2<sup>n+1</sup> 种，每个状态枚举 n 个数，所以时间是它们的乘积。记忆化保证每个 status 只展开一次。空间就是这张表，用 <code>signed char</code> 存是 2<sup>n+1</sup> 字节，n = 20 时 2 MB；递归栈的深度不超过 n，因为每往下一层至少取走一个数。</p>
+      <p>这个复杂度只是个上界，实测远用不满。上面那张图里，n = 20 的九组数据最多访问 704658 个状态，只有上界 2097152 的三分之一，剩下的是被「找到一条必胜走法就 break」提前砍掉的。</p>
+
+      <h2>总结</h2>
+      <p>用整数的二进制位表示「哪些样本还能用」，可变参数就从一个集合变成了一个整数，表也就建得起来。k 个样本对应 2<sup>k</sup> 个状态，所以这类题的样本量一般在 20 以内。</p>
+      <p>建表之前先数可变参数。这道题有 status 和 rest 两个，但 rest 完全由 status 决定，表只用管 status。判断的标准是「它能不能由别的参数推出来」，能推出来的就不进状态。</p>
+      <p>递归里「对手的答案取反」要写对。取反只表示「对手不能赢」，而对手不能赢和对手必输并不等同：池子空了是平局。这道题靠一句「总和到不了 m 就直接返回 false」把这个口子堵上，拿掉它就会在总分不够的样本上答错。</p>
+      <p>加记忆化之前先想清楚：不同的递归路径会不会走到同一个 status，却带着不同的 rest。这道题不会，因为 rest 是 status 的函数；换成别的题就要小心，那样缓存单靠 status 就不够了。</p>
+      <p>下一类题的 status 换了语义，记录的是「还剩多少活没干完」。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>我能赢吗</td><td><a href="https://leetcode.cn/problems/can-i-win/" target="_blank">leetcode.cn/problems/can-i-win</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解080【必备】状压dp-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') + '>' +
+      esc(s) + '</text>';
+  }
+  function box(x, y, w, h, fill, stroke, r) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (r === undefined ? 6 : r) +
+      '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.2"/>';
+  }
+  function line(x1, y1, x2, y2, col, dash, w) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + col +
+      '" stroke-width="' + (w || 1.6) + '"' + (dash ? ' stroke-dasharray="5 3"' : '') + '/>';
+  }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+
+  // ---------- 图 1：status 的位 ----------
+  (function () {
+    var g = '', cw = 46, gap = 4, x0 = 142;
+    function row(y, bits, hi) {
+      for (var i = 0; i < 8; i++) {
+        var x = x0 + i * (cw + gap);
+        var on = bits[i] === 1;
+        var hot = hi.indexOf(i) >= 0;
+        g += box(x, y, cw, 40, hot ? C.orangeBg : (on ? C.blueBg : '#fff'), hot ? C.orange : (on ? C.blue : C.gray), 6);
+        g += txt(x + cw / 2, y + 26, String(on ? 1 : 0), { size: 15, weight: 700, fill: hot ? C.orange : (on ? C.blue : C.dim) });
+        g += txt(x + cw / 2, y + 58, String(7 - i), { size: 11, fill: C.dim });
+      }
+    }
+    g += txt(30, 44, '1~7 全能选：', { size: 12, anchor: 'start', fill: C.dim });
+    row(52, [1, 1, 1, 1, 1, 1, 1, 1], []);
+    g += txt(30, 130, '4、2 已选走：', { size: 12, anchor: 'start', fill: C.dim });
+    row(138, [1, 1, 1, 0, 1, 0, 1, 1], [3, 5]);
+    g += txt(340, 224, '下面一行标的是位下标：数字 i 落在第 i 位，第 0 位弃而不用', { size: 12, fill: C.dim });
+    g += txt(340, 246, 'status = 11111011 表示 4 和 2 都还能选；取走 4 就是把它清成 11110011', { size: 12, fill: C.text });
+    wrap('figStatus', 264, g, '一个整数装下「谁能用、谁不能用」。');
+  })();
+
+  // ---------- 图 2：两个可变参数只留一个 ----------
+  (function () {
+    var g = '';
+    g += box(28, 34, 296, 132, '#fff', C.orange, 8);
+    g += txt(176, 60, '缓存 (status, rest)', { size: 14, weight: 700, fill: C.orange });
+    g += txt(176, 88, '2^(n+1) × 21 个格子', { size: 12 });
+    g += txt(176, 110, 'n = 20 时 4.4×10⁷ 个', { size: 12, fill: C.dim });
+    g += txt(176, 140, 'rest 有 21 种取值，但每种', { size: 11, fill: C.dim });
+    g += txt(176, 158, '取值只对应一个 status，白留', { size: 11, fill: C.dim });
+    g += box(356, 34, 296, 132, C.blueBg, C.blue, 8);
+    g += txt(504, 60, '只缓存 status', { size: 14, weight: 700, fill: C.blue });
+    g += txt(504, 88, '2^(n+1) 个格子', { size: 12, fill: C.text });
+    g += txt(504, 110, 'n = 20 时 2.1×10⁶ 个', { size: 12, fill: C.blue, weight: 700 });
+    g += txt(504, 140, 'rest 直接由 status 算出来，', { size: 11, fill: C.dim });
+    g += txt(504, 158, '不进状态', { size: 11, fill: C.dim });
+    g += txt(340, 196, '两个可变参数，只有一个是真的自变量', { size: 13, weight: 700, fill: C.text });
+    g += txt(340, 218, '其余的是被它决定的从变量，建表时直接扔掉', { size: 12, fill: C.dim });
+    wrap('figParams', 236, g, 'rest 是 status 的函数，所以不用它当状态。');
+  })();
+
+  // ---------- 图 3：两句提前返回 ----------
+  (function () {
+    var g = '';
+    function row(y, code, desc, isFix) {
+      var f = isFix ? C.orangeBg : C.blueBg, s = isFix ? C.orange : C.blue;
+      g += box(24, y, 632, 58, f, s, 8);
+      g += txt(40, y + 25, code, { size: 13, anchor: 'start', fill: s, weight: 700 });
+      g += txt(40, y + 46, desc, { size: 12, anchor: 'start', fill: C.text });
+    }
+    row(30, 'if (m == 0) return true;', '题目规定：不推就是先手赢', false);
+    row(100, 'if (n*(n+1)/2 < m) return false;', '1~n 全加起来到不了 m，谁都不赢，先手当然不算赢', true);
+    g += txt(340, 182, '第二句不是剪枝，是正确性：拿掉它，20000 组随机 (n,m) 里 10.52% 出错，', { size: 12, fill: C.text });
+    g += txt(340, 202, '在「总和小于 m」的那 3718 组样本里 56.94% 出错', { size: 12, fill: C.dim });
+    wrap('figEarly', 222, g, '两句提前返回，第二句挡的是「没有赢家」这种局面。');
+  })();
+
+  // ---------- 图 4：访问状态数随 m 变化 ----------
+  (function () {
+    var g = '', data = [
+      ['20%', 42, 6545, 0.42], ['40%', 84, 167729, 6.50], ['60%', 126, 596708, 21.03],
+      ['70%', 147, 704658, 22.83], ['80%', 168, 574530, 17.33], ['100%', 210, 28655, 0.64]
+    ];
+    var bx = 70, bw = 62, gap2 = 32, base = 218, maxH = 178;
+    var mx = Math.sqrt(704658);
+    g += line(60, base, 660, base, C.border, false, 1.4);
+    function kfmt(v) { return v >= 10000 ? (v / 1000).toFixed(0) + 'k' : String(v); }
+    for (var i = 0; i < data.length; i++) {
+      var d = data[i], x = bx + i * (bw + gap2);
+      var h = Math.max(3, Math.sqrt(d[2]) / mx * maxH);
+      var isMax = d[3] > 22;
+      g += box(x, base - h, bw, h, isMax ? C.orangeBg : C.blueBg, isMax ? C.orange : C.blue, 4);
+      g += txt(x + bw / 2, base - h - 22, kfmt(d[2]), { size: 12, weight: 700, fill: isMax ? C.orange : C.blue });
+      g += txt(x + bw / 2, base - h - 7, d[3].toFixed(2) + ' ms', { size: 10, fill: C.dim });
+      g += txt(x + bw / 2, base + 18, 'm=' + d[1], { size: 11, fill: C.text });
+      g += txt(x + bw / 2, base + 34, d[0], { size: 10, fill: C.dim });
+    }
+    g += txt(340, 268, 'n = 20（总和 210）；柱高按平方根缩放，面积才与状态数成正比；柱上数字是访问过的状态数', { size: 11, fill: C.dim });
+    wrap('figReach', 286, g, 'm 落在总和七成附近最费，贴着总和反而最省。');
+  })();
+
+  // ---------- 演示一：状态表 ----------
+  var S1 = { n: 3, m: 7, step: 0, cells: [], log: [], memo: {} };
+  function buildLog(n, m) {
+    var log = [], memo = {};
+    function f(status, rest) {
+      if (rest <= 0) { log.push({ t: 'short', s: status }); return false; }
+      if (memo[status] !== undefined) { log.push({ t: 'hit', s: status, v: memo[status] ? 1 : 0 }); return memo[status]; }
+      log.push({ t: 'enter', s: status });
+      var ans = false;
+      for (var i = 1; i <= n; i++) {
+        if ((status & (1 << i)) && !f(status ^ (1 << i), rest - i)) { ans = true; break; }
+      }
+      memo[status] = ans;
+      log.push({ t: 'set', s: status, v: ans ? 1 : 0 });
+      return ans;
+    }
+    f((1 << (n + 1)) - 1, m);
+    return { log: log, memo: memo };
+  }
+  function s1Build() {
+    var r = buildLog(S1.n, S1.m);
+    S1.log = r.log; S1.memo = r.memo;
+    S1.cells = [];
+    for (var i = 0; i < (1 << S1.n); i++) S1.cells.push((i << 1) | 1);
+    S1.step = 0;
+    s1Render();
+  }
+  function s1State() {
+    var st = {};
+    for (var i = 0; i < S1.cells.length; i++) st[S1.cells[i]] = 0;
+    for (var k = 0; k <= S1.step && k < S1.log.length; k++) {
+      var e = S1.log[k];
+      if (e.t === 'enter') st[e.s] = 1;
+      else if (e.t === 'set') st[e.s] = e.v === 1 ? 2 : 3;
+      else if (e.t === 'short') st[e.s] = 4;
+    }
+    return st;
+  }
+  function s1Render() {
+    var cells = S1.cells, cols = 4, cw = 96, ch = 54, gx = 8, x0 = 136;
+    var rows = Math.ceil(cells.length / cols);
+    var g = '';
+    var st = s1State();
+    for (var idx = 0; idx < cells.length; idx++) {
+      var s = cells[idx], r = Math.floor(idx / cols), c = idx % cols;
+      var x = x0 + c * (cw + gx), y = 30 + r * (ch + gx);
+      var bits = '';
+      for (var j = S1.n; j >= 1; j--) bits += String((s >> j) & 1);
+      var fill = '#fff', stroke = C.border, lab = '·', col = C.dim;
+      if (st[s] === 1) { fill = C.orangeBg; stroke = C.orange; lab = '正在算'; col = C.orange; }
+      else if (st[s] === 2) { fill = C.blueBg; stroke = C.blue; lab = 'win'; col = C.blue; }
+      else if (st[s] === 3) { fill = C.bg; stroke = C.border; lab = 'lose'; col = C.dim; }
+      else if (st[s] === 4) { fill = '#fff4e8'; stroke = '#f6c9a4'; lab = '出局'; col = '#a9581f'; }
+      g += box(x, y, cw, ch, fill, stroke, 6);
+      g += txt(x + cw / 2, y + 21, bits, { size: 14, weight: 700, fill: col });
+      g += txt(x + cw / 2, y + 41, lab, { size: 11, fill: col });
+    }
+    var host = document.getElementById('v1board');
+    var H = 30 + rows * (ch + gx) + 8;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img">' + g + '</svg>';
+    var e = S1.log[Math.min(S1.step, S1.log.length - 1)];
+    var done = Object.keys(S1.memo).length;
+    var note = '第 ' + (S1.step + 1) + ' / ' + S1.log.length + ' 步。';
+    if (!e) note += '没有可走的状态。';
+    else if (e.t === 'enter') note += '进入 status ' + e.s + '（二进制 ' + sbits(e.s) + '），表里没有，开始展开。';
+    else if (e.t === 'hit') note += 'status ' + e.s + ' 表里已经有答案 ' + (e.v ? 'win' : 'lose') + '，直接拿走，子树不用再算。';
+    else if (e.t === 'set') note += 'status ' + e.s + ' 算完了，答案是 ' + (e.v ? 'win' : 'lose') + '，写进表。';
+    else note += 'status ' + e.s + ' 的 rest 已经不大于 0，直接返回 lose，不进表。';
+    note += ' 表里已结算 ' + done + ' 个状态。';
+    document.getElementById('v1note').textContent = note;
+    var full = (1 << (S1.n + 1)) - 1;
+    document.getElementById('v1ans').textContent = (S1.step >= S1.log.length - 1)
+      ? ('先手' + (S1.memo[full] ? '能赢' : '赢不了') + '（n = ' + S1.n + '，m = ' + S1.m + '）') : '';
+    document.getElementById('v1prev').disabled = S1.step === 0;
+    document.getElementById('v1next').disabled = S1.step >= S1.log.length - 1;
+  }
+  function sbits(s) {
+    var b = '';
+    for (var j = S1.n; j >= 1; j--) b += String((s >> j) & 1);
+    return b;
+  }
+
+  // ---------- 演示二：一局实况 ----------
+  var S2 = { n: 3, m: 7, step: 0, moves: [], winner: -1, draw: false };
+  function playBest(n, m) {
+    var memo = {};
+    function f(status, rest) {
+      if (rest <= 0) return false;
+      if (memo[status] !== undefined) return memo[status];
+      var ans = false;
+      for (var i = 1; i <= n; i++) if ((status & (1 << i)) && !f(status ^ (1 << i), rest - i)) { ans = true; break; }
+      return memo[status] = ans;
+    }
+    var st = (1 << (n + 1)) - 1, rest = m, moves = [], turn = 0, winner = -1, draw = false;
+    while (true) {
+      var avail = [];
+      for (var i = 1; i <= n; i++) if (st & (1 << i)) avail.push(i);
+      if (!avail.length) { draw = true; break; }
+      var pick = -1;
+      for (var k = 0; k < avail.length; k++) {
+        var v = avail[k];
+        if (rest - v <= 0) { pick = v; break; }
+        if (!f(st ^ (1 << v), rest - v)) { pick = v; break; }
+      }
+      if (pick < 0) pick = avail[avail.length - 1];
+      moves.push({ p: turn, i: pick, sum: m - rest + pick });
+      st ^= (1 << pick); rest -= pick;
+      if (rest <= 0) { winner = turn; break; }
+      turn ^= 1;
+    }
+    return { moves: moves, winner: winner, draw: draw };
+  }
+  function s2Build() {
+    var r = playBest(S2.n, S2.m);
+    S2.moves = r.moves; S2.winner = r.winner; S2.draw = r.draw;
+    S2.step = 0;
+    s2Render();
+  }
+  function s2Render() {
+    var g = '', m = S2.m, bx = 60, bw = 560, y = 34, h = 26;
+    var full = S2.moves.length ? S2.moves[S2.moves.length - 1].sum : 0;
+    g += box(bx, y, bw, h, C.bg, C.border, 4);
+    for (var k = 0; k < S2.moves.length; k++) {
+      if (k > S2.step) break;
+      var mv = S2.moves[k];
+      var w = bw * mv.sum / m;
+      g += '<rect x="' + bx + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" fill="' +
+        (mv.p === 0 ? C.blueBg : C.orangeBg) + '" stroke="none"/>';
+    }
+    g += box(bx, y, bw, h, 'none', C.border, 4);
+    g += line(bx + bw, y - 6, bx + bw, y + h + 6, C.text, false, 1.6);
+    g += txt(bx + bw, y - 12, 'm = ' + m, { size: 12, weight: 700, fill: C.text, anchor: 'end' });
+    g += txt(bx, y + h + 18, '0', { size: 11, fill: C.dim, anchor: 'start' });
+    for (var k2 = 0; k2 < S2.moves.length; k2++) {
+      var mv2 = S2.moves[k2];
+      var til = k2 <= S2.step;
+      var cx = bx + bw * mv2.sum / m;
+      g += txt(cx, y + h + 18, String(til ? mv2.sum : ''), { size: 11, fill: til ? C.text : C.dim });
+    }
+    for (var r = 0; r < S2.moves.length; r++) {
+      var mv3 = S2.moves[r], ry = 104 + r * 42;
+      if (r > S2.step) break;
+      var isA = mv3.p === 0;
+      g += box(60, ry, 560, 34, isA ? C.blueBg : C.orangeBg, isA ? C.blue : C.orange, 6);
+      g += txt(80, ry + 22, isA ? '先手 A' : '后手 B', { size: 13, anchor: 'start', weight: 700, fill: isA ? C.blue : C.orange });
+      g += txt(230, ry + 22, '挑走 ' + mv3.i, { size: 13, anchor: 'start', fill: C.text });
+      g += txt(390, ry + 22, '累加和推到 ' + mv3.sum, { size: 13, anchor: 'start', fill: C.text });
+      if (mv3.sum >= m) g += txt(600, ry + 22, '过线', { size: 13, anchor: 'end', weight: 700, fill: isA ? C.blue : C.orange });
+    }
+    var host = document.getElementById('v2board');
+    var H = 104 + Math.max(1, S2.moves.length) * 42 + 6;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img">' + g + '</svg>';
+    var cur = S2.moves[Math.min(S2.step, S2.moves.length - 1)];
+    var note = '第 ' + (S2.step + 1) + ' / ' + S2.moves.length + ' 手：';
+    note += cur.p === 0 ? '先手' : '后手';
+    note += '挑走 ' + cur.i + '，累加和到 ' + cur.sum + '。';
+    if (cur.sum >= S2.m) note += ' 这一手已经过线，出局。';
+    document.getElementById('v2note').textContent = note;
+    document.getElementById('v2ans').textContent = (S2.step >= S2.moves.length - 1)
+      ? (S2.draw ? '掏空了也没人过线' : ((S2.winner === 0 ? '先手' : '后手') + '赢了，' + S2.moves.length + ' 手分出胜负'))
+      : '';
+    document.getElementById('v2prev').disabled = S2.step === 0;
+    document.getElementById('v2next').disabled = S2.step >= S2.moves.length - 1;
+  }
+
+  (function () {
+    var nSel = document.getElementById('v1n');
+    [3, 4].forEach(function (n) { var o = document.createElement('option'); o.value = String(n); o.textContent = String(n); nSel.appendChild(o); });
+    nSel.value = '3';
+    var mSel = document.getElementById('v1m');
+    function fillM(n, keep) {
+      mSel.innerHTML = '';
+      var tot = n * (n + 1) / 2;
+      for (var m = 1; m <= tot; m++) { var o = document.createElement('option'); o.value = String(m); o.textContent = String(m); mSel.appendChild(o); }
+      var want = keep && +keep <= tot ? +keep : Math.max(1, Math.round(tot * 0.7));
+      mSel.value = String(want);
+    }
+    fillM(3, 7);
+    nSel.addEventListener('change', function () { S1.n = +nSel.value; fillM(S1.n, null); S1.m = +mSel.value; s1Build(); });
+    mSel.addEventListener('change', function () { S1.m = +mSel.value; s1Build(); });
+    document.getElementById('v1prev').addEventListener('click', function () { if (S1.step > 0) { S1.step--; s1Render(); } });
+    document.getElementById('v1next').addEventListener('click', function () { if (S1.step < S1.log.length - 1) { S1.step++; s1Render(); } });
+    document.getElementById('v1reset').addEventListener('click', function () { S1.step = 0; s1Render(); });
+    S1.n = 3; S1.m = 7; s1Build();
+
+    var n2 = document.getElementById('v2n');
+    [3, 4, 5].forEach(function (n) { var o = document.createElement('option'); o.value = String(n); o.textContent = String(n); n2.appendChild(o); });
+    n2.value = '3';
+    var m2 = document.getElementById('v2m');
+    function fillM2(n, keep) {
+      m2.innerHTML = '';
+      var tot = n * (n + 1) / 2;
+      for (var m = 1; m <= tot; m++) { var o = document.createElement('option'); o.value = String(m); o.textContent = String(m); m2.appendChild(o); }
+      var want = keep && +keep <= tot ? +keep : Math.max(1, Math.round(tot * 0.6));
+      m2.value = String(want);
+    }
+    fillM2(3, 7);
+    n2.addEventListener('change', function () { S2.n = +n2.value; fillM2(S2.n, null); S2.m = +m2.value; s2Build(); });
+    m2.addEventListener('change', function () { S2.m = +m2.value; s2Build(); });
+    document.getElementById('v2prev').addEventListener('click', function () { if (S2.step > 0) { S2.step--; s2Render(); } });
+    document.getElementById('v2next').addEventListener('click', function () { if (S2.step < S2.moves.length - 1) { S2.step++; s2Render(); } });
+    document.getElementById('v2reset').addEventListener('click', function () { S2.step = 0; s2Render(); });
+    S2.n = 3; S2.m = 7; s2Build();
+  })();
+})();
+</script>
+</body>
+</html>

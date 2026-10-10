@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>状压 dp：售货员的难题（TSP）</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.legend-inline { font-size: 13px; color: var(--text-dim); margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>状压 dp：售货员的难题（TSP）</h1>
+      <p class="intro">n 个村子，从 1 号村出发，每个村恰好去一次，最后回到 1 号村，求最短路程。这条路要枚举的话是 (n−1)! 种走法。n = 20 时这个数有一亿亿量级，但状态压缩之后只要 2<sup>n</sup> × n 个状态。</p>
+
+      <h2>零、只记「走了几个村」是不够的</h2>
+      <p>最直接的动态规划想法是让状态记「已经走了几个村」。立刻会撞墙：走了两个村的路，可能是 <code>1 → 3 → 2</code>，也可能是 <code>1 → 5 → 4</code>。这两个状态记的都是「2 个」，但接下来能去哪些村、还要多少路，完全不一样。</p>
+      <p>所以状态里必须记住「走过哪些村」，光记一个数量不够。这正是状压的地方：把村庄集合压进一个整数的二进制位。</p>
+
+      <figure class="fig" id="figWhy"></figure>
+
+      <h2>一、状态是（集合，当前村）</h2>
+      <p>状态记两个量：<code>s</code> 是已经走过的村庄集合，第 i 位为 1 表示第 i 个村走过；<code>i</code> 是现在停在哪个村。因为「已经走过哪些」和「此刻在哪」共同决定接下来怎么走。</p>
+      <p><code>f(s, i)</code> 的含义是：走过 <code>s</code> 这些村、现在停在 <code>i</code>，把剩下的村走完再回到 0 号村（商店）的最短路程。两件事定下整个递归：</p>
+      <ol>
+        <li><code>s</code> 全都置位时，剩下的事就是从 <code>i</code> 回商店，返回 <code>g[i][0]</code>；</li>
+        <li>否则枚举每一个没走过的 <code>j</code>，取 <code>g[i][j] + f(s | (1 &lt;&lt; j), j)</code> 的最小值。</li>
+      </ol>
+      <p>入口是 <code>f(1, 0)</code>：出发那一刻，0 号村已经在集合里了。</p>
+
+      <figure class="fig" id="figState"></figure>
+
+      <pre class="code"><span class="cm">// dp[s][i] : -1 表示没算过</span>
+    <span class="cm">// s 的第 i 位是 1，表示第 i 个村已经走过；出发时只有 0 号村，即 s = 1</span>
+    <span class="kw">int</span> <span class="fn">f</span>(<span class="kw">int</span> s, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (s == (1 &lt;&lt; n) - 1) <span class="kw">return</span> g[i][0];   <span class="cm">// 全走完了，从 i 回 0 号村</span>
+        <span class="kw">if</span> (dp[s][i] != -1) <span class="kw">return</span> dp[s][i];
+        <span class="kw">int</span> ans = INT_MAX;
+        <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; n; j++) {
+            <span class="kw">if</span> ((s &amp; (1 &lt;&lt; j)) == 0)             <span class="cm">// 没走过的村才能作为下一站</span>
+                ans = min(ans, g[i][j] + f(s | (1 &lt;&lt; j), j));
+        }
+        <span class="kw">return</span> dp[s][i] = ans;
+    }</pre>
+
+      <p>入口写成 <code>f(0, 0)</code> 是个很隐蔽的错。0 号村不在集合里，就会被当成普通村庄再走一遍，「从别的村回 0 号村再出发」这种路线也算进来了。实测在 20000 组随机 n ≤ 8 的有向图上，这个版本只有 5.50% 出错，大部分图上答案碰巧一样，随手造几组数据根本看不出来。</p>
+      <p>终点那句也有个方向问题。返回的是 <code>g[i][0]</code>，也就是从当前村回商店。写成 <code>g[0][i]</code> 就是「从商店到当前村」，方向反了。这题明确是有向图，A 到 B 和 B 到 A 大多不同，实测在随机有向图上 99.86% 出错。</p>
+
+      <figure class="fig" id="figBack"></figure>
+
+      <h2>二、剥掉起始村，省掉一半状态</h2>
+      <p>看表的大小：<code>2<sup>n</sup> × n</code> 个状态跑不掉。n = 20 时是 2<sup>20</sup> × 20 项，用 <code>int</code> 存就是 80 MB。而且表里有一大半格子永远走不到。出发时 0 号村必然在集合里，所以只有含 0 号村的集合才有意义，那已经是 <code>2<sup>n−1</sup></code> 个；再要求当前村 <code>i</code> 也在集合里，可达的状态只剩 2<sup>19</sup> × 10.5 ≈ 550 万，实测 n = 20 走满了 498 万，占 80 MB 那张表的不到四分之一。</p>
+      <p>既然 0 号村一定走过、也一定是最后一站，干脆把它从 <code>s</code> 里拿掉。这样 <code>s</code> 只记录另外 <code>n − 1</code> 个村，状态数从 <code>2<sup>n</sup> × n</code> 掉到 <code>2<sup>n−1</sup> × (n−1)</code>，正好一半。</p>
+
+      <figure class="fig" id="figMem"></figure>
+
+      <pre class="code"><span class="cm">// n 是不含起始村的村庄数；st[i] : 起始村 -&gt; i，bk[i] : i -&gt; 起始村</span>
+    <span class="cm">// 起始村一定走过、也一定是最后一站，那就别把它放进 status，</span>
+    <span class="cm">// 状态数从 2^n * n 直接砍到 2^(n-1) * (n-1)</span>
+    <span class="kw">int</span> <span class="fn">f</span>(<span class="kw">int</span> s, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (s == (1 &lt;&lt; n) - 1) <span class="kw">return</span> bk[i];
+        <span class="kw">if</span> (dp[s][i] != -1) <span class="kw">return</span> dp[s][i];
+        <span class="kw">int</span> ans = INT_MAX;
+        <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; n; j++) {
+            <span class="kw">if</span> ((s &amp; (1 &lt;&lt; j)) == 0)
+                ans = min(ans, g[i][j] + f(s | (1 &lt;&lt; j), j));
+        }
+        <span class="kw">return</span> dp[s][i] = ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">solve</span>() {
+        <span class="kw">int</span> ans = INT_MAX;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) ans = min(ans, st[i] + f(1 &lt;&lt; i, i));
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <p>代价是要把商店单拎出来存成两张小表：<code>st[i]</code> 是商店到 <code>i</code>，<code>bk[i]</code> 是 <code>i</code> 回商店；中间那些距离换成去掉商店之后的子矩阵。入口改成对所有 <code>i</code> 取 <code>st[i] + f(1 &lt;&lt; i, i)</code> 的最小值。改完两版答案完全一致（6000 组随机小图逐组核对过）。</p>
+
+      <h2>三、实测</h2>
+      <p>把 n 从 15 调到 20，一次完整记忆化搜索的耗时和访问状态数是这样的：</p>
+
+      <figure class="fig" id="figTime"></figure>
+
+      <p>n = 20 用 380.72 ms，访问了 4980718 个状态，而同样的输入枚举全排列要 19! ≈ 1.22 × 10<sup>17</sup> 次，比记忆化搜索的上界 2<sup>n</sup> × n<sup>2</sup> ≈ 4.19 × 10<sup>8</sup> 还大 2.9 亿倍。</p>
+
+      <h2>四、两个演示</h2>
+      <p>第一个演示按集合从大到小的顺序填表，每一格是一个 <code>(s, i)</code> 状态。</p>
+
+      <div class="viz" id="viz1">
+        <p class="viz-title">演示一：按集合从大到小填状态表</p>
+        <div id="v1board"></div>
+        <p class="legend-inline">每格上面是集合 s 的二进制，中间是当前村 i，下面是算出来的最短路程。</p>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>村庄数 <select id="v1n"></select></label>
+          <label>数据 <select id="v1d"></select></label>
+          <button type="button" id="v1prev">上一步</button>
+          <button type="button" id="v1next">下一步</button>
+          <button type="button" id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <p>第二个演示把最优路线画出来。村庄摆在圆周上，从商店出发，按最优顺序一段一段连起来。</p>
+
+      <div class="viz" id="viz2">
+        <p class="viz-title">演示二：最优路线</p>
+        <div id="v2board"></div>
+        <p class="viz-note" id="v2note"></p>
+        <p class="viz-answer" id="v2ans"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="v2d"></select></label>
+          <button type="button" id="v2prev">上一步</button>
+          <button type="button" id="v2next">下一步</button>
+          <button type="button" id="v2reset">重置</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>空间</th></tr>
+        <tr><td>状压 dp（含起始村）</td><td>O(2<sup>n</sup> · n<sup>2</sup>)</td><td>O(2<sup>n</sup> · n)</td></tr>
+        <tr><td>状压 dp（剥掉起始村）</td><td>O(2<sup>n−1</sup> · n<sup>2</sup>)</td><td>O(2<sup>n−1</sup> · n)</td></tr>
+        <tr><td>枚举全排列</td><td>O(n!)</td><td>O(n)</td></tr>
+      </table>
+      <p>状态数是 2<sup>n</sup> 个集合乘 n 个当前村，每个状态还要枚举 n 个下一站，所以时间 O(2<sup>n</sup> · n<sup>2</sup>)，空间 O(2<sup>n</sup> · n)。n = 20 时是 2<sup>20</sup> × 400 ≈ 4.19 × 10<sup>8</sup> 次枚举、80 MB 表。剥掉起始村之后两边的指数各降一位，正好是一半。</p>
+      <p>递归栈深度不超过 n，可以忽略。</p>
+
+      <h2>总结</h2>
+      <p>状态里必须同时有「走过哪些村」和「现在在哪个村」。少了前者，不同的路径会被压成同一个状态；少了后者，就没法算下一段路。</p>
+      <p>入口的集合要把出发村置上位，终点的返回值要是「从当前村回出发村」。这两处都属于「样例能过、换组数据就错」的类型，实测的出错率分别是 5.50% 和 99.86%，一个躲得很深，一个错得很明显，但都得记住。</p>
+      <p>题面说 A 到 B 和 B 到 A 大多不同，这句话决定了不能把距离矩阵当成对称的来处理。顺手在对称图上验一遍，会把方向写反这种错完全藏起来。</p>
+      <p>表里有大量走不到的格子：含 0 号村的集合、且当前村在集合里，这两个条件去掉一大半。当内存真的吃紧时，把固定的那几个维度从状态里剔出去，就是最直接的省法。</p>
+      <p>状压到这里就告一段落了。status 表示「哪些样本可用」「还剩什么没干」「走过哪些地方」，三种语义共用一套写法：设计 status，写尝试的递归，加记忆化，再看能不能压掉一维。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>售货员的难题</td><td><a href="https://www.luogu.com.cn/problem/P1171" target="_blank">luogu.com.cn/problem/P1171</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解080【必备】状压dp-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') + '>' +
+      esc(s) + '</text>';
+  }
+  function box(x, y, w, h, fill, stroke, r) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (r === undefined ? 6 : r) +
+      '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.2"/>';
+  }
+  function line(x1, y1, x2, y2, col, dash, w) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + col +
+      '" stroke-width="' + (w || 1.6) + '"' + (dash ? ' stroke-dasharray="5 3"' : '') + '/>';
+  }
+  function circ(x, y, r, fill, stroke, w) {
+    return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke +
+      '" stroke-width="' + (w || 1.4) + '"/>';
+  }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+
+  // ---------- 图 1：为什么不能只记走了几个 ----------
+  (function () {
+    var g = '';
+    g += txt(340, 24, '同样是「已经走了 2 个村」，剩下的局面完全不同', { size: 13, weight: 700, fill: C.text });
+    function path(y, names, rest, note) {
+      for (var i = 0; i < 3; i++) {
+        var x = 96 + i * 110;
+        g += circ(x, y, 20, i === 2 ? C.orangeBg : C.blueBg, i === 2 ? C.orange : C.blue, 1.6);
+        g += txt(x, y + 5, names[i], { size: 13, weight: 700, fill: i === 2 ? C.orange : C.blue });
+        if (i < 2) g += line(x + 21, y, x + 89, y, C.gray);
+      }
+      g += txt(440, y + 5, rest, { size: 12, anchor: 'start', fill: C.text });
+      g += txt(440, y + 24, note, { size: 11, anchor: 'start', fill: C.dim });
+    }
+    path(70, ['0', '3', '2'], '还剩 {4, 5}，离 4 号村 7', '从 2 号走，路线完全不同');
+    path(150, ['0', '5', '4'], '还剩 {2, 3}，离 2 号村 19', '');
+    g += box(24, 192, 632, 34, C.orangeBg, C.orange, 6);
+    g += txt(340, 214, '两行只记「走了 2 个」的话是同一个状态，答案却不一样', { size: 13, weight: 700, fill: C.orange });
+    wrap('figWhy', 244, g, '状态里必须带上「走过哪些村」，不能只记数量。');
+  })();
+
+  // ---------- 图 2：表里哪些格子走得到 ----------
+  (function () {
+    var g = '', n = 5, x0 = 66, y0 = 58, cw = 30, ch = 26, rows = 8;
+    g += txt(340, 26, '状态表：2^n 个集合 × n 个当前村', { size: 13, weight: 700, fill: C.text });
+    for (var r = 0; r < rows; r++) {
+      var s = 2 * r + 1;
+      var has0 = true;
+      g += txt(x0 - 12, y0 + r * ch + 18, String(s), { size: 11, fill: C.dim, anchor: 'end' });
+      for (var i = 0; i < n; i++) {
+        var reach = has0 && ((s >> i) & 1) === 1;
+        g += box(x0 + i * cw, y0 + r * ch, cw - 3, ch - 3, reach ? C.blueBg : '#fff', reach ? C.blue : C.border, 3);
+      }
+    }
+    g += txt(x0 + n * cw / 2, y0 - 12, '当前村 i', { size: 11, fill: C.dim });
+    g += txt(x0 - 40, y0 + rows * ch + 22, '集合 s', { size: 11, fill: C.dim });
+    g += box(300, y0 + rows * ch + 10, 356, 30, C.bg, C.border, 6);
+    g += txt(478, y0 + rows * ch + 30, '蓝格才走得到：集合含 0 号村、且 i 在集合里', { size: 11, fill: C.text });
+    g += txt(340, y0 + rows * ch + 62, 'n = 20 时，全表 2^20 × 20 = 20971520 格，可达上限 550 万格，实测走了 498 万格', { size: 12, fill: C.dim });
+    wrap('figState', y0 + rows * ch + 80, g, '出发村里一定要有 0 号村，当前村一定在集合里。');
+  })();
+
+  // ---------- 图 3：内存对照 ----------
+  (function () {
+    var g = '', rows = [15, 17, 19, 20], x0 = 96, gw = 128, base = 210, maxH = 150;
+    function mb(n, drop) { return drop ? (Math.pow(2, n - 1) * (n - 1) * 4) / 1024 / 1024 : (Math.pow(2, n) * n * 4) / 1024 / 1024; }
+    var top = Math.log(mb(20, false));
+    g += line(80, base, 664, base, C.border, false, 1.4);
+    for (var k = 0; k < rows.length; k++) {
+      var n = rows[k], gx = x0 + k * gw;
+      var a = mb(n, false), b = mb(n, true);
+      var ha = Math.max(3, Math.log(a) / top * maxH), hb = Math.max(3, Math.log(b) / top * maxH);
+      g += box(gx, base - ha, 44, ha, C.orangeBg, C.orange, 4);
+      g += box(gx + 50, base - hb, 44, hb, C.blueBg, C.blue, 4);
+      g += txt(gx + 22, base - ha - 6, a >= 10 ? a.toFixed(0) + ' MB' : a.toFixed(1) + ' MB', { size: 10, fill: C.orange });
+      g += txt(gx + 72, base - hb - 6, b >= 10 ? b.toFixed(0) + ' MB' : b.toFixed(1) + ' MB', { size: 10, fill: C.blue });
+      g += txt(gx + 47, base + 18, 'n = ' + n, { size: 12, fill: C.text });
+    }
+    g += txt(40, 246, '橙：含起始村 2^n × n   蓝：剥掉起始村 2^(n-1) × (n-1)，正好一半', { size: 11, fill: C.text, anchor: 'start' });
+    g += txt(40, 268, '横轴按 n 分组，柱高按对数缩放；n = 20 时 80 MB 对 38 MB', { size: 11, fill: C.dim, anchor: 'start' });
+    wrap('figMem', 286, g, '把固定的那一维从状态里剔出去，表就小一半。');
+  })();
+
+  // ---------- 图 4：实测耗时 ----------
+  (function () {
+    var g = '', data = [[15, 4.68, 114675], [17, 26.00, 524273], [19, 154.60, 2359279], [20, 380.72, 4980718]];
+    var x0 = 76, gw = 146, base = 208, maxH = 168;
+    var top = Math.log(380.72);
+    g += line(60, base, 664, base, C.border, false, 1.4);
+    for (var i = 0; i < data.length; i++) {
+      var d = data[i], x = x0 + i * gw;
+      var h = Math.max(4, Math.log(d[1]) / top * maxH);
+      g += box(x, base - h, 96, h, C.blueBg, C.blue, 4);
+      g += txt(x + 48, base - h - 20, d[1].toFixed(2) + ' ms', { size: 12, weight: 700, fill: C.blue });
+      g += txt(x + 48, base + 18, 'n = ' + d[0], { size: 12, fill: C.text });
+      g += txt(x + 48, base + 36, '访问 ' + d[2] + ' 个状态', { size: 10, fill: C.dim });
+    }
+    g += txt(340, 268, '横轴等差、柱高按对数缩放；n 每加 1，规模大约乘 2 倍', { size: 11, fill: C.dim });
+    wrap('figTime', 286, g, '一次完整记忆化搜索的耗时与访问状态数。');
+  })();
+
+  // ---------- 图 5：回程方向 ----------
+  (function () {
+    var g = '';
+    g += box(24, 30, 300, 100, C.orangeBg, C.orange, 8);
+    g += txt(174, 58, 'g[i][0] 写成 g[0][i]', { size: 13, weight: 700, fill: C.orange });
+    g += txt(174, 84, '随机有向图', { size: 12, fill: C.text });
+    g += txt(174, 110, '99.86% 出错', { size: 15, weight: 700, fill: C.orange });
+    g += box(356, 30, 300, 100, C.blueBg, C.blue, 8);
+    g += txt(506, 58, '同一个错法', { size: 13, weight: 700, fill: C.blue });
+    g += txt(506, 84, '对称图（A→B 等于 B→A）', { size: 12, fill: C.text });
+    g += txt(506, 110, '0.00% 出错', { size: 15, weight: 700, fill: C.blue });
+    g += txt(340, 156, '题面写着「A 村到 B 村，与 B 到 A 大多不同」，所以这两处不能互相替代', { size: 12, fill: C.text });
+    g += txt(340, 178, '在对称的数据上验证，这个 bug 一次都不会露头', { size: 12, fill: C.dim });
+    wrap('figBack', 196, g, '同一个方向写反，在有向图和对偶图上抓取率差了一个数量级还多。');
+  })();
+
+  // ================= 小图数据（固定，便于复现） =================
+  var GRAPHS = [
+    { name: '4 个村子', n: 4, g: [[0, 3, 7, 9], [4, 0, 5, 8], [6, 2, 0, 6], [5, 9, 3, 0]] },
+    { name: '5 个村子', n: 5, g: [[0, 4, 9, 6, 8], [7, 0, 3, 8, 5], [6, 2, 0, 7, 4], [9, 5, 3, 0, 6], [4, 8, 2, 7, 0]] }
+  ];
+
+  // 逐格结算
+  function tableValues(g) {
+    var n = g.length, memo = {};
+    function f(s, i) {
+      if (s === (1 << n) - 1) return g[i][0];
+      var key = s * n + i;
+      if (memo[key] !== undefined) return memo[key];
+      var ans = Infinity;
+      for (var j = 0; j < n; j++) if ((s & (1 << j)) === 0) ans = Math.min(ans, g[i][j] + f(s | (1 << j), j));
+      return memo[key] = ans;
+    }
+    return { f: f, memo: memo };
+  }
+
+  // ================= 演示一：逐格填表 =================
+  var S1 = { gi: 0, n: 4, step: 0, states: [], T: null };
+  function s1Build() {
+    var G = GRAPHS[S1.gi];
+    S1.g = G.g; S1.n = G.n;
+    S1.T = tableValues(G.g);
+    var st = (1 << G.n) - 1;
+    S1.states = [];
+    for (var s = st; s >= 1; s--) {
+      if ((s & 1) === 0) continue;
+      for (var i = 0; i < G.n; i++) if (s & (1 << i)) S1.states.push([s, i]);
+    }
+    S1.step = 0;
+    s1Render();
+  }
+  function bits(s, n) { var b = ''; for (var j = n - 1; j >= 0; j--) b += String((s >> j) & 1); return b; }
+  function s1Render() {
+    var g = '', n = S1.n, cols = (n === 4 ? 5 : 8), gx = 8, x0 = 20;
+    var cw = Math.floor((640 - (cols - 1) * gx) / cols), chh = 58;
+    var rows = Math.ceil(S1.states.length / cols);
+    for (var idx = 0; idx < S1.states.length; idx++) {
+      var stt = S1.states[idx], r = Math.floor(idx / cols), c = idx % cols;
+      var x = x0 + c * (cw + gx), y = 26 + r * (chh + gx);
+      var isCur = idx === S1.step, done = idx <= S1.step;
+      var fill = isCur ? C.orangeBg : (done ? C.blueBg : '#fff');
+      var stroke = isCur ? C.orange : (done ? '#93b4ee' : C.border);
+      var col = isCur ? C.orange : (done ? C.blue : C.dim);
+      g += box(x, y, cw, chh, fill, stroke, 5);
+      g += txt(x + cw / 2, y + 19, bits(stt[0], n), { size: 13, weight: 700, fill: col });
+      g += txt(x + cw / 2, y + 36, 'i = ' + stt[1], { size: 11, fill: col });
+      if (done) g += txt(x + cw / 2, y + 52, 'dp = ' + S1.T.f(stt[0], stt[1]), { size: 11, weight: 700, fill: col });
+    }
+    var host = document.getElementById('v1board');
+    var H = 26 + rows * (chh + gx) + 8;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img">' + g + '</svg>';
+    var cur = S1.states[S1.step], s = cur[0], i = cur[1], gg = S1.g;
+    var parts = [];
+    if (s === (1 << n) - 1) {
+      parts.push('集合满了，直接返回 g[' + i + '][0] = ' + gg[i][0]);
+    } else {
+      for (var j = 0; j < n; j++) if ((s & (1 << j)) === 0) parts.push('j=' + j + '：' + gg[i][j] + ' + ' + S1.T.f(s | (1 << j), j) + ' = ' + (gg[i][j] + S1.T.f(s | (1 << j), j)));
+    }
+    document.getElementById('v1note').textContent =
+      '第 ' + (S1.step + 1) + ' / ' + S1.states.length + ' 格：s = ' + bits(s, n) + '，停在 ' + i + ' 号村。' + parts.join('；') + '。取最小得 ' + S1.T.f(s, i) + '。';
+    document.getElementById('v1ans').textContent = (S1.step >= S1.states.length - 1)
+      ? ('最短路程 = ' + S1.T.f(1, 0)) : '';
+    document.getElementById('v1prev').disabled = S1.step === 0;
+    document.getElementById('v1next').disabled = S1.step >= S1.states.length - 1;
+  }
+
+  // ================= 演示二：最优路线 =================
+  var S2 = { gi: 0, step: 0, tour: [], total: 0 };
+  function bestTour(g) {
+    var n = g.length, memo = {};
+    function f(s, i) {
+      if (s === (1 << n) - 1) return g[i][0];
+      var key = s * n + i;
+      if (memo[key] !== undefined) return memo[key];
+      var ans = Infinity;
+      for (var j = 0; j < n; j++) if ((s & (1 << j)) === 0) ans = Math.min(ans, g[i][j] + f(s | (1 << j), j));
+      return memo[key] = ans;
+    }
+    var s = 1, i = 0, tour = [0], total = 0;
+    while (s !== (1 << n) - 1) {
+      var bestJ = -1, bestV = Infinity;
+      for (var j = 0; j < n; j++) {
+        if ((s & (1 << j)) === 0) {
+          var v = g[i][j] + f(s | (1 << j), j);
+          if (v < bestV) { bestV = v; bestJ = j; }
+        }
+      }
+      total += g[i][bestJ];
+      s |= (1 << bestJ); i = bestJ; tour.push(bestJ);
+    }
+    total += g[i][0]; tour.push(0);
+    return { tour: tour, total: total };
+  }
+  function s2Build() {
+    var G = GRAPHS[S2.gi];
+    S2.g = G.g; S2.n = G.n;
+    var r = bestTour(G.g);
+    S2.tour = r.tour; S2.total = r.total;
+    S2.step = 0;
+    s2Render();
+  }
+  function s2Render() {
+    var g = '', n = S2.n, gg = S2.g, cx = 200, cy = 168, R = 108;
+    var pos = [];
+    for (var i = 0; i < n; i++) {
+      var ang = -Math.PI / 2 + i * 2 * Math.PI / n;
+      pos.push([cx + R * Math.cos(ang), cy + R * Math.sin(ang)]);
+    }
+    for (var a = 0; a < n; a++) for (var b = 0; b < n; b++) {
+      if (a === b) continue;
+      var onPath = false;
+      for (var k = 0; k + 1 <= S2.step && k + 1 < S2.tour.length; k++) {
+        if (S2.tour[k] === a && S2.tour[k + 1] === b) onPath = true;
+      }
+      g += line(pos[a][0], pos[a][1], pos[b][0], pos[b][1], onPath ? C.orange : '#eef1f4', !onPath, onPath ? 2.6 : 1);
+    }
+    for (var v = 0; v < n; v++) {
+      var isStore = v === 0;
+      g += circ(pos[v][0], pos[v][1], 22, isStore ? C.orangeBg : C.blueBg, isStore ? C.orange : C.blue, isStore ? 2 : 1.5);
+      g += txt(pos[v][0], pos[v][1] + 5, isStore ? '店' : String(v), { size: 13, weight: 700, fill: isStore ? C.orange : C.blue });
+    }
+    var lst = [];
+    for (var t = 0; t <= S2.step && t < S2.tour.length; t++) lst.push(S2.tour[t] === 0 ? '店' : String(S2.tour[t]));
+    g += txt(500, 60, '路线', { size: 12, fill: C.dim });
+    g += txt(500, 86, lst.join(' → '), { size: 13, weight: 700, fill: C.orange });
+    var acc = 0;
+    for (var t2 = 0; t2 < S2.step && t2 + 1 < S2.tour.length; t2++) acc += gg[S2.tour[t2]][S2.tour[t2 + 1]];
+    g += txt(500, 118, '已走 ' + acc, { size: 12, fill: C.text });
+    var host = document.getElementById('v2board');
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' 340" xmlns="http://www.w3.org/2000/svg" role="img">' + g + '</svg>';
+    var cur = S2.tour[Math.min(S2.step, S2.tour.length - 1)];
+    var nxt = S2.tour[Math.min(S2.step + 1, S2.tour.length - 1)];
+    document.getElementById('v2note').textContent = (S2.step >= S2.tour.length - 1)
+      ? ('回到商店，整圈走完。')
+      : ('第 ' + (S2.step + 1) + ' / ' + (S2.tour.length - 1) + ' 段：' + (cur === 0 ? '店' : cur) + ' → ' + (nxt === 0 ? '店' : nxt) + '，这一段 ' + gg[cur][nxt] + '。');
+    document.getElementById('v2ans').textContent = (S2.step >= S2.tour.length - 1)
+      ? ('最短路程 = ' + S2.total + '（暴力枚举全排列核对过）') : '';
+    document.getElementById('v2prev').disabled = S2.step === 0;
+    document.getElementById('v2next').disabled = S2.step >= S2.tour.length - 1;
+  }
+
+  (function () {
+    var sel = document.getElementById('v1n');
+    [4, 5].forEach(function (n) { var o = document.createElement('option'); o.value = String(n); o.textContent = String(n); sel.appendChild(o); });
+    var sd = document.getElementById('v1d');
+    for (var i = 0; i < GRAPHS.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = GRAPHS[i].name; sd.appendChild(o);
+    }
+    function syncGs() { S1.gi = +sel.value - 4; if (S1.gi < 0 || S1.gi >= GRAPHS.length) S1.gi = 0; sd.value = String(S1.gi); }
+    sel.value = '4'; sd.value = '0';
+    sel.addEventListener('change', function () { syncGs(); s1Build(); });
+    sd.addEventListener('change', function () { S1.gi = +sd.value; sel.value = String(GRAPHS[S1.gi].n); s1Build(); });
+    document.getElementById('v1prev').addEventListener('click', function () { if (S1.step > 0) { S1.step--; s1Render(); } });
+    document.getElementById('v1next').addEventListener('click', function () { if (S1.step < S1.states.length - 1) { S1.step++; s1Render(); } });
+    document.getElementById('v1reset').addEventListener('click', function () { S1.step = 0; s1Render(); });
+    S1.gi = 0; s1Build();
+
+    var sd2 = document.getElementById('v2d');
+    for (var j = 0; j < GRAPHS.length; j++) {
+      var o2 = document.createElement('option'); o2.value = String(j); o2.textContent = GRAPHS[j].name; sd2.appendChild(o2);
+    }
+    sd2.addEventListener('change', function () { S2.gi = +sd2.value; s2Build(); });
+    document.getElementById('v2prev').addEventListener('click', function () { if (S2.step > 0) { S2.step--; s2Render(); } });
+    document.getElementById('v2next').addEventListener('click', function () { if (S2.step < S2.tour.length - 1) { S2.step++; s2Render(); } });
+    document.getElementById('v2reset').addEventListener('click', function () { S2.step = 0; s2Render(); });
+    S2.gi = 0; s2Build();
+  })();
+})();
+</script>
+</body>
+</html>

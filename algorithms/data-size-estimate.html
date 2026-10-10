@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>根据数据量猜解法</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz-ctl{margin:8px 0 4px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;}
+.viz-ctl label{font-size:13px;color:var(--text-dim);white-space:nowrap;}
+.viz-ctl select{font-size:13px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:#fff;}
+.viz-note{margin:10px 0 4px;font-size:13px;color:var(--text);}
+.viz-answer{margin-top:6px;font-size:15px;font-weight:600;}
+.ds-legend{display:flex;justify-content:space-between;font-size:12px;color:var(--text-dim);margin-top:2px;}
+.sk-card{display:inline-block;min-width:96px;margin:3px 6px 3px 0;padding:6px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg-soft);font-size:13px;line-height:1.5;}
+.sk-card .sk-id{font-weight:700;color:var(--accent);}
+.sk-card.cur{border-color:var(--partial);background:var(--partial-bg);}
+.sk-card .sk-x{font-variant-numeric:tabular-nums;}
+.viz-log{margin-top:10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;font-variant-numeric:tabular-nums;}
+.viz-log .row{margin:2px 0;color:var(--text-dim);}
+.viz-log .row b{color:var(--text);font-weight:600;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>根据数据量猜解法</h1>
+      <p class="intro">题目给的数据范围不是摆设。把复杂度代进去算出操作次数，和 1 秒能做的次数一比，方法行不行当场就有答案。范围写成 n ≤ 10，通常就是在明着说：把顺序全试一遍。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>一场笔试通常给 1 到 2 秒。这段时间里 C++ 能做多少次「基本操作」？经验值是 1e7 到 1e8，其他语言同量级。这个数字换台机器也差不了多少。</p>
+      <p>先看本机实测的三个微内核（g++ -O2）：依赖链上的乘加 1e9 次花 781ms，数组读加比较加分支 1e9 次花 340ms，取模 1e9 次花 893ms。三个都在 1e9 上下，比 1e8 高出一个量级。</p>
+      <p>别急着把预算改成 1e9。再看几个真正在跑的算法：<code>std::sort</code> 每秒完成 4.6e8 次比较，枚举全排列每秒 5e8 个，后面那道技能题的搜索每秒走 3.2e8 个节点。真实算法每走一步都要访存、比大小、写回数组，常数是微内核的几倍到几十倍。再加上比赛评测机比本机慢两三倍是常事，1e8 这个口径正好把这些都兜住。</p>
+      <figure class="fig" id="figThroughput"></figure>
+
+      <h2 id="budget">一、折成操作次数</h2>
+      <p>复杂度说的是「操作次数关于入参规模的函数」。把规模代进去，得到的就是操作次数。用之前要确认两件事。</p>
+      <p>1）题目得给入参范围。正式笔试和比赛一定会给，面试里要主动跟面试官确认，别自己猜。</p>
+      <p>2）对自己的复杂度得估准。「大概是 O(n log n)」不够用，要能写出确切的式子，包括内层循环跑几次、常数有多大。</p>
+      <p>举个例子。入参 n ≤ 1e5，你想用 O(n²) 的做法，操作次数就是 1e5 × 1e5 = 1e10，预算 1e8，超了 100 倍。这一眼就能看出来要换方法，不用等写完再收一个超时。</p>
+
+      <h2 id="table">二、规模与可用算法</h2>
+      <p>把常见复杂度的可行范围列成表，看到范围就能反推方法。</p>
+      <table class="complexity">
+        <tr><th>n 的范围</th><th>log n</th><th>n</th><th>n log n</th><th>n√n</th><th>n²</th><th>2^n</th><th>n!</th></tr>
+        <tr><td>n ≤ 11</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+        <tr><td>n ≤ 25</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td></tr>
+        <tr><td>n ≤ 5000</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td></tr>
+        <tr><td>n ≤ 1e5</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td></tr>
+        <tr><td>n ≤ 1e6</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td></tr>
+        <tr><td>n ≤ 1e7</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td></tr>
+        <tr><td>n ≥ 1e8</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td></tr>
+      </table>
+      <p>读法很直接：n 那一栏划到哪一行，那一行往右还打勾的复杂度就是候选。n ≤ 25 出现在题目里，别想别的，先算 2^n；n ≤ 5000 就去看 n²；n ≤ 1e5 去看 n√n；n ≤ 1e6 去看 n log n。</p>
+      <p>表里每一行其实都对应一笔差不多的操作预算。11! = 3.99e7，2^25 = 3.36e7，5000² = 2.5e7，1e5 × 316 = 3.16e7，1e6 × 19.9 = 1.99e7。全都落在 2.5e7 到 4e7 之间，也就是 1e8 的三分之一左右。剩下那三分之二就是留给常数和慢机器的。</p>
+      <figure class="fig" id="figBudget"></figure>
+
+      <h2 id="limits">三、表只能当参考</h2>
+      <p>第一个原因是多入参。表按单个 n 画，实战里常常是 O(n·m)、O(n+m)、O(n·k)。一棵 1e3 个点的树做 n² 的树型 dp 是 1e6 次，很轻松；两个长度 1e5 的数组求交集，排个序再扫一遍是 3.4e6 次，也很轻松。真正要算的是所有入参乘起来之后落在哪个量级。</p>
+      <p>第二个原因是每一步的价钱不一样。同样叫「一次操作」，排序里的一次比较每秒能走 4.6e8 次，取模每秒 1.12e9 次，链表跳一步和数组读一格又差好几倍。同样是 1e7 次操作，落在这三种内核上耗时能差十倍。</p>
+      <p>所以这张表正确的用法是给个方向：先按复杂度估出操作次数，再乘一个自己掂量过的常数，最后跟 1e8 比。反过来，用它去卡「n 到底能不能到 1e5、1e6」意义不大，差一档的量级本来就在误差里。</p>
+
+      <h2 id="q1">四、n ≤ 10 在说什么</h2>
+      <p>来看一道题。你有 n 个技能打一只怪，每个技能最多放一次。i 号技能的伤害是 x[i]；当怪兽剩余血量不高于 y[i] 时，这个技能打双倍伤害。已知怪兽有 m 点血，问最少用几个技能能把它打死（血量降到 0 以下）。范围：n ≤ 10，m、x[i]、y[i] ≤ 1e6。</p>
+      <p>n ≤ 10 就是全部的信号。10! 是 3,628,800，把释放顺序全部试一遍在 1e8 以内，正好卡在预算里面。看到这个范围还去推贪心或者 dp，属于跟出题人对赌。</p>
+      <p>这里有个细节：搜索的对象是顺序，不能换成集合。技能打多少伤害，取决于「放它的时候怪兽还剩多少血」，所以同一组技能换个顺序，结局会不一样。</p>
+      <figure class="fig" id="figOrder"></figure>
+      <p>m = 112，三个技能分别是 s1 伤害 24 / 双倍阈值 101、s2 伤害 11 / 阈值 18、s3 伤害 73 / 阈值 24。s3 先手：112 − 73 = 39，39 ≤ 101，s1 打双倍 48，怪兽倒地，两个技能解决。换 s1 先手：112 − 24 = 88，88 > 18，s2 只打 11 剩 77，77 > 24，s3 打 73 剩 4。三个技能用完，怪兽还在。</p>
+      <p>搜索的写法是 f(i, r)：已经放了 i 个技能、怪兽还剩 r 点血，返回最少还要几个技能。枚举第 i 个位置放谁——把 j 号技能换到 i 位置，递归，回来再换回去试下一个，就是最普通的 swap 回溯。剪枝极简单：r ≤ 0 直接返回 i。</p>
+      <figure class="fig" id="figTree"></figure>
+      <p>节点数的实测和表里对得上。最坏情况（所有技能加起来也打不死）n = 10 要走 9,864,101 个节点，正好约等于 e·10!；n = 11 涨到 108,505,112 个节点、331ms；n = 12 是 1.3e9 个节点、3.96s。n ≤ 11 能过、n = 12 会超，这就是表里 n! 那一行说的意思。</p>
+      <table class="complexity">
+        <tr><th>数据</th><th>节点数</th><th>耗时</th><th>答案</th></tr>
+        <tr><td>n=10，所有技能都打不死</td><td>9,864,101</td><td>31ms</td><td>-1</td></tr>
+        <tr><td>n=10，200 组随机平均</td><td>3,776,538</td><td>13.4ms</td><td>—</td></tr>
+        <tr><td>n=10，有一个技能能秒杀</td><td>1,972,820</td><td>6.1ms</td><td>1</td></tr>
+        <tr><td>n=10，伤害 2e5、阈值 1e6</td><td>821</td><td>0.003ms</td><td>3</td></tr>
+      </table>
+      <p>随机数据平均只要 3.78e6 个节点，是理论最坏的三分之一多一点。剪枝不是装饰，它把「打死就返回」这条路整片砍掉了。</p>
+
+      <div class="viz" id="dsViz"></div>
+      <div class="viz" id="skillViz"></div>
+
+      <h2 id="code">五、代码</h2>
+      <p>搜索函数和输入部分分开写。技能数量最多 10 个，伤害和阈值各开 11 长度的数组就够。</p>
+    <pre class="code"><span class="kw">int</span> n;                    <span class="cm">// 技能数</span>
+    <span class="kw">int</span> dmg[11];              <span class="cm">// dmg[i]：i 号技能的伤害</span>
+    <span class="kw">int</span> thr[11];              <span class="cm">// thr[i]：怪兽血量降到 thr[i] 及以下时，这个技能打双倍</span>
+
+    <span class="cm">// 已经放了 i 个技能、怪兽还剩 r 点血，返回把怪打死最少还要几个技能</span>
+    <span class="kw">int</span> <span class="fn">f</span>(<span class="kw">int</span> i, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (r &lt;= 0) <span class="kw">return</span> i;              <span class="cm">// 打死了，一共用了 i 个</span>
+        <span class="kw">if</span> (i == n) <span class="kw">return</span> INT_MAX;        <span class="cm">// 技能放完还没死，这条路无效</span>
+        <span class="kw">int</span> ans = INT_MAX;
+        <span class="kw">for</span> (<span class="kw">int</span> j = i; j &lt; n; j++) {      <span class="cm">// 把 j 号技能换到第 i 个位置试一遍</span>
+            swap(dmg[i], dmg[j]);
+            swap(thr[i], thr[j]);
+            <span class="kw">int</span> hit = (r &gt; thr[i]) ? dmg[i] : dmg[i] * 2;
+            ans = min(ans, f(i + 1, r - hit));
+            swap(dmg[i], dmg[j]);          <span class="cm">// 换回来，再试下一个</span>
+            swap(thr[i], thr[j]);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+    <pre class="code"><span class="kw">int</span> <span class="fn">main</span>() {
+        <span class="kw">int</span> t;
+        scanf("%d", &amp;t);
+        <span class="kw">while</span> (t--) {
+            <span class="kw">int</span> m;
+            scanf("%d %d", &amp;n, &amp;m);
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) scanf("%d %d", &amp;dmg[i], &amp;thr[i]);
+            <span class="kw">int</span> ans = f(0, m);
+            printf("%d\n", ans == INT_MAX ? -1 : ans);
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2 id="complexity">复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间（最坏）</th><th>额外空间</th><th>说明</th></tr>
+        <tr><td>枚举全部释放顺序</td><td>O(n!·n)</td><td>O(n)</td><td>搜索树节点数 Σ n!/(n−k)! ≈ e·n!，每层循环开销合计 O(n!)</td></tr>
+        <tr><td>加上 r ≤ 0 剪枝</td><td>O(n!·n)</td><td>O(n)</td><td>最坏复杂度不变，随机数据能砍掉约七成节点</td></tr>
+      </table>
+      <p>空间只有递归栈，深度最多 n + 1 层，即 O(n)。</p>
+
+      <h2 id="sum">六、总结</h2>
+      <p>要点列一下。</p>
+      <p>1 秒的预算取 1e8 次基本操作。真实算法实测在 3e8 到 5e8 之间，微内核能到 1e9 以上，1e8 是留着给慢评测机的保守值。</p>
+      <p>那张规模表每一行都对应 2.5e7 到 4e7 次操作，约等于预算的三分之一。本机实测能多跑 12 到 64 倍，余量就是这个来源。</p>
+      <p>表按单个 n 画，多入参的题要自己乘起来算；每一步的价钱也不一样，先算次数再乘常数。</p>
+      <p>范围提示很直白：n ≤ 10 想阶乘枚举，n ≤ 25 想 2^n，n ≤ 5000 想 n²，n ≤ 1e5 想 n√n，n ≤ 1e6 想 n log n。</p>
+      <p>下一讲顺着这个思路，看一道范围大到 1e18、却依然能枚举的题——能枚举的原因不在范围本身，在于满足条件的数非常稀疏。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>牛客</td><td>最优的技能释放顺序</td><td><a href="https://www.nowcoder.com/practice/d88ef50f8dab4850be8cd4b95514bbbd" target="_blank">nowcoder.com/practice/d88ef50f8dab4850be8cd4b95514bbbd</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解043【必备】根据数据量猜解法的技巧-天字第一号重要技巧</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+'use strict';
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2328')+'" text-anchor="'+(o.an||'middle')+'" font-weight="'+(o.fw||400)+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function rect(x,y,w,h,o){ o=o||{}; return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(o.rx===undefined?4:o.rx)+'" fill="'+(o.fill||'#fff')+'" stroke="'+(o.stroke||'#2563eb')+'" stroke-width="'+(o.sw||1.2)+'"/>'; }
+function ln(x1,y1,x2,y2,o){ o=o||{}; return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+(o.stroke||'#9aa0a6')+'" stroke-width="'+(o.sw||1)+'"'+(o.dash?' stroke-dasharray="4 4"':'')+'/>'; }
+function svgWrap(w,h,b){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+b+'</svg>'; }
+
+// ===== 图 1：每秒能做多少次（对数刻度）=====
+(function(){
+  var W = 660, H = 250, body = '';
+  var rows = [
+    ['微内核 · 依赖链乘加', 1.28e9, '1.28e9'],
+    ['微内核 · 数组读+分支', 2.94e9, '2.94e9'],
+    ['微内核 · 取模', 1.12e9, '1.12e9'],
+    ['std::sort 的比较', 4.6e8, '4.6e8'],
+    ['枚举全排列', 5.0e8, '5.0e8'],
+    ['技能搜索的节点', 3.2e8, '3.2e8']
+  ];
+  var x0 = 190, x1 = 610, lo = 8, hi = Math.log10(4e9), px = (x1 - x0) / (hi - lo);
+  function X(v){ return x0 + (Math.log10(v) - lo) * px; }
+  var y0 = 46, dy = 28, bh = 16;
+  for (var i = 0; i < rows.length; i++){
+    var y = y0 + i * dy, w = X(rows[i][1]) - x0;
+    var micro = i < 3;
+    body += rect(x0, y, w, bh, {fill: micro ? '#dbeafe' : '#ffedd5', stroke: micro ? '#2563eb' : '#ea580c'});
+    body += txt(12, y + 13, rows[i][0], {an:'start', fs:11, fill:'#1f2328'});
+    body += txt(X(rows[i][1]) + 6, y + 13, rows[i][2], {an:'start', fs:11, fill:'#6b7280'});
+  }
+  body += ln(x0, 30, x0, 212, {stroke:'#ea580c', dash:true});
+  body += txt(x0, 22, '1e8 经验值', {fs:11, fill:'#ea580c'});
+  body += ln(x0, 212, x1, 212, {stroke:'#c9ced4'});
+  [[1e8,'1e8'],[3e8,'3e8'],[1e9,'1e9'],[3e9,'3e9']].forEach(function(t){
+    body += txt(X(t[0]), 226, t[1], {fs:10, fill:'#6b7280'});
+    body += ln(X(t[0]), 212, X(t[0]), 216, {stroke:'#c9ced4'});
+  });
+  document.getElementById('figThroughput').innerHTML = svgWrap(W, H, body)
+    + '<figcaption>每秒能做多少次（对数刻度）。蓝色是微内核，橙色是真实算法。真实算法慢 3 到 10 倍，经验值 1e8 落在两者之下。</figcaption>';
+})();
+
+// ===== 图 2：表里每行暗含的操作量 =====
+(function(){
+  var W = 660, H = 215, body = '';
+  var rows = [
+    ['n log n', 1.99e7, '2.0e7'],
+    ['n√n', 3.16e7, '3.2e7'],
+    ['n²', 2.5e7, '2.5e7'],
+    ['2^n', 3.36e7, '3.4e7'],
+    ['n!', 3.99e7, '4.0e7']
+  ];
+  var x0 = 120, x1 = 590, scale = (x1 - x0) / 1e8;
+  var y0 = 44, dy = 30, bh = 18;
+  for (var i = 0; i < rows.length; i++){
+    var y = y0 + i * dy, w = rows[i][1] * scale;
+    body += rect(x0, y, w, bh, {fill:'#dbeafe', stroke:'#2563eb'});
+    body += txt(12, y + 13, rows[i][0], {an:'start', fs:12, fill:'#1f2328'});
+    body += txt(x0 + w + 6, y + 13, rows[i][2], {an:'start', fs:11, fill:'#6b7280'});
+  }
+  body += ln(x1, 30, x1, 190, {stroke:'#ea580c', dash:true});
+  body += txt(x1, 22, '1e8 预算', {fs:11, fill:'#ea580c'});
+  body += ln(x0, 190, x1, 190, {stroke:'#c9ced4'});
+  [[0,'0'],[2.5e7,'2.5e7'],[5e7,'5e7'],[7.5e7,'7.5e7'],[1e8,'1e8']].forEach(function(t){
+    body += txt(x0 + t[0] * scale, 204, t[1], {fs:10, fill:'#6b7280'});
+  });
+  document.getElementById('figBudget').innerHTML = svgWrap(W, H, body)
+    + '<figcaption>表里每一行对应的操作量。五行都在 2.5e7 到 4e7 之间，约等于 1e8 的三分之一。</figcaption>';
+})();
+
+// ===== 图 3：同一个血量，两条顺序 =====
+(function(){
+  var W = 660, H = 232, body = '';
+  function row(xs, boxes, arrows, y, color, fillc){
+    for (var i = 0; i < boxes.length; i++){
+      body += rect(xs[i], y, 78, 34, {fill:fillc, stroke:color});
+      body += txt(xs[i] + 39, y + 22, boxes[i], {fs:13, fill:'#1f2328', fw:600});
+    }
+    for (var j = 0; j < arrows.length; j++){
+      var sx = xs[j] + 78, ex = xs[j + 1];
+      body += ln(sx + 2, y + 17, ex - 4, y + 17, {stroke:color, sw:1.4});
+      body += txt((sx + ex) / 2, y - 6, arrows[j], {fs:10, fill:color});
+    }
+  }
+  body += txt(12, 24, '顺序一：s3 先手', {an:'start', fs:12, fw:600, fill:'#2563eb'});
+  row([153, 291, 429], ['112', '39', '0'], ['s3 打 73', 's1 双倍 48'], 36, '#2563eb', '#dbeafe');
+  body += txt(12, 100, 's3 先手：112 − 73 = 39，39 ≤ 101 触发双倍，s1 打 48。两个技能打完。', {an:'start', fs:11, fill:'#2563eb'});
+  body += txt(12, 130, '顺序二：s1 先手', {an:'start', fs:12, fw:600, fill:'#ea580c'});
+  row([84, 222, 360, 498], ['112', '88', '77', '4'], ['s1 打 24', 's2 打 11', 's3 打 73'], 142, '#ea580c', '#ffedd5');
+  body += txt(12, 206, 's1 先手：88 > 18 只打 11，77 > 24 只打 73，剩 4。三个技能全用完，怪兽还在。', {an:'start', fs:11, fill:'#ea580c'});
+  document.getElementById('figOrder').innerHTML = svgWrap(W, H, body)
+    + '<figcaption>同一只 112 血的怪，同一组技能，两条顺序两条结局。血量阈值卡在「放技能的那一刻」，所以顺序不能省。</figcaption>';
+})();
+
+// ===== 图 4：n=3 的搜索树 =====
+(function(){
+  var W = 660, H = 292, body = '';
+  var L = [
+    [{x:330, t:'开始'}],
+    [{x:130, t:'s1'}, {x:330, t:'s2'}, {x:530, t:'s3'}],
+    [{x:80, t:'s1s2'}, {x:180, t:'s1s3'}, {x:280, t:'s2s1'}, {x:380, t:'s2s3'}, {x:480, t:'s3s1'}, {x:580, t:'s3s2'}],
+    [{x:80, t:'s1s2s3'}, {x:180, t:'s1s3s2'}, {x:280, t:'s2s1s3'}, {x:380, t:'s2s3s1'}, {x:480, t:'s3s1s2'}, {x:580, t:'s3s2s1'}]
+  ];
+  var CH = [[[0,1,2]], [[0,1],[2,3],[4,5]], [[0],[1],[2],[3],[4],[5]]];
+  var YS = [30, 100, 170, 240], pw = 58, ph = 22;
+  for (var lv = 0; lv < CH.length; lv++){
+    for (var i = 0; i < CH[lv].length; i++){
+      var par = L[lv][i];
+      for (var k = 0; k < CH[lv][i].length; k++){
+        var ch = L[lv + 1][CH[lv][i][k]];
+        body += ln(par.x, YS[lv] + ph, ch.x, YS[lv + 1], {stroke:'#c9ced4'});
+      }
+    }
+  }
+  for (var lv2 = 0; lv2 < L.length; lv2++){
+    for (var j = 0; j < L[lv2].length; j++){
+      var leaf = lv2 === 3;
+      var node = L[lv2][j];
+      body += rect(node.x - pw / 2, YS[lv2], pw, ph, {fill: leaf ? '#ffedd5' : '#dbeafe', stroke: leaf ? '#ea580c' : '#2563eb'});
+      body += txt(node.x, YS[lv2] + 15, node.t, {fs:11, fill: leaf ? '#c2410c' : '#1d4ed8'});
+    }
+  }
+  body += txt(12, 20, 'n=3：节点数 1 + 3 + 6 + 6 = 16', {an:'start', fs:11, fill:'#6b7280'});
+  body += txt(330, 282, '橙色是完整的释放顺序，共 6 条', {fs:11, fill:'#ea580c'});
+  document.getElementById('figTree').innerHTML = svgWrap(W, H, body)
+    + '<figcaption>每一层决定「第 i 个位置放谁」。层数越多分叉越多，n=10 时整棵树的节点数是 9,864,101。</figcaption>';
+})();
+
+// ===== 演示①：数据量判定器 =====
+(function(){
+  var CX = [
+    {k:'n log n', lim:'n ≤ 1e6', f:function(n){ return Math.log10(n) + Math.log10(Math.log2(n)); }},
+    {k:'n√n', lim:'n ≤ 1e5', f:function(n){ return Math.log10(n) + 0.5 * Math.log10(n); }},
+    {k:'n²', lim:'n ≤ 5000', f:function(n){ return 2 * Math.log10(n); }},
+    {k:'2^n', lim:'n ≤ 25', f:function(n){ return n * Math.log10(2); }},
+    {k:'n!', lim:'n ≤ 11', f:function(n){
+      var s = 0; for (var i = 2; i <= n; i++){ s += Math.log10(i); if (s > 16) return s; } return s; }}
+  ];
+  var NS = [10,11,12,15,20,25,30,50,100,200,500,1000,2000,5000,10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000];
+  var PRESETS = [[0,20],[1,17],[2,13],[3,5],[4,1],[2,17],[4,2],[3,6],[0,24]];
+  var box = document.getElementById('dsViz');
+  box.innerHTML =
+    '<p class="viz-title">演示：数据量判定器（选复杂度和规模，看操作量离 1e8 有多远）</p>' +
+    '<div class="viz-ctl"><label>复杂度</label><select id="dsCx"></select>' +
+    '<label>规模 n</label><select id="dsN"></select></div>' +
+    '<div id="dsBarWrap" style="margin-top:12px"></div>' +
+    '<p class="viz-note" id="dsNote"></p>' +
+    '<p class="viz-answer" id="dsAns"></p>' +
+    '<div class="viz-controls"><button type="button" id="dsNext">下一步</button><button type="button" id="dsReset">重置</button></div>';
+  var scx = box.querySelector('#dsCx'), sn = box.querySelector('#dsN');
+  CX.forEach(function(c, i){ scx.add(new Option(c.k, i)); });
+  NS.forEach(function(v, i){ sn.add(new Option(String(v), i)); });
+  var step = 0;
+  function draw(){
+    var ci = +scx.value, ni = +sn.value;
+    var e = CX[ci].f(NS[ni]);
+    var ops = Math.pow(10, e);
+    var color, verdict;
+    if (ops <= 4e7){ color = '#16a34a'; verdict = '判定：稳过（在表里那笔 4e7 的预算之内）'; }
+    else if (ops <= 1e8){ color = '#ea580c'; verdict = '判定：悬（过了 4e7，还在 1e8 以内，得自己掂量常数）'; }
+    else { color = '#dc2626'; verdict = '判定：超预算（超了 10 的 ' + (e - 8).toFixed(1) + ' 次方倍）'; }
+    var pct = Math.min(100, e / 12 * 100);
+    box.querySelector('#dsBarWrap').innerHTML =
+      '<div style="position:relative;height:22px;background:#eef4ff;border:1px solid var(--border);border-radius:6px">' +
+      '<div style="height:100%;border-radius:6px;background:' + color + ';opacity:.75;width:' + pct.toFixed(1) + '%"></div>' +
+      '<div style="position:absolute;left:66.7%;top:-4px;bottom:-4px;width:2px;background:#ea580c"></div>' +
+      '</div><div class="ds-legend"><span>1</span><span>1e4</span><span>1e8 预算</span><span>1e12</span></div>';
+    var ops = e > 15 ? '操作量在 10 的 15 次方以上' : '操作量约 10 的 ' + e.toFixed(1) + ' 次方';
+    box.querySelector('#dsNote').innerHTML =
+      CX[ci].k + ' 取 n = ' + NS[ni] + '，' + ops + '。表上这个复杂度的上限是 ' + CX[ci].lim + '。';
+    var ans = box.querySelector('#dsAns');
+    ans.innerHTML = verdict;
+    ans.style.color = color;
+  }
+  scx.addEventListener('change', draw);
+  sn.addEventListener('change', draw);
+  box.querySelector('#dsNext').addEventListener('click', function(){
+    step = (step + 1) % PRESETS.length;
+    scx.value = PRESETS[step][0]; sn.value = PRESETS[step][1]; draw();
+  });
+  box.querySelector('#dsReset').addEventListener('click', function(){
+    step = 0; scx.value = PRESETS[0][0]; sn.value = PRESETS[0][1]; draw();
+  });
+  scx.value = PRESETS[0][0]; sn.value = PRESETS[0][1];
+  draw();
+})();
+
+// ===== 演示②：技能释放的搜索逐帧 =====
+(function(){
+  var PRE = [
+    {m:112, sk:[[24,101],[11,18],[73,24]]},
+    {m:60, sk:[[20,30],[25,10],[15,40]]},
+    {m:45, sk:[[30,20],[12,50],[9,60]]},
+    {m:86, sk:[[31,12],[18,44],[27,30]]}
+  ];
+  var rand = (function(){ var seed = 20261006; return function(){
+    seed = (seed + 0x6D2B79F5) | 0; var t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; })();
+  var box = document.getElementById('skillViz');
+  box.innerHTML =
+    '<p class="viz-title">演示：技能释放的搜索（每个节点对应一种「前 i 个位置放谁」的选择）</p>' +
+    '<div class="viz-ctl"><label>数据</label><select id="skSel"></select></div>' +
+    '<div id="skCards" style="margin:10px 0"></div>' +
+    '<div id="skProg" style="height:8px;background:#eef4ff;border:1px solid var(--border);border-radius:4px;overflow:hidden"><div id="skProgIn" style="height:100%;background:#2563eb;width:0"></div></div>' +
+    '<div class="viz-log" id="skLog"></div>' +
+    '<p class="viz-answer" id="skAns"></p>' +
+    '<div class="viz-controls"><button type="button" id="skNext">下一步</button><button type="button" id="skReset">重置</button></div>';
+  var sel = box.querySelector('#skSel');
+  function build(m, sk){
+    var n = sk.length, steps = [], seq = [], best = Infinity;
+    var arr = sk.map(function(s, i){ return {id:i + 1, x:s[0], y:s[1]}; });
+    function dfs(i, r, info){
+      steps.push({i:i, r:r, seq:seq.slice(), best:best, info:info,
+        tag: r <= 0 ? 'kill' : (i === n ? 'dead' : 'go')});
+      if (r <= 0){ if (i < best) best = i; return i; }
+      if (i === n) return Infinity;
+      var ans = Infinity;
+      for (var j = i; j < n; j++){
+        var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+        var cur = arr[i];
+        seq.push(cur.id);
+        var hit = (r > cur.y) ? cur.x : cur.x * 2;
+        var sub = dfs(i + 1, r - hit, {id:cur.id, x:cur.x, y:cur.y, hit:hit, dbl: r <= cur.y});
+        seq.pop();
+        if (sub < ans) ans = sub;
+        t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+      }
+      return ans;
+    }
+    var res = dfs(0, m, null);
+    steps.push({i:0, r:0, seq:[], best:best, tag:'done', ans: res === Infinity ? -1 : res, info:null});
+    return {m:m, sk:sk, n:n, steps:steps, ans: res === Infinity ? -1 : res};
+  }
+  var st = null, step = 0;
+  function load(){
+    var v = sel.value, m, sk;
+    if (v === 'r'){
+      m = 40 + Math.floor(rand() * 60);
+      sk = [];
+      for (var i = 0; i < 3; i++) sk.push([3 + Math.floor(rand() * 30), 5 + Math.floor(rand() * 50)]);
+    } else { m = PRE[+v].m; sk = PRE[+v].sk; }
+    st = build(m, sk); step = 0; draw();
+  }
+  function draw(){
+    var cards = '', lastId = 0;
+    if (step >= 1 && step <= st.steps.length - 1){
+      var cur = st.steps[step - 1];
+      if (cur.seq.length) lastId = cur.seq[cur.seq.length - 1];
+    }
+    for (var i = 0; i < st.n; i++){
+      var cls = 'sk-card' + (st.sk[i] && lastId === i + 1 ? ' cur' : '');
+      cards += '<span class="' + cls + '"><span class="sk-id">s' + (i + 1) + '</span> '
+        + '<span class="sk-x">伤害 ' + st.sk[i][0] + '／阈值 ' + st.sk[i][1] + '</span></span>';
+    }
+    box.querySelector('#skCards').innerHTML = cards + '<span style="font-size:13px;color:#6b7280;margin-left:4px">怪兽血量 m = ' + st.m + '</span>';
+    var total = st.steps.length;
+    box.querySelector('#skProgIn').style.width = (step / total * 100).toFixed(1) + '%';
+    var note = box.querySelector('#skLog');
+    if (step === 0){
+      note.innerHTML = '<div class="row">还没开始。点击「下一步」从搜索树的根往下走。</div>'
+        + '<div class="row">搜索树一共 <b>' + total + '</b> 个节点，全部试完就知道最少用几个技能。</div>';
+    } else {
+      var c = st.steps[step - 1];
+      var h = '<div class="row">第 <b>' + step + '</b> / ' + total + ' 个节点　'
+        + '已放顺序：<b>' + (c.seq.length ? c.seq.map(function(x){ return 's' + x; }).join(' → ') : '（空）') + '</b></div>';
+      if (c.tag === 'dead' || c.tag === 'kill') h += '<div class="row">剩余血量 <b>' + Math.max(c.r, 0) + '</b></div>';
+      else {
+        h += '<div class="row">剩余血量 <b>' + c.r + '</b>，接下来试第 ' + (c.i + 1) + ' 个位置放谁</div>';
+        if (c.info) h += '<div class="row">上一步放 s' + c.info.id + '：伤害 ' + c.info.x
+          + (c.info.dbl ? '，血量 ≤ 阈值 ' + c.info.y + ' → 打双倍 ' : '，血量 > 阈值 ' + c.info.y + ' → 只打 ') + c.info.hit + '</div>';
+      }
+      if (c.tag === 'kill') h += '<div class="row">血量 ≤ 0，这条路用了 <b>' + c.i + '</b> 个技能，更新最优解</div>';
+      if (c.tag === 'dead') h += '<div class="row">技能放完还剩 ' + c.r + ' 血，这条顺序无效</div>';
+      if (c.tag === 'done') h += '<div class="row">搜索结束</div>';
+      h += '<div class="row">目前为止最优：' + (c.best === Infinity ? '还没有解' : '<b>' + c.best + ' 个技能</b>') + '</div>';
+      note.innerHTML = h;
+    }
+    var ans = box.querySelector('#skAns');
+    if (step < total) ans.innerHTML = '最少技能数：走得还不够远，先把树走完。';
+    else if (st.ans === -1) ans.innerHTML = '最少技能数：怎么排都打不死，输出 -1';
+    else ans.innerHTML = '最少技能数：' + st.ans + ' 个';
+    ans.style.opacity = (step >= total) ? 1 : 0.45;
+  }
+  sel.addEventListener('change', load);
+  PRE.forEach(function(p, i){ sel.add(new Option('m=' + p.m + '，三个技能', i)); });
+  sel.add(new Option('随机数据', 'r'));
+  box.querySelector('#skNext').addEventListener('click', function(){ if (step < st.steps.length) step++; draw(); });
+  box.querySelector('#skReset').addEventListener('click', function(){ step = 0; draw(); });
+  load();
+})();
+
+})();
+</script>
+</body>
+</html>

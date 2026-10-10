@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>混合背包：01、完全、多重混在一道题里</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); min-height: 22px; }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); min-height: 22px; }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.kv { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; color: var(--text-dim); margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>混合背包：01、完全、多重混在一道题里</h1>
+      <p class="intro">真实题目很少只考一种背包。观赏樱花那道题里，同一棵树可以「只看一遍」「最多看 c 遍」「想看多少遍看多少遍」；找零那道题里，同一种面值可能只有一张、可能有一小叠、也可能多到用不完。把「每种的可用次数」这件事分成三条路，各走各的处理方式，一张表就能同时容下三种模型。</p>
+
+      <h2>零、两种混合的方式</h2>
+      <p>这里有两道题，混合的粒度不一样。</p>
+      <p>观赏樱花（洛谷 P1833）：每种树的次数 cnt 给 0 表示无限、给正数表示上限。做法是把无限当成一个足够大的次数，这样每种都变成多重背包，再统一二进制分组转成 01 背包。整题走一条流水线。</p>
+      <p>找零（POJ 1742）：每种货币有面值 val[i] 和数量 cnt[i]，问 1 到 m 里能凑出多少个数。做法是在同一趟循环里按情况分三支：只有一张走 01，张数够填满容量就走完全，其余走多重。三种模型互不干扰，只共用一个 dp 数组。</p>
+      <figure class="fig" id="figThree"></figure>
+      <p>把三种模型的转移方向摆在一起看，区别其实只有「内层 j 往哪边走」和「要不要分组」：01 背包倒序、完全背包正序、多重背包按余数分组后在窗口里取或。</p>
+
+      <h2>一、樱花：先把时刻换成分钟</h2>
+      <p>这道题的输入是「现在时间」和「上学时间」两个 <code>hh:mm</code> 的时刻，背包容量是两者之差，单位是分钟。换算本身很短，但有个细节值得说一句：当开始的分针比结束的分针大（6:50 到 7:00 这种），代码里会先把结束时刻借位一小时再减。借不借位结果其实一样，因为「借 1 小时给 60 分钟」恰好抵消了。</p>
+      <figure class="fig" id="figTime"></figure>
+            <pre class="code"><span class="cm">// 输入格式是 6:50 7:00 3，先把两个时刻各自换算成当天第几分钟</span>
+    <span class="cm">// 两个时刻之差就是背包容量（单位：分钟）</span>
+    <span class="kw">int</span> <span class="fn">readCapacity</span>() {
+        <span class="kw">string</span> a, b;
+        <span class="kw">int</span> n;
+        cin &gt;&gt; a &gt;&gt; b &gt;&gt; n;
+        <span class="kw">int</span> h1 = stoi(a.substr(0, a.find(':')));
+        <span class="kw">int</span> m1 = stoi(a.substr(a.find(':') + 1));
+        <span class="kw">int</span> h2 = stoi(b.substr(0, b.find(':')));
+        <span class="kw">int</span> m2 = stoi(b.substr(b.find(':') + 1));
+        <span class="kw">if</span> (m1 &gt; m2) {              <span class="cm">// 分针借位：7:00 看成 6:60</span>
+            h2--;
+            m2 += 60;
+        }
+        <span class="kw">return</span> (h2 - h1) * 60 + (m2 - m1);
+    }</pre>
+      <p>换算完，容量就是 10 分钟，剩下的完全是背包问题。</p>
+
+      <h2>二、「无限」换成一个够大的次数</h2>
+      <p>cnt = 0 的语义是「想看多少遍就看多少遍」。二进制分组处理不了无穷，得换成一个有限的数。选多大的数合适？看容量：本题容量不超过 1000 分钟，每棵树的耗费时间都 ≥ 1，所以任何一棵树看够 1001 次都装不进背包。既然装不下，把它排到 1001 次和排到无穷次的结果一样。</p>
+      <figure class="fig" id="figEnough"></figure>
+      <p>这个「够大」有明确的下界，由「一次的花费下界」和「容量上界」一起定出来：次数上限 ≥ ⌈容量 / 最小花费⌉ 就够了。本题最小花费是 1，容量是 1000，所以 1001。</p>
+            <pre class="code"><span class="cm">// cnt == 0 表示可以无限看：把数量换成一个「够大」的数，再走二进制分组</span>
+    <span class="cm">// 容量 t &lt;= 1000，任何一棵树看超过 1000 次都不可能装下，所以 1001 就够了</span>
+    <span class="kw">int</span> <span class="fn">cherry</span>(<span class="kw">int</span> n, <span class="kw">int</span> t, vector&lt;<span class="kw">int</span>&gt;&amp; cost, vector&lt;<span class="kw">int</span>&gt;&amp; val, vector&lt;<span class="kw">int</span>&gt;&amp; cntIn) {
+        <span class="kw">const</span> <span class="kw">int</span> ENOUGH = 1001;
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">nv</span>(1), nw(1);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">int</span> cnt = (cntIn[i] == 0 ? ENOUGH : cntIn[i]);
+            <span class="kw">for</span> (<span class="kw">int</span> k = 1; k &lt;= cnt; k &lt;&lt;= 1) {
+                nv.push_back(k * val[i]);
+                nw.push_back(k * cost[i]);
+                cnt -= k;
+            }
+            <span class="kw">if</span> (cnt &gt; 0) {
+                nv.push_back(cnt * val[i]);
+                nw.push_back(cnt * cost[i]);
+            }
+        }
+        <span class="kw">int</span> m = nv.size() - 1;
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(t + 1, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++)
+            <span class="kw">for</span> (<span class="kw">int</span> j = t; j &gt;= nw[i]; j--)
+                dp[j] = max(dp[j], dp[j - nw[i]] + nv[i]);
+        <span class="kw">return</span> dp[t];
+    }</pre>
+      <p>用题目样例验证一下：<code>6:50 7:00</code>、三棵树（耗费 2 价值 1 无限、耗费 3 价值 3 一件、耗费 4 价值 5 四件）。容量 10 分钟，最优是赏第一棵一次（2 分钟、1 点）加第三棵两次（8 分钟、10 点），合计 11 点，和样例输出一致。</p>
+
+      <h2>三、找零：三条分支的判据</h2>
+      <p>找零的 dp[j] 只记「能不能凑出 j」。每种货币进来时看两个数就能决定走哪一支：</p>
+      <p>1）cnt[i] == 1，只有一张，走 01 的倒序循环。倒序是为了让本轮刚写过的 dp 不被同一张纸币再用一次。</p>
+      <p>2）val[i] × cnt[i] &gt; m，所有张数加起来都超过容量上界 m。这意味着在 1..m 这个范围内，「数量不够」这个限制永远碰不到，等价于无限张，直接走完全背包的正序循环。</p>
+      <p>3）剩下的才是真的多重背包，需要同余分组处理。</p>
+      <p>第二条判据是这道题的关键。它把「数量够多」的情况甩给完全背包，省掉了分组，只剩那些张数不多的货币才需要走慢路径。实测两组数据看这条判据的分量：容量 m = 20 时，「把多重全当完全」只错 2.68%，因为大部分货币本来就满足 val×cnt &gt; m，走的就是完全分支；m 涨到 500 就变成错 67.36%，这时很多货币的张数不够填满容量，当完全做就会超量。反过来「把多重全当 01」（每种只用一张）错得更狠，m 越大越接近 100%，一张纸币根本凑不出几个数。</p>
+
+      <h2>四、多重那一路：窗口里数 true</h2>
+      <p>多重背包要不要按二进制分组，这里有个更省的做法。找零问的是「能不能凑出」，没有价值可谈，是一个布尔问题。要知道 dp[j] 能不能被当前货币凑出来，只需看窗口 <code>[j − c·v, j − v]</code> 里有没有一个是 true 的。有的话，从那个数再加一张就到 j 了。</p>
+      <p>于是维护一个计数 trueCnt，它记录窗口里 true 的个数。j 沿同余链从右往左走一格，窗口也左移一格：最右边出去的那个如果是 true 就减一，最左边新进来的那个如果是 true 就加一。整条链扫一遍，每个位置的判断都是 O(1)。</p>
+      <figure class="fig" id="figWindow"></figure>
+      <p>循环里两个下标要分清。第一个循环只数「链尾 c[i] + 1 个位置」里的 true，这是最初那个窗口；第二个循环里 <code>l = j − val[i]·(cnt[i] + 1)</code> 指向的是新滑出窗口的那一格，<code>l ≥ 0</code> 时才参与计数。两个循环的上界和下界都是 c[i] + 1 的量级，这也是为什么窗口大小是 c + 1 而不是 c：凑出 j 需要从某个已经凑出的数加一张，那个数最远只能是 j − c·v。</p>
+            <pre class="code"><span class="cm">// dp[j]：手上的钱能不能正好凑出 j</span>
+    <span class="cm">// 每种货币按「只有一张 / 有上限 / 够填满容量」分成三条路走</span>
+    <span class="kw">int</span> <span class="fn">coins</span>(<span class="kw">int</span> n, <span class="kw">int</span> m, vector&lt;<span class="kw">int</span>&gt;&amp; val, vector&lt;<span class="kw">int</span>&gt;&amp; cnt) {
+        vector&lt;<span class="kw">char</span>&gt; <span class="fn">dp</span>(m + 1, 0);
+        dp[0] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (cnt[i] == 1) {
+                <span class="kw">for</span> (<span class="kw">int</span> j = m; j &gt;= val[i]; j--)                  <span class="cm">// 01：倒序</span>
+                    <span class="kw">if</span> (dp[j - val[i]]) dp[j] = 1;
+            } <span class="kw">else</span> <span class="kw">if</span> (val[i] * cnt[i] &gt; m) {
+                <span class="kw">for</span> (<span class="kw">int</span> j = val[i]; j &lt;= m; j++)                  <span class="cm">// 张数够填满容量，当完全背包：正序</span>
+                    <span class="kw">if</span> (dp[j - val[i]]) dp[j] = 1;
+            } <span class="kw">else</span> {
+                <span class="kw">for</span> (<span class="kw">int</span> mod = 0; mod &lt; val[i]; mod++) {           <span class="cm">// 同余分组，窗口里数有多少个 true</span>
+                    <span class="kw">int</span> trueCnt = 0;
+                    <span class="kw">for</span> (<span class="kw">int</span> j = m - mod, k = 0; j &gt;= 0 &amp;&amp; k &lt;= cnt[i]; j -= val[i], k++)
+                        trueCnt += dp[j] ? 1 : 0;
+                    <span class="kw">for</span> (<span class="kw">int</span> j = m - mod, l = j - val[i] * (cnt[i] + 1); j &gt;= 1; j -= val[i], l -= val[i]) {
+                        <span class="kw">if</span> (dp[j]) trueCnt--;
+                        <span class="kw">else</span> <span class="kw">if</span> (trueCnt != 0) dp[j] = 1;
+                        <span class="kw">if</span> (l &gt;= 0) trueCnt += dp[l] ? 1 : 0;
+                    }
+                }
+            }
+        }
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) ans += dp[i] ? 1 : 0;
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2>五、两种做法的耗时</h2>
+      <figure class="fig" id="figPerf"></figure>
+      <p>同一个「多重」问题有三种写法：窗口计数、单开一个 used[] 数组记录「这一种货币已经用了几张」、以及每个位置都回头重扫最多 c 个格子。前两种都是 O(n·m)，重扫那个是 O(n·m·c)，在 c 大时直接退化。实测 n = 50、m = 100000、每种面值 11 到 60、每种 1000 张：窗口计数 8.00 ms，used 计数 3.20 ms，每格重扫 71.20 ms。窗口计数比 used 计数慢在常数上（多一趟分组循环），但省下一个数组；重扫慢了将近 9 倍，是三者里唯一会被卡掉的写法。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示一：樱花把「无限」拆成包</p>
+        <div id="v1svg"></div>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>数据
+            <select id="v1case">
+              <option value="0">样例：t=10，三棵树</option>
+              <option value="1">t=12，三棵树</option>
+              <option value="2">t=9，两棵树</option>
+            </select>
+          </label>
+          <button id="v1prev">上一步</button>
+          <button id="v1next">下一步</button>
+          <button id="v1last">到末尾</button>
+          <button id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <div class="viz">
+        <p class="viz-title">演示二：找零的三条分支与窗口计数</p>
+        <div id="v2svg"></div>
+        <p class="viz-note" id="v2note"></p>
+        <p class="viz-answer" id="v2ans"></p>
+        <div class="viz-controls">
+          <label>数据
+            <select id="v2case">
+              <option value="0">m=10，面值 1/2/4</option>
+              <option value="1">m=12，面值 3/5/8</option>
+              <option value="2">m=20，面值 6/7</option>
+            </select>
+          </label>
+          <button id="v2prev">上一步</button>
+          <button id="v2next">下一步</button>
+          <button id="v2last">到末尾</button>
+          <button id="v2reset">重置</button>
+        </div>
+      </div>
+
+      <h2>六、复杂度分析</h2>
+      <table class="complexity">
+        <thead><tr><th>题</th><th>做法</th><th>时间</th><th>额外空间</th></tr></thead>
+        <tbody>
+          <tr><td>樱花</td><td>完全转多重、再二进制分组</td><td>O(t · Σ log c[i])</td><td>O(t)</td></tr>
+          <tr><td>找零</td><td>三支混合 + 窗口计数</td><td>O(n · m)</td><td>O(m)</td></tr>
+          <tr><td>找零</td><td>每格重扫（对照）</td><td>O(n · m · c)</td><td>O(m)</td></tr>
+        </tbody>
+      </table>
+      <p>樱花的复杂度里 t ≤ 1000，log 项也小，随便怎么写都过。找零的 m 最大 100000、n 最大 100，窗口计数版刚好卡在 10<sup>7</sup> 这个量级上，缺了分支判据或窗口优化，那道题都过不了。</p>
+
+      <h2>七、总结</h2>
+      <p>混合背包的处理套路是「先按每种的可用次数分路，再各走各的」。</p>
+      <p>几个要点：</p>
+      <p>1）cnt = 0 或 cnt 很大，本质是「限制碰不到容量上限」，直接当完全背包（正序）。</p>
+      <p>2）cnt = 1 走 01（倒序）；cnt 不大不小才需要多重背包那一套。</p>
+      <p>3）判「能不能当完全」的依据是 <code>val · cnt</code> 与容量 m 的大小关系，不是 cnt 本身。</p>
+      <p>4）布尔型多重背包（只问能不能凑出）可以用窗口计数，O(1) 平移，比每格重扫快一个数量级。</p>
+      <p>5）数值问题里的「无限」总要先落成一个有限的数，取值由容量与最小花费共同决定。</p>
+      <p>6）算时刻差、坐标差这类输入，先统一单位再当容量用。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>观赏樱花</td><td><a href="https://www.luogu.com.cn/problem/P1833" target="_blank">P1833</a></td></tr>
+          <tr><td>POJ</td><td>Coins</td><td><a href="http://poj.org/problem?id=1742" target="_blank">POJ 1742</a></td></tr>
+          <tr><td>洛谷</td><td>宝物筛选</td><td><a href="https://www.luogu.com.cn/problem/P1776" target="_blank">P1776</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解075【必备】背包dp-多重背包、混合背包</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            green: '#2e7d32', greenBg: '#e8f5e9', gray: '#9aa0a6', bg: '#f6f7f9',
+            border: '#e6e8eb', text: '#1e293b', dim: '#6b7280' };
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      (o.mono ? ' font-family="ui-monospace, Menlo, monospace"' : '') + '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx == null ? 4 : o.rx) +
+      '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.border) + '"' + (o.sw ? ' stroke-width="' + o.sw + '"' : '') + '/>';
+  }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+  function cell(x, y, w, h, v, o) {
+    o = o || {};
+    var s = rect(x, y, w, h, { fill: o.fill || '#fff', stroke: o.stroke || C.border, sw: o.sw });
+    s += txt(x + w / 2, y + h / 2 + 4, String(v), { size: o.size || 12, mono: true, fill: o.tc || C.text, weight: o.weight });
+    return s;
+  }
+
+  // ---------- 图 1：三种模型的转移方向 ----------
+  function figThree() {
+    var s = txt(340, 18, '同一张 dp 表，三种模型只差「内层往哪边走、要不要分组」', { size: 12, weight: '600' });
+    var rows = [
+      { t: '01 背包（cnt = 1）', dir: 'j 从大到小', col: C.blue, note: '读 dp[j−w] 时它还是上一轮的值，每件只拿一次' },
+      { t: '完全背包（cnt 够大）', dir: 'j 从小到大', col: C.green, note: '读 dp[j−w] 时它已被本轮写过，同一件可以再拿' },
+      { t: '多重背包（真·上限）', dir: '按 j mod w 分组', col: C.orange, note: '同一组里窗口 [j−c·w, j] 取或 / 取最大' }
+    ];
+    var y = 44, i, j;
+    for (i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      s += txt(30, y + 18, r.t, { size: 11, anchor: 'start', mono: true, fill: r.col, weight: '600' });
+      s += txt(560, y + 18, r.dir, { size: 11, anchor: 'start', mono: true, fill: r.col });
+      y += 24;
+      for (j = 0; j <= 8; j++) {
+        var x = 60 + j * 44;
+        var hl = (i < 2 && j === 8) || (i === 2 && j >= 3 && j <= 9);
+        s += cell(x, y, 38, 24, 'dp' + j, { size: 10, mono: true, fill: hl ? (i === 2 ? C.orangeBg : C.blueBg) : '#fff',
+          stroke: hl ? r.col : C.border, tc: hl ? r.col : C.dim, sw: hl ? 1.5 : 1 });
+      }
+      if (i < 2) {
+        var dirArrow = i === 0 ? '←' : '→';
+        s += txt(30, y + 40, '方向 ' + dirArrow, { size: 11, anchor: 'start', fill: r.col });
+      }
+      y += 32;
+      s += txt(340, y, r.note, { size: 10.5, fill: C.dim });
+      y += 26;
+    }
+    wrap('figThree', y + 6, s, '三种模型共用一张表：01 倒序、完全正序、多重分组做窗口');
+  }
+
+  // ---------- 图 2：时刻换算 ----------
+  function figTime() {
+    var s = txt(340, 18, '输入 6:50 7:00，容量是两者之差；分针是大的那个，借不借位都一样', { size: 12, weight: '600' });
+    var x0 = 110, x1 = 570, y = 56, i;
+    s += '<line x1="' + x0 + '" y1="' + y + '" x2="' + x1 + '" y2="' + y + '" stroke="' + C.gray + '" stroke-width="2"/>';
+    s += '<line x1="' + x0 + '" y1="' + (y - 6) + '" x2="' + x0 + '" y2="' + (y + 6) + '" stroke="' + C.gray + '"/>';
+    s += '<line x1="' + x1 + '" y1="' + (y - 6) + '" x2="' + x1 + '" y2="' + (y + 6) + '" stroke="' + C.gray + '"/>';
+    s += txt(x0, y - 14, '6:50', { size: 12, mono: true, weight: '600', fill: C.blue });
+    s += txt(x1, y - 14, '7:00', { size: 12, mono: true, weight: '600', fill: C.orange });
+    s += txt((x0 + x1) / 2, y + 22, '10 分钟', { size: 11, fill: C.dim });
+    // 两种写法
+    var yy = y + 52;
+    s += txt(340, yy, '直接减：开始到结束的分钟差，先按整数小时算', { size: 11, fill: C.text });
+    yy += 24;
+    s += txt(340, yy, '(7 − 6) × 60 + (0 − 50) = 10', { size: 11.5, mono: true, fill: C.blue });
+    yy += 24;
+    s += txt(340, yy, '先借位：min1(50) > min2(0) → hour2 减 1、min2 加 60，(6 − 6) × 60 + (60 − 50) = 10，一样',
+      { size: 10.5, fill: C.dim });
+    wrap('figTime', yy + 18, s, '时刻差 = (h2 − h1) × 60 + (m2 − m1)，借 1 小时给 60 分钟正好抵消，借不借都行');
+  }
+
+  // ---------- 图 3：ENOUGH ----------
+  function figEnough() {
+    var s = txt(340, 18, '「无限」要落成一个有限的次数：取一个超过容量上限的值就够', { size: 12, weight: '600' });
+    var y = 52, x0 = 120, w = 400;
+    s += txt(x0 - 10, y + 16, '容量上限 t', { size: 11, anchor: 'end', mono: true, fill: C.blue });
+    s += rect(x0, y, w, 22, { fill: C.bg });
+    s += '<rect x="' + x0 + '" y="' + y + '" width="' + (w * 1000 / 1001) + '" height="22" rx="3" fill="' + C.blue + '"/>';
+    s += txt(x0 + w * 1000 / 1001 + 6, y + 16, '≤ 1000 分钟', { size: 11, anchor: 'start', mono: true, fill: C.blue });
+    y += 40;
+    s += txt(x0 - 10, y + 16, '次数上限', { size: 11, anchor: 'end', mono: true, fill: C.orange });
+    s += rect(x0, y, w, 22, { fill: C.bg });
+    var bw = w * 1001 / 1001;
+    s += '<rect x="' + x0 + '" y="' + y + '" width="' + bw + '" height="22" rx="3" fill="' + C.orange + '"/>';
+    s += txt(x0 + bw + 6, y + 16, 'ENOUGH = 1001', { size: 11, anchor: 'start', mono: true, fill: C.orange });
+    y += 40;
+    s += txt(340, y, '每棵树耗费时间 ≥ 1，看 1001 次至少占 1001 分钟，装不进 1000 分钟的背包', { size: 11, fill: C.text });
+    y += 22;
+    s += txt(340, y, '既然装不下，排成 1001 次和排成无穷次，能选到的方案完全一样', { size: 11, fill: C.dim });
+    wrap('figEnough', y + 20, s, 'ENOUGH 由「容量上界 ÷ 最小花费」定出来，本题是 1000 / 1 + 1 = 1001');
+  }
+
+  // ---------- 图 4：窗口计数 ----------
+  function figWindow() {
+    var v = 3, c = 2, chain = [0, 3, 6, 9, 12];
+    var truth = [true, false, true, false, true];
+    var s = txt(340, 18, '面值 v = 3、张数 c = 2，一条同余链上数窗口里的 true', { size: 12, weight: '600' });
+    var y = 46, cw = 76, x0 = 40, i;
+    for (i = 0; i < chain.length; i++) {
+      var x = x0 + i * (cw + 10);
+      var inWin = i >= 2;
+      s += cell(x, y, cw, 30, truth[i] ? 'true' : 'false', {
+        fill: truth[i] ? C.blueBg : '#fff', stroke: truth[i] ? C.blue : C.border,
+        tc: truth[i] ? C.blue : C.dim, size: 11, weight: '600' });
+      s += txt(x + cw / 2, y + 46, 'j = ' + chain[i], { size: 10, mono: true, fill: inWin ? C.orange : C.dim });
+    }
+    s += rect(x0 + 2 * (cw + 10) - 6, y - 6, 3 * (cw + 10) - 4, 42, { fill: 'none', stroke: C.orange, sw: 1.6, rx: 6 });
+    s += txt(x0 + 2 * (cw + 10) + (3 * (cw + 10) - 10) / 2, y - 14, '窗口 [j−c·v, j] = [6, 12]', { size: 11, fill: C.orange, weight: '600' });
+    var y2 = y + 66;
+    s += txt(340, y2, '窗口里有 2 个 true（j = 6、j = 12），所以 j = 12 能被凑出', { size: 11.5, fill: C.text });
+    y2 += 22;
+    s += txt(340, y2, 'j 往左走一格，窗口右端那个 true 减掉、左端新进来的 true 加上，只改这两个数', { size: 11, fill: C.dim });
+    y2 += 22;
+    s += txt(340, y2, '窗口大小是 c + 1 个位置（c 次加法加上起点本身），下标别数错', { size: 11, fill: C.dim });
+    wrap('figWindow', y2 + 20, s, '布尔型多重背包只需知道窗口里有没有 true，用计数平移代替逐个重扫');
+  }
+
+  // ---------- 图 5：耗时 ----------
+  function figPerf() {
+    var s = txt(340, 18, '找零的同一条多重分支，三种写法耗时（n = 50、m = 100000、c = 1000）', { size: 11.5, weight: '600' });
+    var items = [
+      { t: '窗口计数', v: 8.00, col: C.blue },
+      { t: 'used 计数', v: 3.20, col: C.green },
+      { t: '每格重扫', v: 71.20, col: C.orange }
+    ];
+    var y = 50, x0 = 190, w = 360, i, mx = 75;
+    for (i = 0; i < items.length; i++) {
+      var it = items[i];
+      var bw = Math.max(6, w * it.v / mx);
+      s += txt(x0 - 12, y + 16, it.t, { size: 11, anchor: 'end', mono: true, fill: it.col });
+      s += rect(x0, y, w, 22, { fill: C.bg });
+      s += '<rect x="' + x0 + '" y="' + y + '" width="' + bw + '" height="22" rx="3" fill="' + it.col + '"/>';
+      s += txt(x0 + bw + 6, y + 16, it.v.toFixed(2) + ' ms', { size: 11, anchor: 'start', mono: true, fill: it.col, weight: '600' });
+      y += 32;
+    }
+    s += txt(340, y + 16, '窗口计数与 used 计数都是 O(n·m)，重扫退化成 O(n·m·c)，慢了近 9 倍', { size: 11, fill: C.dim });
+    wrap('figPerf', y + 36, s, '布尔型多重背包里，逐个重扫是唯一会被卡掉的写法');
+  }
+
+  figThree(); figTime(); figEnough(); figWindow(); figPerf();
+
+  // ================= 演示一：樱花拆包 =================
+  var CH = [
+    { t: 10, items: [[2, 1, 0], [3, 3, 1], [4, 5, 4]], label: 't=10' },
+    { t: 12, items: [[3, 2, 0], [5, 4, 2], [2, 1, 3]], label: 't=12' },
+    { t: 9, items: [[4, 3, 0], [2, 5, 2]], label: 't=9' }
+  ];
+  var ENOUGH = 1001;
+  var st1 = { ci: 0, step: 0, steps: [] };
+
+  function buildCherry(cs) {
+    var t = cs.t, steps = [], packages = [];
+    var dp = []; for (var j = 0; j <= t; j++) dp.push(0);
+    steps.push({ kind: 'start', dp: dp.slice(), packages: [], tree: -1, note: '' });
+    for (var i = 0; i < cs.items.length; i++) {
+      var cost = cs.items[i][0], val = cs.items[i][1], cnt0 = cs.items[i][2];
+      var cnt = cnt0 === 0 ? ENOUGH : cnt0, rest = cnt, list = [];
+      for (var k = 1; k <= rest; k <<= 1) { list.push(k); rest -= k; }
+      if (rest > 0) list.push(rest);
+      var added = 0;
+      for (var q = 0; q < list.length; q++) {
+        var pack = { cost: list[q] * cost, val: list[q] * val, k: list[q], tree: i, eff: list[q] * cost <= t };
+        packages.push(pack);
+        if (pack.eff) added++;
+      }
+      steps.push({ kind: 'pack', dp: dp.slice(), packages: JSON.parse(JSON.stringify(packages)), tree: i,
+        total: list.length, eff: added, note: '' });
+    }
+    for (var p = 0; p < packages.length; p++) {
+      if (!packages[p].eff) continue;
+      for (var j2 = t; j2 >= packages[p].cost; j2--)
+        dp[j2] = Math.max(dp[j2], dp[j2 - packages[p].cost] + packages[p].val);
+      steps.push({ kind: 'item', dp: dp.slice(), packages: JSON.parse(JSON.stringify(packages)), cur: p, note: '' });
+    }
+    steps.push({ kind: 'done', dp: dp.slice(), packages: JSON.parse(JSON.stringify(packages)), t: t, note: '' });
+    return steps;
+  }
+
+  function render1() {
+    var cs = CH[st1.ci], s = '', y = 20, t = cs.t, i, j;
+    var stp = st1.steps[st1.step];
+    s += txt(340, y, '每棵树拆成几包（cnt = 0 先当 1001 次），再按 01 商品刷 dp', { size: 12, weight: '600' });
+    y += 22;
+    for (i = 0; i < cs.items.length; i++) {
+      var it = cs.items[i];
+      var cntTxt = it[2] === 0 ? '无限（当 ' + ENOUGH + '）' : String(it[2]);
+      var cur = stp.tree === i;
+      s += txt(40, y, '第 ' + (i + 1) + ' 棵：耗费 ' + it[0] + '、价值 ' + it[1] + '、次数 ' + cntTxt,
+        { size: 11, anchor: 'start', mono: true, fill: cur ? C.orange : C.dim, weight: cur ? '600' : '400' });
+      y += 20;
+    }
+    y += 4;
+    // 当前 dp
+    var cw = Math.min(46, Math.floor(580 / (t + 1))), gap = cw > 30 ? 6 : 3;
+    var x0 = Math.max(40, (VW - (t + 1) * (cw + gap)) / 2);
+    s += txt(340, y, 'dp（容量 0…' + t + '）', { size: 10, fill: C.dim });
+    y += 6;
+    for (j = 0; j <= t; j++) {
+      var x = x0 + j * (cw + gap);
+      var isCur = stp.kind === 'item' && stp.packages[stp.cur] && stp.packages[stp.cur].cost <= t && j === t;
+      s += cell(x, y, cw, 24, String(stp.dp[j]), { size: 11, mono: true,
+        fill: isCur ? C.blueBg : '#fff', stroke: isCur ? C.blue : C.border, tc: isCur ? C.blue : C.text });
+      s += txt(x + cw / 2, y + 36, String(j), { size: 9, mono: true, fill: C.dim });
+    }
+    y += 56;
+    // 包列表
+    var shown = 0;
+    var lineTxt = '';
+    for (i = 0; i < stp.packages.length && shown < 12; i++) {
+      var pk = stp.packages[i];
+      if (!pk.eff) continue;
+      lineTxt += (lineTxt ? '　' : '') + pk.k + '件(' + pk.cost + '分/' + pk.val + '点)';
+      shown++;
+    }
+    s += txt(340, y, '有效包（重量 ≤ 容量）：' + (lineTxt || '（暂无）'), { size: 10.5, mono: true, fill: C.dim });
+    y += 20;
+    if (stp.kind === 'pack') {
+      s += txt(340, y, '第 ' + (stp.tree + 1) + ' 棵拆出 ' + stp.total + ' 包，其中 ' + stp.eff + ' 包重量没超容量',
+        { size: 11.5, weight: '600', fill: C.blue });
+      y += 22;
+    } else if (stp.kind === 'item') {
+      var cp = stp.packages[stp.cur];
+      s += txt(340, y, '正在刷第 ' + (cp.tree + 1) + ' 棵的 ' + cp.k + ' 件包（' + cp.cost + ' 分钟 / ' + cp.val + ' 点）',
+        { size: 11.5, weight: '600', fill: C.blue });
+      y += 22;
+    } else if (stp.kind === 'done') {
+      s += txt(340, y, '答案：' + t + ' 分钟最多拿到 ' + stp.dp[t] + ' 点美学值', { size: 12, weight: '600', fill: C.green });
+      y += 22;
+    } else {
+      s += txt(340, y, '还没有开始拆分', { size: 11, fill: C.dim });
+      y += 22;
+    }
+    var host = document.getElementById('v1svg');
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + (y + 8) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    var note = '第 ' + st1.step + ' / ' + (st1.steps.length - 1) + ' 步';
+    if (stp.kind === 'pack') note += '：第 ' + (stp.tree + 1) + ' 棵刚拆完包。';
+    else if (stp.kind === 'item') note += '：正在刷第 ' + (stp.packages[stp.cur].tree + 1) + ' 棵的一个包。';
+    else if (stp.kind === 'done') note += '：全部包刷完，答案出来。';
+    document.getElementById('v1note').textContent = note;
+    document.getElementById('v1ans').textContent = stp.kind === 'done' ? '最大美学值 ' + stp.dp[t] + '（t = ' + t + ' 分钟）' : '';
+    document.getElementById('v1next').disabled = st1.step >= st1.steps.length - 1;
+    document.getElementById('v1prev').disabled = st1.step <= 0;
+  }
+
+  // ================= 演示二：找零三分支 =================
+  var CC = [
+    { m: 10, val: [1, 2, 4], cnt: [2, 1, 1], label: 'm=10' },
+    { m: 12, val: [3, 5, 8], cnt: [3, 2, 20], label: 'm=12' },
+    { m: 20, val: [6, 7], cnt: [4, 3], label: 'm=20' }
+  ];
+  var st2 = { ci: 0, step: 0, steps: [] };
+
+  function buildCoins(cs) {
+    var m = cs.m, steps = [], dp = [];
+    for (var j = 0; j <= m; j++) dp.push(false);
+    dp[0] = true;
+    steps.push({ kind: 'start', dp: dp.slice(), coin: -1, branch: '', note: '' });
+    for (var i = 0; i < cs.val.length; i++) {
+      var v = cs.val[i], c = cs.cnt[i], branch;
+      if (c === 1) {
+        branch = '01：只有一张，倒序刷';
+        for (var j2 = m; j2 >= v; j2--) if (dp[j2 - v]) dp[j2] = true;
+      } else if (v * c > m) {
+        branch = '完全：' + v + '×' + c + ' > ' + m + '，当无限张，正序刷';
+        for (var j3 = v; j3 <= m; j3++) if (dp[j3 - v]) dp[j3] = true;
+      } else {
+        branch = '多重：' + v + '×' + c + ' ≤ ' + m + '，按 mod ' + v + ' 分组数窗口';
+        for (var mod = 0; mod < v; mod++) {
+          var tc = 0;
+          for (var j4 = m - mod, k4 = 0; j4 >= 0 && k4 <= c; j4 -= v, k4++) if (dp[j4]) tc++;
+          for (var j5 = m - mod, l5 = j5 - v * (c + 1); j5 >= 1; j5 -= v, l5 -= v) {
+            if (dp[j5]) tc--;
+            else if (tc !== 0) dp[j5] = true;
+            if (l5 >= 0 && dp[l5]) tc++;
+          }
+        }
+      }
+      var reach = 0;
+      for (var j6 = 1; j6 <= m; j6++) if (dp[j6]) reach++;
+      steps.push({ kind: 'coin', dp: dp.slice(), coin: i, branch: branch, reach: reach, note: '' });
+    }
+    var ans = 0;
+    for (var j7 = 1; j7 <= m; j7++) if (dp[j7]) ans++;
+    steps.push({ kind: 'done', dp: dp.slice(), coin: -1, branch: '', ans: ans, m: m, note: '' });
+    return steps;
+  }
+
+  function render2() {
+    var cs = CC[st2.ci], s = '', y = 20, m = cs.m, j;
+    var stp = st2.steps[st2.step];
+    var cw = Math.min(40, Math.floor(600 / (m + 1))), gap = cw > 26 ? 5 : 2;
+    var x0 = Math.max(30, (VW - (m + 1) * (cw + gap)) / 2);
+    s += txt(340, y, '面值 ' + cs.val.join(' / ') + '，数量 ' + cs.cnt.join(' / ') + '，钱数范围 1…' + m, { size: 12, weight: '600' });
+    y += 22;
+    for (j = 0; j <= m; j++) {
+      var x = x0 + j * (cw + gap);
+      s += cell(x, y, cw, 24, stp.dp[j] ? '1' : '0', { size: 11, mono: true,
+        fill: stp.dp[j] ? C.blueBg : '#fff', stroke: stp.dp[j] ? C.blue : C.border, tc: stp.dp[j] ? C.blue : C.dim,
+        weight: stp.dp[j] ? '600' : '400' });
+      s += txt(x + cw / 2, y + 36, String(j), { size: 9, mono: true, fill: C.dim });
+    }
+    y += 56;
+    if (stp.kind === 'coin') {
+      s += txt(340, y, '第 ' + (stp.coin + 1) + ' 枚面值 ' + cs.val[stp.coin] + '：' + stp.branch,
+        { size: 11.5, weight: '600', fill: C.orange });
+      y += 22;
+      s += txt(340, y, '1…' + m + ' 里已能凑出 ' + stp.reach + ' 个数', { size: 11, fill: C.text });
+      y += 22;
+    } else if (stp.kind === 'done') {
+      s += txt(340, y, '答案：1…' + m + ' 里能凑出的钱数共 ' + stp.ans + ' 种', { size: 12, weight: '600', fill: C.green });
+      y += 22;
+    } else {
+      s += txt(340, y, '只有 0 能凑出，其余都是 0', { size: 11, fill: C.dim });
+      y += 22;
+    }
+    var host = document.getElementById('v2svg');
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + (y + 8) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    var note = '第 ' + st2.step + ' / ' + (st2.steps.length - 1) + ' 步';
+    if (stp.kind === 'coin') note += '：处理第 ' + (stp.coin + 1) + ' 枚。';
+    else if (stp.kind === 'done') note += '：所有货币处理完。';
+    document.getElementById('v2note').textContent = note;
+    document.getElementById('v2ans').textContent = stp.kind === 'done'
+      ? '能找零的钱数有 ' + stp.ans + ' 种（1…' + m + '）' : '';
+    document.getElementById('v2next').disabled = st2.step >= st2.steps.length - 1;
+    document.getElementById('v2prev').disabled = st2.step <= 0;
+  }
+
+  function rb1() { st1.steps = buildCherry(CH[st1.ci]); st1.step = 0; render1(); }
+  function rb2() { st2.steps = buildCoins(CC[st2.ci]); st2.step = 0; render2(); }
+  document.getElementById('v1case').addEventListener('change', function () { st1.ci = +this.value; rb1(); });
+  document.getElementById('v1prev').addEventListener('click', function () { if (st1.step > 0) { st1.step--; render1(); } });
+  document.getElementById('v1next').addEventListener('click', function () { if (st1.step < st1.steps.length - 1) { st1.step++; render1(); } });
+  document.getElementById('v1last').addEventListener('click', function () { st1.step = st1.steps.length - 1; render1(); });
+  document.getElementById('v1reset').addEventListener('click', function () { st1.step = 0; render1(); });
+  document.getElementById('v2case').addEventListener('change', function () { st2.ci = +this.value; rb2(); });
+  document.getElementById('v2prev').addEventListener('click', function () { if (st2.step > 0) { st2.step--; render2(); } });
+  document.getElementById('v2next').addEventListener('click', function () { if (st2.step < st2.steps.length - 1) { st2.step++; render2(); } });
+  document.getElementById('v2last').addEventListener('click', function () { st2.step = st2.steps.length - 1; render2(); });
+  document.getElementById('v2reset').addEventListener('click', function () { st2.step = 0; render2(); });
+  rb1(); rb2();
+})();
+</script>
+</body>
+</html>

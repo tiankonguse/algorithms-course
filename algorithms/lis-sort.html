@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>排序之后转 LIS：信封与数对链</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); min-height: 22px; }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); min-height: 22px; }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.kv { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; color: var(--text-dim); margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>排序之后转 LIS：信封与数对链</h1>
+      <p class="intro">俄罗斯套娃信封和最长数对链，题面里都是二维的东西：一个信封有宽和高，一个数对有左端和右端。两道题的解法长得几乎一样，都是先排一次序，把二维压成一维，再跑上一页那个 ends 数组。真正要想清楚的只有两件事：按什么排，以及 ends 里存什么。</p>
+
+      <h2>零、信封问题：二维怎么压成一维</h2>
+      <p>信封 <code>[w, h]</code> 能装进 <code>[w', h']</code>，条件是 <code>w &lt; w'</code> 且 <code>h &lt; h'</code>，两个方向都得严格小，不允许旋转。</p>
+      <figure class="fig" id="figEnv"></figure>
+      <p>先看宽度这一维。把所有信封按宽度从小到大排，那么「能装」关系里宽度这一侧就自动满足了：排在后面的信封宽度不小于前面的。于是问题只剩高度这一侧，在高度序列上找最长严格递增子序列就行。</p>
+      <p>等等，这里有个坑：宽度相等的两个信封，谁也装不进谁。可按宽度排序后它们挨在一起，如果高度恰好也是升序，最长递增子序列就会把它们串成一条，答案凭空多出来。</p>
+
+      <h2>一、同宽的高度必须倒着排</h2>
+      <p>处理办法只有一行：排序时宽度升序，宽度一样时按高度<strong>降序</strong>排。</p>
+      <p class="kv">a[0] != b[0] ? a[0] &lt; b[0] : a[1] &gt; b[1]</p>
+      <p>同宽的几个信封高度倒着摆，高度序列在这一段上是下降的，严格递增子序列最多只能从中挑一个。宽度这一侧的约束被排序拿掉了，高度这一侧用倒序补回来。</p>
+      <figure class="fig" id="figSort"></figure>
+      <p>这个坑写反了不一定会被测出来。实测两万个随机样本（每个样本 2 到 20 个信封）：宽高值域 V = 3 时错版答案不同的占 43.73%，V = 10 时 53.62%，V = 100 时 10.89%，V = 100000 时只有 0.01%。值域一大，宽度撞车的机会就小，写反也能过，等到出一组宽高都小的数据就露馅。</p>
+    <pre class="code"><span class="cm">// 俄罗斯套娃信封：宽度升序，宽度一样时高度降序，然后对高度做最长递增子序列</span>
+    <span class="kw">int</span> <span class="fn">maxEnvelopes</span>(<span class="kw">int</span>** env, <span class="kw">int</span> n) {
+        sort(env, env + n, [](<span class="kw">int</span>* a, <span class="kw">int</span>* b) {
+            <span class="kw">return</span> a[0] != b[0] ? a[0] &lt; b[0] : a[1] &gt; b[1];
+        });
+        <span class="kw">int</span> ends[100005];
+        <span class="kw">int</span> len = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, find; i &lt; n; i++) {
+            find = bs1(ends, len, env[i][1]);
+            <span class="kw">if</span> (find == -1) {
+                ends[len++] = env[i][1];
+            } <span class="kw">else</span> {
+                ends[find] = env[i][1];
+            }
+        }
+        <span class="kw">return</span> len;
+    }</pre>
+      <div class="viz">
+        <p class="viz-title">演示一：信封排序 + 高度上的 LIS</p>
+        <div id="v1svg"></div>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>信封
+            <select id="v1case">
+              <option value="0">LC 样例 [[5,4],[6,4],[6,7],[2,3]]</option>
+              <option value="1">三个同宽 [[1,3],[1,4],[1,5]]</option>
+              <option value="2">同宽再加一个 [[1,3],[1,4],[1,5],[2,6]]</option>
+              <option value="3">全同 [[1,1],[1,1],[1,1]]</option>
+            </select>
+          </label>
+          <label>同宽排序
+            <select id="v1mode">
+              <option value="1">高度降序（正确）</option>
+              <option value="0">高度升序（错版）</option>
+            </select>
+          </label>
+          <button id="v1prev">上一步</button>
+          <button id="v1next">下一步</button>
+          <button id="v1last">到末尾</button>
+          <button id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <h2>二、数对链：ends 里存右端点</h2>
+      <p>数对 <code>[a, b]</code> 后面能接 <code>[c, d]</code>，条件是 <code>b &lt; c</code>。问最长能接多长。</p>
+      <p>思路和信封一样：先按左端点升序排，左端这一侧就自动满足了。接下来在 ends 上做文章，但这次 ends 里存的东西不一样。</p>
+      <p>上一页的 ends[i] 是「长度为 i + 1 的递增子序列的最小结尾」，这一题直接照搬：<code>ends[i]</code> 记长度为 i + 1 的数对链，结尾（也就是链上最后一个数对的右端点）最小能小到多少。链尾越小，后面能接的数对越多。</p>
+      <p>处理一个数对 <code>[l, r]</code> 时，在 ends 里找第一个 <code>&gt;= l</code> 的位置：</p>
+      <p>1）找不到，说明所有链的尾巴都小于 l，这个数对能接在任何一条链后面，长度加一，往 ends 末尾追加 r。</p>
+      <p>2）找到了下标 f，说明有一条长度为 f 的链尾巴小于 l（就是 ends[f-1]，或者 f = 0 时是空链），可以接上这个数对，得到一条长度为 f + 1、结尾是 r 的链。原来 ends[f] 记的那个尾巴要和 r 取小。</p>
+      <figure class="fig" id="figChain"></figure>
+      <p class="kv">ends[find] = min(ends[find], pairs[i][1])</p>
+      <p>那个 <code>min</code> 不能省。ends[f] 记录的旧尾巴可能比 r 大，也可能比 r 小，两边都出现过：新数对右端点很大时旧尾巴更小，右端点很小时新尾巴更小。实测两万个随机样本，去掉 min 的答案出错率 56.17%，比一半还高。</p>
+    <pre class="code"><span class="cm">// 最长数对链：按左端点升序，ends 里存右端点</span>
+    <span class="kw">int</span> <span class="fn">findLongestChain</span>(<span class="kw">int</span>** pairs, <span class="kw">int</span> n) {
+        sort(pairs, pairs + n, [](<span class="kw">int</span>* a, <span class="kw">int</span>* b) { <span class="kw">return</span> a[0] &lt; b[0]; });
+        <span class="kw">int</span> ends[100005];
+        <span class="kw">int</span> len = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, find; i &lt; n; i++) {
+            find = bs1(ends, len, pairs[i][0]);   <span class="cm">// 第一个结尾 &gt;= 左端点的链</span>
+            <span class="kw">if</span> (find == -1) {
+                ends[len++] = pairs[i][1];
+            } <span class="kw">else</span> {
+                ends[find] = min(ends[find], pairs[i][1]);
+            }
+        }
+        <span class="kw">return</span> len;
+    }</pre>
+
+      <h2>三、数对链还能更省事</h2>
+      <p>这题其实有个更短的写法：按右端点升序排，然后从头到尾扫，能接就接。</p>
+      <p>为什么是对的？按右端点升序扫，每次遇到的数对都是「当前右端点最小」的那个候选。能接上就接，接不上说明它的左端点不大于当前链尾，而它的右端点又不比当前链尾小，留着它不会比留着当前链尾更好。这就是区间调度的贪心。</p>
+    <pre class="code"><span class="cm">// 更省事的写法：按右端点升序，能接就接（活动选择的贪心）</span>
+    <span class="kw">int</span> <span class="fn">findLongestChain2</span>(<span class="kw">int</span>** pairs, <span class="kw">int</span> n) {
+        sort(pairs, pairs + n, [](<span class="kw">int</span>* a, <span class="kw">int</span>* b) { <span class="kw">return</span> a[1] &lt; b[1]; });
+        <span class="kw">int</span> pre = -2147483648, ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">if</span> (pre &lt; pairs[i][0]) {
+                pre = pairs[i][1];
+                ans++;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>实测 n = 200000 时，ends 版 26.85 毫秒，贪心版 22.87 毫秒，答案一致（都是 15691）。差的那点时间是排序的比较函数不同带来的，复杂度同阶，写哪个都行。倒过来想：按左端点排序再贪心是错的，实测两万个随机样本里 33.49% 的答案不对。</p>
+      <div class="viz">
+        <p class="viz-title">演示二：数对链的三种接法</p>
+        <div id="v2svg"></div>
+        <p class="viz-note" id="v2note"></p>
+        <p class="viz-answer" id="v2ans"></p>
+        <div class="viz-controls">
+          <label>数对
+            <select id="v2case">
+              <option value="0">[[1,2],[2,3],[3,4]]</option>
+              <option value="1">[[1,2],[7,8],[4,5]]</option>
+              <option value="2">[[1,10],[2,3],[4,5]]</option>
+              <option value="3">[[1,2],[3,4],[5,6],[2,3]]</option>
+            </select>
+          </label>
+          <label>写法
+            <select id="v2mode">
+              <option value="0">ends 版（按左端点排）</option>
+              <option value="1">贪心版（按右端点排）</option>
+              <option value="2">ends 版去掉 min</option>
+              <option value="3">按左端点排再贪心</option>
+            </select>
+          </label>
+          <button id="v2prev">上一步</button>
+          <button id="v2next">下一步</button>
+          <button id="v2last">到末尾</button>
+          <button id="v2reset">重置</button>
+        </div>
+      </div>
+
+      <h2>四、三种写错的方式</h2>
+      <figure class="fig" id="figBug"></figure>
+      <p>四个数字分别是：信封同宽按高度升序排（错）、数对链去掉 min（错）、数对链把 &gt;= 写成 &gt;（错）、数对链按左端点排序后贪心（错）。样本都是两万组随机小数据。</p>
+      <p>共同点是它们都只在「有重复」的时候现形：同宽的信封、右端点比旧尾巴小的数对、左端点相等的边界。做这类题时先问一句「排序之后，相等的那部分会不会被串起来」，多数 bug 就躲在这一句里。</p>
+
+      <h2>五、复杂度分析</h2>
+      <table class="complexity">
+        <thead><tr><th>题目</th><th>时间</th><th>额外空间</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>俄罗斯套娃信封</td><td>O(n log n)</td><td>O(n)</td><td>排序 O(n log n)，之后每个高度一次二分 O(log n)</td></tr>
+          <tr><td>最长数对链（ends 版）</td><td>O(n log n)</td><td>O(n)</td><td>同左</td></tr>
+          <tr><td>最长数对链（贪心版）</td><td>O(n log n)</td><td>O(1)</td><td>时间花在排序上，扫描那一段是 O(n)，不额外开 ends</td></tr>
+        </tbody>
+      </table>
+      <p>两道题的空间都是 O(n)，ends 数组按 n 开就够，有效长度是答案、最坏是 n。贪心版那栏写 O(1) 是指除了排序之外不再开数组，排序本身的开销看实现，标准库一般是 O(log n) 的栈。</p>
+      <p>实测（g++ -O2）：信封 n = 100000 时 12.26 毫秒，n = 200000 时 29.25 毫秒；数对链 n = 200000 时 ends 版 26.85 毫秒、贪心版 22.87 毫秒。</p>
+
+      <h2>六、总结</h2>
+      <p>这两道题是同一个套路：先按其中一维排序，让这一维的约束自动成立，剩下那一维交给 ends 数组。</p>
+      <p>要记住的点：</p>
+      <p>1）信封排序是「宽度升序，同宽时高度降序」。同宽降序那一项是为了防止同宽信封被串进同一条链。</p>
+      <p>2）数对链的 ends 里存的是右端点，替换时写 <code>min</code>，不是直接赋值。</p>
+      <p>3）数对链还能按右端点排序贪心，代码更短，不用开 ends。</p>
+      <p>判断排序策略对不对的土办法：想一遍「两个相同的第一维」会不会被串起来。会，就得在第二维上倒着排。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>LeetCode</td><td>俄罗斯套娃信封问题</td><td><a href="https://leetcode.cn/problems/russian-doll-envelopes/" target="_blank">russian-doll-envelopes</a></td></tr>
+          <tr><td>LeetCode</td><td>最长数对链</td><td><a href="https://leetcode.cn/problems/maximum-length-of-pair-chain/" target="_blank">maximum-length-of-pair-chain</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解072【必备】最长递增子序列问题与扩展</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            green: '#2e7d32', greenBg: '#e8f5e9', gray: '#9aa0a6', bg: '#f6f7f9',
+            border: '#e6e8eb', text: '#1e293b', dim: '#6b7280' };
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      (o.mono ? ' font-family="ui-monospace, Menlo, monospace"' : '') + '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx == null ? 4 : o.rx) +
+      '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.border) + '"' + (o.sw ? ' stroke-width="' + o.sw + '"' : '') + '/>';
+  }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+  function cell(x, y, w, h, v, o) {
+    o = o || {};
+    var s = rect(x, y, w, h, { fill: o.fill || '#fff', stroke: o.stroke || C.border, sw: o.sw });
+    s += txt(x + w / 2, y + h / 2 + 4, String(v), { size: o.size || 12, mono: true, fill: o.tc || C.text, weight: o.weight });
+    return s;
+  }
+  function bar(x, y, w, h, v, max, color, label, valtxt) {
+    var s = rect(x, y, w, h, { fill: C.bg });
+    var bw = Math.max(2, w * v / max);
+    s += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="3" fill="' + color + '"/>';
+    s += txt(x - 6, y + h - 4, label, { size: 11, fill: C.dim, anchor: 'end', mono: true });
+    s += txt(x + w + 6, y + h - 4, valtxt, { size: 11, anchor: 'start', mono: true, fill: C.dim });
+    return s;
+  }
+
+  // ---------- 图 1：信封嵌套 ----------
+  function figEnv() {
+    var e = [[2, 3], [5, 4], [6, 4], [6, 7]];
+    var s = txt(340, 18, '四个信封摆在宽高平面上：宽和高都得严格小才装得进去', { size: 13, weight: '600' });
+    var ox = 70, oy = 210, sx = 62, sy = 20;
+    var i;
+    s += '<line x1="' + ox + '" y1="' + oy + '" x2="' + (ox + 9 * sx) + '" y2="' + oy + '" stroke="' + C.border + '"/>';
+    s += '<line x1="' + ox + '" y1="' + oy + '" x2="' + ox + '" y2="' + (oy - 9 * sy) + '" stroke="' + C.border + '"/>';
+    s += txt(ox + 9 * sx, oy - 8, '宽度 w', { size: 11, fill: C.dim, anchor: 'end' });
+    s += txt(ox + 6, oy - 9 * sy - 10, '高度 h', { size: 11, fill: C.dim, anchor: 'start' });
+    for (i = 1; i <= 8; i++) {
+      s += txt(ox + i * sx, oy + 16, String(i), { size: 10, fill: C.gray });
+      s += txt(ox - 12, oy - i * sy + 4, String(i), { size: 10, fill: C.gray });
+    }
+    // 从大到小画，小的画在上面才不会被盖住；顺序：[6,7] [6,4] [5,4] [2,3]
+    var order = [[3, true], [2, false], [1, true], [0, true]];   // [原下标, 是否在链上]
+    for (var t = 0; t < 4; t++) {
+      var oi = order[t][0], inChain = order[t][1];
+      var w = e[oi][0], h = e[oi][1];
+      var x = ox, y = oy - h * sy;
+      s += rect(x, y, w * sx, h * sy, { fill: '#fff', stroke: inChain ? C.blue : C.gray, sw: inChain ? 2 : 1 });
+      s += txt(x + w * sx - 8, y + 16, '[' + w + ',' + h + ']', { size: 11, mono: true, anchor: 'end', fill: inChain ? C.blue : C.dim });
+    }
+    s += txt(468, 120, '能串成一条：', { size: 11, anchor: 'start', weight: '600' });
+    s += txt(468, 140, '[2,3]→[5,4]→[6,7]', { size: 11, anchor: 'start', mono: true });
+    s += txt(468, 162, '长度 3', { size: 13, anchor: 'start', weight: '600', fill: C.blue });
+    s += txt(468, 186, '[6,4] 装不进 [6,7]：', { size: 10, anchor: 'start', fill: C.dim });
+    s += txt(468, 202, '宽度相等', { size: 10, anchor: 'start', fill: C.dim });
+    s += txt(340, oy + 40, '答案 = 3', { size: 13, weight: '600', fill: C.blue });
+    wrap('figEnv', oy + 56, s, 'LC 样例 [[5,4],[6,4],[6,7],[2,3]]：蓝框是能串起来的三个，[6,4] 因为宽度相等被排除');
+  }
+
+  // ---------- 图 2：两种排序策略 ----------
+  function figSort() {
+    var s = txt(340, 18, '四个信封 [[1,3],[1,4],[1,5],[2,6]]，正确答案是 2', { size: 13, weight: '600' });
+    var rows = [
+      { tag: '同宽高度降序（正确）', list: [[1, 5], [1, 4], [1, 3], [2, 6]], hs: [5, 4, 3, 6], ans: 2, ok: true, col: C.blue, bg: C.blueBg },
+      { tag: '同宽高度升序（错版）', list: [[1, 3], [1, 4], [1, 5], [2, 6]], hs: [3, 4, 5, 6], ans: 4, ok: false, col: C.orange, bg: C.orangeBg }
+    ];
+    var i, j;
+    for (i = 0; i < 2; i++) {
+      var r = rows[i];
+      var y = 36 + i * 92;
+      s += txt(24, y + 14, r.tag, { size: 12, anchor: 'start', fill: r.col, weight: '600' });
+      for (j = 0; j < 4; j++) {
+        var x = 150 + j * 84;
+        s += rect(x, y, 74, 26, { fill: r.bg, stroke: r.col });
+        s += txt(x + 37, y + 18, '[' + r.list[j][0] + ',' + r.list[j][1] + ']', { size: 11, mono: true });
+      }
+      s += txt(24, y + 48, '高度序列', { size: 11, anchor: 'start', fill: C.dim });
+      for (j = 0; j < 4; j++) {
+        var hx = 150 + j * 84;
+        s += rect(hx, y + 34, 74, 26, { fill: '#fff', stroke: C.border });
+        s += txt(hx + 37, y + 52, String(r.hs[j]), { size: 12, mono: true, weight: '600' });
+      }
+      s += txt(510, y + 52, 'LIS = ' + r.ans, { size: 13, anchor: 'start', weight: '600', fill: r.col });
+      s += txt(610, y + 52, r.ok ? '正确' : '偏大', { size: 12, anchor: 'start', fill: r.ok ? C.green : C.orange });
+    }
+    var yb = 36 + 2 * 92 + 4;
+    s += rect(60, yb, 560, 34, { fill: C.bg, stroke: C.border });
+    s += txt(340, yb + 22, '错版把三个同宽信封串成了一条，答案从 2 变成 4', { size: 12 });
+    wrap('figSort', yb + 50, s, '同宽的那几个信封，高度必须倒着排，否则会被最长递增子序列当成一条链');
+  }
+
+  // ---------- 图 3：数对链 ends 存右端点 ----------
+  function figChain() {
+    var p = [[1, 10], [2, 3], [4, 5]];
+    var st = [[10], [3], [3, 5]];
+    var s = txt(340, 18, '数对 [[1,10],[2,3],[4,5]]：ends 里存的是链的右端点', { size: 13, weight: '600' });
+    var i, j;
+    var x0 = 40, cw = 200;
+    for (i = 0; i < 3; i++) {
+      var x = x0 + i * cw;
+      s += txt(x + 70, 42, '[' + p[i][0] + ',' + p[i][1] + ']', { size: 13, mono: true, weight: '600', fill: C.orange });
+      s += txt(x + 70, 60, '左端 ' + p[i][0] + '，右端 ' + p[i][1], { size: 10, fill: C.dim });
+      for (j = 0; j < st[i].length; j++) {
+        s += rect(x + 10, 74 + j * 28, 120, 24, { fill: C.blueBg, stroke: C.blue });
+        s += txt(x + 70, 91 + j * 28, 'ends[' + j + '] = ' + st[i][j], { size: 11, mono: true, fill: C.blue });
+      }
+    }
+    var yb = 74 + 2 * 28 + 16;
+    s += txt(340, yb, '第 2 步：ends[0] = 10，新的右端 3 更小，取 min 之后变成 3', { size: 12 });
+    s += txt(340, yb + 22, '第 3 步：3 < 4，接得上，长度加一，追加 5', { size: 12 });
+    s += txt(340, yb + 48, '去掉 min 的话 ends 停在 [10]，第 3 步的 4 接不上，答案从 2 变成 1', { size: 12, fill: C.orange });
+    wrap('figChain', yb + 70, s, '数对链的 ends 存右端点：链尾越小越好，替换时两边取小的那个');
+  }
+
+  // ---------- 图 4：四种错法的错误率 ----------
+  function figBug() {
+    var s = txt(340, 18, '两万组随机小数据上，四种写法的出错比例', { size: 13, weight: '600' });
+    var items = [
+      { n: '信封：同宽按高度升序', p: 53.62 },
+      { n: '数对链：去掉 min', p: 56.17 },
+      { n: '数对链：>= 写成 >', p: 53.51 },
+      { n: '数对链：按左端点贪心', p: 33.49 }
+    ];
+    var i;
+    for (i = 0; i < 4; i++) {
+      var y = 40 + i * 32;
+      s += bar(210, y, 340, 18, items[i].p, 100, i < 3 ? C.orange : C.gray, items[i].n, items[i].p + '%');
+    }
+    s += txt(340, 40 + 4 * 32 + 12, '四种写法都能通过一部分测试，剩下的部分全是靠「重复值」暴露出来的', { size: 11, fill: C.dim });
+    wrap('figBug', 40 + 4 * 32 + 30, s, '出错比例都超过三成，说明这些写法错得很实在，只是随机大值域数据不容易撞上');
+  }
+
+  figEnv(); figSort(); figChain(); figBug();
+
+  // ================= 演示 1：信封 =================
+  var ENV = [
+    [[5, 4], [6, 4], [6, 7], [2, 3]],
+    [[1, 3], [1, 4], [1, 5]],
+    [[1, 3], [1, 4], [1, 5], [2, 6]],
+    [[1, 1], [1, 1], [1, 1]]
+  ];
+  function bs1(ends, len, num) {
+    var l = 0, r = len - 1, m, ans = -1;
+    while (l <= r) { m = Math.floor((l + r) / 2); if (ends[m] >= num) { ans = m; r = m - 1; } else l = m + 1; }
+    return ans;
+  }
+  function envSteps(list, rightOrder) {
+    var arr = list.map(function (x) { return [x[0], x[1]]; });
+    arr.sort(function (a, b) { return a[0] !== b[0] ? a[0] - b[0] : (rightOrder ? b[1] - a[1] : a[1] - b[1]); });
+    var ends = [], len = 0, steps = [];
+    steps.push({ i: -1, arr: arr, ends: [], len: 0, pos: null, grow: false,
+      note: '排序完成，共 ' + arr.length + ' 个信封。按「下一步」开始在高度上跑最长递增子序列。' });
+    for (var i = 0; i < arr.length; i++) {
+      var num = arr[i][1];
+      var pos = bs1(ends, len, num);
+      var before = ends.slice(0, len);
+      if (pos === -1) {
+        ends[len] = num; len++;
+        steps.push({ i: i, arr: arr, ends: ends.slice(0, len), before: before, len: len, pos: -1, grow: true,
+          note: '第 ' + (i + 1) + ' / ' + arr.length + ' 步：高度 ' + num + '，ends 里没有 >= 它的，长度 +1。' });
+      } else {
+        ends[pos] = num;
+        steps.push({ i: i, arr: arr, ends: ends.slice(0, len), before: before, len: len, pos: pos, grow: false,
+          note: '第 ' + (i + 1) + ' / ' + arr.length + ' 步：高度 ' + num + '，二分定位到下标 ' + pos + '，顶掉 ' + before[pos] + '。' });
+      }
+    }
+    steps.push({ i: arr.length, arr: arr, ends: ends.slice(0, len), len: len, pos: null, done: true,
+      note: '扫完了，答案 = ' + len + '。' + (rightOrder ? '' : '（同宽按升序排是错版，同宽的信封会被串成一条）') });
+    return steps;
+  }
+  var v1 = { step: 0, data: null };
+  function v1Render() {
+    var st = v1.data.steps[Math.min(v1.step, v1.data.steps.length - 1)];
+    var arr = st.arr, n = arr.length;
+    var s = '', i;
+    var cw = Math.min(150, Math.floor(620 / n)), x0 = 20;
+    s += txt(340, 16, '排序后的信封（灰底是还没处理的）', { size: 11, fill: C.dim });
+    for (i = 0; i < n; i++) {
+      var x = x0 + i * cw;
+      var cur = (st.i === i);
+      s += rect(x, 26, cw - 10, 30, { fill: cur ? C.orangeBg : (st.i > i ? C.blueBg : C.bg),
+        stroke: cur ? C.orange : (st.i > i ? C.blue : C.border) });
+      s += txt(x + (cw - 10) / 2, 47, '[' + arr[i][0] + ',' + arr[i][1] + ']', { size: 12, mono: true, weight: cur ? '600' : undefined });
+    }
+    var y0 = 78;
+    s += txt(340, y0, '高度序列上的 ends（橙底是本轮改到的格子）', { size: 11, fill: C.dim });
+    if (st.len === 0) {
+      s += txt(340, y0 + 34, '（空）', { size: 13, fill: C.gray, mono: true });
+    } else {
+      for (i = 0; i < st.len; i++) {
+        var ex = 60 + i * 74;
+        var fresh = (st.pos === i) || (st.grow && i === st.len - 1);
+        s += rect(ex, y0 + 10, 62, 30, { fill: fresh ? C.orangeBg : '#fff', stroke: fresh ? C.orange : C.border, sw: fresh ? 2 : 1 });
+        s += txt(ex + 31, y0 + 30, String(st.ends[i]), { size: 13, mono: true, fill: fresh ? C.orange : C.text });
+        s += txt(ex + 31, y0 + 50, 'len ' + (i + 1), { size: 10, fill: C.dim });
+      }
+    }
+    var yb = y0 + 68;
+    s += txt(60, yb, '答案 len = ' + st.len, { size: 13, mono: true, anchor: 'start', weight: '600', fill: C.blue });
+    s += txt(620, yb, v1.data.right ? '同宽降序' : '同宽升序（错版）', { size: 12, anchor: 'end', fill: v1.data.right ? C.blue : C.orange });
+    var host = document.getElementById('v1svg');
+    host.innerHTML = '<svg viewBox="0 0 680 ' + (yb + 20) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    document.getElementById('v1note').textContent = st.note;
+    document.getElementById('v1ans').textContent = (v1.step >= v1.data.steps.length - 1) ? '答案 = ' + st.len : '';
+    document.getElementById('v1prev').disabled = (v1.step === 0);
+    document.getElementById('v1next').disabled = (v1.step >= v1.data.steps.length - 1);
+  }
+  function v1Build() {
+    var ci = parseInt(document.getElementById('v1case').value, 10);
+    var right = document.getElementById('v1mode').value === '1';
+    v1.data = { right: right, steps: envSteps(ENV[ci], right) };
+    v1.step = 0;
+    v1Render();
+  }
+
+  // ================= 演示 2：数对链 =================
+  var PAIRS = [
+    [[1, 2], [2, 3], [3, 4]],
+    [[1, 2], [7, 8], [4, 5]],
+    [[1, 10], [2, 3], [4, 5]],
+    [[1, 2], [3, 4], [5, 6], [2, 3]]
+  ];
+  function chainSteps(list, mode) {
+    var arr = list.map(function (x) { return [x[0], x[1]]; });
+    var steps = [], i;
+    if (mode === 0 || mode === 2) {
+      arr.sort(function (a, b) { return a[0] - b[0]; });
+      var ends = [], len = 0;
+      steps.push({ i: -1, arr: arr, ends: [], len: 0, pos: null, grow: false, pre: -2147483648, cnt: 0,
+        note: '按左端点升序排好，共 ' + arr.length + ' 个数对。按「下一步」开始。' });
+      for (i = 0; i < arr.length; i++) {
+        var pos = bs1(ends, len, arr[i][0]);
+        var before = ends.slice(0, len);
+        if (pos === -1) {
+          ends[len] = arr[i][1]; len++;
+          steps.push({ i: i, arr: arr, ends: ends.slice(0, len), before: before, len: len, pos: -1, grow: true, pre: null, cnt: len,
+            note: '第 ' + (i + 1) + ' / ' + arr.length + ' 步：[' + arr[i][0] + ',' + arr[i][1] + ']，左端 ' + arr[i][0] +
+                  ' 比所有链尾都大，长度 +1，追加右端 ' + arr[i][1] + '。' });
+        } else {
+          var nv = (mode === 2) ? arr[i][1] : Math.min(before[pos], arr[i][1]);
+          ends[pos] = nv;
+          steps.push({ i: i, arr: arr, ends: ends.slice(0, len), before: before, len: len, pos: pos, grow: false, pre: null, cnt: len,
+            note: '第 ' + (i + 1) + ' / ' + arr.length + ' 步：[' + arr[i][0] + ',' + arr[i][1] + ']，二分定位到下标 ' + pos +
+                  '，ends[' + pos + '] 原来是 ' + before[pos] + '，' +
+                  (mode === 2 ? '错版直接赋值成 ' + nv : '取 min 后是 ' + nv) + '。' });
+        }
+      }
+      steps.push({ i: arr.length, arr: arr, ends: ends.slice(0, len), len: len, pos: null, done: true, pre: null, cnt: len,
+        note: '扫完了，答案 = ' + len + '。' + (mode === 2 ? '（去掉 min 是错版）' : '') });
+    } else {
+      arr.sort(function (a, b) { return (mode === 1 ? (a[1] - b[1]) : (a[0] - b[0])); });
+      var pre = -2147483648, cnt = 0, ends = [];
+      steps.push({ i: -1, arr: arr, ends: [], len: 0, pos: null, grow: false, pre: pre, cnt: 0,
+        note: (mode === 1 ? '按右端点升序排好' : '按左端点升序排好（这种排法下贪心是错的）') + '，共 ' + arr.length + ' 个数对。' });
+      for (i = 0; i < arr.length; i++) {
+        var take = pre < arr[i][0];
+        if (take) { pre = arr[i][1]; cnt++; ends = ends.slice(0, cnt - 1); ends[cnt - 1] = arr[i][1]; }
+        steps.push({ i: i, arr: arr, ends: ends.slice(0, cnt), before: null, len: cnt, pos: take ? cnt - 1 : null,
+          grow: take, pre: pre, cnt: cnt,
+          note: '第 ' + (i + 1) + ' / ' + arr.length + ' 步：[' + arr[i][0] + ',' + arr[i][1] + ']，链尾 ' +
+                (take ? '接上，新的尾是 ' + arr[i][1] : '不满足 ' + pre + ' < ' + arr[i][0] + '，跳过') + '。' });
+      }
+      steps.push({ i: arr.length, arr: arr, ends: ends.slice(0, cnt), len: cnt, pos: null, done: true, pre: pre, cnt: cnt,
+        note: '扫完了，答案 = ' + cnt + '。' + (mode === 3 ? '（按左端点排再贪心是错的）' : '') });
+    }
+    return steps;
+  }
+  var v2 = { step: 0, data: null };
+  function v2Render() {
+    var st = v2.data.steps[Math.min(v2.step, v2.data.steps.length - 1)];
+    var arr = st.arr, n = arr.length;
+    var s = '', i;
+    var cw = Math.min(150, Math.floor(620 / n)), x0 = 20;
+    s += txt(340, 16, '排好序的数对（灰底是还没处理的）', { size: 11, fill: C.dim });
+    for (i = 0; i < n; i++) {
+      var x = x0 + i * cw;
+      var cur = (st.i === i);
+      s += rect(x, 26, cw - 10, 30, { fill: cur ? C.orangeBg : (st.i > i ? C.blueBg : C.bg),
+        stroke: cur ? C.orange : (st.i > i ? C.blue : C.border) });
+      s += txt(x + (cw - 10) / 2, 47, '[' + arr[i][0] + ',' + arr[i][1] + ']', { size: 12, mono: true, weight: cur ? '600' : undefined });
+    }
+    var y0 = 78;
+    s += txt(340, y0, (v2.data.mode === 1 || v2.data.mode === 3) ? '已选中的链尾' : 'ends（存的是右端点）', { size: 11, fill: C.dim });
+    if (st.len === 0) {
+      s += txt(340, y0 + 34, '（空）', { size: 13, fill: C.gray, mono: true });
+    } else {
+      for (i = 0; i < st.len; i++) {
+        var ex = 60 + i * 74;
+        var fresh = (st.pos === i) || (st.grow && i === st.len - 1);
+        s += rect(ex, y0 + 10, 62, 30, { fill: fresh ? C.orangeBg : '#fff', stroke: fresh ? C.orange : C.border, sw: fresh ? 2 : 1 });
+        s += txt(ex + 31, y0 + 30, String(st.ends[i]), { size: 13, mono: true, fill: fresh ? C.orange : C.text });
+        s += txt(ex + 31, y0 + 50, 'len ' + (i + 1), { size: 10, fill: C.dim });
+      }
+    }
+    var yb = y0 + 68;
+    s += txt(60, yb, '答案 = ' + st.cnt, { size: 13, mono: true, anchor: 'start', weight: '600', fill: C.blue });
+    if (st.pre !== null && st.pre !== undefined && st.pre > -2147483648) {
+      s += txt(300, yb, '当前链尾 = ' + st.pre, { size: 12, mono: true, anchor: 'start', fill: C.dim });
+    }
+    var names = ['ends 版', '贪心版（右端点排）', '去掉 min（错）', '左端点排贪心（错）'];
+    s += txt(620, yb, names[v2.data.mode], { size: 12, anchor: 'end', fill: (v2.data.mode >= 2) ? C.orange : C.blue });
+    var host = document.getElementById('v2svg');
+    host.innerHTML = '<svg viewBox="0 0 680 ' + (yb + 20) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    document.getElementById('v2note').textContent = st.note;
+    document.getElementById('v2ans').textContent = (v2.step >= v2.data.steps.length - 1) ? '答案 = ' + st.cnt : '';
+    document.getElementById('v2prev').disabled = (v2.step === 0);
+    document.getElementById('v2next').disabled = (v2.step >= v2.data.steps.length - 1);
+  }
+  function v2Build() {
+    var ci = parseInt(document.getElementById('v2case').value, 10);
+    var mode = parseInt(document.getElementById('v2mode').value, 10);
+    v2.data = { mode: mode, steps: chainSteps(PAIRS[ci], mode) };
+    v2.step = 0;
+    v2Render();
+  }
+
+  document.getElementById('v1case').addEventListener('change', v1Build);
+  document.getElementById('v1mode').addEventListener('change', v1Build);
+  document.getElementById('v1prev').addEventListener('click', function () { if (v1.step > 0) { v1.step--; v1Render(); } });
+  document.getElementById('v1next').addEventListener('click', function () { if (v1.step < v1.data.steps.length - 1) { v1.step++; v1Render(); } });
+  document.getElementById('v1last').addEventListener('click', function () { v1.step = v1.data.steps.length - 1; v1Render(); });
+  document.getElementById('v1reset').addEventListener('click', function () { v1.step = 0; v1Render(); });
+  document.getElementById('v2case').addEventListener('change', v2Build);
+  document.getElementById('v2mode').addEventListener('change', v2Build);
+  document.getElementById('v2prev').addEventListener('click', function () { if (v2.step > 0) { v2.step--; v2Render(); } });
+  document.getElementById('v2next').addEventListener('click', function () { if (v2.step < v2.data.steps.length - 1) { v2.step++; v2Render(); } });
+  document.getElementById('v2last').addEventListener('click', function () { v2.step = v2.data.steps.length - 1; v2Render(); });
+  document.getElementById('v2reset').addEventListener('click', function () { v2.step = 0; v2Render(); });
+  v1Build();
+  v2Build();
+})();
+</script>
+</body>
+</html>

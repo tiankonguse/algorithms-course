@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>洪水填充：一次感染一整片</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; min-height: 20px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.viz-controls select { margin-right: 6px; }
+.cell-grid { display: grid; gap: 3px; margin: 8px 0; }
+.cell { width: 32px; height: 32px; border: 1px solid #cbd5e1; background: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cell.w { background: #f6f7f9; color: #9aa0a6; }
+.cell.land { background: #dbeafe; color: #1e40af; border-color: #2563eb; }
+.cell.done { background: #bfdbfe; color: #1e3a8a; border-color: #2563eb; }
+.cell.cur { outline: 2px solid #ea580c; background: #ffedd5; }
+.cell.mark { background: #fed7aa; color: #9a3412; border-color: #ea580c; }
+.cell.keep { background: #dbeafe; color: #1e40af; border-color: #2563eb; }
+.cell.gone { background: #e5e7eb; color: #6b7280; }
+.cell.id2 { background: #dbeafe; border-color: #2563eb; }
+.cell.id3 { background: #ffedd5; border-color: #ea580c; }
+.cell.id4 { background: #dcfce7; border-color: #16a34a; }
+.cell.id5 { background: #f3e8ff; border-color: #9333ea; }
+.cell.id6 { background: #fef9c3; border-color: #ca8a04; }
+.legend { font-size: 12px; color: var(--fg2); margin: 6px 0; }
+.legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; border: 1px solid #cbd5e1; margin-right: 4px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>洪水填充：一次感染一整片</h1>
+      <p class="intro">一个递归函数从某个格子出发，把和它连成一片的格子全部改成另一个值。看着是到处乱窜的暴力过程，代价却和把网格扫一遍同阶：每格只被真正处理一次。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>网格题里最常做的事是「找到和某个格子连通的整片，然后统一处理」。数岛屿、判区域、染色、扩散，全都是这一件事。</p>
+      <p>做法只有一句：走到一个格子上，先看看它合不合规矩（有没有越界、是不是要找的那种格子），不合就返回；合规就把它改成另一个值，然后朝四个方向分别调用自己。</p>
+      <p>关键在于改的那个值不撤销。常见的递归过程里，路径信息进栈出栈要成对恢复，因为还要回头枚举别的分支；这里不需要回头，改完就是改完了，同一片永远只会被处理一次。</p>
+
+      <h2 id="shape">一、感染函数的形状</h2>
+      <figure class="fig" id="figInfect"></figure>
+      <p>四行就能写完：判越界与不合格、改标记、四个方向各自递归。方向顺序怎么写都行，上下左右只是一种习惯。</p>
+      <p>「改成另一个值」这一步同时干了三件事：标记已处理、避免重复进入、给后面的扫描留证据。所以主循环扫到没被改过的格子时，可以直接断定发现了一片新区域。</p>
+
+    <pre class="code"><span class="cm">// 从 (i,j) 出发，把连着的 '1' 全部改成 '2'</span>
+    <span class="kw">void</span> <span class="fn">dfs</span>(vector&lt;<span class="kw">string</span>&gt;&amp; board, <span class="kw">int</span> n, <span class="kw">int</span> m, <span class="kw">int</span> i, <span class="kw">int</span> j) {
+        <span class="kw">if</span> (i &lt; 0 || i == n || j &lt; 0 || j == m || board[i][j] != '1') {
+            <span class="kw">return</span>;
+        }
+        board[i][j] = '2';
+        dfs(board, n, m, i - 1, j);
+        dfs(board, n, m, i + 1, j);
+        dfs(board, n, m, i, j - 1);
+        dfs(board, n, m, i, j + 1);
+    }</pre>
+
+      <h2 id="islands">二、岛屿数量：数一共启动了几次</h2>
+      <figure class="fig" id="figIslands"></figure>
+      <p>网格里 '1' 是陆地、'0' 是水，上下左右相连的 '1' 算同一座岛。主循环把每个格子看一眼，遇到 '1' 就把计数加一，再从这里感染一整片；遇到 '0' 或者已经被改成 '2' 的，直接跳过。</p>
+      <p>计数加一的时机就是「发现新岛」的时机，因为能被主循环碰到的 '1'，一定是还没被任何一次感染碰过的。</p>
+
+    <pre class="code"><span class="cm">// 主循环扫一遍，碰到没被改过的 '1' 就说明发现了一座新岛</span>
+    <span class="kw">int</span> <span class="fn">numIslands</span>(vector&lt;<span class="kw">string</span>&gt;&amp; board) {
+        <span class="kw">int</span> n = board.size();
+        <span class="kw">int</span> m = board[0].size();
+        <span class="kw">int</span> islands = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; m; j++) {
+                <span class="kw">if</span> (board[i][j] == '1') {
+                    islands++;
+                    dfs(board, n, m, i, j);
+                }
+            }
+        }
+        <span class="kw">return</span> islands;
+    }</pre>
+
+      <h2 id="visit">三、为什么是线性的</h2>
+      <figure class="fig" id="figVisit"></figure>
+      <p>每个格子会招来几次调用？它被四个邻居各叫一次（方向是死写的四个，不管邻居在不在网格里），再加上自己被真正进入的那一次。一个格子摊到五次调用以内，调用次数和格子数同阶。</p>
+      <p>实测很贴这个数：200×200 全是 '1' 的网格（4 万格），感染函数一共被调用 160001 次，正好是 4×40000+1，每格摊 4.00 次。随机网格更省，密度 0.3 时每格 1.32 次、密度 0.5 时 2.06 次、密度 0.7 时 2.80 次。</p>
+      <p>300×300、密度 0.45 的随机网格上，三种数法都给出 8127 座岛，耗时分别是：感染递归 1.49ms、并查集 2.83ms、BFS 队列 3.68ms。感染版最快，因为它既不用开队列也不用维护 father 数组，标记直接写在原网格上。</p>
+      <div class="viz" id="vizIslands">
+        <p class="viz-title">演示：主循环扫格子，扫到 '1' 就感染一整片</p>
+        <div class="viz-controls">
+          <select id="islSel"></select>
+          <button id="islPrev">上一步</button>
+          <button id="islNext">下一步</button>
+          <button id="islReset">重置</button>
+        </div>
+        <div class="cell-grid" id="islGrid"></div>
+        <p class="viz-note" id="islNote"></p>
+        <p class="viz-answer" id="islAns"></p>
+      </div>
+
+      <h2 id="depth">四、递归深度等于连通块大小</h2>
+      <figure class="fig" id="figDepth"></figure>
+      <p>感染函数没有尾递归优化可指望，栈一层压一层，深度等于这一片有多长。全是陆地的网格最坏：200×200 全 '1' 实测最深 40001 层，就是格子总数。</p>
+      <p>本机 macOS 默认栈 8176 KB，这个写法的每帧约 113 字节，于是七万多层就到顶了。实测：272×272 全 '1'（73984 格）能跑完，274×274（75076 格）段错误。所以大网格要么换队列版，要么确认数据里没有巨大的连通块。</p>
+      <p>随机网格的压力小得多，200×200 上实测最大深度：密度 0.4 时 41 层、0.5 时 88 层、0.6 时 1246 层。真会出事的是整片连在一起的构造数据。</p>
+
+    <pre class="code"><span class="cm">// 递归深度等于连通块大小，换成队列就没有这个上限</span>
+    <span class="kw">int</span> <span class="fn">numIslandsBfs</span>(vector&lt;<span class="kw">string</span>&gt;&amp; board) {
+        <span class="kw">int</span> n = board.size(), m = board[0].size(), islands = 0;
+        <span class="kw">int</span> dr[4] = {1, -1, 0, 0}, dc[4] = {0, 0, 1, -1};
+        queue&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt; q;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; m; j++) {
+                <span class="kw">if</span> (board[i][j] != '1') <span class="kw">continue</span>;
+                islands++;
+                board[i][j] = '2';
+                q.push({i, j});
+                <span class="kw">while</span> (!q.empty()) {
+                    auto [x, y] = q.front();
+                    q.pop();
+                    <span class="kw">for</span> (<span class="kw">int</span> d = 0; d &lt; 4; d++) {
+                        <span class="kw">int</span> nx = x + dr[d], ny = y + dc[d];
+                        <span class="kw">if</span> (nx &lt; 0 || nx == n || ny &lt; 0 || ny == m) <span class="kw">continue</span>;
+                        <span class="kw">if</span> (board[nx][ny] != '1') <span class="kw">continue</span>;
+                        board[nx][ny] = '2';
+                        q.push({nx, ny});
+                    }
+                }
+            }
+        }
+        <span class="kw">return</span> islands;
+    }</pre>
+
+      <h2 id="surrounded">五、被围绕的区域：从边界往里感染</h2>
+      <figure class="fig" id="figSurrounded"></figure>
+      <p>棋盘上 'O' 是被 'X' 包围的区域候选，问哪些 'O' 被完全围住（上下左右走不到边界），把它们填成 'X'。</p>
+      <p>顺着题意做，是对每块 'O' 都查一次「能不能走到边界」。查一次的代价是整片区域的大小，于是总代价是每片区域大小的平方和，网格一大立刻爆炸。</p>
+      <p>反过来想就通了：走不到边界的 'O' 才是要改的，那先把走得到边界的都标记出来，剩下没被标记的就是答案。边界只有最外一圈，从这一圈上的每个 'O' 出发感染，把这些格子临时改成 'F'；最后扫一遍，还是 'O' 的填成 'X'，是 'F' 的还原成 'O'。</p>
+      <p>实测（随机棋盘，密度 0.6）：n=40 时顺向 11.99ms、反向 0.06ms；n=200 时顺向 2126.76ms、反向 0.44ms，差约 4800 倍。全是 'O' 的棋盘更极端，n=60 时顺向 97.54ms、反向 0.06ms。</p>
+
+    <pre class="code"><span class="cm">// 从边界上的 'O' 出发感染成 'F'，剩下的 'O' 全是被围住的</span>
+    <span class="kw">void</span> <span class="fn">dfs</span>(vector&lt;<span class="kw">string</span>&gt;&amp; board, <span class="kw">int</span> n, <span class="kw">int</span> m, <span class="kw">int</span> i, <span class="kw">int</span> j) {
+        <span class="kw">if</span> (i &lt; 0 || i == n || j &lt; 0 || j == m || board[i][j] != 'O') {
+            <span class="kw">return</span>;
+        }
+        board[i][j] = 'F';
+        dfs(board, n, m, i + 1, j);
+        dfs(board, n, m, i - 1, j);
+        dfs(board, n, m, i, j + 1);
+        dfs(board, n, m, i, j - 1);
+    }
+
+    <span class="kw">void</span> <span class="fn">solve</span>(vector&lt;<span class="kw">string</span>&gt;&amp; board) {
+        <span class="kw">int</span> n = board.size();
+        <span class="kw">int</span> m = board[0].size();
+        <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; m; j++) {
+            <span class="kw">if</span> (board[0][j] == 'O') dfs(board, n, m, 0, j);
+            <span class="kw">if</span> (board[n - 1][j] == 'O') dfs(board, n, m, n - 1, j);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n - 1; i++) {
+            <span class="kw">if</span> (board[i][0] == 'O') dfs(board, n, m, i, 0);
+            <span class="kw">if</span> (board[i][m - 1] == 'O') dfs(board, n, m, i, m - 1);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; m; j++) {
+                <span class="kw">if</span> (board[i][j] == 'O') board[i][j] = 'X';
+                <span class="kw">else</span> <span class="kw">if</span> (board[i][j] == 'F') board[i][j] = 'O';
+            }
+        }
+    }</pre>
+
+      <div class="viz" id="vizSur">
+        <p class="viz-title">演示：先从边界感染成 F，剩下的 O 全是被围住的</p>
+        <div class="viz-controls">
+          <select id="surSel"></select>
+          <button id="surPrev">上一步</button>
+          <button id="surNext">下一步</button>
+          <button id="surReset">重置</button>
+        </div>
+        <div class="cell-grid" id="surGrid"></div>
+        <p class="viz-note" id="surNote"></p>
+        <p class="viz-answer" id="surAns"></p>
+      </div>
+
+      <h2 id="comp">六、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>指标</th><th>值</th></tr>
+        <tr><td>时间复杂度</td><td>O(n×m)，网格 n 行 m 列</td></tr>
+        <tr><td>额外空间</td><td>O(n×m)（递归栈，最坏等于连通块大小；队列版是 O(n×m) 的队列）</td></tr>
+        <tr><td>标记写在原网格上</td><td>不额外开 visited 数组，代价是原数据被改掉</td></tr>
+      </table>
+      <p>时间这一项不含系数里的方向数：每格摊到 4 次调用加 1 次进入，常数是 5。递归版的额外空间严格说是 O(最大连通块大小)，全陆地网格下等于格子数。</p>
+
+      <h2 id="sum">七、总结</h2>
+      <p>感染函数四行：判越界与不合格、改标记、四个方向递归。标记不撤销是整套做法的支点，它让「主循环扫到未改过的格子」等价于「发现一片新区域」。</p>
+      <p>用的时候记两件事。一是递归深度等于连通块大小，整片连在一起的网格会打穿栈，七万层上下就是本机上限，这时候换队列版。二是别顺着题意硬查，先问一句「剩下的才是答案吗」，能反过来就反过来：被围绕的区域从边界感染，比逐块判定快三个数量级。</p>
+      <p>把标记换成编号、把一次感染换成多次感染，这套动作还能往上叠出更难的用法。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>岛屿数量</td><td><a href="https://leetcode.cn/problems/number-of-islands/" target="_blank">leetcode.cn/problems/number-of-islands</a></td></tr>
+        <tr><td>LeetCode</td><td>被围绕的区域</td><td><a href="https://leetcode.cn/problems/surrounded-regions/" target="_blank">leetcode.cn/problems/surrounded-regions</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解058【必备】洪水填充</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function rect(x,y,w,h,fill,stroke){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+(fill||'#fff')+'" stroke="'+(stroke||'#cbd5e1')+'"/>'; }
+function box(x,y,w,h,fill,stroke){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="4" fill="'+(fill||'#f6f7f9')+'" stroke="'+(stroke||'#e6e8eb')+'"/>'; }
+function arrow(x1,y1,x2,y2,c){ c=c||'#ea580c'; return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+c+'" stroke-width="1.6" marker-end="url(#ah)"/>'; }
+function defs(){ return '<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#ea580c"/></marker></defs>'; }
+function put(id,body){ var e=document.getElementById(id); if(e) e.innerHTML=body; }
+
+// ===== 图 1：感染函数的形状 =====
+(function(){
+  var W=720,H=250, b=defs();
+  b += txt(W/2, 20, '感染函数：不合格就返回，合格就改标记，然后朝四个方向继续', {fs:13});
+  var cw=52, ch=44, x0=40, y0=52;
+  for(var i=0;i<3;i++) for(var j=0;j<3;j++){
+    var isC = (i===1&&j===1);
+    var isN = (Math.abs(i-1)+Math.abs(j-1)===1);
+    var fill = isC ? '#ffedd5' : (isN ? '#dbeafe' : '#f6f7f9');
+    var st = isC ? '#ea580c' : (isN ? '#2563eb' : '#e6e8eb');
+    b += rect(x0+j*(cw+10), y0+i*(ch+10), cw, ch, fill, st);
+    b += txt(x0+j*(cw+10)+cw/2, y0+i*(ch+10)+ch/2+4, isC?'(i,j)':(isN?'邻':'角'), {fs:12, fill: isC?'#9a3412':'#1f2937'});
+  }
+  var cx = x0+1*(cw+10)+cw/2, cy = y0+1*(ch+10)+ch/2;
+  b += arrow(cx, cy-22, cx, cy-34);
+  b += arrow(cx, cy+22, cx, cy+34);
+  b += arrow(cx-26, cy, cx-38, cy);
+  b += arrow(cx+26, cy, cx+38, cy);
+  b += txt(x0+1*(cw+10)+cw/2, y0-6, '上', {fs:12, fill:'#ea580c'});
+  b += txt(x0+1*(cw+10)+cw/2, y0+2*(ch+10)+ch+18, '下', {fs:12, fill:'#ea580c'});
+
+  var bx = 250;
+  var lines = [
+    ['1. 越界或者不是要找的值', '直接 return，这一支到此为止'],
+    ['2. 是就把它改成别的', '改完不还原，同一格只处理一次'],
+    ['3. 四个方向各调一次自己', '方向顺序随便写，四个都要有'],
+    ['4. 主循环扫到未改过的格子', '等价于发现了一片新区域']
+  ];
+  lines.forEach(function(L, k){
+    var y = 54 + k*46;
+    b += box(bx, y, 450, 38, '#eef4ff', '#cbd5e1');
+    b += txt(bx+12, y+16, L[0], {fs:12, an:'start', fill:'#1e3a8a'});
+    b += txt(bx+12, y+31, L[1], {fs:12, an:'start', fill:'#4b5563'});
+  });
+  put('figInfect', svg(W,H,b));
+})();
+
+// ===== 图 2：岛屿数量前后对照 =====
+(function(){
+  var W=720,H=300, b='';
+  b += txt(W/2, 20, '4×5 网格：主循环扫到 3 次未改过的 \'1\'，就是 3 座岛', {fs:13});
+  var raw = ['11000','11000','00100','00011'];
+  var after = [['2','2','0','0','0'],['2','2','0','0','0'],['0','0','3','0','0'],['0','0','0','4','4']];
+  var cw=40, ch=34, gap=8;
+  var color = {'2':'#dbeafe','3':'#ffedd5','4':'#dcfce7','5':'#f3e8ff'};
+  var sc = {'2':'#2563eb','3':'#ea580c','4':'#16a34a','5':'#9333ea'};
+  function draw(ox, oy, title){
+    b += txt(ox+2*(cw+gap)+cw/2, oy-8, title, {fs:12, fill:'#4b5563'});
+    for(var i=0;i<4;i++) for(var j=0;j<5;j++){
+      var x = ox+j*(cw+gap), y = oy+i*(ch+gap);
+      if(raw[i][j]==='1'){
+        b += rect(x, y, cw, ch, '#dbeafe', '#2563eb');
+        b += txt(x+cw/2, y+ch/2+4, '1', {fs:13, fill:'#1e40af'});
+      } else {
+        b += rect(x, y, cw, ch, '#f6f7f9', '#e6e8eb');
+        b += txt(x+cw/2, y+ch/2+4, '0', {fs:13, fill:'#9aa0a6'});
+      }
+    }
+  }
+  draw(30, 46, '原网格');
+  b += txt(255, 130, '→', {fs:22, fill:'#ea580c'});
+  var ox2 = 300;
+  b += txt(ox2+2*(cw+gap)+cw/2, 38, '感染并编号后', {fs:12, fill:'#4b5563'});
+  for(var i=0;i<4;i++) for(var j=0;j<5;j++){
+    var x = ox2+j*(cw+gap), y = 46+i*(ch+gap);
+    var v = after[i][j];
+    if(v==='0'){
+      b += rect(x, y, cw, ch, '#f6f7f9', '#e6e8eb');
+      b += txt(x+cw/2, y+ch/2+4, '0', {fs:13, fill:'#9aa0a6'});
+    } else {
+      b += rect(x, y, cw, ch, color[v], sc[v]);
+      b += txt(x+cw/2, y+ch/2+4, '岛'+(v-1), {fs:11, fill:'#1f2937'});
+    }
+  }
+  b += box(560, 60, 140, 60, '#fff7ed', '#fdba74');
+  b += txt(630, 82, 'islands = 3', {fs:14, fill:'#9a3412'});
+  b += txt(630, 102, '数的是启动次数', {fs:11, fill:'#9a3412'});
+  b += box(560, 150, 140, 60, '#eef4ff', '#cbd5e1');
+  b += txt(630, 172, '感染 12 格', {fs:13, fill:'#1e3a8a'});
+  b += txt(630, 190, '调用 3+12×4 = 51 次', {fs:11, fill:'#1e3a8a'});
+  b += txt(W/2, 250, '主循环每格只看一眼：是 \'1\' 就启动一次感染，是 \'0\' 或 \'2\' 就跳过', {fs:12, fill:'#4b5563'});
+  b += txt(W/2, 274, '实测 200×200 全陆地网格共调用 160001 次 = 4×40000+1，每格摊 4 次', {fs:12, fill:'#4b5563'});
+  put('figIslands', svg(W,H,b));
+})();
+
+// ===== 图 3：每格被拜访几次 =====
+(function(){
+  var W=720,H=270, b='';
+  b += txt(W/2, 20, '每格平均被感染函数拜访几次（200×200 网格实测）', {fs:13});
+  var data = [['全是陆地', 4.00, '#2563eb'],['密度 0.7', 2.80, '#3b82f6'],['密度 0.5', 2.06, '#60a5fa'],['密度 0.3', 1.32, '#93c5fd']];
+  var y0=50, bw=90, gap=30, x0=90;
+  var maxV = 4.5;
+  b += '<line x1="60" y1="230" x2="660" y2="230" stroke="#cbd5e1"/>';
+  data.forEach(function(d,k){
+    var x = x0 + k*(bw+gap);
+    var h = d[1]/maxV*160;
+    b += rect(x, 230-h, bw, h, d[2], d[2]);
+    b += txt(x+bw/2, 230-h-8, d[1].toFixed(2), {fs:12, fill:'#1f2937'});
+    b += txt(x+bw/2, 248, d[0], {fs:12, fill:'#4b5563'});
+  });
+  b += txt(60, 230, '0', {fs:11, an:'end', fill:'#6b7280'});
+  b += txt(60, 70, '4.5', {fs:11, an:'end', fill:'#6b7280'});
+  b += txt(W/2, 268, '上界恒为 5 次/格：四个方向各来一次，再加自己被进入的那一次', {fs:12, fill:'#4b5563'});
+  put('figVisit', svg(W,H,b));
+})();
+
+// ===== 图 4：递归深度 =====
+(function(){
+  var W=720,H=250, b='';
+  b += txt(W/2, 20, '递归深度 = 连通块长度：全陆地网格会打穿栈', {fs:13});
+  var rows = [
+    ['200×200 全陆地', '40001 层', '#2563eb', '实测'],
+    ['随机 200×200 密度 0.6', '1246 层', '#60a5fa', '实测'],
+    ['随机 200×200 密度 0.5', '88 层', '#93c5fd', '实测'],
+    ['随机 200×200 密度 0.4', '41 层', '#bfdbfe', '实测'],
+    ['272×272 全陆地', '73984 层，能跑完', '#dcfce7', '实测'],
+    ['274×274 全陆地', '75076 层，段错误', '#fecaca', '实测']
+  ];
+  rows.forEach(function(r,k){
+    var y = 44 + k*32;
+    b += box(40, y, 400, 26, '#f6f7f9', '#e6e8eb');
+    b += txt(52, y+18, r[0], {fs:12, an:'start', fill:'#1f2937'});
+    b += box(450, y, 230, 26, '#fff', '#cbd5e1');
+    b += txt(462, y+18, r[1], {fs:12, an:'start', fill:'#1f2937'});
+  });
+  b += txt(W/2, 240, '本机 macOS 栈 8176 KB，这个写法的帧约 113 字节，七万层出头到顶', {fs:12, fill:'#4b5563'});
+  put('figDepth', svg(W,H,b));
+})();
+
+// ===== 图 5：被围绕的区域，顺向 vs 反向 =====
+(function(){
+  var W=720,H=348, b=defs();
+  b += txt(W/2, 20, '被围绕的区域：逐块判定 vs 从边界感染', {fs:13});
+  b += box(30, 36, 300, 140, '#fef2f2', '#fecaca');
+  b += txt(180, 56, '顺着题意做', {fs:13, fill:'#991b1b'});
+  var l1 = ['每块 \'O\' 都查一次能不能走到边界',
+            '查一次 = 整片区域的大小',
+            '总代价 = 每片大小的平方和',
+            'n=200 随机棋盘：2126.76ms'];
+  l1.forEach(function(s,k){ b += txt(44, 82+k*24, s, {fs:12, an:'start', fill:'#7f1d1d'}); });
+  b += box(390, 36, 300, 140, '#f0fdf4', '#bbf7d0');
+  b += txt(540, 56, '反过来做', {fs:13, fill:'#166534'});
+  var l2 = ['边界上的 \'O\' 出发感染成 \'F\'',
+            '感染总量就是格子数',
+            '扫一遍：\'O\'→\'X\'，\'F\'→\'O\'',
+            'n=200 随机棋盘：0.44ms'];
+  l2.forEach(function(s,k){ b += txt(404, 82+k*24, s, {fs:12, an:'start', fill:'#14532d'}); });
+  b += arrow(340, 106, 380, 106, '#ea580c');
+  b += txt(360, 99, '反过来', {fs:11, fill:'#ea580c'});
+  b += txt(70, 200, '耗时对照（随机棋盘，密度 0.6，毫秒，对数刻度）', {fs:12, an:'start', fill:'#4b5563'});
+  var data = [['n=40', 11.99, 0.06], ['n=80', 47.80, 0.08], ['n=120', 101.11, 0.14], ['n=200', 2126.76, 0.44]];
+  var x0=90, gw=130;
+  b += '<line x1="70" y1="316" x2="660" y2="316" stroke="#cbd5e1"/>';
+  data.forEach(function(d,k){
+    var x = x0 + k*gw;
+    var h1 = Math.log10(d[1]*100)/Math.log10(300000)*80;
+    var h2 = Math.log10(d[2]*100)/Math.log10(300000)*80;
+    b += rect(x, 316-h1, 34, h1, '#fca5a5', '#dc2626');
+    b += rect(x+40, 316-h2, 34, h2, '#86efac', '#16a34a');
+    b += txt(x+17, 316-h1-6, ''+d[1], {fs:11, fill:'#991b1b'});
+    b += txt(x+57, 316-h2-6, ''+d[2], {fs:11, fill:'#166534'});
+    b += txt(x+37, 334, d[0], {fs:12, fill:'#4b5563'});
+  });
+  b += txt(70, 316, '0', {fs:11, an:'end', fill:'#6b7280'});
+  b += txt(W/2, 346, '红柱顺着题意做，绿柱反过来做，差出两个数量级以上', {fs:11, fill:'#6b7280'});
+  put('figSurrounded', svg(W,356,b));
+})();
+
+// ===== 演示 1：岛屿数量 =====
+(function(){
+  var PRESETS = [
+    {name:'样例一（1 座岛）', g:['11110','11010','11000','00000'], ans:1},
+    {name:'样例二（3 座岛）', g:['11000','11000','00100','00011'], ans:3},
+    {name:'四角加中心（5 座）', g:['101','010','101'], ans:5},
+    {name:'环形（1 座）', g:['111','101','111'], ans:1},
+    {name:'7×5 混合（3 座）', g:['1111101','1000101','1011100','1000000','1110111'], ans:3},
+    {name:'随机网格', g:null, ans:null}
+  ];
+  function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function randGrid(){
+    var rnd = mulberry32(20261007);
+    var n = 5 + Math.floor(rnd()*3), m = 6 + Math.floor(rnd()*3);
+    var g = [];
+    for(var i=0;i<n;i++){ var s=''; for(var j=0;j<m;j++) s += (rnd() < 0.45 ? '1' : '0'); g.push(s); }
+    return g;
+  }
+  function gen(g){
+    var n=g.length, m=g[0].length;
+    var b = g.map(function(r){ return r.split(''); });
+    var steps=[], islands=0, infected=0;
+    function snap(){ return b.map(function(r){ return r.join(''); }); }
+    for(var i=0;i<n;i++){
+      for(var j=0;j<m;j++){
+        if(b[i][j] !== '1') continue;
+        islands++;
+        steps.push({grid:snap(), cur:[i,j], islands:islands, calls:islands+infected*4,
+          msg:'扫到 ('+i+','+j+')，还是没改过的陆地：第 '+islands+' 座岛，从这里开始感染'});
+        var st=[[i,j]];
+        while(st.length){
+          var c=st.pop(), x=c[0], y=c[1];
+          if(x<0||x>=n||y<0||y>=m||b[x][y]!=='1') continue;
+          b[x][y]='2'; infected++;
+          steps.push({grid:snap(), cur:[x,y], islands:islands, calls:islands+infected*4,
+            msg:'感染 ('+x+','+y+')：把 \'1\' 改成 \'2\''});
+          st.push([x,y+1]); st.push([x,y-1]); st.push([x+1,y]); st.push([x-1,y]);
+        }
+      }
+    }
+    steps.push({grid:snap(), cur:null, islands:islands, calls:islands+infected*4,
+      msg:'扫完，一共 '+islands+' 座岛'});
+    return {steps:steps, ans:islands, n:n, m:m};
+  }
+  var sel=document.getElementById('islSel'), gridEl=document.getElementById('islGrid'),
+      noteEl=document.getElementById('islNote'), ansEl=document.getElementById('islAns');
+  if(!sel) return;
+  var cur=null, idx=0;
+  PRESETS.forEach(function(p,k){ var o=document.createElement('option'); o.value=k; o.textContent=p.name; sel.appendChild(o); });
+  function build(){
+    var p = PRESETS[+sel.value];
+    var g = p.g ? p.g.slice() : randGrid();
+    cur = gen(g);
+    idx = 0;
+    gridEl.style.gridTemplateColumns = 'repeat('+cur.m+', 32px)';
+    redraw();
+  }
+  function redraw(){
+    var s = cur.steps[idx];
+    var html='';
+    for(var i=0;i<cur.n;i++) for(var j=0;j<cur.m;j++){
+      var v = s.grid[i][j], cls='cell ';
+      if(v==='0') cls += 'w'; else if(v==='2') cls += 'done'; else cls += 'land';
+      if(s.cur && s.cur[0]===i && s.cur[1]===j) cls += ' cur';
+      html += '<span class="'+cls+'">'+v+'</span>';
+    }
+    gridEl.innerHTML = html;
+    noteEl.textContent = s.msg + '　（感染函数调用 '+s.calls+' 次）';
+    ansEl.textContent = '岛屿数 = '+s.islands+'　进度 '+(idx+1)+'/'+cur.steps.length;
+  }
+  sel.addEventListener('change', build);
+  document.getElementById('islNext').addEventListener('click', function(){ if(idx<cur.steps.length-1){ idx++; redraw(); } });
+  document.getElementById('islPrev').addEventListener('click', function(){ if(idx>0){ idx--; redraw(); } });
+  document.getElementById('islReset').addEventListener('click', function(){ idx=0; redraw(); });
+  build();
+})();
+
+// ===== 演示 2：被围绕的区域 =====
+(function(){
+  var PRESETS = [
+    {name:'样例一', g:['XXXX','XOOX','XXOX','XOXX'], ans:['XXXX','XXXX','XXXX','XOXX']},
+    {name:'棋盘格', g:['XOXOXO','OXOXOX','XOXOXO','OXOXOX'], ans:['XOXOXO','OXXXXX','XXXXXO','OXOXOX']},
+    {name:'回字', g:['OOOOO','OXXXO','OXOXO','OXXXO','OOOOO'], ans:['OOOOO','OXXXO','OXXXO','OXXXO','OOOOO']},
+    {name:'对角不算连通', g:['OXX','XOX','XXO'], ans:['OXX','XXX','XXO']},
+    {name:'随机棋盘', g:null, ans:null}
+  ];
+  function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function randGrid(){
+    var rnd = mulberry32(424242);
+    var n = 4 + Math.floor(rnd()*3), m = 5 + Math.floor(rnd()*3);
+    var g = [];
+    for(var i=0;i<n;i++){ var s=''; for(var j=0;j<m;j++) s += (rnd() < 0.55 ? 'O' : 'X'); g.push(s); }
+    return g;
+  }
+  function gen(g){
+    var n=g.length, m=g[0].length;
+    var b = g.map(function(r){ return r.split(''); });
+    var steps=[];
+    function snap(){ return b.map(function(r){ return r.join(''); }); }
+    steps.push({grid:snap(), cur:null, msg:'原棋盘：先找最外一圈上的 O'});
+    function infect(sx,sy){
+      var st=[[sx,sy]];
+      while(st.length){
+        var c=st.pop(), x=c[0], y=c[1];
+        if(x<0||x>=n||y<0||y>=m||b[x][y]!=='O') continue;
+        b[x][y]='F';
+        steps.push({grid:snap(), cur:[x,y], msg:'从边界走过来，('+x+','+y+') 标成 F：它够得着外面'});
+        st.push([x,y+1]); st.push([x,y-1]); st.push([x+1,y]); st.push([x-1,y]);
+      }
+    }
+    for(var j=0;j<m;j++){
+      if(b[0][j]==='O') infect(0,j);
+      if(n>1 && b[n-1][j]==='O') infect(n-1,j);
+    }
+    for(var i=1;i<n-1;i++){
+      if(b[i][0]==='O') infect(i,0);
+      if(b[i][m-1]==='O') infect(i,m-1);
+    }
+    steps.push({grid:snap(), cur:null, msg:'边界能到的都标成 F 了，剩下还是 O 的就是被围住的'});
+    for(var i2=0;i2<n;i2++){
+      for(var j2=0;j2<m;j2++){
+        if(b[i2][j2]==='O'){ b[i2][j2]='X'; steps.push({grid:snap(), cur:[i2,j2], msg:'('+i2+','+j2+') 走不到边界：填成 X'}); }
+        else if(b[i2][j2]==='F'){ b[i2][j2]='O'; steps.push({grid:snap(), cur:[i2,j2], msg:'('+i2+','+j2+') 够得着边界：还原成 O'}); }
+      }
+    }
+    steps.push({grid:snap(), cur:null, msg:'结算完毕'});
+    return {steps:steps, n:n, m:m};
+  }
+  var sel=document.getElementById('surSel'), gridEl=document.getElementById('surGrid'),
+      noteEl=document.getElementById('surNote'), ansEl=document.getElementById('surAns');
+  if(!sel) return;
+  var cur=null, idx=0;
+  PRESETS.forEach(function(p,k){ var o=document.createElement('option'); o.value=k; o.textContent=p.name; sel.appendChild(o); });
+  function build(){
+    var p = PRESETS[+sel.value];
+    var g = p.g ? p.g.slice() : randGrid();
+    cur = gen(g);
+    idx = 0;
+    gridEl.style.gridTemplateColumns = 'repeat('+cur.m+', 32px)';
+    redraw();
+  }
+  function redraw(){
+    var s = cur.steps[idx];
+    var html='';
+    for(var i=0;i<cur.n;i++) for(var j=0;j<cur.m;j++){
+      var v = s.grid[i][j], cls='cell ';
+      if(v==='X') cls += 'gone'; else if(v==='O') cls += 'keep'; else cls += 'mark';
+      if(s.cur && s.cur[0]===i && s.cur[1]===j) cls += ' cur';
+      html += '<span class="'+cls+'">'+v+'</span>';
+    }
+    gridEl.innerHTML = html;
+    noteEl.textContent = s.msg;
+    ansEl.textContent = '进度 '+(idx+1)+'/'+cur.steps.length + (idx===cur.steps.length-1 ? '　剩下的 O 全部填成了 X' : '');
+  }
+  sel.addEventListener('change', build);
+  document.getElementById('surNext').addEventListener('click', function(){ if(idx<cur.steps.length-1){ idx++; redraw(); } });
+  document.getElementById('surPrev').addEventListener('click', function(){ if(idx>0){ idx--; redraw(); } });
+  document.getElementById('surReset').addEventListener('click', function(){ idx=0; redraw(); });
+  build();
+})();
+})();
+</script>
+</body>
+</html>

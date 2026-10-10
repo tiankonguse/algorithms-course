@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>目标和与最后一块石头：把 ± 号变成挑子集</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); min-height: 22px; }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); min-height: 22px; }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.kv { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; color: var(--text-dim); margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>目标和与最后一块石头：把 ± 号变成挑子集</h1>
+      <p class="intro">两道看起来毫无关系的题，最后落到同一张表上：一张记「凑出某个和有多少种办法」，一张记「不超过某个和最多能凑到多少」。共同点是它们都在问「这个数要不要选进集合里」，也就是 01 背包。</p>
+
+      <h2>零、目标和：一个等式换掉整个搜索</h2>
+      <p>nums = [1, 1, 1, 1, 1]，target = 3。给每个数前面放 + 或 −，问有多少种放法能得到 3。每个位置两种选择，n = 20 就是 2<sup>20</sup> 约一百万种，n 再大就得换个想法。</p>
+      <p>把取正号的数记成集合 A，取负号的记成 B，那么：</p>
+      <p class="kv">sum(A) − sum(B) = target　　且　　sum(A) + sum(B) = s（数组总和）</p>
+      <p>两式相加，B 消掉了：<code>2 * sum(A) = target + s</code>，也就是 <code>sum(A) = (target + s) / 2</code>。</p>
+      <p>这一步把问题整个换了。原来是「给每个位置挑符号」，现在是「从数组里挑一个子集，让它的和恰好是 (target + s) / 2」。每一种这样的子集，唯一对应一种符号放法（子集里的取正，其余取负），所以计数也相等。</p>
+      <figure class="fig" id="figSign"></figure>
+      <p>三个能直接返回 0 的情况要提前判掉：target 比 s 还大，够不着；target + s 是奇数，除不开；还有 target 的绝对值超过 s。第三个容易漏，nums 全部取负也到不了 −s 以下。</p>
+
+      <h2>一、两条路：平移表，或者直接转背包</h2>
+      <p>第一条路不绕那个等式，按原样做记忆化：从左往右，每个位置放 + 或放 −，问剩下这些数能不能凑到 target。中间的累加和可能是负数，数组下标不能为负，于是整体加一个偏移量 s，把 −s 到 +s 搬到 0 到 2s。</p>
+      <figure class="fig" id="figShift"></figure>
+      <p>整张表要开 (n + 1) × (2s + 1) 个 int。实测 LC494 的规模（n = 20，每个数不超过 1000，s = 12216）下是 513093 格，跑 1.908 毫秒。</p>
+    <pre class="code"><span class="cm">// 平移：累加和可能是负数，下标不能为负，整体加个偏移量 s</span>
+    <span class="kw">int</span> <span class="fn">targetSumByShift</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> target) {
+        <span class="kw">int</span> s = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> num : nums) s += num;
+        <span class="kw">if</span> (target &lt; -s || target &gt; s) <span class="kw">return</span> 0;
+        <span class="kw">int</span> n = nums.size(), m = 2 * s + 1;          <span class="cm">// -s ~ +s 共 2s+1 个位置</span>
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">dp</span>(n + 1, vector&lt;<span class="kw">int</span>&gt;(m, 0));
+        dp[n][target + s] = 1;                        <span class="cm">// 原本的 dp[n][target] = 1</span>
+        <span class="kw">for</span> (<span class="kw">int</span> i = n - 1; i &gt;= 0; i--) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = -s; j &lt;= s; j++) {
+                <span class="kw">if</span> (j + nums[i] + s &lt; m) {            <span class="cm">// 这一位前面放 +</span>
+                    dp[i][j + s] = dp[i + 1][j + nums[i] + s];
+                }
+                <span class="kw">if</span> (j - nums[i] + s &gt;= 0) {           <span class="cm">// 这一位前面放 -</span>
+                    dp[i][j + s] += dp[i + 1][j - nums[i] + s];
+                }
+            }
+        }
+        <span class="kw">return</span> dp[0][s];                              <span class="cm">// 原本要返回 dp[0][0]</span>
+    }</pre>
+      <p>第二条路用上面那个等式，只需要一张长度为 (target + s) / 2 + 1 的一维表。同样的数据下是 8145 格，0.184 毫秒，比平移表少 63 倍的格子。表小这么多，是因为平移表要把「所有可能的累加和」都留着，而背包表只关心小于等于目标的那一段。</p>
+    <pre class="code"><span class="cm">// 记取正号的集合为 A，取负号的集合为 B</span>
+    <span class="cm">// sum(A) - sum(B) = target，而 sum(A) + sum(B) = 数组总和 s</span>
+    <span class="cm">// 两式相加：2 * sum(A) = target + s，即 sum(A) = (target + s) / 2</span>
+    <span class="cm">// 于是「凑出 target 的方案数」=「凑出 (target + s) / 2 的子集个数」</span>
+    <span class="kw">int</span> <span class="fn">findTargetSumWays</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> target) {
+        <span class="kw">int</span> s = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> num : nums) s += num;
+        <span class="kw">if</span> (s &lt; target || ((target &amp; 1) ^ (s &amp; 1)) == 1) <span class="kw">return</span> 0;  <span class="cm">// 够不着，或奇偶性不对</span>
+        <span class="kw">return</span> subsets(nums, (target + s) &gt;&gt; 1);
+    }
+
+    <span class="cm">// 非负数组 nums 里，累加和恰好是 t 的子集有多少个</span>
+    <span class="kw">int</span> <span class="fn">subsets</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> t) {
+        <span class="kw">if</span> (t &lt; 0) <span class="kw">return</span> 0;
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(t + 1, 0);
+        dp[0] = 1;                                    <span class="cm">// 空集</span>
+        <span class="kw">for</span> (<span class="kw">int</span> num : nums) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = t; j &gt;= num; j--) {          <span class="cm">// 同样要从大到小</span>
+                dp[j] += dp[j - num];
+            }
+        }
+        <span class="kw">return</span> dp[t];
+    }</pre>
+      <p>背包版的转移是 <code>dp[j] += dp[j - num]</code>，不是 max。含义是「凑出 j 的办法数」= 原来就有的办法数 + 拿上 num 之后凑出 j 的办法数。初值 <code>dp[0] = 1</code> 代表空集，这一项必须给，否则整张表恒为 0。j 仍然要从大到小，理由和 01 背包一样：每个数只能用一次。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示一：目标和的两种写法</p>
+        <div id="v1svg"></div>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>数据
+            <select id="v1case">
+              <option value="0">[1,1,1,1,1] target=3</option>
+              <option value="1">[1,2,3] target=0</option>
+              <option value="2">[2,1] target=1</option>
+            </select>
+          </label>
+          <label>写法
+            <select id="v1mode">
+              <option value="1">转 01 背包</option>
+              <option value="0">平移表</option>
+            </select>
+          </label>
+          <button id="v1prev">上一步</button>
+          <button id="v1next">下一步</button>
+          <button id="v1last">到末尾</button>
+          <button id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <h2>二、最后一块石头：粉碎就是在分正负号</h2>
+      <p>一堆石头，每次挑两块 x ≤ y 一起粉碎，剩下 |y − x|。问最后剩下的石头最小能有多重。</p>
+      <p>这里有个跳步。把每次粉碎想成「给这两块分配相反的符号」，反复做下去，最后剩下的重量等于 |Σ ± stones[i]|，其中每个石头自己挑正或负。这个等价性不是显然的，本机用真正按规则枚举所有粉碎顺序的暴力程序跑过 3000 组随机样本（n 在 1 到 6），和 |Σ ± | 的结果 0 组不一致。</p>
+      <p>于是问题变成：把石头分成两堆，让两堆重量差尽量小。一堆的总重量不会超过 sum / 2（超过的话把两堆互换），那就用 01 背包找出「不超过 sum / 2 的最接近的那个子集和」，答案就是 sum − 2 × near。</p>
+      <figure class="fig" id="figStone"></figure>
+      <p>转移是 <code>dp[j] = max(dp[j], dp[j - num] + num)</code>，dp 全 0 初始化，回答的是「不超过 j」。这正好符合「不超过 sum / 2 的最接近值」这个要求，不需要额外处理装不满的情况。</p>
+    <pre class="code"><span class="cm">// 每次粉碎等价于给石头分正负号，最后剩下的重量 = |Σ ± stones[i]|</span>
+    <span class="cm">// 于是问题变成：把石头分成两堆，让两堆的重量差尽量小</span>
+    <span class="kw">int</span> <span class="fn">lastStoneWeightII</span>(vector&lt;<span class="kw">int</span>&gt;&amp; stones) {
+        <span class="kw">int</span> sum = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> x : stones) sum += x;
+        <span class="kw">int</span> near = nearSum(stones, sum / 2);
+        <span class="kw">return</span> sum - near - near;
+    }
+
+    <span class="cm">// 非负数组 nums 中，累加和不超过 t 但最接近 t 的是多少</span>
+    <span class="kw">int</span> <span class="fn">nearSum</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> t) {
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(t + 1, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> num : nums) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = t; j &gt;= num; j--) {
+                dp[j] = max(dp[j], dp[j - num] + num);
+            }
+        }
+        <span class="kw">return</span> dp[t];
+    }</pre>
+      <p>实测 n = 300、sum = 15382 的随机数据，near 算出 7691，答案 0，耗时 0.744 毫秒。LC1049 的样例 [2, 7, 4, 1, 8, 1]：sum = 23，sum / 2 = 11，near 恰好是 11（2 + 8 + 1），答案是 23 − 22 = 1。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示二：分两堆，让差尽量小</p>
+        <div id="v2svg"></div>
+        <p class="viz-note" id="v2note"></p>
+        <p class="viz-answer" id="v2ans"></p>
+        <div class="viz-controls">
+          <label>石头
+            <select id="v2case">
+              <option value="0">[2,7,4,1,8,1]</option>
+              <option value="1">[3,7,2]</option>
+              <option value="2">[1,1,2]</option>
+            </select>
+          </label>
+          <button id="v2prev">上一步</button>
+          <button id="v2next">下一步</button>
+          <button id="v2last">到末尾</button>
+          <button id="v2reset">重置</button>
+        </div>
+      </div>
+
+      <h2>三、两张表的差别</h2>
+      <p>两题的 dp 定义只差一个字：一个记「有多少种」，一个记「最多多少」。</p>
+      <figure class="fig" id="figTable"></figure>
+      <p>这个差别决定了初值和转移符号。计数问题要 <code>dp[0] = 1</code>（空集算一种办法）和 <code>+=</code>；最值问题要全 0 初值（什么都不选时价值 0）和 <code>max</code>。把这两套弄混是最常见的错法：计数题用 max，会丢掉所有重复路径，答案偏小；最值题用 +=，会算出一个毫无意义的累加值。</p>
+
+      <h2>四、复杂度分析</h2>
+      <table class="complexity">
+        <thead><tr><th>题目</th><th>做法</th><th>时间</th><th>额外空间</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>目标和</td><td>枚举符号</td><td>O(2<sup>n</sup>)</td><td>O(n)</td><td>递归栈深度 n，n = 20 就一百万次</td></tr>
+          <tr><td>目标和</td><td>平移表</td><td>O(n · s)</td><td>O(n · s)</td><td>表 (n+1)(2s+1) 个 int，s 是数组总和</td></tr>
+          <tr><td>目标和</td><td>转 01 背包</td><td>O(n · t)</td><td>O(t)</td><td>t = (target + s) / 2，实测比平移表少 63 倍格子</td></tr>
+          <tr><td>最后一块石头</td><td>01 背包</td><td>O(n · s)</td><td>O(s)</td><td>容量 s / 2，转移是 max 不是 +=</td></tr>
+        </tbody>
+      </table>
+      <p>两题的复杂度都写成了 O(n · 容量)，这个「容量」在目标和里是 (target + s) / 2，在石头题里是 s / 2。它跟 n 无关，所以这两道题的实际开销取决于数值范围。s = 12216 时表里才八千个格子，跑起来是微秒级；如果每个数能到 10<sup>9</sup>，这张表就开不出来了，得换别的手法。</p>
+      <p>目标和那题还有个点：方案数会很大，int 装不下。LC494 的约束下（n ≤ 20）最多 2<sup>20</sup> 约一百万，int 够用；数据放宽就要换成 long long。</p>
+
+      <h2>五、总结</h2>
+      <p>这两道题的关键都是「换一个问法」，换完之后是同一张 01 背包表。</p>
+      <p>几个要记住的点：</p>
+      <p>1）目标和里 <code>sum(A) = (target + s) / 2</code>，于是「挑符号的方案数」等于「和为 (target + s) / 2 的子集个数」。target 太大、奇偶性不对、绝对值超过 s，三种情况直接返回 0。</p>
+      <p>2）计数题用 <code>dp[0] = 1</code> 配 <code>+=</code>，最值题用全 0 初值配 <code>max</code>。混用的话计数题答案偏小，最值题答案毫无意义。</p>
+      <p>3）累加和可能为负时，平移一个偏移量 s 就能当数组下标用，代价是表长变成 2s + 1。能推出目标值的题（像目标和）用背包表更省。</p>
+      <p>4）最后一块石头那题，「反复粉碎」和「分正负号」是同一件事，本机 3000 组随机样本实测 0 组不一致。想到这一步，题目就从模拟题变成了背包题。</p>
+      <p>下一页处理一件货物带着附件、只能打包购买的情况，转移要从「两种可能」扩成「五种可能」。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>LeetCode</td><td>目标和</td><td><a href="https://leetcode.cn/problems/target-sum/" target="_blank">target-sum</a></td></tr>
+          <tr><td>LeetCode</td><td>最后一块石头的重量 II</td><td><a href="https://leetcode.cn/problems/last-stone-weight-ii/" target="_blank">last-stone-weight-ii</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解073【必备】背包dp-01背包、有依赖的背包</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            green: '#2e7d32', greenBg: '#e8f5e9', gray: '#9aa0a6', bg: '#f6f7f9',
+            border: '#e6e8eb', text: '#1e293b', dim: '#6b7280' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      (o.mono ? ' font-family="ui-monospace, Menlo, monospace"' : '') + '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx == null ? 4 : o.rx) +
+      '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.border) + '"' + (o.sw ? ' stroke-width="' + o.sw + '"' : '') + '/>';
+  }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+  function cell(x, y, w, h, v, o) {
+    o = o || {};
+    var s = rect(x, y, w, h, { fill: o.fill || '#fff', stroke: o.stroke || C.border, sw: o.sw });
+    s += txt(x + w / 2, y + h / 2 + 4, String(v), { size: o.size || 12, mono: true, fill: o.tc || C.text, weight: o.weight });
+    return s;
+  }
+
+  // ---------- 图 1：五种符号放法 = 五种子集 ----------
+  function figSign() {
+    var s = txt(340, 20, 'nums = [1,1,1,1,1]，target = 3：取正号的集合必须恰好是 4 个位置', { size: 13, weight: '600' });
+    var combos = [
+      [1, 1, 1, 1, 0], [1, 1, 1, 0, 1], [1, 1, 0, 1, 1], [1, 0, 1, 1, 1], [0, 1, 1, 1, 1]
+    ];
+    var cw = 62, x0 = 70, y0 = 40;
+    var i, j;
+    for (i = 0; i < 5; i++) {
+      var expr = [], sumA = 0, sumB = 0;
+      for (j = 0; j < 5; j++) {
+        var pos = combos[i][j] === 1;
+        expr.push((pos ? '+' : '−') + '1');
+        if (pos) sumA++; else sumB++;
+        s += cell(x0 + j * cw, y0 + i * 34, cw - 6, 30, pos ? '+1' : '−1', {
+          fill: pos ? C.blueBg : C.bg, stroke: pos ? C.blue : C.border, size: 12
+        });
+      }
+      s += txt(x0 + 5 * cw + 40, y0 + i * 34 + 20, 'sum(A) = ' + sumA + '　sum(B) = ' + sumB + '　' +
+        sumA + ' − ' + sumB + ' = 3', { size: 11, anchor: 'start', mono: true, fill: C.dim });
+    }
+    var y = y0 + 5 * 34 + 10;
+    s += txt(340, y, 's = 5，(target + s) / 2 = (3 + 5) / 2 = 4　→　和为 4 的子集有 C(5,4) = 5 个，答案 5', { size: 12, weight: '600', fill: C.blue });
+    s += txt(340, y + 22, '挑符号和挑子集一一对应，所以两边的计数一样', { size: 11, fill: C.dim });
+    wrap('figSign', y + 42, s,
+      '每个位置放 + 还是 −，等价于「这个数进不进集合 A」；等式两边一加，B 就消掉了');
+  }
+
+  // ---------- 图 2：平移 ----------
+  function figShift() {
+    var s = txt(340, 20, '累加和可能是负数，整体加 s 之后才能当数组下标', { size: 13, weight: '600' });
+    var sSum = 6, m = 13;
+    var cw = 46, x0 = 40, y0 = 52;
+    var j;
+    for (j = -sSum; j <= sSum; j++) {
+      s += cell(x0 + (j + sSum) * cw, y0, cw - 4, 28, j, { fill: j === 0 ? C.orangeBg : '#fff', stroke: j === 0 ? C.orange : C.border, size: 11 });
+    }
+    s += txt(x0 - 8, y0 + 19, '原本', { size: 11, anchor: 'end', fill: C.dim });
+    for (j = -sSum; j <= sSum; j++) {
+      s += cell(x0 + (j + sSum) * cw, y0 + 40, cw - 4, 28, j + sSum, { fill: j + sSum === sSum ? C.orangeBg : C.blueBg, stroke: j + sSum === sSum ? C.orange : C.blue, size: 11 });
+    }
+    s += txt(x0 - 8, y0 + 59, '平移后', { size: 11, anchor: 'end', fill: C.dim });
+    var y = y0 + 84;
+    s += txt(340, y, '原本的 dp[i][j] 一律搬到 dp[i][j + s]；返回 dp[0][0] 改成返回 dp[0][s]', { size: 12, mono: true });
+    s += txt(340, y + 22, '表长 2s + 1 = ' + m + '；s = 12216 的规模下是 513093 格，转背包只要 8145 格', { size: 11, fill: C.dim });
+    wrap('figShift', y + 42, s,
+      '平移只是换个下标，代价是表长翻倍还多一格；能直接推出目标值的题用不上它');
+  }
+
+  // ---------- 图 3：粉碎 = 分正负号 ----------
+  function figStone() {
+    var s = txt(340, 20, '[2,7,4,1,8,1]：每次粉碎等价于给这两块分相反的符号', { size: 13, weight: '600' });
+    var steps = [
+      { l: '2 和 7 粉碎 → 5', arr: [5, 4, 1, 8, 1] },
+      { l: '5 和 4 粉碎 → 1', arr: [1, 1, 8, 1] },
+      { l: '1 和 1 粉碎 → 0', arr: [0, 8, 1] },
+      { l: '8 和 1 粉碎 → 7', arr: [0, 7] },
+      { l: '剩下 7 和 0', arr: [7] }
+    ];
+    var y = 44, i, j;
+    for (i = 0; i < steps.length; i++) {
+      s += txt(120, y + 16, steps[i].l, { size: 11, anchor: 'start', mono: true, fill: C.dim });
+      for (j = 0; j < steps[i].arr.length; j++) {
+        s += cell(250 + j * 46, y, 42, 28, steps[i].arr[j], { fill: C.bg, size: 12 });
+      }
+      y += 36;
+    }
+    s += txt(340, y + 6, '换一种看法：7 和 8 分到一堆，2、4、1、1 分到另一堆', { size: 12, weight: '600', fill: C.blue });
+    s += txt(340, y + 28, 'sum = 23，一半是 11，near = 11（2 + 8 + 1），答案 23 − 11 − 11 = 1', { size: 12 });
+    s += txt(340, y + 48, '本机用真模拟枚举所有粉碎顺序跑 3000 组，与 |Σ ± | 的结果 0 组不一致', { size: 11, fill: C.dim });
+    wrap('figStone', y + 68, s,
+      '「反复粉碎」和「给每块石头分正负号」算的是同一个数，想到这一步题目就变成了 01 背包');
+  }
+
+  // ---------- 图 4：两张表的差别 ----------
+  function figTable() {
+    var s = txt(340, 20, '同一个转移骨架，计数题与最值题的初值和符号都不一样', { size: 13, weight: '600' });
+    var x0 = 40, y0 = 44;
+    var i;
+    // 目标和
+    var nums = [1, 2, 3], t = 3;
+    var dp = [1, 0, 0, 0];
+    s += txt(160, y0 - 10, '目标和：dp[j] = 凑出 j 的办法数', { size: 12, weight: '600', anchor: 'start' });
+    var snaps = [[1, 0, 0, 0], [1, 1, 1, 0], [1, 1, 1, 1], [1, 1, 1, 2]];
+    var names = ['初始', 'num=1', 'num=2', 'num=3'];
+    for (i = 0; i < 4; i++) {
+      s += txt(x0 - 6, y0 + i * 32 + 19, names[i], { size: 10, anchor: 'end', fill: C.dim });
+      for (var j = 0; j <= t; j++) {
+        s += cell(x0 + j * 54, y0 + i * 32, 50, 28, snaps[i][j], {
+          fill: (i === 3 && j === 3) ? C.blueBg : '#fff',
+          stroke: (i === 3 && j === 3) ? C.blue : C.border, size: 12
+        });
+      }
+    }
+    s += txt(160, y0 + 4 * 32 + 16, 'dp[0] = 1，转移 dp[j] += dp[j − num]，答案 dp[3] = 2', { size: 11, anchor: 'start', mono: true, fill: C.dim });
+    // 石头
+    var st = [3, 7, 2], tt = 6;
+    var snaps2 = [[0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 3, 3, 3, 3], [0, 0, 0, 3, 3, 3, 3], [0, 0, 2, 3, 3, 5, 5]];
+    var names2 = ['初始', 'num=3', 'num=7', 'num=2'];
+    var y1 = y0 + 4 * 32 + 40;
+    s += txt(160, y1 - 10, '石头：dp[j] = 不超过 j 能凑到的最大重量', { size: 12, weight: '600', anchor: 'start' });
+    for (i = 0; i < 4; i++) {
+      s += txt(x0 - 6, y1 + i * 32 + 19, names2[i], { size: 10, anchor: 'end', fill: C.dim });
+      for (var j2 = 0; j2 <= tt; j2++) {
+        s += cell(x0 + j2 * 54, y1 + i * 32, 50, 28, snaps2[i][j2], {
+          fill: (i === 3 && j2 === tt) ? C.orangeBg : '#fff',
+          stroke: (i === 3 && j2 === tt) ? C.orange : C.border, size: 12
+        });
+      }
+    }
+    s += txt(160, y1 + 4 * 32 + 16, 'dp 全 0，转移 dp[j] = max(dp[j], dp[j − num] + num)，答案 12 − 5 − 5 = 2', { size: 11, anchor: 'start', mono: true, fill: C.dim });
+    wrap('figTable', y1 + 4 * 32 + 38, s,
+      '计数题少了 dp[0] = 1 整张表恒为 0；最值题用了 += 会加出一个没有意义的数');
+  }
+
+  figSign(); figShift(); figStone(); figTable();
+
+  // ================= 演示一：目标和 =================
+  var TCASES = [
+    { nums: [1, 1, 1, 1, 1], target: 3 },
+    { nums: [1, 2, 3], target: 0 },
+    { nums: [2, 1], target: 1 }
+  ];
+  function buildTarget(c, mode) {
+    var steps = [], i, j;
+    var sum = 0;
+    for (i = 0; i < c.nums.length; i++) sum += c.nums[i];
+    if (c.target > sum || c.target < -sum) return [{ kind: 'no', sum: sum }];
+    if (((c.target & 1) ^ (sum & 1)) === 1) return [{ kind: 'no', sum: sum, odd: true }];
+    if (mode === 1) {
+      var t = (c.target + sum) >> 1;
+      if (t < 0) return [{ kind: 'no', sum: sum }];
+      var dp = [];
+      for (j = 0; j <= t; j++) dp.push(0);
+      dp[0] = 1;
+      steps.push({ kind: 'init', dp: dp.slice(), t: t, sum: sum, mode: 1 });
+      for (i = 0; i < c.nums.length; i++) {
+        for (j = t; j >= c.nums[i]; j--) {
+          dp[j] += dp[j - c.nums[i]];
+          steps.push({ kind: 'fill', i: i, j: j, dp: dp.slice(), t: t, sum: sum, mode: 1, num: c.nums[i] });
+        }
+      }
+      steps.push({ kind: 'done', dp: dp.slice(), t: t, sum: sum, mode: 1, ans: dp[t] });
+    } else {
+      var s = sum, m = 2 * s + 1, n = c.nums.length;
+      var table = [];
+      for (i = 0; i <= n; i++) { var r = []; for (j = 0; j < m; j++) r.push(0); table.push(r); }
+      table[n][c.target + s] = 1;
+      steps.push({ kind: 'init', table: table, n: n, m: m, s: s, mode: 0, mark: [n, c.target + s] });
+      for (i = n - 1; i >= 0; i--) {
+        for (j = 0; j < m; j++) {
+          var v = 0, jj = j - s;
+          if (jj + c.nums[i] + s < m) v += table[i + 1][jj + c.nums[i] + s];
+          if (jj - c.nums[i] + s >= 0) v += table[i + 1][jj - c.nums[i] + s];
+          table[i][j] = v;
+          steps.push({ kind: 'fill', i: i, j: j, table: table, n: n, m: m, s: s, mode: 0, num: c.nums[i] });
+        }
+      }
+      steps.push({ kind: 'done', table: table, n: n, m: m, s: s, mode: 0, ans: table[0][s] });
+    }
+    return steps;
+  }
+  var v1 = { steps: [], step: 0, c: null, mode: 1 };
+  function v1Build() {
+    var ci = parseInt(document.getElementById('v1case').value, 10);
+    v1.mode = parseInt(document.getElementById('v1mode').value, 10);
+    v1.c = TCASES[ci];
+    v1.steps = buildTarget(v1.c, v1.mode);
+    v1.step = 0;
+    v1Render();
+  }
+  function v1Render() {
+    var st = v1.steps[v1.step], c = v1.c;
+    var s = txt(340, 20, 'nums = [' + c.nums.join(',') + ']　target = ' + c.target + '　（' +
+      (v1.mode === 1 ? '转 01 背包' : '平移表') + '）', { size: 12, weight: '600' });
+    var y = 44;
+    if (st.kind === 'no') {
+      s += txt(340, y + 20, st.odd ? 'target 与总和奇偶性不同，直接返回 0' : 'target 绝对值超过总和，直接返回 0', { size: 13, fill: C.orange });
+      document.getElementById('v1svg').innerHTML = '<svg viewBox="0 0 680 120" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+      document.getElementById('v1note').textContent = '答案 0';
+      document.getElementById('v1ans').textContent = '答案 0';
+      document.getElementById('v1next').disabled = true;
+      document.getElementById('v1prev').disabled = true;
+      return;
+    }
+    var j;
+    if (v1.mode === 1) {
+      var t = st.t;
+      var cw = Math.floor(600 / (t + 1)); if (cw > 70) cw = 70;
+      var x0 = 40;
+      s += txt(340, y, 't = (target + sum) / 2 = (' + c.target + ' + ' + st.sum + ') / 2 = ' + t, { size: 12, mono: true, fill: C.dim });
+      y += 18;
+      for (j = 0; j <= t; j++) s += txt(x0 + j * cw + cw / 2, y + 12, j, { size: 10, fill: C.dim, mono: true });
+      for (j = 0; j <= t; j++) {
+        var isC = st.kind === 'fill' && j === st.j;
+        var isF = st.kind === 'fill' && j === st.j - st.num;
+        s += cell(x0 + j * cw, y + 18, cw - 5, 30, st.dp[j], {
+          fill: isC ? C.blueBg : (isF ? C.orangeBg : '#fff'),
+          stroke: isC ? C.blue : (isF ? C.orange : C.border),
+          weight: (isC || isF) ? '600' : null, size: 12
+        });
+      }
+      y += 62;
+      if (st.kind === 'init') s += txt(340, y, 'dp[0] = 1（空集算一种办法），其余为 0', { size: 12 });
+      else if (st.kind === 'fill') s += txt(340, y, 'dp[' + st.j + '] += dp[' + (st.j - st.num) + ']  →  ' + st.dp[st.j], { size: 12, mono: true });
+      else s += txt(340, y, '答案 dp[' + t + '] = ' + st.ans, { size: 13, weight: '600', fill: C.blue });
+      y += 24;
+    } else {
+      var m = st.m, sSum = st.s;
+      var cw2 = Math.floor(620 / m); if (cw2 > 52) cw2 = 52;
+      var x02 = 30;
+      s += txt(340, y, '表长 2s + 1 = ' + m + '，行 i 从 ' + st.n + ' 填到 0', { size: 11, fill: C.dim });
+      y += 16;
+      for (j = 0; j < m; j++) s += txt(x02 + j * cw2 + cw2 / 2, y + 10, j - sSum, { size: 9, fill: C.dim, mono: true });
+      var i2;
+      for (i2 = 0; i2 <= st.n; i2++) {
+        for (j = 0; j < m; j++) {
+          var cur = st.kind !== 'init' && st.kind === 'fill' && st.i === i2 && st.j === j;
+          s += cell(x02 + j * cw2, y + 14 + i2 * 26, cw2 - 3, 24, st.table[i2][j], {
+            fill: cur ? C.blueBg : ((i2 === st.n && j === c.target + sSum) ? C.orangeBg : '#fff'),
+            stroke: cur ? C.blue : ((i2 === st.n && j === c.target + sSum) ? C.orange : C.border),
+            size: 9
+          });
+        }
+        s += txt(x02 - 5, y + 14 + i2 * 26 + 17, 'i=' + i2, { size: 9, anchor: 'end', fill: C.dim, mono: true });
+      }
+      y += 14 + (st.n + 1) * 26 + 14;
+      if (st.kind === 'init') s += txt(340, y, 'dp[' + st.n + '][' + c.target + '] = 1，平移后是 dp[' + st.n + '][' + (c.target + sSum) + ']', { size: 12, mono: true });
+      else if (st.kind === 'fill') s += txt(340, y, 'dp[' + st.i + '][' + (st.j - sSum) + '] = dp[' + (st.i + 1) + '][' + (st.j - sSum + st.num) + '] + dp[' + (st.i + 1) + '][' + (st.j - sSum - st.num) + ']', { size: 11, mono: true });
+      else s += txt(340, y, '返回 dp[0][s] = dp[0][' + sSum + '] = ' + st.ans, { size: 13, weight: '600', fill: C.blue });
+      y += 24;
+    }
+    document.getElementById('v1svg').innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + (y + 16) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    document.getElementById('v1note').textContent = '第 ' + v1.step + ' / ' + (v1.steps.length - 1) + ' 步' +
+      (st.kind === 'fill' ? '：正在填这一格' : (st.kind === 'done' ? '：结束' : '：初始化'));
+    document.getElementById('v1ans').textContent = st.kind === 'done' ? '答案 ' + st.ans : '';
+    document.getElementById('v1next').disabled = v1.step >= v1.steps.length - 1;
+    document.getElementById('v1prev').disabled = v1.step <= 0;
+  }
+
+  // ================= 演示二：最后一块石头 =================
+  var SCASES = [[2, 7, 4, 1, 8, 1], [3, 7, 2], [1, 1, 2]];
+  function buildStone(stones) {
+    var steps = [], i, j;
+    var sum = 0;
+    for (i = 0; i < stones.length; i++) sum += stones[i];
+    var t = Math.floor(sum / 2);
+    var dp = [];
+    for (j = 0; j <= t; j++) dp.push(0);
+    steps.push({ kind: 'init', dp: dp.slice(), t: t, sum: sum });
+    for (i = 0; i < stones.length; i++) {
+      for (j = t; j >= stones[i]; j--) {
+        var old = dp[j], cand = dp[j - stones[i]] + stones[i];
+        dp[j] = cand > old ? cand : old;
+        steps.push({ kind: 'fill', i: i, j: j, dp: dp.slice(), t: t, sum: sum, num: stones[i], changed: dp[j] !== old });
+      }
+    }
+    steps.push({ kind: 'done', dp: dp.slice(), t: t, sum: sum, near: dp[t] });
+    return steps;
+  }
+  var v2 = { steps: [], step: 0, stones: null };
+  function v2Build() {
+    var ci = parseInt(document.getElementById('v2case').value, 10);
+    v2.stones = SCASES[ci];
+    v2.steps = buildStone(v2.stones);
+    v2.step = 0;
+    v2Render();
+  }
+  function v2Render() {
+    var st = v2.steps[v2.step];
+    var cw = Math.floor(600 / (st.t + 1)); if (cw > 62) cw = 62;
+    var x0 = 40, y = 0;
+    var s = txt(340, 20, 'stones = [' + v2.stones.join(',') + ']　sum = ' + st.sum + '　容量 t = ' + st.t, { size: 12, weight: '600' });
+    y = 40;
+    var j;
+    for (j = 0; j <= st.t; j++) s += txt(x0 + j * cw + cw / 2, y, j, { size: 10, fill: C.dim, mono: true });
+    for (j = 0; j <= st.t; j++) {
+      var isC = st.kind === 'fill' && j === st.j;
+      var isF = st.kind === 'fill' && j === st.j - st.num;
+      s += cell(x0 + j * cw, y + 8, cw - 5, 30, st.dp[j], {
+        fill: isC ? C.blueBg : (isF ? C.orangeBg : '#fff'),
+        stroke: isC ? C.blue : (isF ? C.orange : C.border),
+        weight: (isC || isF) ? '600' : null, size: 12
+      });
+    }
+    y += 52;
+    if (st.kind === 'init') s += txt(340, y, 'dp 全 0：什么都不选时重量是 0', { size: 12 });
+    else if (st.kind === 'fill') {
+      s += txt(340, y, 'dp[' + st.j + '] = max(' + (st.dp[st.j] - (st.changed ? 0 : 0)) + ', dp[' + (st.j - st.num) + '] + ' + st.num + ') = ' + st.dp[st.j], { size: 12, mono: true });
+    } else {
+      s += txt(340, y, 'near = ' + st.near + '，答案 = ' + st.sum + ' − ' + st.near + ' − ' + st.near + ' = ' + (st.sum - 2 * st.near), { size: 13, weight: '600', fill: C.blue });
+    }
+    y += 24;
+    document.getElementById('v2svg').innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + (y + 16) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    document.getElementById('v2note').textContent = st.kind === 'fill'
+      ? '第 ' + v2.step + ' / ' + (v2.steps.length - 1) + ' 步：石头 ' + st.num + '，填 j = ' + st.j + '，' + (st.changed ? '刷新了' : '没动')
+      : (st.kind === 'done' ? '第 ' + v2.step + ' / ' + (v2.steps.length - 1) + ' 步：结束' : '第 ' + v2.step + ' / ' + (v2.steps.length - 1) + ' 步：初始化');
+    document.getElementById('v2ans').textContent = st.kind === 'done' ? '最小剩余重量 ' + (st.sum - 2 * st.near) : '';
+    document.getElementById('v2next').disabled = v2.step >= v2.steps.length - 1;
+    document.getElementById('v2prev').disabled = v2.step <= 0;
+  }
+
+  document.getElementById('v1case').addEventListener('change', v1Build);
+  document.getElementById('v1mode').addEventListener('change', v1Build);
+  document.getElementById('v1prev').addEventListener('click', function () { if (v1.step > 0) { v1.step--; v1Render(); } });
+  document.getElementById('v1next').addEventListener('click', function () { if (v1.step < v1.steps.length - 1) { v1.step++; v1Render(); } });
+  document.getElementById('v1last').addEventListener('click', function () { v1.step = v1.steps.length - 1; v1Render(); });
+  document.getElementById('v1reset').addEventListener('click', function () { v1.step = 0; v1Render(); });
+  document.getElementById('v2case').addEventListener('change', v2Build);
+  document.getElementById('v2prev').addEventListener('click', function () { if (v2.step > 0) { v2.step--; v2Render(); } });
+  document.getElementById('v2next').addEventListener('click', function () { if (v2.step < v2.steps.length - 1) { v2.step++; v2Render(); } });
+  document.getElementById('v2last').addEventListener('click', function () { v2.step = v2.steps.length - 1; v2Render(); });
+  document.getElementById('v2reset').addEventListener('click', function () { v2.step = 0; v2Render(); });
+  v1Build();
+  v2Build();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>状压 dp：好子集的数目</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.legend-inline { font-size: 13px; color: var(--text-dim); margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>状压 dp：好子集的数目</h1>
+      <p class="intro">一个子集的乘积要能写成「若干互不相同的质数相乘」，等价于每个质因子最多出现一次。1 到 30 之间只有 10 个质数，这句话直接决定了状态的形状。</p>
+
+      <h2>零、判据就是「质因子不许重复」</h2>
+      <p>题目给的判据是「乘积可以表示为一个或多个互不相同质数的乘积」。换个说法更好用：把乘积分解质因数，每种质数最多出现一次。于是 6 = 2 × 3 合格，4 = 2 × 2 不合格，12 = 2 × 2 × 3 也不合格。</p>
+      <p>数组里的数不超过 30，而 30 以内只有 10 个质数：2、3、5、7、11、13、17、19、23、29。这十个数刚好压进十个二进制位，一个 int 装得下，「用过哪些质因子」就是一个 1024 以内的状态。</p>
+      <p>先把每个数字自己的质因子状况打表。<code>own[x]</code> 的第 k 位为 1 表示 x 含有第 k 个质数；如果 x 有哪个质因子出现了不止一次，直接记成 0，表示这个数根本不能进好子集。</p>
+
+    <pre class="code"><span class="cm">// 质数: 29 23 19 17 13 11  7  5  3  2</span>
+    <span class="cm">// 位置:  9  8  7  6  5  4  3  2  1  0</span>
+    <span class="cm">// own[x] = 0 表示 x 有某个质因子出现了不止一次，这种数不能用</span>
+    <span class="cm">// 10 个质数刚好压进 10 个 bit，状态总数 2^10 = 1024</span>
+    <span class="kw">int</span> own[31] = {
+        0, 0,            <span class="cm">// 0 1</span>
+        0b0000000001,    <span class="cm">// 2</span>
+        0b0000000010,    <span class="cm">// 3</span>
+        0,               <span class="cm">// 4  = 2 * 2</span>
+        0b0000000100,    <span class="cm">// 5</span>
+        0b0000000011,    <span class="cm">// 6  = 2 * 3</span>
+        0b0000001000,    <span class="cm">// 7</span>
+        0, 0,            <span class="cm">// 8 9</span>
+        0b0000000101,    <span class="cm">// 10 = 2 * 5</span>
+        0b0000010000,    <span class="cm">// 11</span>
+        0,               <span class="cm">// 12 = 2 * 2 * 3</span>
+        0b0000100000,    <span class="cm">// 13</span>
+        0b0000001001,    <span class="cm">// 14 = 2 * 7</span>
+        0b0000000110,    <span class="cm">// 15 = 3 * 5</span>
+        0,               <span class="cm">// 16</span>
+        0b0001000000,    <span class="cm">// 17</span>
+        0,               <span class="cm">// 18</span>
+        0b0010000000,    <span class="cm">// 19</span>
+        0,               <span class="cm">// 20</span>
+        0b0000001010,    <span class="cm">// 21 = 3 * 7</span>
+        0b0000010001,    <span class="cm">// 22 = 2 * 11</span>
+        0b0100000000,    <span class="cm">// 23</span>
+        0, 0,            <span class="cm">// 24 25</span>
+        0b0000100001,    <span class="cm">// 26 = 2 * 13</span>
+        0, 0,            <span class="cm">// 27 28</span>
+        0b1000000000,    <span class="cm">// 29</span>
+        0b0000000111     <span class="cm">// 30 = 2 * 3 * 5</span>
+    };</pre>
+
+      <p>1 到 30 里有效的数字一共 18 个：2、3、5、6、7、10、11、13、14、15、17、19、21、22、23、26、29、30。剩下那些（4、8、9、12、16、18、20、24、25、27、28）连带 0 和 1，在表里都是 0。</p>
+
+      <figure class="fig" id="figOwn"></figure>
+
+      <h2>一、状态是「已经用过哪些质因子」</h2>
+      <p>记 <code>s</code> 为当前乘积里已经出现的质因子集合。往里加一个数字 <code>x</code>，新状态是 <code>s | own[x]</code>；只有当 <code>own[x]</code> 和 <code>s</code> 没有交集时才能加，也就是 <code>(s &amp; own[x]) == 0</code>。反过来问「最终状态恰好是 s 的子集有多少个」，条件写成 <code>(s &amp; cur) == cur</code>，两种写法等价。</p>
+      <p>数字还有重复。<code>nums</code> 里有 <code>times</code> 个 x，那么选 x 的时候要从这 <code>times</code> 个下标里挑一个，方案数乘 <code>times</code>。这也是题目里「下标不同就算不同子集」这句话落到的地方。</p>
+
+    <pre class="code"><span class="cm">// 1 ~ i 范围的数字随便挑，每种数字 cnt[i] 个</span>
+    <span class="cm">// 最终乘积的质因子状态恰好是 s，且每种质因子只出现一次，问子集数量</span>
+    <span class="kw">int</span> <span class="fn">f1</span>(<span class="kw">int</span> i, <span class="kw">int</span> s, <span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; cnt, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; dp) {
+        <span class="kw">if</span> (dp[i][s] != -1) <span class="kw">return</span> dp[i][s];
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">if</span> (i == 1) {
+            <span class="cm">// 只有 1 可选，乘积恒为 1，状态只能是 0，每个 1 都可以选或不选</span>
+            <span class="kw">if</span> (s == 0) {
+                ans = 1;
+                <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; cnt[1]; j++) ans = (ans &lt;&lt; 1) % MOD;
+            }
+        } <span class="kw">else</span> {
+            ans = f1(i - 1, s, cnt, dp);                       <span class="cm">// 不要 i 这个数字</span>
+            <span class="kw">int</span> cur = own[i], times = cnt[i];
+            <span class="kw">if</span> (cur != 0 &amp;&amp; times != 0 &amp;&amp; (s &amp; cur) == cur) {  <span class="cm">// i 有效且与 s 不冲突</span>
+                ans = (f1(i - 1, s ^ cur, cnt, dp) * times + ans) % MOD;
+            }
+        }
+        dp[i][s] = ans;
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <p><code>i == 1</code> 是单独的一支。1 的乘积还是 1，不含任何质因子，所以它只影响 <code>s == 0</code> 那个状态，而且每个 1 都可以选或不选，方案数是 2<sup>cnt[1]</sup>。实测 cnt[1] 从 0 涨到 5，答案正好是 1、2、4、8、16、32。</p>
+
+      <figure class="fig" id="figSample"></figure>
+
+      <p>注意最后统计答案是从 <code>s = 1</code> 开始加的。<code>s = 0</code> 对应「只选了若干个 1」，乘积是 1，等于一个质数都没用上，题目要的是「一个或多个质数」，所以这一档不能算。</p>
+
+      <h2>二、压掉数字那一维</h2>
+      <p><code>f1(i, s)</code> 只依赖 <code>f1(i − 1, ·)</code>，二维表能压成一维。每个数字 i 占一轮，从大到小或从小到大遍历 status 都行，写完直接覆盖。</p>
+
+    <pre class="code"><span class="kw">int</span> cnt[31], dp[1 &lt;&lt; 10];
+
+    <span class="kw">int</span> <span class="fn">numberOfGoodSubsets</span>(<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; nums) {
+        memset(cnt, 0, <span class="kw">sizeof</span>(cnt));
+        memset(dp, 0, <span class="kw">sizeof</span>(dp));
+        <span class="kw">for</span> (<span class="kw">int</span> x : nums) cnt[x]++;
+        dp[0] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; cnt[1]; i++) dp[0] = dp[0] * 2LL % MOD;   <span class="cm">// 1 的 2^cnt[1] 种选法</span>
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= 30; i++) {
+            <span class="kw">int</span> cur = own[i], times = cnt[i];
+            <span class="kw">if</span> (cur == 0 || times == 0) <span class="kw">continue</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> status = (1 &lt;&lt; 10) - 1; status &gt;= 0; status--) {
+                <span class="kw">if</span> ((status &amp; cur) == cur) {
+                    dp[status] = (dp[status ^ cur] * (<span class="kw">long</span> <span class="kw">long</span>)times + dp[status]) % MOD;
+                }
+            }
+        }
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> s = 1; s &lt; (1 &lt;&lt; 10); s++) ans = (ans + dp[s]) % MOD;  <span class="cm">// s = 0 是只选 1，不算</span>
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <p>这里有个跟 01 背包不一样的地方，值得单独说一句：常见的一维背包必须倒序遍历，否则同一个物品会被用两次。这一题实测正序遍历 6000 组随机数据，答案 0 处不同。原因是转移有前置条件 <code>(status &amp; cur) == cur</code>，被读的那个格子 <code>dp[status ^ cur]</code> 里 cur 对应的位全是 0，本轮的条件对它不成立，它压根不会被写。读到的永远是上一轮留下的值，顺序就无所谓了。</p>
+
+      <figure class="fig" id="figTable"></figure>
+
+      <p>规模上，二维表是 31 × 1024 = 31744 格，124 KB；压掉一维之后是 1024 格，4 KB。实测一组 n = 40 的随机数据，记忆化填了 30719 格（几乎铺满整张表），压缩版只走了 1024 × 18 = 18432 格。n = 100000 的数组，整个跑完 0.084 ms。</p>
+
+      <h2>三、两个写错的地方</h2>
+      <p>第一个是漏掉 1 的 2<sup>cnt[1]</sup> 倍率。写漏之后 <code>dp[0]</code> 恒为 1，所有「带 1 的子集」都被少算，实测 6000 组随机数据里 15.37% 出错。</p>
+      <p>第二个是 own 表打错。比如把 4 误标成 <code>0b1</code>（当成只含质因子 2），那么 <code>[2, 4]</code> 会被当成一个好子集，乘积 8 里 2 出现了三次也不管。实测抓取率 16.28%。这张表是手打的，三十个数里错一个就够呛，所以打完最好跟分解结果对一遍。</p>
+
+      <figure class="fig" id="figBug"></figure>
+
+      <h2>四、两个演示</h2>
+      <p>第一个演示按数字从 2 到 30 推进，每一帧处理一个在数组里出现过的有效数字。</p>
+
+      <div class="viz" id="viz1">
+        <p class="viz-title">演示一：逐个数字更新压缩表</p>
+        <div id="v1board"></div>
+        <p class="legend-inline">上方是十个质因子的位带，橙色是当前数字占掉的位；下方是这一轮被刷新的状态。</p>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="v1d"></select></label>
+          <button type="button" id="v1prev">上一步</button>
+          <button type="button" id="v1next">下一步</button>
+          <button type="button" id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <p>第二个演示把二维写法和压缩写法并排放着跑，同一个数字同一轮，两边的值始终一致。</p>
+
+      <div class="viz" id="viz2">
+        <p class="viz-title">演示二：二维表与压缩表同轮对照</p>
+        <div id="v2board"></div>
+        <p class="legend-inline">左边是 dp[i][s] 这一行，右边是压缩后的 dp[s]，两边只抽出实际会用到的那些状态列。</p>
+        <p class="viz-note" id="v2note"></p>
+        <p class="viz-answer" id="v2ans"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="v2d"></select></label>
+          <button type="button" id="v2prev">上一步</button>
+          <button type="button" id="v2next">下一步</button>
+          <button type="button" id="v2reset">重置</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>空间</th></tr>
+        <tr><td>记忆化 f1(i, s)</td><td>O(V · 2<sup>P</sup>)</td><td>O(V · 2<sup>P</sup>)</td></tr>
+        <tr><td>压缩成一维</td><td>O(V · 2<sup>P</sup>)</td><td>O(2<sup>P</sup>)</td></tr>
+        <tr><td>枚举所有下标子集</td><td>O(n · 2<sup>n</sup>)</td><td>O(n)</td></tr>
+      </table>
+      <p>V = 30 是数字的取值范围，P = 10 是 30 以内质数的个数。状态数是 2<sup>10</sup> = 1024，跟 n 无关，所以 n = 100000 也只要 0.084 ms。真正的瓶颈在预处理计数，是 O(n)。</p>
+      <p>空间上二维表 31 × 1024 个 int 是 124 KB，压掉数字那一维之后 1024 个 int 是 4 KB。</p>
+
+      <h2>总结</h2>
+      <p>状态压的是质因子而不是数字，这是这道题唯一的关键决策。30 以内只有 10 个质数，状态数就锁死在 1024，n 再大也不动。</p>
+      <p>1 要单独处理：它不占任何质因子位，只给 <code>s = 0</code> 那一档乘上 2<sup>cnt[1]</sup>，而 <code>s = 0</code> 本身又不算进答案。这两句一起看才不会漏。</p>
+      <p>这一题的一维遍历不用倒序，原因是 <code>(status &amp; cur) == cur</code> 这个条件保证了被读的格子本轮不会被写。别把 01 背包的习惯直接搬过来，搬过来不错但也白紧张一场。</p>
+      <p>下一题把「状态里装什么」换成另一类对象：顾客的订单集合，同时要在位状态上枚举所有子集。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>好子集的数目</td><td><a href="https://leetcode.cn/problems/the-number-of-good-subsets/" target="_blank">leetcode.cn/problems/the-number-of-good-subsets</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解081【必备】状压dp-下</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680, MOD = 1000000007;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') + '>' +
+      esc(s) + '</text>';
+  }
+  function box(x, y, w, h, fill, stroke, r) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (r === undefined ? 6 : r) +
+      '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.2"/>';
+  }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+
+  var PRIMES = [29, 23, 19, 17, 13, 11, 7, 5, 3, 2];   // 位 9 .. 0
+  var OWN = [0, 0, 1, 2, 0, 4, 3, 8, 0, 0, 5, 16, 0, 32, 9, 6, 0, 64, 0, 128, 0, 10, 17, 256, 0, 0, 33, 0, 0, 512, 7];
+
+  // ---------- 图 1：own 表 ----------
+  (function () {
+    var g = '';
+    g += txt(340, 22, '30 以内只有 10 个质数，一个 int 装得下', { size: 13, weight: 700 });
+    var bx = 60, by = 44, cw = 56, ch = 26;
+    for (var k = 0; k < 10; k++) {
+      g += box(bx + k * cw, by, cw - 4, ch, C.bg, C.border, 3);
+      g += txt(bx + k * cw + (cw - 4) / 2, by + 18, String(PRIMES[k]), { size: 12, weight: 700, fill: C.dim });
+    }
+    g += txt(bx - 8, by + 18, '位', { size: 11, fill: C.dim, anchor: 'end' });
+    var samples = [[2, '1'], [3, '1'], [6, '2'], [15, '2'], [30, '3'], [4, '—'], [12, '—'], [9, '—']];
+    var y = 92;
+    g += txt(340, y, '每个数字占掉哪些位（— 表示这个数有质因子重复，整行作废）', { size: 12, fill: C.dim });
+    y += 16;
+    for (var r = 0; r < 2; r++) {
+      for (var c = 0; c < 4; c++) {
+        var s = samples[r * 4 + c], x = 40 + c * 160;
+        var val = OWN[s[0]], invalid = val === 0;
+        g += txt(x, y + r * 62 + 16, invalid ? (s[0] + '（质因子重复）') : (s[0] + ' = ' + s[1] + ' 位'), { size: 12, anchor: 'start', fill: invalid ? C.orange : C.text });
+        for (var k2 = 0; k2 < 10; k2++) {
+          var on = (val >> k2) & 1;
+          g += box(x + k2 * 12, y + r * 62 + 26, 10, 16, on ? C.blueBg : '#fff', on ? C.blue : C.border, 2);
+          if (on) g += txt(x + k2 * 12 + 5, y + r * 62 + 39, '1', { size: 9, fill: C.blue });
+        }
+      }
+    }
+    g += box(40, y + 136, 600, 30, C.orangeBg, C.orange, 6);
+    g += txt(340, y + 156, '有效数字 18 个：2 3 5 6 7 10 11 13 14 15 17 19 21 22 23 26 29 30', { size: 12, weight: 700, fill: C.orange });
+    wrap('figOwn', y + 182, g, 'own[x] 的第 k 位是 1 表示 x 含第 k 个质数，整行全 0 表示这个数不配进好子集。');
+  })();
+
+  // ---------- 图 2：样例 ----------
+  (function () {
+    var g = '';
+    g += txt(340, 22, 'nums = [1, 2, 3, 4]，好子集一共 6 个', { size: 13, weight: 700 });
+    var sets = [['{2}', '2', 1], ['{3}', '3', 1], ['{2,3}', '6 = 2×3', 1],
+                ['{1,2}', '2', 1], ['{1,3}', '3', 1], ['{1,2,3}', '6 = 2×3', 1]];
+    for (var i = 0; i < 6; i++) {
+      var x = 30 + (i % 3) * 212, y = 46 + Math.floor(i / 3) * 62;
+      g += box(x, y, 196, 50, C.blueBg, C.blue, 6);
+      g += txt(x + 98, y + 20, sets[i][0], { size: 13, weight: 700, fill: C.blue });
+      g += txt(x + 98, y + 39, '乘积 ' + sets[i][1], { size: 12, fill: C.text });
+    }
+    g += box(30, 178, 620, 30, C.orangeBg, C.orange, 6);
+    g += txt(340, 198, '{4} 和 {1,4} 不算：4 = 2×2，质因子 2 出现了两次', { size: 12, weight: 700, fill: C.orange });
+    g += txt(340, 224, 's = 0 那一档（只选 1）也不算，题目要求「一个或多个质数」', { size: 12, fill: C.dim });
+    wrap('figSample', 242, g, '六个好子集里有一半带 1，这就是 2^cnt[1] 那一份倍率的来源。');
+  })();
+
+  // ---------- 图 3：表规模 ----------
+  (function () {
+    var g = '';
+    g += txt(340, 22, '压掉数字那一维，表从 124 KB 降到 4 KB', { size: 13, weight: 700 });
+    g += box(40, 44, 300, 120, C.orangeBg, C.orange, 8);
+    g += txt(190, 72, '二维 dp[i][s]', { size: 13, weight: 700, fill: C.orange });
+    g += txt(190, 96, '31 行 × 1024 列 = 31744 格', { size: 12 });
+    g += txt(190, 122, '124 KB', { size: 16, weight: 700, fill: C.orange });
+    g += txt(190, 148, 'n = 40 时记忆化填到 30719 格', { size: 11, fill: C.dim });
+    g += box(352, 44, 288, 120, C.blueBg, C.blue, 8);
+    g += txt(496, 72, '一维 dp[s]', { size: 13, weight: 700, fill: C.blue });
+    g += txt(496, 96, '1024 格 × 18 个有效数字', { size: 12 });
+    g += txt(496, 122, '4 KB', { size: 16, weight: 700, fill: C.blue });
+    g += txt(496, 148, '同一组数据走 18432 格', { size: 11, fill: C.dim });
+    g += box(40, 176, 600, 32, C.bg, C.border, 6);
+    g += txt(340, 197, '状态数 2^10 = 1024 与 n 无关，n = 100000 跑完 0.084 ms', { size: 13, weight: 700 });
+    wrap('figTable', 222, g, '二维只多存了「处理到第几个数字」，这一维可以滚掉。');
+  })();
+
+  // ---------- 图 4：错误率 ----------
+  (function () {
+    var g = '', data = [['漏掉 1 的 2^cnt[1] 倍率', 15.37, '所有带 1 的子集都被少算'],
+                        ['own 表把 4 标成有效', 16.28, '[2,4] 被当成好子集，乘积里 2 出现三次'],
+                        ['status 写成正序遍历', 0.00, '被读的格子本轮不会被写，顺序无关']];
+    g += txt(340, 22, '6000 组随机数据上的抓取率', { size: 13, weight: 700 });
+    var base = 178, maxW = 330, x0 = 236;
+    for (var i = 0; i < data.length; i++) {
+      var y = 50 + i * 56;
+      var w = data[i][1] / 100 * maxW;
+      g += txt(x0 - 10, y + 22, data[i][0], { size: 12, anchor: 'end', fill: C.text });
+      if (w < 3) {
+        g += txt(x0 + 12, y + 22, '0.00%（一模一样）', { size: 12, weight: 700, anchor: 'start', fill: C.blue });
+      } else {
+        g += box(x0, y, w, 30, i === 0 ? C.orangeBg : C.blueBg, i === 0 ? C.orange : C.blue, 5);
+        g += txt(x0 + w + 12, y + 21, data[i][1].toFixed(2) + '%', { size: 14, weight: 700, anchor: 'start', fill: i === 0 ? C.orange : C.blue });
+      }
+      g += txt(x0, y + 48, data[i][2], { size: 11, anchor: 'start', fill: C.dim });
+    }
+    g += txt(340, base + 22, '第三种写法看着最危险，实测一点问题没有', { size: 12, fill: C.dim });
+    wrap('figBug', base + 40, g, '前两种是实打实的错，第三种是虚惊一场。');
+  })();
+
+  // ================= 数据 =================
+  var DATA = [
+    { name: '[1, 2, 3, 4]', nums: [1, 2, 3, 4] },
+    { name: '[4, 2, 3, 15]', nums: [4, 2, 3, 15] },
+    { name: '[1, 1, 2]', nums: [1, 1, 2] },
+    { name: '[2, 3, 6]', nums: [2, 3, 6] }
+  ];
+  var LIMIT = 1 << 10;
+
+  function countNums(nums) {
+    var cnt = [];
+    for (var i = 0; i <= 30; i++) cnt.push(0);
+    for (var k = 0; k < nums.length; k++) cnt[nums[k]]++;
+    return cnt;
+  }
+  function usedStatuses(cnt) {
+    var U = 0;
+    for (var i = 2; i <= 30; i++) if (OWN[i] && cnt[i]) U |= OWN[i];
+    var list = [];
+    for (var s = 0; s < LIMIT; s++) if ((s & U) === s) list.push(s);
+    if (list.length > 16) list = list.slice(0, 16);
+    return list;
+  }
+
+  // ================= 演示一：逐个数字推进 =================
+  var S1 = { di: 0, step: 0, frames: [], dp: null };
+  function s1Build() {
+    var cnt = countNums(DATA[S1.di].nums);
+    var dp = [];
+    for (var s = 0; s < LIMIT; s++) dp.push(0);
+    dp[0] = 1;
+    S1.frames = [];
+    S1.frames.push({ kind: 'init', cnt1: cnt[1], dp0: dp[0] });
+    for (var i = 0; i < cnt[1]; i++) dp[0] = dp[0] * 2 % MOD;
+    S1.frames[0].dp0 = dp[0];
+    for (var x = 2; x <= 30; x++) {
+      var cur = OWN[x], times = cnt[x];
+      if (cur === 0 || times === 0) continue;
+      var touched = [];
+      for (var st = LIMIT - 1; st >= 0; st--) {
+        if ((st & cur) === cur) {
+          var before = dp[st];
+          dp[st] = (dp[st ^ cur] * times + dp[st]) % MOD;
+          if (dp[st] !== before) touched.push({ s: st, from: before, to: dp[st], src: st ^ cur, add: dp[st ^ cur] });
+        }
+      }
+      S1.frames.push({ kind: 'num', x: x, cur: cur, times: times, touched: touched });
+    }
+    var ans = 0;
+    for (var s2 = 1; s2 < LIMIT; s2++) ans = (ans + dp[s2]) % MOD;
+    S1.frames.push({ kind: 'done', ans: ans });
+    S1.step = 0;
+    s1Render();
+  }
+  function bits10(s) { var b = ''; for (var j = 9; j >= 0; j--) b += String((s >> j) & 1); return b; }
+  function s1Render() {
+    var f = S1.frames[S1.step], g = '';
+    var bx = 60, by = 34, cw = 56, ch = 26;
+    var curBits = f.kind === 'num' ? f.cur : 0;
+    for (var k = 0; k < 10; k++) {
+      var on = (curBits >> k) & 1;
+      g += box(bx + k * cw, by, cw - 4, ch, on ? C.orangeBg : '#fff', on ? C.orange : C.border, 3);
+      g += txt(bx + k * cw + (cw - 4) / 2, by + 18, String(PRIMES[k]), { size: 12, weight: 700, fill: on ? C.orange : C.dim });
+    }
+    g += txt(bx - 8, by + 18, '质因子', { size: 11, fill: C.dim, anchor: 'end' });
+    var y = 80;
+    if (f.kind === 'init') {
+      g += txt(340, y + 16, '初始：dp[0] = 2^cnt[1] = 2^' + f.cnt1 + ' = ' + f.dp0, { size: 14, weight: 700, fill: C.blue });
+      g += txt(340, y + 40, '数组里的 1 一共 ' + f.cnt1 + ' 个，每个都可挑可不挑', { size: 12, fill: C.dim });
+      y += 60;
+    } else if (f.kind === 'num') {
+      g += txt(340, y + 14, '数字 ' + f.x + '，占 ' + bits10(f.cur).replace(/0/g, '·') + '，数组里有 ' + f.times + ' 个', { size: 13, weight: 700, fill: C.orange });
+      y += 34;
+      var list = f.touched.slice(0, 8);
+      for (var i = 0; i < list.length; i++) {
+        var t = list[i];
+        g += box(40, y + i * 30, 240, 26, C.blueBg, '#93b4ee', 4);
+        g += txt(160, y + i * 30 + 18, 'dp[' + bits10(t.s) + '] += dp[' + bits10(t.src) + '] × ' + f.times, { size: 11, fill: C.blue });
+        g += box(292, y + i * 30, 120, 26, C.bg, C.border, 4);
+        g += txt(352, y + i * 30 + 18, t.from + ' → ' + t.to, { size: 11, fill: C.text });
+        g += txt(424, y + i * 30 + 18, t.src === 0 ? '（空集那一档）' : '', { size: 11, anchor: 'start', fill: C.dim });
+      }
+      if (f.touched.length > list.length) g += txt(340, y + list.length * 30 + 18, '…… 这一轮共刷新 ' + f.touched.length + ' 个状态，这里只列前 ' + list.length + ' 个', { size: 11, fill: C.dim });
+      y += Math.max(list.length, 1) * 30 + (f.touched.length > list.length ? 30 : 6);
+    } else {
+      g += box(40, y, 600, 46, C.orangeBg, C.orange, 8);
+      g += txt(340, y + 20, '把所有非空状态加起来（s = 0 不算）', { size: 12, weight: 700, fill: C.orange });
+      g += txt(340, y + 38, '答案 = Σ dp[s]，s 从 1 到 1023', { size: 12, fill: C.text });
+      y += 60;
+    }
+    var host = document.getElementById('v1board');
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + (y + 14) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + g + '</svg>';
+    var note;
+    if (f.kind === 'init') note = '第 1 / ' + S1.frames.length + ' 帧：先把 1 处理掉，dp[0] = ' + f.dp0 + '。';
+    else if (f.kind === 'num') note = '第 ' + (S1.step + 1) + ' / ' + S1.frames.length + ' 帧：数字 ' + f.x + '（质因子 ' + f.cur + '）出现 ' + f.times +
+      ' 次，本轮刷新 ' + f.touched.length + ' 个状态，每个状态加上「去掉它之后的状态 × ' + f.times + '」。';
+    else note = '第 ' + S1.frames.length + ' / ' + S1.frames.length + ' 帧：收尾，只统计 s ≠ 0 的状态。';
+    document.getElementById('v1note').textContent = note;
+    document.getElementById('v1ans').textContent = f.kind === 'done' ? ('好子集数目 = ' + f.ans) : '';
+    document.getElementById('v1prev').disabled = S1.step === 0;
+    document.getElementById('v1next').disabled = S1.step >= S1.frames.length - 1;
+  }
+
+  // ================= 演示二：二维 vs 压缩 =================
+  var S2 = { di: 0, step: 0, frames: [], cols: [] };
+  function s2Build() {
+    var cnt = countNums(DATA[S2.di].nums);
+    S2.cols = usedStatuses(cnt);
+    var two = [];
+    for (var i = 0; i <= 30; i++) { two.push([]); for (var s = 0; s < LIMIT; s++) two[i].push(0); }
+    for (var s0 = 0; s0 < LIMIT; s0++) two[1][s0] = 0;
+    two[1][0] = 1;
+    for (var k = 0; k < cnt[1]; k++) two[1][0] = two[1][0] * 2 % MOD;
+    var one = [];
+    for (var s1 = 0; s1 < LIMIT; s1++) one.push(0);
+    one[0] = two[1][0];
+    S2.frames = [{ i: 1, cur: 0, times: cnt[1], two: two[1].slice(0), one: one.slice(0) }];
+    for (var x = 2; x <= 30; x++) {
+      var cur = OWN[x], times = cnt[x];
+      for (var s2 = 0; s2 < LIMIT; s2++) {
+        two[x][s2] = two[x - 1][s2];
+        if (cur !== 0 && times !== 0 && (s2 & cur) === cur) two[x][s2] = (two[x - 1][s2 ^ cur] * times + two[x][s2]) % MOD;
+      }
+      if (cur === 0 || times === 0) continue;
+      for (var st = LIMIT - 1; st >= 0; st--) {
+        if ((st & cur) === cur) one[st] = (one[st ^ cur] * times + one[st]) % MOD;
+      }
+      S2.frames.push({ i: x, cur: cur, times: times, two: two[x].slice(0), one: one.slice(0) });
+    }
+    var a1 = 0, a2 = 0;
+    for (var s3 = 1; s3 < LIMIT; s3++) { a1 = (a1 + one[s3]) % MOD; a2 = (a2 + two[30][s3]) % MOD; }
+    S2.frames.push({ i: 'done', ans1: a1, ans2: a2, one: one.slice(0), two: two[30].slice(0) });
+    S2.step = 0;
+    s2Render();
+  }
+  function s2Render() {
+    var f = S2.frames[S2.step], cols = S2.cols, g = '';
+    var n = cols.length;
+    var cw = Math.min(70, Math.floor(548 / n)), ch = 40, x0 = 112;
+    g += txt(340, 20, f.i === 'done' ? '收尾：两边各自把 s ≠ 0 的状态加起来' : ('当前数字 i = ' + f.i + (f.cur ? '，质因子位 ' + f.cur : '，只有 1')), { size: 13, weight: 700 });
+    g += txt(40, 62, '二维', { size: 12, weight: 700, anchor: 'start', fill: C.blue });
+    g += txt(40, 78, 'dp[i][s]', { size: 11, anchor: 'start', fill: C.blue });
+    g += txt(40, 132, '压缩', { size: 12, weight: 700, anchor: 'start', fill: C.orange });
+    g += txt(40, 148, 'dp[s]', { size: 11, anchor: 'start', fill: C.orange });
+    for (var c = 0; c < n; c++) {
+      var s = cols[c];
+      g += txt(x0 + c * cw + (cw - 3) / 2, 44, bits10(s).slice(-4), { size: 10, fill: C.dim });
+      g += box(x0 + c * cw, 50, cw - 3, ch, C.blueBg, '#93b4ee', 4);
+      g += txt(x0 + c * cw + (cw - 3) / 2, 75, String(f.two[s]), { size: 12, weight: 700, fill: C.blue });
+      g += box(x0 + c * cw, 104, cw - 3, ch, C.orangeBg, C.orange, 4);
+      g += txt(x0 + c * cw + (cw - 3) / 2, 129, String(f.one[s]), { size: 12, weight: 700, fill: C.orange });
+      if (f.two[s] !== f.one[s]) g += txt(340, 160, '不一致！', { size: 12, fill: '#c0392b' });
+    }
+    var H = 168;
+    var host = document.getElementById('v2board');
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img">' + g + '</svg>';
+    var note;
+    if (f.i === 'done') note = '第 ' + S2.frames.length + ' / ' + S2.frames.length + ' 帧：二维答案 ' + f.ans2 + '，压缩答案 ' + f.ans1 + '，逐个状态都对得上。';
+    else if (f.cur === 0) note = '第 ' + (S2.step + 1) + ' / ' + S2.frames.length + ' 帧：i = 1，这一轮只动 dp[0]，两边都是 ' + f.one[0] + '。';
+    else note = '第 ' + (S2.step + 1) + ' / ' + S2.frames.length + ' 帧：数字 ' + f.i + ' 出现 ' + f.times + ' 次，二维那一行照抄上一行再加上 dp[i−1][' + 's ^ ' + f.cur + '] × ' + f.times + '，压缩那边直接在原地叠。';
+    document.getElementById('v2note').textContent = note;
+    document.getElementById('v2ans').textContent = f.i === 'done' ? ('好子集数目 = ' + f.ans1 + '（两种写法一致）') : '';
+    document.getElementById('v2prev').disabled = S2.step === 0;
+    document.getElementById('v2next').disabled = S2.step >= S2.frames.length - 1;
+  }
+
+  (function () {
+    var sd = document.getElementById('v1d');
+    for (var i = 0; i < DATA.length; i++) { var o = document.createElement('option'); o.value = String(i); o.textContent = DATA[i].name; sd.appendChild(o); }
+    sd.addEventListener('change', function () { S1.di = +sd.value; s1Build(); });
+    document.getElementById('v1prev').addEventListener('click', function () { if (S1.step > 0) { S1.step--; s1Render(); } });
+    document.getElementById('v1next').addEventListener('click', function () { if (S1.step < S1.frames.length - 1) { S1.step++; s1Render(); } });
+    document.getElementById('v1reset').addEventListener('click', function () { S1.step = 0; s1Render(); });
+    S1.di = 0; s1Build();
+
+    var sd2 = document.getElementById('v2d');
+    for (var j = 0; j < DATA.length; j++) { var o2 = document.createElement('option'); o2.value = String(j); o2.textContent = DATA[j].name; sd2.appendChild(o2); }
+    sd2.addEventListener('change', function () { S2.di = +sd2.value; s2Build(); });
+    document.getElementById('v2prev').addEventListener('click', function () { if (S2.step > 0) { S2.step--; s2Render(); } });
+    document.getElementById('v2next').addEventListener('click', function () { if (S2.step < S2.frames.length - 1) { S2.step++; s2Render(); } });
+    document.getElementById('v2reset').addEventListener('click', function () { S2.step = 0; s2Render(); });
+    S2.di = 0; s2Build();
+  })();
+})();
+</script>
+</body>
+</html>

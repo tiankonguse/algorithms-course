@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>并查集的定制信息：集合数与集合标签</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { font-weight: 600; margin-bottom: 10px; font-size: 15px; }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
+.viz-controls button { margin-right: 6px; }
+.mp { display: inline-block; min-width: 26px; padding: 2px 6px; margin: 2px; border: 1px solid #e6e8eb; border-radius: 4px; background: #fff; font-size: 13px; }
+.mp.hit { background: #ffedd5; border-color: #ea580c; }
+.tag { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; margin-left: 6px; }
+.tag.yes { background: #ffedd5; color: #ea580c; }
+.tag.no { background: #f6f7f9; color: #9aa0a6; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>并查集的定制信息：集合数与集合标签</h1>
+      <p class="intro">并查集只有 father 数组时，能回答的只是「两个点在不在一起」。给它挂两样东西，一个是集合个数 sets，一个是记在代表节点上的标签，它能回答的问题立刻多出一大截。这一讲前两道题就落在这两样上。</p>
+
+      <h2 id="bg">零、并查集能记住什么</h2>
+      <p>并查集的固有信息只有 father 数组，find 给出代表节点，union 把两棵树接上。除此之外还可以自己加：</p>
+      <p>（1）<b>集合个数 sets</b>。初始等于元素个数，每次合并成功就减一。它是「整体有多少块」的直接答案。</p>
+      <p>（2）<b>代表节点上的标签</b>。开一个和 father 等长的数组，下标只认代表节点。合并时把两边的标签合成一个（按语义决定是或、是加、还是取最大），查询时先 find 再读。</p>
+      <p>标签只有一条硬规矩：只在代表节点上读写。往非代表节点上写的值，下一次合并就会被盖掉，读出来的是脏数据。</p>
+
+      <h2 id="q1">一、移除最多的同行或同列石头</h2>
+      <p>平面上有 n 块石头，坐标都是整数，一个点上最多一块。如果一块石头同行或同列上还有别的石头，这块就能被移除。问最多能移除几块。</p>
+      <figure class="fig" id="figStone"></figure>
+      <p>把「同行或同列」当成边，石头是点，能互相到达的石头在同一个连通块里。答案就是 n 减去连通块数：每个连通块内部可以一直删到只剩一块，删不掉的那块是块里的任意一块。</p>
+      <p>为什么一个连通块只留一块：删掉某块之后，剩下的石头之间的同行同列关系一条都没少，块还是连通的，于是还能继续删。删到最后剩一块时，它同行同列上再没有别的石头，删不动了。</p>
+
+      <h2 id="first">二、只连「第一个遇到的」就够了</h2>
+      <figure class="fig" id="figFirst"></figure>
+      <p>建边的时候有个省事写法：给每一行、每一列只记「第一次遇到的石头编号」，后面再碰到同一行（或同一列）的石头，就和这个编号合并，而不是和之前所有石头都合并一遍。</p>
+      <p>这样写对，是因为连通性有传递性。同一行的 a、b、c，连 a-b 和 a-c 之后，b 和 c 已经在同一个集合里，第三条边是多余的。随机生成石头坐标跑了 20000 组，两种写法算出的答案 0 组不同。</p>
+      <p>代价差得很多。只连第一个，union 调用次数 = 2n − 不同行数 − 不同列数，最多 2n 次。全连的话每条边都要连，边数是 Σ C(行数里石头数, 2) + Σ C(列数里石头数, 2)。n = 10 万块石头摊在 1000 × 1000 的网格里：拆点法 198000 次 union，朴素连边 9991336 条，差 50 倍；网格缩到 400 × 400，边数涨到 24936919 条，125 倍。拆点法在这些规模上跑 1.18 ~ 1.80 ms。</p>
+      <p>两个坑。第一，行和列必须各用一张表，混用一张 map 的话，行号 3 和列号 3 会被当成同一条线索，石头被错误地连到一起，实测 11.21% 的样例答案会错。第二，扁平化要写成递归的 <code>father[i] = find(father[i])</code>，写成 <code>father[father[i]]</code> 只跳一级，返回的未必是代表节点，实测 2.13% 的样例会算错。</p>
+<pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 石头编号 0 ~ n-1，rowFirst / colFirst 记「某行、某列第一次遇到的石头编号」</span>
+    unordered_map&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt; rowFirst, colFirst;
+    vector&lt;<span class="kw">int</span>&gt; father;
+    <span class="kw">int</span> sets;
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n) {
+        rowFirst.clear();
+        colFirst.clear();
+        father.resize(n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            father[i] = i;
+        }
+        sets = n;
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (i != father[i]) {
+            father[i] = find(father[i]);
+        }
+        <span class="kw">return</span> father[i];
+    }
+
+    <span class="kw">void</span> <span class="fn">unionSet</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">int</span> fx = find(x);
+        <span class="kw">int</span> fy = find(y);
+        <span class="kw">if</span> (fx != fy) {
+            father[fx] = fy;
+            sets--;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">removeStones</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; stones) {
+        <span class="kw">int</span> n = stones.size();
+        build(n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">int</span> row = stones[i][0];
+            <span class="kw">int</span> col = stones[i][1];
+            <span class="cm">// 这一行第一次出现 : 记下来；之后再遇到 : 合并</span>
+            <span class="kw">if</span> (!rowFirst.count(row)) {
+                rowFirst[row] = i;
+            } <span class="kw">else</span> {
+                unionSet(i, rowFirst[row]);
+            }
+            <span class="kw">if</span> (!colFirst.count(col)) {
+                colFirst[col] = i;
+            } <span class="kw">else</span> {
+                unionSet(i, colFirst[col]);
+            }
+        }
+        <span class="kw">return</span> n - sets;
+    }</pre>
+      <div class="viz" id="vizStone">
+        <div class="viz-title">石头合并操作台</div>
+        <div id="stoneSvg"></div>
+        <div class="viz-note" id="stoneNote"></div>
+        <div class="breakdown" id="stoneInfo"></div>
+        <div class="viz-answer" id="stoneAns"></div>
+        <div class="viz-controls">
+          <label>数据 <select id="stoneSel"></select></label>
+          <button id="stoneNext">下一步</button>
+          <button id="stonePrev">上一步</button>
+          <button id="stoneReset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="q2">三、找出知晓秘密的所有专家</h2>
+      <p>n 个专家，m 场会议，每场是 (x, y, t)：专家 x 和 y 在时刻 t 开会。0 号专家有个秘密，在时刻 0 也告诉了 firstPerson。开会时只要一方知道秘密，另一方立刻知道，而且同一时刻的传播是瞬时的：一个人在 t 时刻刚知道，就能在同一时刻的另一场会里传出去。所有会议结束后，返回知道秘密的名单。</p>
+      <p>这里要用的就是标签：开一个 secret 数组，secret[代表节点] 记这个集合里有没有人知道秘密。合并时两边取或：</p>
+      <p><code>secret[fy] |= secret[fx]</code>，只要一边有人知道，合并后的整块都知道。</p>
+      <p>会议按时刻排序，一个时刻一批，每批两步：先把这批会涉及的人全部合并，再把「整块都不知道秘密」的人退回到单独集合（<code>father[a] = a</code>）。</p>
+      <figure class="fig" id="figSecret"></figure>
+      <p>为什么要按时刻分批：同一时刻的传播是瞬时的，(2,3,t) 和 (3,0,t) 两场会里，0 知道，那么 2 也该在同时刻知道。逐条处理的话，第一条会里没人知道就把 2 和 3 拆回去了，第二条会只传到 3，2 就漏了。实测逐条处理有 7.50% 的样例答案不对。</p>
+      <p>为什么批内要撤回：合并是为了让这一时刻的信息瞬时扩散，扩散完就该散场。这一批里整块都不知道秘密的人，他们之间的合并在这一时刻没有带来任何信息，留着就会污染后面的时刻。实测不撤回有 13.95% 的样例答案不对。</p>
+      <p>撤回只针对这批会里出现过的人。没参会的人这一批没被 union 动过，不可能混进别人的集合，不用管。</p>
+      <p>这一步用不上可撤销并查集那套：可撤销并查集要按栈精确还原合并前的形态，这里只需要把不该连的人重新置成单点，被撤掉的集合里没有要留的信息。</p>
+<pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    vector&lt;<span class="kw">int</span>&gt; father;
+    <span class="cm">// 集合的标签信息 : 代表节点 whole 集合是否有人知道秘密</span>
+    vector&lt;<span class="kw">int</span>&gt; secret;
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n, <span class="kw">int</span> first) {
+        father.resize(n);
+        secret.assign(n, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            father[i] = i;
+            secret[i] = 0;
+        }
+        <span class="cm">// 0 号专家知道秘密，first 在 0 时刻也知道了</span>
+        father[first] = 0;
+        secret[0] = 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (i != father[i]) {
+            father[i] = find(father[i]);
+        }
+        <span class="kw">return</span> father[i];
+    }
+
+    <span class="kw">void</span> <span class="fn">unionSet</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">int</span> fx = find(x);
+        <span class="kw">int</span> fy = find(y);
+        <span class="kw">if</span> (fx != fy) {
+            father[fx] = fy;
+            <span class="cm">// 标签跟着一起并 : 两边只要有人知道，合并后整块都知道</span>
+            secret[fy] |= secret[fx];
+        }
+    }
+
+    vector&lt;<span class="kw">int</span>&gt; <span class="fn">findAllPeople</span>(<span class="kw">int</span> n, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; meetings, <span class="kw">int</span> first) {
+        build(n, first);
+        <span class="cm">// 按时刻排序 : O(m * log m)</span>
+        sort(meetings.begin(), meetings.end(),
+             [](<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; a, <span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; b) { <span class="kw">return</span> a[2] &lt; b[2]; });
+        <span class="kw">int</span> m = meetings.size();
+        <span class="kw">for</span> (<span class="kw">int</span> l = 0, r; l &lt; m;) {
+            <span class="cm">// l....r 这些会议都在同一时刻</span>
+            r = l;
+            <span class="kw">while</span> (r + 1 &lt; m &amp;&amp; meetings[l][2] == meetings[r + 1][2]) {
+                r++;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+                unionSet(meetings[i][0], meetings[i][1]);
+            }
+            <span class="cm">// 这一批里，整块都不知道秘密的人 : 退回到单独的集合</span>
+            <span class="kw">for</span> (<span class="kw">int</span> i = l; i &lt;= r; i++) {
+                <span class="kw">int</span> a = meetings[i][0];
+                <span class="kw">int</span> b = meetings[i][1];
+                <span class="kw">if</span> (!secret[find(a)]) {
+                    father[a] = a;
+                }
+                <span class="kw">if</span> (!secret[find(b)]) {
+                    father[b] = b;
+                }
+            }
+            l = r + 1;
+        }
+        vector&lt;<span class="kw">int</span>&gt; ans;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">if</span> (secret[find(i)]) {
+                ans.push_back(i);
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <div class="viz" id="vizSecret">
+        <div class="viz-title">秘密传播操作台</div>
+        <div id="secSvg"></div>
+        <div class="viz-note" id="secNote"></div>
+        <div class="breakdown" id="secInfo"></div>
+        <div class="viz-answer" id="secAns"></div>
+        <div class="viz-controls">
+          <label>数据 <select id="secSel"></select></label>
+          <label>版本 <select id="secVer"><option value="0">正确版（含撤回）</option><option value="1">错版（合并后不撤回）</option></select></label>
+          <button id="secNext">下一步</button>
+          <button id="secPrev">上一步</button>
+          <button id="secReset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="comp">四、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>指标</th><th>石头（n 块）</th><th>秘密（n 人 m 场会）</th></tr>
+        <tr><td>时间复杂度</td><td>O(n·α(n))</td><td>O(m·log m + m·α(n) + n)</td></tr>
+        <tr><td>额外空间</td><td>O(n)（father + 两张哈希表）</td><td>O(n)（father + secret）</td></tr>
+      </table>
+      <p>石头那题是线性扫一遍，每块石头两次查表加最多两次合并。秘密那题的大头是排序 O(m·log m)，之后每场会常数次并查集操作，最后扫一遍专家收答案。n = 10 万、m = 10 万实测：排序 3.08 ms，合并加撤回 0.72 ms；m = 50 万时排序 14.81 ms、处理 4.80 ms。</p>
+
+      <h2 id="sum">五、总结</h2>
+      <p>这两道题的共同点是「并查集 + 一点自己的信息」。石头题只要集合数，答案直接是 n − sets；秘密题要集合标签，secret 跟着合并一起取或，还要在每个时刻结束时把没沾上信息的合并撤掉。</p>
+      <p>写这类题时最先要想清楚的是标签的合并规则：是或、是加、还是取最大，错了整个答案就偏。合并规则定了，剩下的就是 find 完再读写，别碰非代表节点。</p>
+      <p>后面两道题会把标签玩得更花：一种让代表节点带上集合的最大值，一种让集合记住「被几个源头盯上」。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>移除最多的同行或同列石头</td><td><a href="https://leetcode.cn/problems/most-stones-removed-with-same-row-or-column/" target="_blank">leetcode.cn/problems/most-stones-removed-with-same-row-or-column</a></td></tr>
+        <tr><td>LeetCode</td><td>找出知晓秘密的所有专家</td><td><a href="https://leetcode.cn/problems/find-all-people-with-secret/" target="_blank">leetcode.cn/problems/find-all-people-with-secret</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解057【必备】并查集-下</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+var NS = 'http://www.w3.org/2000/svg';
+function E(t, a, x){ var e = document.createElementNS(NS, t); for (var k in a) e.setAttribute(k, a[k]); if (x != null) e.textContent = x; return e; }
+function SV(w, h){ var s = document.createElementNS(NS, 'svg'); s.setAttribute('viewBox', '0 0 ' + w + ' ' + h); return s; }
+function box(s, x, y, w, h, fill, stroke){ s.appendChild(E('rect', {x:x, y:y, width:w, height:h, rx:5, fill:fill, 'stroke-width':1.2, stroke:stroke||'#e6e8eb'})); }
+function tx(s, x, y, str, o){ o = o || {}; s.appendChild(E('text', {x:x, y:y, 'font-size':o.size||13, fill:o.fill||'#333', 'text-anchor':o.anchor||'start', 'font-weight':o.bold?'600':'normal'}, str)); }
+function line(s, x1, y1, x2, y2, c, dash){ s.appendChild(E('line', {x1:x1, y1:y1, x2:x2, y2:y2, stroke:c||'#2563eb', 'stroke-width':1.6, 'stroke-dasharray':dash||''})); }
+function fig(id, svg, cap){ var f = document.getElementById(id); if (!f) return; f.appendChild(svg); var c = document.createElement('figcaption'); c.textContent = cap; f.appendChild(c); }
+
+var BLUE = '#2563eb', BLUEBG = '#dbeafe', OR = '#ea580c', ORBG = '#ffedd5', GRAY = '#9aa0a6', BG = '#f6f7f9';
+
+/* ---------- 图 1 : 六块石头与连通块 ---------- */
+(function(){
+  var s = SV(680, 380);
+  var ox = 110, oy = 70, cs = 90;
+  var st = [[0,0],[0,1],[1,0],[1,2],[2,1],[2,2]];
+  // 网格
+  for (var r = 0; r < 3; r++) for (var c = 0; c < 3; c++)
+    s.appendChild(E('rect', {x:ox + c*cs - cs/2, y:oy + r*cs - cs/2, width:cs, height:cs, fill:'#fff', stroke:'#e6e8eb', 'stroke-width':1}));
+  for (var c2 = 0; c2 < 3; c2++) tx(s, ox + c2*cs, oy - cs/2 - 12, '列 ' + c2, {anchor:'middle', fill:GRAY, size:12});
+  for (var r2 = 0; r2 < 3; r2++) tx(s, ox - cs/2 - 26, oy + r2*cs + 4, '行 ' + r2, {anchor:'middle', fill:GRAY, size:12});
+  // 连边
+  line(s, ox, oy, ox + cs, oy);                 // 行0 : 0-1
+  line(s, ox, oy + cs, ox + 2*cs, oy + cs);     // 行1 : 2-3
+  line(s, ox + cs, oy + 2*cs, ox + 2*cs, oy + 2*cs); // 行2 : 4-5
+  line(s, ox, oy, ox, oy + cs);                 // 列0 : 0-2
+  line(s, ox + cs, oy, ox + cs, oy + 2*cs);     // 列1 : 1-4
+  line(s, ox + 2*cs, oy + cs, ox + 2*cs, oy + 2*cs); // 列2 : 3-5
+  // 石头
+  for (var i = 0; i < st.length; i++) {
+    var px = ox + st[i][1]*cs, py = oy + st[i][0]*cs;
+    s.appendChild(E('circle', {cx:px, cy:py, r:17, fill:BLUEBG, stroke:BLUE, 'stroke-width':1.6}));
+    tx(s, px, py + 5, String(i), {anchor:'middle', fill:BLUE, bold:true});
+  }
+  // 右侧说明
+  box(s, 400, 70, 250, 210, BG, '#e6e8eb');
+  tx(s, 420, 100, '6 块石头，1 个连通块', {bold:true});
+  tx(s, 420, 130, '每个连通块内部可以一直删', {size:12, fill:'#555'});
+  tx(s, 420, 152, '到只剩一块', {size:12, fill:'#555'});
+  tx(s, 420, 190, '答案 = 6 − 1 = 5', {bold:true, fill:OR, size:15});
+  tx(s, 420, 222, '虚线是「同行」或「同列」', {size:12, fill:GRAY});
+  tx(s, 420, 244, '连上的边，不是石头之间的', {size:12, fill:GRAY});
+  tx(s, 420, 266, '实际移动', {size:12, fill:GRAY});
+  tx(s, 60, 340, '同行同列是等价关系，六块石头全在同一块里', {size:12, fill:GRAY});
+  fig('figStone', s, '六块石头按同行同列连边，最后只留一块，答案 5');
+})();
+
+/* ---------- 图 2 : 只连第一个 vs 全连 ---------- */
+(function(){
+  var s = SV(680, 300);
+  function row(y, all, label){
+    var xs = [70, 165, 260, 355, 450];
+    for (var i = 0; i < 5; i++) {
+      s.appendChild(E('circle', {cx:xs[i], cy:y, r:16, fill:BLUEBG, stroke:BLUE, 'stroke-width':1.5}));
+      tx(s, xs[i], y + 5, String(i), {anchor:'middle', fill:BLUE, bold:true});
+    }
+    var k = 0;
+    for (var a = 0; a < 5; a++) for (var b = a + 1; b < 5; b++) {
+      if (!all && a !== 0) continue;
+      k++;
+      var lift = 34 + (k % 3) * 12;
+      s.appendChild(E('path', {d:'M' + xs[a] + ' ' + (y - 16) + ' Q ' + ((xs[a] + xs[b]) / 2) + ' ' + (y - lift) + ' ' + xs[b] + ' ' + (y - 16), fill:'none', stroke:GRAY, 'stroke-width':1.2}));
+    }
+    tx(s, 545, y - 6, k + ' 条边', {bold:true});
+    tx(s, 545, y + 14, '集合数 5 → 1', {size:12, fill:GRAY});
+    tx(s, 70, y - 62, label, {bold:true, fill:'#333'});
+  }
+  row(110, false, '只连第一个遇到的');
+  row(240, true, '同行全部两两连');
+  tx(s, 70, 285, '两种写法集合数一样：20000 组随机石头，答案 0 组不同', {size:12, fill:GRAY});
+  fig('figFirst', s, '同一行五块石头：连 4 条边和连 10 条边，得到的集合完全相同');
+})();
+
+/* ---------- 图 3 : 秘密传播的三批 ---------- */
+(function(){
+  var s = SV(680, 380);
+  var rows = [
+    {t:'t1', a:1, b:2, keep:false, note:'整块都没人知道，拆回单点'},
+    {t:'t2', a:2, b:3, keep:false, note:'整块都没人知道，拆回单点'},
+    {t:'t3', a:3, b:0, keep:true, note:'0 号知道，整块留下'}
+  ];
+  tx(s, 60, 30, 'n = 5，会议 (1,2,t1) (2,3,t2) (3,0,t3)，firstPerson = 4', {size:12, fill:GRAY});
+  for (var i = 0; i < rows.length; i++) {
+    var y = 80 + i * 95, d = rows[i];
+    tx(s, 60, y + 20, d.t, {bold:true, size:14});
+    // 合并框
+    box(s, 110, y - 10, 150, 58, '#fff', '#e6e8eb');
+    tx(s, 122, y + 6, '先合并', {size:11, fill:GRAY});
+    s.appendChild(E('circle', {cx:155, cy:y + 32, r:15, fill:BLUEBG, stroke:BLUE, 'stroke-width':1.4}));
+    tx(s, 155, y + 37, String(d.a), {anchor:'middle', fill:BLUE, bold:true, size:12});
+    s.appendChild(E('circle', {cx:215, cy:y + 32, r:15, fill:BLUEBG, stroke:BLUE, 'stroke-width':1.4}));
+    tx(s, 215, y + 37, String(d.b), {anchor:'middle', fill:BLUE, bold:true, size:12});
+    line(s, 170, y + 32, 200, y + 32, BLUE, '');
+    // 箭头
+    tx(s, 275, y + 22, '→', {size:16, fill:GRAY});
+    // 结果框
+    box(s, 300, y - 10, 200, 58, d.keep ? ORBG : BG, d.keep ? OR : '#e6e8eb');
+    tx(s, 312, y + 6, d.keep ? '整块知情，保留' : '无人知情，撤回', {size:11, fill:d.keep ? OR : GRAY});
+    if (d.keep) {
+      s.appendChild(E('circle', {cx:350, cy:y + 32, r:15, fill:ORBG, stroke:OR, 'stroke-width':1.4}));
+      tx(s, 350, y + 37, String(d.a), {anchor:'middle', fill:OR, bold:true, size:12});
+      s.appendChild(E('circle', {cx:410, cy:y + 32, r:15, fill:ORBG, stroke:OR, 'stroke-width':1.4}));
+      tx(s, 410, y + 37, String(d.b), {anchor:'middle', fill:OR, bold:true, size:12});
+      line(s, 365, y + 32, 395, y + 32, OR, '');
+    } else {
+      s.appendChild(E('circle', {cx:350, cy:y + 32, r:15, fill:'#fff', stroke:GRAY, 'stroke-width':1.4}));
+      tx(s, 350, y + 37, String(d.a), {anchor:'middle', fill:GRAY, bold:true, size:12});
+      s.appendChild(E('circle', {cx:410, cy:y + 32, r:15, fill:'#fff', stroke:GRAY, 'stroke-width':1.4}));
+      tx(s, 410, y + 37, String(d.b), {anchor:'middle', fill:GRAY, bold:true, size:12});
+    }
+    tx(s, 515, y + 22, d.note, {size:12, fill:GRAY});
+  }
+  box(s, 40, 330, 604, 34, ORBG, OR);
+  tx(s, 56, 352, '答案 0、3、4（0 号本来就知情，4 是 firstPerson，3 在 t3 被告知）', {bold:true, fill:OR, size:13});
+  fig('figSecret', s, '三个时刻：前两批合并后没人知情要撤回，第三批沾上了信息才留下');
+})();
+
+/* ---------- 演示 1 : 石头合并 ---------- */
+(function(){
+  var PRESETS = [
+    {name:'样例一 6 块（答案 5）', st:[[0,0],[0,1],[1,0],[1,2],[2,1],[2,2]]},
+    {name:'样例二 5 块（答案 3）', st:[[0,0],[0,2],[1,1],[2,0],[2,2]]},
+    {name:'拐角 3 块（答案 2）', st:[[0,0],[0,1],[1,1]]},
+    {name:'三块孤立（答案 0）', st:[[0,0],[2,2],[4,4]]}
+  ];
+  var sel = document.getElementById('stoneSel');
+  for (var i = 0; i < PRESETS.length; i++) {
+    var o = document.createElement('option'); o.value = String(i); o.textContent = PRESETS[i].name; sel.appendChild(o);
+  }
+  var o = document.createElement('option'); o.value = 'rand'; o.textContent = '随机（固定种子）'; sel.appendChild(o);
+
+  function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  function build(st){
+    var n = st.length, f = [], sets = n, rf = {}, cf = {}, frames = [];
+    for (var i = 0; i < n; i++) f[i] = i;
+    function find(x){ while (x !== f[x]) x = f[x]; return x; }
+    var links = [];
+    frames.push({phase:'init', i:-1, note:'第 0 步 / ' + (2*n + 1) + ' 步：' + n + ' 块石头各自成集，sets = ' + n,
+      f:f.slice(), sets:sets, rf:{}, cf:{}, links:[], cur:-1, key:null});
+    for (var i2 = 0; i2 < n; i2++) {
+      var row = st[i2][0], col = st[i2][1];
+      var stepNo = i2 * 2 + 1;
+      if (rf[row] === undefined) {
+        rf[row] = i2;
+        frames.push({phase:'row-new', i:i2, note:'第 ' + stepNo + ' 步 / ' + (2*n + 1) + ' 步：行 ' + row + ' 第一次出现，记 rowFirst[' + row + '] = ' + i2,
+          f:f.slice(), sets:sets, rf:Object.assign({}, rf), cf:Object.assign({}, cf), links:links.slice(), cur:i2, key:'row'+row});
+      } else {
+        var k = rf[row];
+        var fx = find(i2), fy = find(k);
+        if (fx !== fy) { f[fx] = fy; sets--; }
+        links.push([i2, k]);
+        frames.push({phase:'row-uni', i:i2, note:'第 ' + stepNo + ' 步 / ' + (2*n + 1) + ' 步：行 ' + row + ' 已有 ' + k + ' 号，合并 ' + i2 + ' 和 ' + k + '，sets = ' + sets,
+          f:f.slice(), sets:sets, rf:Object.assign({}, rf), cf:Object.assign({}, cf), links:links.slice(), cur:i2, key:'row'+row});
+      }
+      stepNo = i2 * 2 + 2;
+      if (cf[col] === undefined) {
+        cf[col] = i2;
+        frames.push({phase:'col-new', i:i2, note:'第 ' + stepNo + ' 步 / ' + (2*n + 1) + ' 步：列 ' + col + ' 第一次出现，记 colFirst[' + col + '] = ' + i2,
+          f:f.slice(), sets:sets, rf:Object.assign({}, rf), cf:Object.assign({}, cf), links:links.slice(), cur:i2, key:'col'+col});
+      } else {
+        var k2 = cf[col];
+        var fx2 = find(i2), fy2 = find(k2);
+        if (fx2 !== fy2) { f[fx2] = fy2; sets--; }
+        links.push([i2, k2]);
+        frames.push({phase:'col-uni', i:i2, note:'第 ' + stepNo + ' 步 / ' + (2*n + 1) + ' 步：列 ' + col + ' 已有 ' + k2 + ' 号，合并 ' + i2 + ' 和 ' + k2 + '，sets = ' + sets,
+          f:f.slice(), sets:sets, rf:Object.assign({}, rf), cf:Object.assign({}, cf), links:links.slice(), cur:i2, key:'col'+col});
+      }
+    }
+    frames.push({phase:'done', i:-1, note:'第 ' + (2*n + 1) + ' 步 / ' + (2*n + 1) + ' 步：扫完，连通块 ' + sets + ' 个，最多移除 ' + n + ' − ' + sets + ' = ' + (n - sets),
+      f:f.slice(), sets:sets, rf:Object.assign({}, rf), cf:Object.assign({}, cf), links:links.slice(), cur:-1, key:null, final:true});
+    return frames;
+  }
+
+  function randStones(seed){
+    var rnd = mulberry32(seed), n = 6 + Math.floor(rnd() * 3), used = {}, out = [];
+    var V = 4;
+    while (out.length < n) {
+      var x = Math.floor(rnd() * V), y = Math.floor(rnd() * V), key = x + ',' + y;
+      if (used[key]) continue;
+      used[key] = 1; out.push([x, y]);
+    }
+    return out;
+  }
+
+  var cur = {st:null, frames:null, step:0};
+  function rebuild(){
+    if (sel.value === 'rand') cur.st = randStones(20261006);
+    else cur.st = PRESETS[Number(sel.value)].st;
+    cur.frames = build(cur.st);
+    cur.step = 0;
+    draw();
+  }
+  function draw(){
+    var fr = cur.frames[Math.min(cur.step, cur.frames.length - 1)];
+    var st = cur.st, n = st.length;
+    var maxR = 0, maxC = 0;
+    for (var i = 0; i < n; i++) { maxR = Math.max(maxR, st[i][0]); maxC = Math.max(maxC, st[i][1]); }
+    var cs = Math.min(70, Math.floor(260 / (maxR + 1))), ox = 70, oy = 68;
+    var s = SV(680, Math.max(200, (maxR + 1) * cs + 110));
+    for (var r = 0; r <= maxR; r++) for (var c = 0; c <= maxC; c++)
+      s.appendChild(E('rect', {x:ox + c*cs - cs/2, y:oy + r*cs - cs/2, width:cs, height:cs, fill:'#fff', stroke:'#e6e8eb', 'stroke-width':1}));
+    for (var c2 = 0; c2 <= maxC; c2++) tx(s, ox + c2*cs, oy - cs/2 - 8, '列' + c2, {anchor:'middle', fill:GRAY, size:11});
+    for (var r2 = 0; r2 <= maxR; r2++) tx(s, ox - cs/2 - 20, oy + r2*cs + 4, '行' + r2, {anchor:'middle', fill:GRAY, size:11});
+    for (var k = 0; k < fr.links.length; k++) {
+      var a = fr.links[k][0], b = fr.links[k][1];
+      line(s, ox + st[a][1]*cs, oy + st[a][0]*cs, ox + st[b][1]*cs, oy + st[b][0]*cs, '#cbd5e1', '5 4');
+    }
+    for (var j = 0; j < n; j++) {
+      var px = ox + st[j][1]*cs, py = oy + st[j][0]*cs;
+      var isCur = (j === fr.cur);
+      s.appendChild(E('circle', {cx:px, cy:py, r:15, fill:isCur ? ORBG : BLUEBG, stroke:isCur ? OR : BLUE, 'stroke-width':1.6}));
+      tx(s, px, py + 5, String(j), {anchor:'middle', fill:isCur ? OR : BLUE, bold:true, size:12});
+    }
+    // 右侧：两张表
+    var bx = 400;
+    box(s, bx, 40, 250, 90, BG, '#e6e8eb');
+    tx(s, bx + 14, 62, 'rowFirst（行 → 石头）', {bold:true, size:12});
+    var keys = Object.keys(fr.rf), sx = bx + 14, sy = 84;
+    if (!keys.length) tx(s, sx, sy, '（空）', {size:12, fill:GRAY});
+    for (var q = 0; q < keys.length; q++) {
+      tx(s, sx + q * 42, sy, keys[q] + '→' + fr.rf[keys[q]], {size:12, fill:'#333'});
+    }
+    box(s, bx, 140, 250, 90, BG, '#e6e8eb');
+    tx(s, bx + 14, 162, 'colFirst（列 → 石头）', {bold:true, size:12});
+    var keys2 = Object.keys(fr.cf);
+    if (!keys2.length) tx(s, bx + 14, 184, '（空）', {size:12, fill:GRAY});
+    for (var q2 = 0; q2 < keys2.length; q2++) {
+      tx(s, bx + 14 + q2 * 42, 184, keys2[q2] + '→' + fr.cf[keys2[q2]], {size:12, fill:'#333'});
+    }
+    box(s, bx, 240, 250, 44, ORBG, OR);
+    tx(s, bx + 14, 268, '集合数 sets = ' + fr.sets, {bold:true, fill:OR});
+    document.getElementById('stoneSvg').innerHTML = '';
+    document.getElementById('stoneSvg').appendChild(s);
+    document.getElementById('stoneNote').textContent = fr.note;
+    var h = 'father：';
+    for (var z = 0; z < fr.f.length; z++) {
+      h += '<span class="mp' + (fr.phase === 'row-uni' || fr.phase === 'col-uni' ? ' hit' : '') + '">' + z + '→' + fr.f[z] + '</span> ';
+    }
+    document.getElementById('stoneInfo').innerHTML = h;
+    document.getElementById('stoneAns').textContent = fr.final ? ('最多移除 ' + (n - fr.sets) + ' 块') : ('当前可移除 ' + (n - fr.sets) + ' 块');
+  }
+  document.getElementById('stoneNext').addEventListener('click', function(){ if (cur.step < cur.frames.length - 1) { cur.step++; draw(); } });
+  document.getElementById('stonePrev').addEventListener('click', function(){ if (cur.step > 0) { cur.step--; draw(); } });
+  document.getElementById('stoneReset').addEventListener('click', function(){ cur.step = 0; draw(); });
+  sel.addEventListener('change', rebuild);
+  rebuild();
+})();
+
+/* ---------- 演示 2 : 秘密传播 ---------- */
+(function(){
+  var PRESETS = [
+    {name:'样例一 n=6（答案 0 1 2 3 5）', n:6, mt:[[1,2,5],[2,3,8],[1,5,10]], first:1},
+    {name:'撤回关键 n=5（答案 0 3 4）', n:5, mt:[[1,2,1],[2,3,2],[3,0,3]], first:4},
+    {name:'同一时刻 n=4（答案 0 1 2 3）', n:4, mt:[[2,3,5],[3,0,5]], first:1},
+    {name:'样例二 n=4（答案 0 1 3）', n:4, mt:[[3,1,3]], first:3}
+  ];
+  var sel = document.getElementById('secSel'), ver = document.getElementById('secVer');
+  for (var i = 0; i < PRESETS.length; i++) {
+    var o = document.createElement('option'); o.value = String(i); o.textContent = PRESETS[i].name; sel.appendChild(o);
+  }
+  var o2 = document.createElement('option'); o2.value = 'rand'; o2.textContent = '随机（固定种子）'; sel.appendChild(o2);
+
+  function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  function build(n, mt, first, wrong){
+    var f = [], sec = [];
+    for (var i = 0; i < n; i++) { f[i] = i; sec[i] = 0; }
+    f[first] = 0; sec[0] = 1;
+    function find(x){ while (x !== f[x]) x = f[x]; return x; }
+    var ms = mt.slice().sort(function(a, b){ return a[2] - b[2]; });
+    var m = ms.length, frames = [];
+    function snap(note, cur){
+      frames.push({note:note, f:f.slice(), sec:sec.slice(), cur:(cur === undefined ? -1 : cur)});
+    }
+    snap('初始状态：0 号和 ' + first + ' 号知道秘密，共 ' + m + ' 场会', -1);
+    var step = 0;
+    for (var l = 0, r; l < m;) {
+      r = l;
+      while (r + 1 < m && ms[l][2] === ms[r + 1][2]) r++;
+      step++;
+      snap('时刻 ' + ms[l][2] + '：这一批有 ' + (r - l + 1) + ' 场会，先全部合并', -1);
+      for (var i2 = l; i2 <= r; i2++) {
+        var a = ms[i2][0], b = ms[i2][1];
+        var fx = find(a), fy = find(b);
+        if (fx !== fy) { f[fx] = fy; sec[fy] = (sec[fy] | sec[fx]); }
+        step++;
+        snap('时刻 ' + ms[l][2] + '：合并 ' + a + ' 和 ' + b + (sec[find(a)] ? '，这一块有人知道秘密' : '，这一块还没人知道'), a);
+      }
+      if (!wrong) {
+        for (var i3 = l; i3 <= r; i3++) {
+          var a2 = ms[i3][0], b2 = ms[i3][1], hit = false;
+          if (!sec[find(a2)]) { f[a2] = a2; hit = true; }
+          if (!sec[find(b2)]) { f[b2] = b2; hit = true; }
+          step++;
+          snap('时刻 ' + ms[l][2] + '：结算 ' + a2 + '、' + b2 + (hit ? '，不在知情块里的退回单点' : '，都在知情块里，保留'), hit ? a2 : -1);
+        }
+      } else {
+        step++;
+        snap('时刻 ' + ms[l][2] + '：错版没有撤回，合并结果全部留着', -1);
+      }
+      l = r + 1;
+    }
+    var ans = [];
+    for (var z = 0; z < n; z++) if (sec[find(z)]) ans.push(z);
+    frames.push({note:'全部会议结束，知情名单已确定', f:f.slice(), sec:sec.slice(), cur:-1, ans:ans, final:true});
+    return frames;
+  }
+
+  var cur = {p:null, frames:null, step:0};
+  function rebuild(){
+    if (sel.value === 'rand') {
+      var rnd = mulberry32(77), n = 5 + Math.floor(rnd() * 2), m = 3 + Math.floor(rnd() * 3), mt = [];
+      for (var i = 0; i < m; i++) {
+        var a = Math.floor(rnd() * n), b = Math.floor(rnd() * n);
+        while (b === a) b = Math.floor(rnd() * n);
+        mt.push([a, b, Math.floor(rnd() * 3)]);
+      }
+      cur.p = {n:n, mt:mt, first:Math.floor(rnd() * n)};
+    } else {
+      cur.p = PRESETS[Number(sel.value)];
+    }
+    cur.frames = build(cur.p.n, cur.p.mt, cur.p.first, ver.value === '1');
+    cur.step = 0;
+    draw();
+  }
+  function draw(){
+    var fr = cur.frames[Math.min(cur.step, cur.frames.length - 1)];
+    var n = cur.p.n;
+    var s = SV(680, 240);
+    var gap = Math.min(70, Math.floor(600 / n)), ox = 40 + (600 - gap * (n - 1)) / 2;
+    // 集合框 : 只有多于一个成员才画框
+    var groups = {};
+    for (var i = 0; i < n; i++) {
+      var root = fr.f[i]; while (fr.f[root] !== root) root = fr.f[root];
+      if (!groups[root]) groups[root] = [];
+      groups[root].push(i);
+    }
+    var keys = Object.keys(groups);
+    for (var g = 0; g < keys.length; g++) {
+      var mem = groups[keys[g]].slice().sort(function(a, b){ return a - b; });
+      if (mem.length < 2) continue;
+      var knows = fr.sec[Number(keys[g])] ? true : false;
+      for (var q = 1; q < mem.length; q++) {
+        var xa = ox + mem[0] * gap, xb = ox + mem[q] * gap, lift = 16 + q * 13;
+        s.appendChild(E('path', {d:'M' + xa + ' 49 Q ' + ((xa + xb) / 2) + ' ' + (49 - lift) + ' ' + xb + ' 49', fill:'none', stroke:knows ? OR : '#cbd5e1', 'stroke-width':1.6}));
+      }
+    }
+    for (var j = 0; j < n; j++) {
+      var px = ox + j * gap, py = 66;
+      var rt2 = j; while (fr.f[rt2] !== rt2) rt2 = fr.f[rt2];
+      var know = fr.sec[rt2] ? 1 : 0;
+      s.appendChild(E('circle', {cx:px, cy:py, r:17, fill:know ? ORBG : '#fff', stroke:know ? OR : BLUE, 'stroke-width':1.6}));
+      tx(s, px, py + 5, String(j), {anchor:'middle', fill:know ? OR : BLUE, bold:true, size:12});
+      if (j === fr.cur) s.appendChild(E('circle', {cx:px, cy:py, r:23, fill:'none', stroke:OR, 'stroke-width':2, 'stroke-dasharray':'3 3'}));
+    }
+    s.appendChild(E('circle', {cx:56, cy:126, r:8, fill:ORBG, stroke:OR, 'stroke-width':1.4}));
+    tx(s, 72, 131, '橙圈 = 知情', {size:12, fill:'#555'});
+    s.appendChild(E('path', {d:'M196 128 Q 212 110 228 128', fill:'none', stroke:'#cbd5e1', 'stroke-width':1.6}));
+    tx(s, 240, 131, '弧 = 同一个集合', {size:12, fill:'#555'});
+    s.appendChild(E('circle', {cx:404, cy:126, r:8, fill:'none', stroke:OR, 'stroke-width':1.6, 'stroke-dasharray':'3 3'}));
+    tx(s, 420, 131, '虚线圈 = 本步刚动过', {size:12, fill:'#555'});
+    var y2 = 172;
+    tx(s, 40, y2, '知情：', {bold:true, size:12});
+    var hx = 96;
+    for (var z = 0; z < n; z++) {
+      var rt3 = z; while (fr.f[rt3] !== rt3) rt3 = fr.f[rt3];
+      s.appendChild(E('rect', {x:hx + z * 34, y:y2 - 14, width:30, height:22, rx:4, fill:fr.sec[rt3] ? ORBG : '#fff', stroke:fr.sec[rt3] ? OR : '#e6e8eb', 'stroke-width':1}));
+      tx(s, hx + z * 34 + 15, y2 + 2, fr.sec[rt3] ? '知' : '–', {anchor:'middle', size:11, fill:fr.sec[rt3] ? OR : GRAY});
+    }
+    tx(s, 40, 212, 'father：', {bold:true, size:12});
+    for (var w = 0; w < n; w++) {
+      s.appendChild(E('rect', {x:96 + w * 34, y:197, width:30, height:22, rx:4, fill:'#fff', stroke:'#e6e8eb', 'stroke-width':1}));
+      tx(s, 96 + w * 34 + 15, 213, String(fr.f[w]), {anchor:'middle', size:11, fill:'#333'});
+    }
+    document.getElementById('secSvg').innerHTML = '';
+    document.getElementById('secSvg').appendChild(s);
+    document.getElementById('secNote').textContent = fr.note + '（第 ' + (Math.min(cur.step, cur.frames.length - 1) + 1) + ' / ' + cur.frames.length + ' 步）';
+    document.getElementById('secInfo').innerHTML = '会议：' + cur.p.mt.map(function(x){ return '(' + x[0] + ',' + x[1] + ',t' + x[2] + ')'; }).join(' ') + '　firstPerson = ' + cur.p.first;
+    if (fr.final) {
+      var wrong = ver.value === '1';
+      document.getElementById('secAns').innerHTML = '知情名单：' + fr.ans.join('、') + (wrong ? '<span class="tag no">错版结果</span>' : '');
+    } else {
+      document.getElementById('secAns').textContent = '进行中';
+    }
+  }
+  document.getElementById('secNext').addEventListener('click', function(){ if (cur.step < cur.frames.length - 1) { cur.step++; draw(); } });
+  document.getElementById('secPrev').addEventListener('click', function(){ if (cur.step > 0) { cur.step--; draw(); } });
+  document.getElementById('secReset').addEventListener('click', function(){ cur.step = 0; draw(); });
+  sel.addEventListener('change', rebuild);
+  ver.addEventListener('change', rebuild);
+  rebuild();
+})();
+})();
+</script>
+</body>
+</html>

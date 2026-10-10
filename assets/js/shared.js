@@ -20,7 +20,8 @@
     menu:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 5h14M3 10h14M3 15h14"/></svg>',
     list:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 5h12M4 10h12M4 15h8"/></svg>',
     search:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14" stroke-linecap="round"/></svg>',
-    top:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15V5M5 10l5-5 5 5"/></svg>'
+    top:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15V5M5 10l5-5 5 5"/></svg>',
+    chevron:'<svg class="nav-group-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>'
   };
 
   // ===== 1. 目录（不依赖 JSON，立刻生成） =====
@@ -74,8 +75,9 @@
 
   // groups: [{ el, items:[{ el, text }] }]，text 为预先小写化的匹配文本
   // extra: 可选的额外过滤函数（首页的难度筛选），返回 false 的条目一律隐藏
+  // afterApply: 可选的搜索后回调，参数为当前是否有搜索词（侧边栏用它临时展开命中组 / 清空后恢复折叠）
   const searches = [];
-  function registerSearch(box, groups, emptyEl, extra){
+  function registerSearch(box, groups, emptyEl, extra, afterApply){
     const input = box.querySelector('.search-input');
     const clear = box.querySelector('.search-clear');
     function apply(){
@@ -93,6 +95,7 @@
       });
       if (emptyEl) emptyEl.hidden = hit !== 0;
       box.classList.toggle('has-value', input.value !== '');
+      if (afterApply) afterApply(keys.length > 0);
     }
     input.addEventListener('input', apply);
     clear.addEventListener('click', function(){ input.value = ''; apply(); input.focus(); });
@@ -279,14 +282,36 @@
       const rest = algos.filter(a => !grouped.some(g => g.items.indexOf(a) >= 0));
       if (rest.length) grouped.push({ name:'其他', items:rest });
 
-      // 8a. 侧边栏（分组 + 搜索，当前页高亮）
+      // 8a. 侧边栏（分组折叠 + 搜索 + 当前页高亮定位；默认只展开当前算法所在组）
       if (sidebar) {
+        // 折叠状态分两层：当前算法所在组每次进页强制展开（不持久化）；
+        // 用户手动展开过的组记进 localStorage，跨页保持
+        const OPEN_KEY = 'algoNavOpenGroups';
+        const manualOpen = (function(){
+          try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); }
+          catch(e){ return new Set(); }
+        })();
+        function persistManualOpen(){
+          try { localStorage.setItem(OPEN_KEY, JSON.stringify(Array.from(manualOpen))); }
+          catch(e){ /* 隐私模式等场景忽略 */ }
+        }
+        const curAlgo = algos.filter(a => fileName(a) === current)[0];
+        const currentGroupName = curAlgo ? curAlgo.group : null;
+
+        function groupOpen(name){
+          return name === currentGroupName || manualOpen.has(name);
+        }
+
         sidebar.innerHTML =
           '<p class="site-title"><a href="' + ROOT + 'index.html">算法教程</a></p>' +
           '<div id="sidebar-search"></div>' +
           grouped.map((g, i) =>
-            '<div class="nav-group">' +
-              '<div class="nav-group-title"><span class="nav-group-idx">' + (i + 1) + '</span>' + g.name + '</div>' +
+            '<div class="nav-group' + (groupOpen(g.name) ? '' : ' collapsed') + '">' +
+              '<button type="button" class="nav-group-title" aria-expanded="' + groupOpen(g.name) + '">' +
+                '<span class="nav-group-idx">' + (i + 1) + '</span>' +
+                '<span class="nav-group-name">' + g.name + '</span>' +
+                ICON.chevron +
+              '</button>' +
               '<ul class="algo-nav">' +
                 g.items.map(a =>
                   '<li><a class="algo-link' + (fileName(a) === current ? ' active' : '') + '" href="' + ROOT + a.file + '"' +
@@ -314,15 +339,49 @@
             })
           };
         });
-        registerSearch(box, domGroups, hint);
 
-        const active = sidebar.querySelector('.algo-link.active');
-        if (active) active.scrollIntoView({ block:'nearest' });
-        const cur = algos.filter(a => fileName(a) === current)[0];
-        if (cur) {
-          const titleEl = document.querySelector('.topbar-title');
-          if (titleEl) titleEl.textContent = cur.title;
+        // 手动展开 / 收起分组
+        Array.prototype.forEach.call(sidebar.querySelectorAll('.nav-group'), function(ge){
+          const btn = ge.querySelector('.nav-group-title');
+          if (!btn) return;
+          btn.addEventListener('click', function(){
+            const collapsed = ge.classList.toggle('collapsed');
+            btn.setAttribute('aria-expanded', String(!collapsed));
+            const name = ge.querySelector('.nav-group-name').textContent;
+            if (!collapsed) manualOpen.add(name); else manualOpen.delete(name);
+            persistManualOpen();
+          });
+        });
+
+        function resetGroupStates(){
+          domGroups.forEach(function(dg){
+            const name = dg.el.querySelector('.nav-group-name').textContent;
+            const open = groupOpen(name);
+            dg.el.classList.toggle('collapsed', !open);
+            const btn = dg.el.querySelector('.nav-group-title');
+            if (btn) btn.setAttribute('aria-expanded', String(open));
+          });
         }
+
+        // 搜索时临时展开命中组，清空后恢复折叠状态
+        registerSearch(box, domGroups, hint, null, function(searching){
+          if (searching) {
+            domGroups.forEach(function(dg){ if (!dg.el.hidden) dg.el.classList.remove('collapsed'); });
+          } else {
+            resetGroupStates();
+          }
+        });
+
+        // 当前算法自动定位：所在组已展开，把高亮项滚动到侧边栏可视区正中间
+        const active = sidebar.querySelector('.algo-link.active');
+        if (active) {
+          const ar = active.getBoundingClientRect();
+          const sbRect = sidebar.getBoundingClientRect();
+          const target = sidebar.scrollTop + (ar.top - sbRect.top) - (sbRect.height - ar.height) / 2;
+          sidebar.scrollTop = Math.max(0, Math.min(target, sidebar.scrollHeight - sbRect.height));
+        }
+        const titleEl = document.querySelector('.topbar-title');
+        if (titleEl && curAlgo) titleEl.textContent = curAlgo.title;
       }
 
       // 8b. 首页卡片（组内顺序即推荐学习顺序）
@@ -340,7 +399,7 @@
         list.parentNode.insertBefore(hint, list);
 
         list.innerHTML = grouped.map((g, i) =>
-          '<section class="group">' +
+          '<section class="group" id="group-' + i + '">' +
             '<h2 class="group-title"><span class="group-idx">' + (i + 1) + '</span>' + g.name + '</h2>' +
             (g.desc ? '<p class="group-desc">' + g.desc + '</p>' : '') +
             '<div class="cards">' +
@@ -355,6 +414,39 @@
             '</div>' +
           '</section>'
         ).join('');
+
+        // 8b-0. 首页左侧专题目录：点击锚点平滑定位到对应分组，滚动时高亮当前分组
+        const homeNav = document.getElementById('homeNav');
+        if (homeNav) {
+          homeNav.innerHTML =
+            '<p class="nav-title">全部专题</p>' +
+            grouped.map((g, i) =>
+              '<a class="home-nav-link' + (i === 0 ? ' active' : '') + '" href="#group-' + i + '">' +
+                '<span class="home-nav-idx">' + (i + 1) + '</span>' +
+                '<span class="home-nav-name">' + g.name + '</span>' +
+                '<span class="home-nav-count">' + g.items.length + '</span>' +
+              '</a>'
+            ).join('');
+          const navLinks = Array.prototype.slice.call(homeNav.querySelectorAll('.home-nav-link'));
+          const groupEls = Array.prototype.slice.call(list.querySelectorAll('.group'));
+          let navTicking = false;
+          const markActive = function(){
+            navTicking = false;
+            const y = window.scrollY;
+            let cur = 0;
+            for (let i = 0; i < groupEls.length; i++) {
+              const anchorTop = groupEls[i].getBoundingClientRect().top + y - 76;
+              if (anchorTop <= y + 10) cur = i; else break;
+            }
+            navLinks.forEach(function(l, i){ l.classList.toggle('active', i === cur); });
+          };
+          window.addEventListener('scroll', function(){
+            if (navTicking) return;
+            navTicking = true;
+            requestAnimationFrame(markActive);
+          }, { passive: true });
+          markActive();
+        }
 
         const domGroups = Array.prototype.map.call(list.querySelectorAll('.group'), function(ge){
           return {
@@ -424,24 +516,24 @@
         }
       }
 
-      // 8c. 上下篇（按 json 里的整体顺序）
+      // 8c. 上下篇（按 json 里的整体顺序；两个链接放在同一个 .pager 行内）
       if (main && sidebar) {
         const flat = grouped.reduce((acc, g) => acc.concat(g.items), []);
         const idx = flat.findIndex(a => fileName(a) === current);
         if (idx >= 0) {
-          const addPager = function(a, dir){
-            const nav = document.createElement('nav');
-            nav.className = 'pager';
+          const nav = document.createElement('nav');
+          nav.className = 'pager';
+          const makeItem = function(a, dir){
             const link = document.createElement('a');
             link.className = 'pager-item ' + dir;
             link.href = ROOT + a.file;
             link.innerHTML = '<span class="pager-label">' + (dir === 'prev' ? '上一篇' : '下一篇') + '</span>' +
                              '<span class="pager-title">' + a.title + '</span>';
-            nav.appendChild(link);
-            main.appendChild(nav);
+            return link;
           };
-          if (idx > 0) { prevHref = ROOT + flat[idx - 1].file; addPager(flat[idx - 1], 'prev'); }
-          if (idx < flat.length - 1) { nextHref = ROOT + flat[idx + 1].file; addPager(flat[idx + 1], 'next'); }
+          if (idx > 0) { prevHref = ROOT + flat[idx - 1].file; nav.appendChild(makeItem(flat[idx - 1], 'prev')); }
+          if (idx < flat.length - 1) { nextHref = ROOT + flat[idx + 1].file; nav.appendChild(makeItem(flat[idx + 1], 'next')); }
+          if (nav.children.length) main.appendChild(nav);
         }
       }
     })

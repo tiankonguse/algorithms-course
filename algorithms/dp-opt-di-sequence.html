@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>优化枚举：DI 序列的有效排列</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>优化枚举：DI 序列的有效排列</h1>
+      <p class="intro">给一个只含 D 和 I 的字符串，数一数有多少个 <code>0..n</code> 的排列满足相邻的大小关系。排列的全枚举是阶乘级的，但这道题的状态只需要记两个量，而且转移里那层枚举能整段替换成前缀和。</p>
+
+      <h2>零、暴力：n + 1 个数的全排列</h2>
+      <p>最直接的做法是把 <code>0..n</code> 的所有排列列出来，逐个检查相邻关系。排列总数是 <code>(n+1)!</code>，n = 8 就是 36 万，n = 12 是 62 亿。</p>
+      <p>这条路走不通，但它给出一个基准：随机小数据上可以用它验证后面的写法对不对。这一页的全部实现对拍，参考值都来自它。</p>
+
+      <h2>一、状态设计：只需要记「上一个数在剩下数里排第几」</h2>
+      <p>从前往后填。填到第 <code>i</code> 个位置时，前面 <code>i</code> 个数已经用完，还剩 <code>n − i</code> 个数没动。接下来能填什么，只取决于两件事：约束是 D 还是 I，以及上一个数的相对位置。</p>
+      <p>关键观察在这里：我们不需要知道具体用掉了哪几个数，只要知道「剩下那些数里，有几个比上一个数小」。这个数量决定了下一个数可以选在哪几档。</p>
+      <p>把这个量记成 <code>less</code>，状态就是 <code>f(i, less)</code>：已经填好第 <code>0..i−1</code> 个位置，上一个位置上的数在当时的未用集合里，有 <code>less</code> 个未用的数比它小。返回值是后面还能排出多少种合法方案。</p>
+      <figure class="fig" id="figLess"></figure>
+      <p>两件事定下整个递归：</p>
+      <ol>
+        <li><code>i = n</code> 时位置填满，返回 1；</li>
+        <li>否则看 <code>s[i−1]</code>：是 D，下一个数必须比上一个小，可选的 <code>nextLess</code> 落在 <code>[0, less−1]</code>；是 I，下一个数必须比上一个大的，可选的 <code>nextLess</code> 落在 <code>[less, n−i−1]</code>。</li>
+      </ol>
+      <p>那个上界 <code>n−i−1</code> 是「还能选更大的数」的数量加 <code>less</code> 减一。实现里写作从 <code>less</code> 起步、走 <code>n−i−less</code> 步。</p>
+      <figure class="fig" id="figBranch"></figure>
+          <pre class="code"><span class="cm">// f(s, i, less, n)：i 是当前要填的位置，less 是「还没用过的数里比上一个数小的个数」</span>
+    <span class="kw">int</span> <span class="fn">f</span>(<span class="kw">string</span>&amp; s, <span class="kw">int</span> i, <span class="kw">int</span> less, <span class="kw">int</span> n) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">if</span> (i == n) {
+            ans = 1;                                   <span class="cm">// 位置填满了，这是一种有效排列</span>
+        } <span class="kw">else</span> <span class="kw">if</span> (i == 0 || s[i - 1] == 'D') {
+            <span class="kw">for</span> (<span class="kw">int</span> nextLess = 0; nextLess &lt; less; nextLess++) {        <span class="cm">// 选一个更小的数</span>
+                ans += f(s, i + 1, nextLess, n);
+            }
+        } <span class="kw">else</span> {
+            <span class="kw">for</span> (<span class="kw">int</span> nextLess = less, k = 1; k &lt;= n - i - less; k++, nextLess++) {
+                ans += f(s, i + 1, nextLess, n);                          <span class="cm">// 选一个更大的数</span>
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>入口是 <code>f(s, 0, n, n)</code>。第 0 个位置没有「上一个数」，<code>less</code> 传什么都不影响分支，传 <code>n</code> 只是让上界算出来正好覆盖全部候选。</p>
+
+      <h2>二、记下来：状态只有两个维度</h2>
+      <p><code>i</code> 和 <code>less</code> 加起来就是全部参数，所以 (n+1)² 个格子就够。倒着填：<code>i</code> 从 <code>n</code> 往 0 走，<code>less</code> 每个格子再枚举一遍 <code>nextLess</code>。</p>
+          <pre class="code"><span class="cm">// 记忆化：i 和 less 是全部参数，倒着填表，每个格子枚举 nextLess</span>
+    <span class="kw">const</span> <span class="kw">int</span> MOD = 1000000007;
+    <span class="kw">int</span> <span class="fn">numPermsDISequence</span>(<span class="kw">string</span> str) {
+        <span class="kw">string</span> s = str;
+        <span class="kw">int</span> n = s.size() + 1;
+        vector&lt;vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt;&gt; <span class="fn">dp</span>(n + 1, vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt;(n + 1, 0));
+        <span class="kw">for</span> (<span class="kw">int</span> less = 0; less &lt;= n; less++) dp[n][less] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = n - 1; i &gt;= 0; i--) {
+            <span class="kw">for</span> (<span class="kw">int</span> less = 0; less &lt;= n; less++) {
+                <span class="kw">if</span> (i == 0 || s[i - 1] == 'D') {
+                    <span class="kw">for</span> (<span class="kw">int</span> nextLess = 0; nextLess &lt; less; nextLess++) {
+                        dp[i][less] = (dp[i][less] + dp[i + 1][nextLess]) % MOD;
+                    }
+                } <span class="kw">else</span> {
+                    <span class="kw">for</span> (<span class="kw">int</span> nextLess = less, k = 1; k &lt;= n - i - less; k++, nextLess++) {
+                        dp[i][less] = (dp[i][less] + dp[i + 1][nextLess]) % MOD;
+                    }
+                }
+            }
+        }
+        <span class="kw">return</span> dp[0][n];
+    }</pre>
+      <p>不加记忆化的裸递归是另一回事。同一个 <code>(i, less)</code> 会被从不同路径重复进入，调用次数随长度指数增长：长度 4 时 35 次，度 6 时 693 次，长度 10 时 55706 次，长度 14 时 1.92 亿次。加一张表之后，长度 14 只有 256 个格子。</p>
+
+      <h2>三、观察：两个分支要的都是区间和</h2>
+      <p>看 D 分支的转移：<code>dp[i][less]</code> 要的是 <code>dp[i+1][0..less−1]</code> 的和。看 I 分支：要的是 <code>dp[i+1][less..n−i−1]</code> 的和。两段都是整区间，也就是前缀和与后缀和。</p>
+      <p>而 <code>less</code> 每挪一格，区间只多进一个元素。于是同一行从左往右（D 分支）或从右往左（I 分支）推一遍，每格只做一次加法：</p>
+      <p style="text-align:center"><code>D：dp[i][less] = dp[i][less−1] + dp[i+1][less−1]</code><br><code>I：dp[i][less] = dp[i][less+1] + dp[i+1][less]</code></p>
+      <p>两处边界要单独立：D 分支的 <code>less = 1</code> 没有 <code>less−1</code>，它直接等于 <code>dp[i+1][0]</code>；I 分支的 <code>less = n−i−1</code> 没有 <code>less+1</code>，它直接等于 <code>dp[i+1][n−i−1]</code>。两处都是从右（左）往左（右）扫的起点。</p>
+          <pre class="code"><span class="cm">// D 分支要的是 dp[i+1] 的前缀和，I 分支要的是后缀和，都能用上一格推出来</span>
+    <span class="kw">const</span> <span class="kw">int</span> MOD = 1000000007;
+    <span class="kw">int</span> <span class="fn">numPermsDISequence</span>(<span class="kw">string</span> str) {
+        <span class="kw">string</span> s = str;
+        <span class="kw">int</span> n = s.size() + 1;
+        vector&lt;vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt;&gt; <span class="fn">dp</span>(n + 1, vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt;(n + 1, 0));
+        <span class="kw">for</span> (<span class="kw">int</span> less = 0; less &lt;= n; less++) dp[n][less] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = n - 1; i &gt;= 0; i--) {
+            <span class="kw">if</span> (i == 0 || s[i - 1] == 'D') {
+                dp[i][1] = dp[i + 1][0];                       <span class="cm">// dp[i+1][0..less-1] 的前缀和</span>
+                <span class="kw">for</span> (<span class="kw">int</span> less = 2; less &lt;= n; less++) {
+                    dp[i][less] = (dp[i][less - 1] + dp[i + 1][less - 1]) % MOD;
+                }
+            } <span class="kw">else</span> {
+                dp[i][n - i - 1] = dp[i + 1][n - i - 1];       <span class="cm">// dp[i+1][less..n-i-1] 的后缀和</span>
+                <span class="kw">for</span> (<span class="kw">int</span> less = n - i - 2; less &gt;= 0; less--) {
+                    dp[i][less] = (dp[i][less + 1] + dp[i + 1][less]) % MOD;
+                }
+            }
+        }
+        <span class="kw">return</span> dp[0][n];
+    }</pre>
+      <p>枚举没了，O(n³) 变 O(n²)。长度 400 时枚举版 55.34 ms、优化版 0.42 ms；长度 800 时是 473.80 ms 对 2.15 ms。</p>
+      <figure class="fig" id="figPrefix"></figure>
+
+      <h2>四、写这份转移时的几个坑</h2>
+      <p>D 分支的枚举区间是半开的 <code>[0, less)</code>，写成 <code>[0, less]</code> 就把「没有数比上一个更小」这种情况也算进去了。实测 83.87% 出错。</p>
+      <p>I 分支的起点是 <code>less</code> 本身。下一个数比上一个大，但它在未用集合里比自己小的个数仍然可以是 <code>less</code>，从 <code>less+1</code> 起步会漏掉这一档。实测 83.72% 出错。</p>
+      <p>前缀和的递推式很容易顺手写成 <code>dp[i][less−1] + dp[i][less−1]</code>，也就是把要加的那一项也换成了本行的邻居。这样少了 <code>dp[i+1]</code> 的贡献，实测 100% 出错。</p>
+      <figure class="fig" id="figPerf3"></figure>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>空间</th></tr>
+        <tr><td>枚举全排列</td><td>O((n+1)! · n)</td><td>O(n)</td></tr>
+        <tr><td>裸递归（无记忆化）</td><td>指数级</td><td>O(n)</td></tr>
+        <tr><td>记忆化搜索 / 填表枚举</td><td>O(n³)</td><td>O(n²)</td></tr>
+        <tr><td>前缀和与后缀和</td><td>O(n²)</td><td>O(n²)</td></tr>
+      </table>
+      <p>状态数是 (n+1)² 量级，这一点没变。变的是每个格子的枚举代价：从 O(n) 降到 O(1)，整体从 O(n³) 落到 O(n²)。空间上每行只依赖下一行，可以压到一维 O(n)，但两个分支的扫描方向相反，压的时候要留意读写顺序。</p>
+
+      <h2>总结</h2>
+      <p>这道题里有两层功夫。第一层是状态设计：把「上一个数在剩下数里的排名」当作唯一需要携带的信息，用相对大小关系替掉具体用了哪些数。第二层才是优化枚举：看清两个分支要的都是整段区间之后，一行前缀和、一行后缀和就把内层扫没了。</p>
+      <p>值得记的数值有两组。裸递归在长度 14 时已经要 1.92 亿次调用，而记忆化之后只有 256 个格子，这就是「状态数少、重复进入多」的典型形状。另一组是三次写法的出错率，D 分支区间开闭 83.87%、I 分支起点 83.72%、前缀和里加错项 100%，都在「闭区间还是开区间」这一档上。</p>
+      <p>这类「用相对排名替掉具体取值」的手法，在插值、状压、排列计数一类题里都能见到。看到状态需要带一个集合又觉得放不下时，先问一句：后面真的用得上集合的每个元素吗，还是只需要一个排名。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>DI 序列的有效排列</td><td><a href="https://leetcode.cn/problems/valid-permutations-for-di-sequence/" target="_blank">valid-permutations-for-di-sequence</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解082【必备】动态规划中用观察优化枚举的技巧-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, fill, stroke, rx) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx == null ? 4 : rx) +
+      '" fill="' + fill + '" stroke="' + (stroke || 'none') + '"/>';
+  }
+  function line(x1, y1, x2, y2, stroke, w, dash) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke +
+      '" stroke-width="' + (w || 1) + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
+  }
+  function put(id, inner) { var el = document.getElementById(id); if (el) el.innerHTML = inner; }
+  function svgWrap(h, body) { return '<svg viewBox="0 0 680 ' + h + '" role="img">' + body + '</svg>'; }
+
+  // ---------- 图 1：less 的含义 ----------
+  (function () {
+    var perm = [2, 0, 3, 1], s = ['D', 'I', 'D'];
+    var g = '';
+    var x0 = 70, cw = 118, y0 = 60, ch = 46;
+    for (var i = 0; i < 4; i++) {
+      var x = x0 + i * cw;
+      g += rect(x, y0, cw - 34, ch, C.blueBg, C.blue);
+      g += txt(x + (cw - 34) / 2, y0 + 30, 'perm[' + i + '] = ' + perm[i], { size: 13, fill: C.blue, weight: '600' });
+      if (i < 3) g += txt(x + cw - 17, y0 + 30, s[i], { size: 14, fill: C.orange, weight: '600' });
+    }
+    var rows = [
+      ['i = 1', '上一个数 2，未用 {0,1,3}，比它小的有 2 个 → less = 2', 'D → nextLess = 0'],
+      ['i = 2', '上一个数 0，未用 {1,3}，比它小的有 0 个 → less = 0', 'I → nextLess = 1'],
+      ['i = 3', '上一个数 3，未用 {1}，比它小的有 1 个 → less = 1', 'D → nextLess = 0']
+    ];
+    var ry = y0 + ch + 26;
+    for (var r = 0; r < rows.length; r++) {
+      g += txt(24, ry + r * 30, rows[r][0], { size: 12, fill: C.text, weight: '600', anchor: 'start' });
+      g += txt(84, ry + r * 30, rows[r][1], { size: 11, fill: C.dim, anchor: 'start' });
+      g += txt(500, ry + r * 30, rows[r][2], { size: 11, fill: C.orange, anchor: 'start' });
+    }
+    put('figLess', svgWrap(232, g) + '<figcaption>以 s = DID 的一个有效排列 [2,0,3,1] 为例。每一格只带走一个数：上一个数在当时的未用集合里排第几。</figcaption>');
+  })();
+
+  // ---------- 图 2：两个分支的 nextLess 区间 ----------
+  (function () {
+    var g = '';
+    var n = 6, x0 = 70, W = 540, y = 96;
+    function px(v) { return x0 + v / n * W; }
+    g += line(x0, y, x0 + W, y, C.gray, 1.4);
+    for (var v = 0; v <= n; v++) {
+      g += line(px(v), y - 5, px(v), y + 5, C.gray, 1.2);
+      g += txt(px(v), y + 22, String(v), { size: 11, fill: C.dim });
+    }
+    g += txt(x0 - 12, y + 4, 'nextLess', { size: 11, fill: C.dim, anchor: 'end' });
+    // D 分支 [0, less-1]，取 less = 4
+    g += rect(px(0), y - 40, px(3) - px(0), 18, C.orangeBg, C.orange, 3);
+    g += txt((px(0) + px(3)) / 2, y - 27, 'D：nextLess 落在 [0, less−1]', { size: 12, fill: C.orange });
+    g += line(px(4), y - 40, px(4), y - 8, C.orange, 1.2, '4 3');
+    g += txt(px(4), y - 46, 'less = 4', { size: 11, fill: C.orange });
+    // I 分支 [less, n-i-1]，取 n-i-1 = 5
+    g += rect(px(4), y + 40, px(5) - px(4), 18, C.blueBg, C.blue, 3);
+    g += txt((px(4) + px(5)) / 2, y + 73, 'I：nextLess 落在 [less, n−i−1]', { size: 12, fill: C.blue });
+    g += line(px(5), y + 8, px(5), y + 40, C.blue, 1.2, '4 3');
+    g += txt(px(5), y + 92, '上界 n−i−1 = 5', { size: 11, fill: C.blue });
+    g += txt(24, 28, '两条区间在 less 处分界，D 占左边、I 占右边', { size: 13, fill: C.text, weight: '600', anchor: 'start' });
+    put('figBranch', svgWrap(216, g) + '<figcaption>同一个 less 下，D 分支只能往左挑、I 分支只能往右挑。两段的端点都随 less 单调移动，这是后面能换成前缀和的原因。</figcaption>');
+  })();
+
+  // ---------- 图 3：前缀和 / 后缀和 ----------
+  (function () {
+    var g = '';
+    var cell = 46, x0 = 210, y0 = 62;
+    var rowNext = [1, 1, 2, 4, 7, 11];
+    var rowCur = [0, 1, 2, 4, 8, 15];
+    g += txt(x0 - 14, y0 + cell / 2 + 4, 'dp[i+1]', { size: 12, fill: C.blue, anchor: 'end', weight: '600' });
+    for (var j = 0; j < rowNext.length; j++) {
+      var x = x0 + j * cell;
+      g += rect(x, y0, cell - 6, cell - 6, C.blueBg, C.blue, 3);
+      g += txt(x + (cell - 6) / 2, y0 + 24, String(rowNext[j]), { size: 12, fill: C.blue });
+    }
+    var y1 = y0 + cell + 22;
+    g += txt(x0 - 14, y1 + cell / 2 + 4, 'dp[i]', { size: 12, fill: C.orange, anchor: 'end', weight: '600' });
+    for (var k = 0; k < rowCur.length; k++) {
+      var x2 = x0 + k * cell;
+      g += rect(x2, y1, cell - 6, cell - 6, C.orangeBg, C.orange, 3);
+      g += txt(x2 + (cell - 6) / 2, y1 + 24, String(rowCur[k]), { size: 12, fill: C.orange });
+    }
+    g += txt(x0 - 14, y1 + cell + 26, 'less', { size: 11, fill: C.dim, anchor: 'end' });
+    for (var m = 0; m < rowNext.length; m++) g += txt(x0 + m * cell + (cell - 6) / 2, y1 + cell + 26, String(m), { size: 11, fill: C.dim });
+    g += txt(24, 28, 'D 分支：本行 = 本行左邻居 + 下一行左邻居', { size: 13, fill: C.orange, weight: '600', anchor: 'start' });
+    g += txt(x0 + rowNext.length * cell + 12, y0 + 24, '← 累加方向', { size: 12, fill: C.blue, anchor: 'start' });
+    g += txt(x0 + rowNext.length * cell + 12, y1 + 24, '← 同步往前推', { size: 12, fill: C.orange, anchor: 'start' });
+    g += txt(x0, y1 + cell + 58, '本行每一格 = 本行左邻 + 本行左邻对应的「下一行」那一格', { size: 11, fill: C.dim, anchor: 'start' });
+    put('figPrefix', svgWrap(280, g) + '<figcaption>D 分支的递推：本行每一格 = 本行前一格 + 下一行前一格。左边那列没有邻居，单独初始化。I 分支把整张表左右翻过来，方向相反。</figcaption>');
+  })();
+
+  // ---------- 图 4：性能与调用次数 ----------
+  (function () {
+    var g = '';
+    var X0 = 84, Y0 = 208, W = 500, H = 140;
+    function py(v) { return Y0 - Math.log10(v / 0.01) / Math.log10(1000 / 0.01) * H; }
+    g += line(X0, Y0, X0 + W, Y0, C.gray, 1);
+    var ticks = [0.01, 0.1, 1, 10, 100];
+    for (var t = 0; t < ticks.length; t++) {
+      g += line(X0, py(ticks[t]), X0 + W, py(ticks[t]), C.border, 1);
+      g += txt(X0 - 8, py(ticks[t]) + 4, ticks[t] + '', { size: 11, fill: C.dim, anchor: 'end' });
+    }
+    g += txt(X0 - 8, 26, '毫秒（对数轴）', { size: 11, fill: C.dim, anchor: 'end' });
+    var data = [[200, 6.107, 0.103], [400, 55.343, 0.417], [800, 473.802, 2.152]];
+    var gw = W / data.length, bw = 56;
+    for (var i = 0; i < data.length; i++) {
+      var cx = X0 + gw * i + gw / 2;
+      var yA = py(data[i][1]), yB = py(data[i][2]);
+      g += rect(cx - bw - 6, yA, bw, Y0 - yA, C.orangeBg, C.orange);
+      g += txt(cx - bw / 2 - 6, yA - 6, data[i][1] + '', { size: 11, fill: C.orange, weight: '600' });
+      g += rect(cx + 6, yB, bw, Y0 - yB, C.blueBg, C.blue);
+      g += txt(cx + bw / 2 + 6, yB - 6, data[i][2] + '', { size: 11, fill: C.blue, weight: '600' });
+      g += txt(cx, Y0 + 18, 'len = ' + data[i][0], { size: 12, fill: C.text });
+    }
+    g += rect(X0 + 6, 34, 12, 12, C.orangeBg, C.orange, 3); g += txt(X0 + 24, 44, '枚举 nextLess O(n³)', { size: 11, fill: C.text, anchor: 'start' });
+    g += rect(X0 + 200, 34, 12, 12, C.blueBg, C.blue, 3); g += txt(X0 + 218, 44, '前缀 / 后缀和 O(n²)', { size: 11, fill: C.text, anchor: 'start' });
+    put('figPerf3', svgWrap(244, g) + '<figcaption>长度翻倍，枚举版耗时约涨 8 倍（n³），优化版约涨 4 倍（n²）。len = 800 时两者差 220 倍。</figcaption>');
+  })();
+
+  // ---------- 演示：DI 填表台 ----------
+  (function () {
+    var PRESETS = ['DID', 'DD', 'II', 'IDI', 'IID'];
+    var host = document.createElement('div');
+    host.className = 'viz';
+    host.innerHTML =
+      '<p class="viz-title">DI 填表台：一行一行倒着推</p><div id="vizBody3"></div>' +
+      '<p class="viz-note" id="vizNote3"></p><p class="viz-answer" id="vizAns3"></p>' +
+      '<div class="viz-controls">' +
+      '<label>字符串 <select id="vizS"></select></label>' +
+      '<label>写法 <select id="vizM"><option value="enum">枚举 nextLess</option><option value="prefix">前缀 / 后缀和</option></select></label>' +
+      '<button id="vizNext3" type="button">下一步</button><button id="vizReset3" type="button">重置</button>' +
+      '</div>';
+    document.getElementById('figPerf3').parentNode.insertBefore(host, document.getElementById('figPerf3').nextSibling);
+    var ssel = host.querySelector('#vizS'), msel = host.querySelector('#vizM');
+    PRESETS.forEach(function (p) { var o = document.createElement('option'); o.value = p; o.textContent = p; ssel.appendChild(o); });
+    var body = host.querySelector('#vizBody3'), note = host.querySelector('#vizNote3'), ansEl = host.querySelector('#vizAns3');
+    var nxt = host.querySelector('#vizNext3'), rst = host.querySelector('#vizReset3');
+    var MOD = 1000000007, st = null;
+
+    function compute(s, mode) {
+      var n = s.length + 1;
+      var dp = [];
+      for (var a = 0; a <= n; a++) { dp.push(new Array(n + 1).fill(0)); }
+      for (var less0 = 0; less0 <= n; less0++) dp[n][less0] = 1;
+      var cnt = 0;
+      for (var i = n - 1; i >= 0; i--) {
+        if (i === 0 || s[i - 1] === 'D') {
+          if (mode === 'enum') {
+            for (var less = 0; less <= n; less++) {
+              var acc = 0;
+              for (var q = 0; q < less; q++) { acc = (acc + dp[i + 1][q]) % MOD; cnt++; }
+              dp[i][less] = acc;
+            }
+          } else {
+            dp[i][1] = dp[i + 1][0];
+            for (var less2 = 2; less2 <= n; less2++) { dp[i][less2] = (dp[i][less2 - 1] + dp[i + 1][less2 - 1]) % MOD; cnt++; }
+          }
+        } else {
+          if (mode === 'enum') {
+            for (var less3 = 0; less3 <= n; less3++) {
+              var acc2 = 0;
+              for (var q2 = less3; q2 <= n - i - 1; q2++) { acc2 = (acc2 + dp[i + 1][q2]) % MOD; cnt++; }
+              dp[i][less3] = acc2;
+            }
+          } else {
+            dp[i][n - i - 1] = dp[i + 1][n - i - 1];
+            for (var less4 = n - i - 2; less4 >= 0; less4--) { dp[i][less4] = (dp[i][less4 + 1] + dp[i + 1][less4]) % MOD; cnt++; }
+          }
+        }
+      }
+      return { dp: dp, n: n, cnt: cnt, ans: dp[0][n] };
+    }
+    function build() {
+      var s = ssel.value, mode = msel.value;
+      var r = compute(s, mode);
+      st = { s: s, mode: mode, dp: r.dp, n: r.n, cnt: r.cnt, ans: r.ans, step: 0 };
+    }
+    function draw() {
+      var s = st.s, n = st.n, dp = st.dp;
+      var curI = n - st.step;                  // 已填到第 curI 行
+      var x0 = 96, y0 = 56, cw = 62, rh = 26;
+      var g = '';
+      g += txt(x0 - 14, y0 - 12, 'less', { size: 11, fill: C.dim, anchor: 'end' });
+      for (var less = 0; less <= n; less++) g += txt(x0 + less * cw + cw / 2, y0 - 12, String(less), { size: 10, fill: C.dim });
+      for (var i = 0; i <= n; i++) {
+        var y = y0 + i * rh;
+        var filled = i >= curI;
+        var isCur = i === curI;
+        g += txt(x0 - 14, y + rh / 2 + 4, 'i=' + i, { size: 11, fill: isCur ? C.orange : C.dim, anchor: 'end' });
+        for (var l = 0; l <= n; l++) {
+          var v = filled ? dp[i][l] : 0;
+          g += rect(x0 + l * cw, y, cw - 5, rh - 4, isCur ? C.orangeBg : (filled ? C.blueBg : C.bg), isCur ? C.orange : C.border, 2);
+          g += txt(x0 + l * cw + (cw - 5) / 2, y + rh / 2 + 2, filled ? String(v) : '', { size: 10, fill: isCur ? C.orange : C.blue });
+        }
+      }
+      body.innerHTML = svgWrap(y0 + (n + 1) * rh + 20, g);
+      if (st.step === 0) { note.innerHTML = 's = ' + s + '，n = ' + n + '。最下面一行是边界全 1，点「下一步」从 i = ' + (n - 1) + ' 往上填。'; ansEl.textContent = ''; nxt.disabled = false; }
+      else if (st.step === n) {
+        note.innerHTML = '填到 i = 0 完成。入口 dp[0][' + n + '] 才是答案。';
+        ansEl.textContent = '答案：' + st.ans + '（加法次数 ' + st.cnt + '）'; nxt.disabled = true;
+      } else {
+        note.innerHTML = '刚填完 i = ' + curI + ' 这一行。' + (st.mode === 'enum' ? '每格枚举了一段区间。' : '每格只做一次加法。');
+        ansEl.textContent = ''; nxt.disabled = false;
+      }
+    }
+    function reset() { build(); draw(); }
+    nxt.addEventListener('click', function () { if (st.step < st.n) { st.step++; draw(); } });
+    rst.addEventListener('click', reset);
+    ssel.addEventListener('change', reset);
+    msel.addEventListener('change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

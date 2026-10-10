@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>单词搜索 II：一棵 Trie 找全部单词</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz-ctl{margin:8px 0 4px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;}
+.viz-ctl label{font-size:13px;color:var(--text-dim);white-space:nowrap;}
+.viz-ctl select{font-size:13px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:#fff;}
+.viz-note{margin:10px 0 4px;font-size:13px;color:var(--text);}
+.viz-answer{margin-top:6px;font-size:15px;font-weight:600;}
+.board-cell{stroke:#9aa0a6;stroke-width:1.4;fill:#fff;}
+.board-cell.cur{stroke:#2563eb;stroke-width:2.6;fill:#dbeafe;}
+.board-cell.used{stroke:#ea580c;stroke-width:2.2;fill:#ffedd5;}
+.board-cell.cut{stroke:#9aa0a6;stroke-width:1.4;fill:#f3f4f6;}
+.board-text{font-size:16px;font-weight:600;}
+.tnode circle{stroke:#9aa0a6;stroke-width:1.4;fill:#fff;}
+.tnode.cur circle{stroke:#2563eb;stroke-width:2.6;fill:#dbeafe;}
+.tnode text.ch{font-size:13px;font-weight:600;}
+.tnode text.pe{font-size:10px;fill:#444;}
+.edge{stroke:#9aa0a6;stroke-width:1.4;}
+.edge.cur{stroke:#2563eb;stroke-width:2.2;}
+.edge-tag{font-size:11px;fill:#555;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>单词搜索 II：一棵 Trie 找全部单词</h1>
+      <p class="intro">3 万个单词，每个都全盘搜一遍二维网格，谁也顶不住。把所有单词插进一棵 Trie，一次 DFS 同时找全部，搜完的子树直接扔掉，实测 12×12 网格、3 万词不到 20 毫秒。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>网格 board 最大 12×12，单词列表最多 3×10^4 个，每个单词最长 10 个字符。找所有能在网格里拼出来的单词，格子不能重复用。</p>
+      <p>朴素做法：每个单词单独做一次 DFS。一个词最坏 144 个起点、每个起点四方向走到 10 层，约 10^8 次访问；3 万个词就是 4.5×10^12 次访问。这个量级不用测也知道跑不完。</p>
+      <p>但单词只有 26 个小写字母。3 万个词的前缀大量重叠，「apple」和「apply」共享前五个字符。把前缀共享掉，一次遍历就能同时照顾 3 万个词。</p>
+
+      <h2 id="build">一、把 words 插成一棵树</h2>
+      <p>26 路前缀树，和 044 的静态数组实现一样，唯一的变化：词尾节点不记 end 计数，直接存整个单词字符串，DFS 走到词尾时取出来就是答案。</p>
+      <figure class="fig" id="figBuild3"></figure>
+      <p>共享的效果很直观：3 万词、每词 10 字符，全不同前缀最多 30 万节点；实测（12×12 网格、3 万随机词）插完只有约 4.9 万节点。</p>
+      <p>静态池要按总字符数开够。实测把 MAXN 开成 10001，3 万词一插就数组越界段错误。别拿「看起来够」当容量，words 总字符数 3×10^5，池子按这个量级开。</p>
+
+      <h2 id="dfs">二、DFS 走网格</h2>
+      <p>每个格子当起点，dfs(board, i, j, t=1, ans) 往四个方向走。每走一步做三件事：沿网格字符在 Trie 里前进一步；发现子树没有要找的词就返回；走到词尾就收词。</p>
+      <figure class="fig" id="figDfs"></figure>
+      <p>关键细节一个一个说。</p>
+      <p>第一步先剪枝：t = tree[t][board[i][j]-'a']，如果 pass[t]==0，说明从「这个前缀」往后没有任何要找的词，直接返回。这一步把大量起点挡在门外：起点字符在树里连路都没有，一次递归都不用进。</p>
+      <p>收词要防重复：同一个单词可能从不同起点、不同路径找到多次，endStr[t] 收完就置空，后找到的不会再收第二次。</p>
+      <p>格子标记是回溯的骨架：board[i][j] = 0 占住，四个方向递归，回来恢复原字符。不占住，同一个格子会在一条路径里被走两次，违反「不允许被重复使用」。</p>
+          <pre class="code"><span class="cm">// words 总字符数上限 3e5，池子开够（实测开 1e4 会越界）</span>
+    <span class="kw">static</span> <span class="kw">const</span> <span class="kw">int</span> MAXN = 3000001;
+    <span class="kw">static</span> <span class="kw">int</span> tree[MAXN][26], pass[MAXN], cnt;
+    <span class="kw">static</span> <span class="kw">string</span> endStr[MAXN];   <span class="cm">// 走到这个节点的单词，没有就是空串</span>
+
+    <span class="kw">void</span> <span class="fn">build</span>(vector&lt;<span class="kw">string</span>&gt;&amp; words) {
+        cnt = 1;
+        <span class="kw">for</span> (<span class="kw">string</span> w : words) {
+            <span class="kw">int</span> cur = 1;
+            pass[cur]++;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0, p; i &lt; w.size(); i++) {
+                p = w[i] - 'a';
+                <span class="kw">if</span> (tree[cur][p] == 0) {
+                    tree[cur][p] = ++cnt;
+                }
+                cur = tree[cur][p];
+                pass[cur]++;
+            }
+            endStr[cur] = w;      <span class="cm">// 词尾节点记住整个单词</span>
+        }
+    }
+
+    <span class="cm">// 从 (i,j) 出发，当前走到 Trie 节点 t，收集到的词放 ans</span>
+    <span class="kw">int</span> <span class="fn">dfs</span>(vector&lt;vector&lt;<span class="kw">char</span>&gt;&gt;&amp; board, <span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> t, vector&lt;<span class="kw">string</span>&gt;&amp; ans) {
+        <span class="kw">if</span> (i &lt; 0 || i == board.size() || j &lt; 0 || j == board[0].size() || board[i][j] == 0) {
+            <span class="kw">return</span> 0;             <span class="cm">// 越界或回头路</span>
+        }
+        <span class="kw">char</span> tmp = board[i][j];
+        t = tree[t][tmp - 'a'];   <span class="cm">// 沿 board 字符在 Trie 里走一步</span>
+        <span class="kw">if</span> (pass[t] == 0) {
+            <span class="kw">return</span> 0;             <span class="cm">// 这棵子树没有要找的词，剪掉</span>
+        }
+        <span class="kw">int</span> fix = 0;
+        <span class="kw">if</span> (!endStr[t].empty()) { <span class="cm">// 走到词尾，收集，并且只收一次</span>
+            fix++;
+            ans.push_back(endStr[t]);
+            endStr[t].clear();
+        }
+        board[i][j] = 0;          <span class="cm">// 占住这个格子，四方向不许回头</span>
+        fix += dfs(board, i - 1, j, t, ans);
+        fix += dfs(board, i + 1, j, t, ans);
+        fix += dfs(board, i, j - 1, t, ans);
+        fix += dfs(board, i, j + 1, t, ans);
+        pass[t] -= fix;           <span class="cm">// 收走的词从 pass 里减掉，下次不进这棵子树</span>
+        board[i][j] = tmp;        <span class="cm">// 恢复</span>
+        <span class="kw">return</span> fix;
+    }</pre>
+      <p>主流程对每个格子调一次 dfs。整棵树的 pass 在 build 时已经全部数好，DFS 只是沿着网格字符在树上走，边走边剪。</p>
+
+      <h2 id="prune">三、pass -= fix：搜完的子树扔掉</h2>
+      <p>还有一个容易被忽略的剪枝：dfs 返回时把收走的词数 fix 从 pass 里减掉。</p>
+      <p>看代码最后几行：pass[t] -= fix。含义是「这棵子树里还没找到的词，已经减掉了 fix 个」。等 fix 把 pass 减到 0，以后再有任何路径走到这个节点，第一步的 pass[t]==0 直接返回。</p>
+      <figure class="fig" id="figCut"></figure>
+      <p>为什么需要它：同一个子树可能被多个起点搜到。第一次搜完把所有词都收走了，第二次再来就是纯浪费时间。pass 减到 0 让第二次连子树都不进。</p>
+      <p>这是把 Trie 从「静态索引」变成「动态收缩」：不只是查询快，是查完的部分直接消失。</p>
+
+      <div class="viz" id="vizSearch"></div>
+
+      <h2 id="measure">四、复杂度与实测</h2>
+      <p>最坏时间复杂度还是 O(m×n×4^10)，前缀树没改变这个上界，它做的是剪枝和压常数。空间 O(words 总字符数)。</p>
+      <p>实测（本机 g++ -O2，12×12 网格）：</p>
+      <p>三字母密集网格、3 万随机词：Trie+DFS 19.8ms，找到 22054 个词。六字母稀疏网格：4.2ms，只找到 240 个。字母越杂，能拼出来的词越少，剪枝越狠。</p>
+      <p>再看访问量：Trie 整场搜索访问了约 195 万个格子；朴素逐词搜索的最坏访问量是 4.5×10^12，差了 230 万倍。差距主要来自两处：前缀共享（一次 DFS 管 3 万词）和 pass 剪枝（没词的子树、搜完的子树都不进）。</p>
+
+      <h2 id="complexity">复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>空间</th></tr>
+        <tr><td>朴素逐词 DFS</td><td>O(words × m×n×4^10)</td><td>O(词长)</td></tr>
+        <tr><td>Trie + DFS</td><td>O(m×n×4^10)，剪枝压常数</td><td>O(words 总字符数)</td></tr>
+      </table>
+      <p>时间上界没变，但常数被砍掉几个数量级：pass 剪枝挡掉无路起点，pass-=fix 让查完的子树消失。</p>
+
+      <h2 id="sum">总结</h2>
+      <p>把 3 万个词并成一棵树，一次 DFS 全找，是「共享前缀」这个思想最直白的应用。</p>
+      <p>三个剪枝缺一不可：pass==0 挡无路起点，end 置空防重复收词，pass-=fix 让搜完的子树下次直接跳过。</p>
+      <p>静态数组池按总字符数开够，这是 044 和这讲共同的教训。前缀树三讲收尾，下一讲换前缀和：把子数组和变成两个前缀和的差。下节课的题目里见。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>单词搜索 II</td><td><a href="https://leetcode.cn/problems/word-search-ii/" target="_blank">leetcode.cn/problems/word-search-ii</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解045【必备】前缀树的相关题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-wiki</td><td>字典树（Trie）</td><td><a href="https://oi-wiki.org/string/trie/" target="_blank">oi-wiki.org/string/trie</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+/* ===== 树绘制（26 路只画用到的） ===== */
+function makeW(){
+  return { ch:'', pass:0, end:'', children:{}, x:0, y:0 };
+}
+function layoutW(root, W){
+  var levels = [];
+  (function dfs(u,d){
+    if(!levels[d]) levels[d] = [];
+    levels[d].push(u);
+    for(var k in u.children) dfs(u.children[k], d+1);
+  })(root,0);
+  levels.forEach(function(lv,d){
+    lv.sort(function(a,b){ return a.ch < b.ch ? -1 : a.ch > b.ch ? 1 : 0; });
+    var y = d===0 ? 48 : 60 + d*66;
+    lv.forEach(function(u,i){
+      u.y = y;
+      u.x = lv.length===1 ? W/2 : 26 + i*(W-52)/(lv.length-1);
+    });
+  });
+}
+function drawW(svg, root, opts){
+  opts = opts || {};
+  var cur = opts.cur || null, edgeCur = opts.edgeCur || null;
+  var showEnd = opts.showEnd !== false;
+  var s = '';
+  (function walk(u){
+    for(var k in u.children){
+      var v = u.children[k];
+      var cls = 'edge';
+      if(edgeCur && edgeCur[0]===u && edgeCur[1]===v) cls='edge cur';
+      s += '<line class="'+cls+'" x1="'+u.x+'" y1="'+u.y+'" x2="'+v.x+'" y2="'+v.y+'"/>';
+      s += '<text class="edge-tag" x="'+((u.x+v.x)/2)+'" y="'+((u.y+v.y)/2-5)+'" text-anchor="middle">'+k+'</text>';
+      walk(v);
+    }
+  })(root);
+  (function walk2(u){
+    var cls = 'tnode';
+    if(u===cur) cls='tnode cur';
+    s += '<g class="'+cls+'">';
+    s += '<circle cx="'+u.x+'" cy="'+u.y+'" r="17"/>';
+    if(u.ch) s += '<text class="ch" x="'+u.x+'" y="'+(u.y+4.5)+'" text-anchor="middle">'+u.ch+'</text>';
+    else s += '<text class="ch" x="'+u.x+'" y="'+(u.y+4.5)+'" text-anchor="middle" style="font-size:10px">根</text>';
+    if(showEnd && u.end) s += '<text class="pe" x="'+u.x+'" y="'+(u.y+30)+'" text-anchor="middle" style="font-size:9.5px;fill:#c2410c">'+u.end+'</text>';
+    s += '</g>';
+    for(var k in u.children) walk2(u.children[k]);
+  })(root);
+  svg.innerHTML = s;
+}
+function cloneW(u){
+  var c = { ch:u.ch, pass:u.pass, end:u.end, children:{}, x:u.x, y:u.y };
+  for(var k in u.children) c.children[k] = cloneW(u.children[k]);
+  return c;
+}
+function buildWords(words){
+  var root = makeW();
+  words.forEach(function(w){
+    var u = root; u.pass++;
+    for(var i=0;i<w.length;i++){
+      var c = w[i];
+      if(!u.children[c]) u.children[c] = { ch:c, pass:0, end:'', children:{}, x:0, y:0 };
+      u = u.children[c]; u.pass++;
+    }
+    u.end = w;
+  });
+  return root;
+}
+
+/* ===== board 网格绘制 ===== */
+function drawBoard(container, board, opts){
+  opts = opts || {};
+  var cur = opts.cur || null;      // 当前起点/路径 {i,j}
+  var path = opts.path || [];      // 高亮路径格子
+  var used = opts.used || null;    // 被 0 占住的格子
+  var cut = opts.cut || [];        // 剪枝格子（灰）
+  var n = board.length, m = board[0].length;
+  var cell = 44, gap = 6, x0 = 20, y0 = 20;
+  var s = '<svg viewBox="0 0 '+(x0+m*(cell+gap)+20)+' '+(y0+n*(cell+gap)+30)+'" xmlns="http://www.w3.org/2000/svg">';
+  var pathSet = {};
+  path.forEach(function(p){ pathSet[p[0]+','+p[1]] = true; });
+  for(var i=0;i<n;i++) for(var j=0;j<m;j++){
+    var x = x0 + j*(cell+gap), y = y0 + i*(cell+gap);
+    var cls = 'board-cell';
+    if(used && used[0]===i && used[1]===j) cls = 'board-cell used';
+    else if(pathSet[i+','+j]) cls = 'board-cell cur';
+    else if(cur && cur[0]===i && cur[1]===j) cls = 'board-cell cur';
+    else if(cut.length) { var isCut=false; for(var c=0;c<cut.length;c++) if(cut[c][0]===i&&cut[c][1]===j){isCut=true;break;} if(isCut) cls='board-cell cut'; }
+    s += '<rect class="'+cls+'" x="'+x+'" y="'+y+'" width="'+cell+'" height="'+cell+'" rx="7"/>';
+    s += '<text class="board-text" x="'+(x+cell/2)+'" y="'+(y+cell/2+6)+'" text-anchor="middle">'+board[i][j]+'</text>';
+  }
+  // 路径箭头
+  for(var p=0;p<path.length-1;p++){
+    var a = path[p], b = path[p+1];
+    var x1 = x0 + a[1]*(cell+gap) + cell/2, y1 = y0 + a[0]*(cell+gap) + cell/2;
+    var x2 = x0 + b[1]*(cell+gap) + cell/2, y2 = y0 + b[0]*(cell+gap) + cell/2;
+    s += '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="#2563eb" stroke-width="2.4"/>';
+    s += '<circle cx="'+x2+'" cy="'+y2+'" r="3.5" fill="#2563eb"/>';
+  }
+  s += '</svg>';
+  container.innerHTML = s;
+}
+
+/* ===== figBuild3：4 词插树 ===== */
+(function(){
+  var root = buildWords(['oath','pea','eat','rain']);
+  layoutW(root, 760);
+  var svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 760 380');
+  drawW(svg, root, {});
+  svg.innerHTML += '<text x="380" y="330" text-anchor="middle" style="font-size:12px;fill:#888">词尾节点橙色标出整个单词：oath、pea、eat、rain 共享根，前缀一多树就矮</text>';
+  document.getElementById('figBuild3').appendChild(svg);
+})();
+
+/* ===== figDfs：board 4x4 + oath 路径 + 0 标记 ===== */
+(function(){
+  var board = [
+    ['o','a','a','n'],
+    ['e','t','a','e'],
+    ['i','h','k','r'],
+    ['i','f','l','v']
+  ];
+  var wrap = document.getElementById('figDfs');
+  var div = document.createElement('div');
+  div.style.cssText = 'display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;';
+  var left = document.createElement('div');
+  drawBoard(left, board, { path: [[0,0],[0,1],[1,1],[2,1]], cur: [2,1] });
+  left.querySelector('svg').setAttribute('viewBox','0 0 220 230');
+  div.appendChild(left);
+  var right = document.createElement('div');
+  right.style.cssText = 'font-size:13px;color:#444;line-height:1.9;padding-top:16px;';
+  right.innerHTML = '走 oath：o(0,0) → a(0,1) → t(1,1) → h(2,1)<br>' +
+    '每走一格，在 Trie 里沿字符前进一步：<br>' +
+    'o → a → t → h，走到 h 发现 endStr=oath，收词<br>' +
+    '收完 pass[h] 减 1 变 0，这棵子树消失<br>' +
+    'DFS 回退时 board 格子恢复原字符，<br>' +
+    '下次别的路径还能从这里走';
+  div.appendChild(right);
+  wrap.appendChild(div);
+})();
+
+/* ===== figCut：pass -= fix 示意 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg">';
+  s += '<text x="200" y="40" text-anchor="middle" style="font-size:14px;font-weight:600">第一次搜到</text>';
+  s += '<text x="560" y="40" text-anchor="middle" style="font-size:14px;font-weight:600">搜完，pass 减到 0</text>';
+  // 左：子树 pass 2
+  var lx = [200, 110, 290, 60, 160];
+  var ly = [90, 160, 160, 230, 230];
+  s += '<line x1="'+lx[0]+'" y1="'+ly[0]+'" x2="'+lx[1]+'" y2="'+ly[1]+'" stroke="#9aa0a6" stroke-width="1.4"/>';
+  s += '<line x1="'+lx[0]+'" y1="'+ly[0]+'" x2="'+lx[2]+'" y2="'+ly[2]+'" stroke="#9aa0a6" stroke-width="1.4"/>';
+  s += '<line x1="'+lx[1]+'" y1="'+ly[1]+'" x2="'+lx[3]+'" y2="'+ly[3]+'" stroke="#9aa0a6" stroke-width="1.4"/>';
+  s += '<line x1="'+lx[1]+'" y1="'+ly[1]+'" x2="'+lx[4]+'" y2="'+ly[4]+'" stroke="#9aa0a6" stroke-width="1.4"/>';
+  s += '<g><circle cx="'+lx[0]+'" cy="'+ly[0]+'" r="20" fill="#fff" stroke="#2563eb" stroke-width="2"/><text x="'+lx[0]+'" y="'+(ly[0]+5)+'" text-anchor="middle" style="font-size:13px;font-weight:600">pass 2</text></g>';
+  [[lx[1],ly[1],'a'],[lx[2],ly[2],'b'],[lx[3],ly[3],'x'],[lx[4],ly[4],'y']].forEach(function(p){
+    s += '<g><circle cx="'+p[0]+'" cy="'+p[1]+'" r="18" fill="#fff" stroke="#9aa0a6" stroke-width="1.4"/><text x="'+p[0]+'" y="'+(p[1]+5)+'" text-anchor="middle" style="font-size:13px;font-weight:600">'+p[2]+'</text></g>';
+  });
+  // 右：pass 0
+  var rx = [560, 470, 650];
+  var ry = [90, 170, 170];
+  s += '<line x1="'+rx[0]+'" y1="'+ry[0]+'" x2="'+rx[1]+'" y2="'+ry[1]+'" stroke="#d1d5db" stroke-width="1.4" stroke-dasharray="4 3"/>';
+  s += '<line x1="'+rx[0]+'" y1="'+ry[0]+'" x2="'+rx[2]+'" y2="'+ry[2]+'" stroke="#d1d5db" stroke-width="1.4" stroke-dasharray="4 3"/>';
+  s += '<g><circle cx="'+rx[0]+'" cy="'+ry[0]+'" r="20" fill="#f3f4f6" stroke="#9aa0a6" stroke-width="1.6"/><text x="'+rx[0]+'" y="'+(ry[0]+5)+'" text-anchor="middle" style="font-size:13px;font-weight:600">pass 0</text></g>';
+  [[rx[1],ry[1],'a'],[rx[2],ry[2],'b']].forEach(function(p){
+    s += '<g><circle cx="'+p[0]+'" cy="'+p[1]+'" r="18" fill="#f9fafb" stroke="#d1d5db" stroke-width="1.2" stroke-dasharray="3 3"/><text x="'+p[0]+'" y="'+(p[1]+5)+'" text-anchor="middle" style="font-size:13px;color:#9ca3af">'+p[2]+'</text></g>';
+  });
+  s += '<text x="380" y="240" text-anchor="middle" style="font-size:12px;fill:#888">词收完 pass 归 0，之后任何路径走到这个节点，第一步 pass==0 就返回</text>';
+  s += '</svg>';
+  document.getElementById('figCut').innerHTML = s;
+})();
+
+/* ===== vizSearch：DFS 逐步找词 ===== */
+(function(){
+  var box = document.getElementById('vizSearch');
+  box.innerHTML =
+    '<p class="viz-title">操作台：4×4 网格找 oath、pea、eat、rain，逐步走 DFS</p>' +
+    '<div class="viz-ctl">' +
+      '<label>预设 <select id="vsSel">' +
+        '<option value="0">样例网格（找到 oath、eat）</option>' +
+        '<option value="1">词全是前缀关系</option>' +
+      '</select></label>' +
+      '<button type="button" id="vsNext">下一步</button>' +
+      '<button type="button" id="vsReset">重置</button>' +
+    '</div>' +
+    '<div class="viz-note" id="vsNote">准备</div>' +
+    '<div class="viz-answer" id="vsAns"></div>';
+  var gridWrap = document.createElement('div');
+  box.appendChild(gridWrap);
+  var treeWrap = document.createElement('div');
+  treeWrap.style.marginTop = '8px';
+  box.appendChild(treeWrap);
+  var steps = [], step = 0;
+
+  var PRESETS = [
+    {
+      board: [['o','a','a','n'],['e','t','a','e'],['i','h','k','r'],['i','f','l','v']],
+      words: ['oath','pea','eat','rain'],
+      seq: [
+        {t:'初始：oath、pea、eat、rain 已插进 Trie，根 pass 4', cur:null, path:[], cut:[]},
+        {t:'起点 (0,0) o：Trie 根有 o 路（oath 经过，pass 1），走', cur:[0,0], path:[[0,0]], cut:[]},
+        {t:'o 后接 a：(0,1)，Trie 沿 o→a，pass 1', cur:[0,1], path:[[0,0],[0,1]], cut:[]},
+        {t:'a 后接 t：(1,1)，Trie 沿 o→a→t，pass 1', cur:[1,1], path:[[0,0],[0,1],[1,1]], cut:[]},
+        {t:'t 后接 h：(2,1)，endStr[h]=oath → 收词！pass[h] 1→0，oath 这棵子树消失', cur:[2,1], path:[[0,0],[0,1],[1,1],[2,1]], cut:[], got:['oath']},
+        {t:'回退恢复格子。下一个起点 (0,1) a：Trie 根没有 a 路，pass 剪枝，整行起点一次跳过', cur:[0,1], path:[], cut:[[0,1],[0,2],[0,3]]},
+        {t:'起点 (1,1) t、t 开头的词没有，根无 t 路，剪', cur:[1,1], path:[], cut:[[1,1],[2,1],[1,2]]},
+        {t:'起点 (2,3) r：根有 r 路（rain，pass 1），走 r；但 r 之后接不到 a，剪', cur:[2,3], path:[[2,3]], cut:[]},
+        {t:'起点 (1,0) e：根有 e 路（eat，pass 1），走 e', cur:[1,0], path:[[1,0]], cut:[]},
+        {t:'e 后接 a：(0,1)，Trie 沿 e→a，pass 1', cur:[0,1], path:[[1,0],[0,1]], cut:[]},
+        {t:'a 后接 t：(1,1)，endStr[t]=eat → 收词！pass[t] 1→0', cur:[1,1], path:[[1,0],[0,1],[1,1]], cut:[], got:['oath','eat']},
+        {t:'其余起点全部剪枝（根无对应路或子树已收空）', cur:null, path:[], cut:[[0,0],[0,2],[0,3],[1,2],[1,3],[2,0],[2,2],[3,0],[3,1],[3,2],[3,3]], got:['oath','eat']},
+        {t:'完成：找到 oath、eat；pea（无 p）、rain（无 ra 路）确认不存在', cur:null, path:[], cut:[], final:true, got:['oath','eat']}
+      ]
+    },
+    {
+      board: [['a','p','l'],['p','p','e'],['e','y','a']],
+      words: ['app','apple','apply','a'],
+      seq: [
+        {t:'初始：app、apple、apply、a 已插进 Trie，根 pass 4', cur:null, path:[], cut:[]},
+        {t:'起点 (0,0) a：根有 a 路，pass 4，走；endStr[a]=a → 收词 a！', cur:[0,0], path:[[0,0]], cut:[], got:['a']},
+        {t:'a 后接 p：(0,1)，沿 a→p，pass 3', cur:[0,1], path:[[0,0],[0,1]], cut:[]},
+        {t:'p 后接 p：(1,1)，沿 a→p→p，pass 3；endStr[p]=app → 收词 app！', cur:[1,1], path:[[0,0],[0,1],[1,1]], cut:[], got:['a','app']},
+        {t:'p 后接 l：(1,0)，沿 a→p→p→l，pass 2', cur:[1,0], path:[[0,0],[0,1],[1,1],[1,0]], cut:[]},
+        {t:'l 后接 e：(2,0)，pass 1；endStr[e]=apple → 收词 apple！', cur:[2,0], path:[[0,0],[0,1],[1,1],[1,0],[2,0]], cut:[], got:['a','app','apple']},
+        {t:'回退。从 (0,1) p 的另一个方向 (0,2) l → (1,2) y：endStr[y]=apply → 收词 apply！', cur:[1,2], path:[[0,0],[0,1],[0,2],[1,2]], cut:[], got:['a','app','apple','apply']},
+        {t:'其余格子扫完（子树已收空，pass 全 0）', cur:null, path:[], cut:[[0,1],[1,1],[2,1],[2,2],[0,0],[2,0],[1,0]], got:['a','app','apple','apply']},
+        {t:'完成：四个词全找到。注意 apple 在 (2,1) 还有个起点，但 end 已置空，不会重复收', cur:null, path:[], cut:[], final:true, got:['a','app','apple','apply']}
+      ]
+    }
+  ];
+
+  function load(){
+    steps = [];
+    var P = PRESETS[+document.getElementById('vsSel').value];
+    P.seq.forEach(function(st){ steps.push({label:st.t, cur:st.cur||null, path:st.path||[], cut:st.cut||[], got:st.got||[], final:!!st.final}); });
+    step = 0; redraw();
+  }
+  function redraw(){
+    var st = steps[step];
+    var P = PRESETS[+document.getElementById('vsSel').value];
+    drawBoard(gridWrap, P.board, { cur: st.cur, path: st.path, cut: st.cut });
+    var root = buildWords(P.words);
+    layoutW(root, 760);
+    var tsvg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    tsvg.setAttribute('viewBox','0 0 760 380');
+    drawW(tsvg, root, {});
+    treeWrap.innerHTML = '';
+    treeWrap.appendChild(tsvg);
+    document.getElementById('vsNote').textContent = st.label;
+    var ansEl = document.getElementById('vsAns');
+    ansEl.textContent = st.got.length ? '已找到：' + st.got.join('、') : '';
+  }
+  document.getElementById('vsNext').addEventListener('click', function(){
+    if(step < steps.length-1){ step++; redraw(); }
+  });
+  document.getElementById('vsReset').addEventListener('click', function(){ step = 0; redraw(); });
+  document.getElementById('vsSel').addEventListener('change', load);
+  load();
+})();
+})();
+</script>
+</body>
+</html>

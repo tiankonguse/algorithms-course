@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数组中两个数的最大异或值</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz-ctl{margin:8px 0 4px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;}
+.viz-ctl label{font-size:13px;color:var(--text-dim);white-space:nowrap;}
+.viz-ctl select{font-size:13px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:#fff;}
+.viz-note{margin:10px 0 4px;font-size:13px;color:var(--text);}
+.viz-answer{margin-top:6px;font-size:15px;font-weight:600;}
+.btnode circle{stroke:#9aa0a6;stroke-width:1.4;fill:#fff;}
+.btnode.cur circle{stroke:#2563eb;stroke-width:2.6;fill:#dbeafe;}
+.btnode.want circle{stroke:#16a34a;stroke-width:2.6;fill:#dcfce7;}
+.btnode text.ch{font-size:13px;font-weight:600;}
+.edge{stroke:#9aa0a6;stroke-width:1.4;}
+.edge.cur{stroke:#2563eb;stroke-width:2.2;}
+.edge.want{stroke:#16a34a;stroke-width:2.4;}
+.edge-tag{font-size:11.5px;fill:#555;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>数组中两个数的最大异或值</h1>
+      <p class="intro">异或结果看每一位，高位能出 1，低位怎么折腾都补不回来。把所有数按位插成 01-Trie，对每个数逐位贪心走「相反的那一位」，一次查询只走 31 步。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>给一个整数数组，找两个数，让异或结果最大。n 最多 2×10^5，数最大到 2^31-1。</p>
+      <p>朴素做法两两异或：2×10^5 个数是 4×10^10 对。实测 n=5×10^4 的暴力要 102.6ms，n 翻四倍、时间翻十六倍，外推 n=2×10^5 约 1.6 秒。这只是把 4 千亿次异或跑完，还没算别的。</p>
+      <p>异或有个好性质：结果的每一位互不影响，第 i 位只由两个数的第 i 位决定。而大小由最高的不同位决定：两个数异或，从高位往下看，第一次出现 1 的那一位，已经决定了结果的大小，低位的所有 1 加起来都填不平这一个 1。</p>
+      <p>所以问题变成：对每个数 num，在数组里找一个数，让异或结果最大。逐位定：这一位能凑出 1，就不要 0。</p>
+
+      <h2 id="build">一、按位建树</h2>
+      <p>把每个数从高位到低位，按二进制位插成一棵树。树的每个节点只有两条路：0 和 1，这就是 01-Trie。</p>
+      <p>不用从第 31 位开始。数组最大值决定了最高有效位，前面全是 0 的位不用建，插进去也只会走 0 路。high 取 max 的最高有效位，从 high 往下插。</p>
+      <figure class="fig" id="figBitTrie"></figure>
+      <p>[5, 25] 两个数：5 的二进制是 00101，25 是 11001，max=25，high=4，从第 4 位开始。5 走 0-0-1-0-1，25 走 1-1-0-0-1，两条路在前两位就分开了。</p>
+      <p>节点数最坏是 n×31：每个数都走一条全新的路。实测 2×10^5 个随机数插完用了约 290 万节点，静态池按 3000001 开刚好够。这个「刚好」提醒你，MAXN 要按最坏规模算，别按平均值算。</p>
+
+      <h2 id="query">二、贪心查询</h2>
+      <p>maxXor(num) 从 high 往下逐位走：num 这一位是 st，希望遇到 want = st^1（异或出 1）。树里有 want 这条路就走 want，没有就只能走 st。</p>
+      <p>贪心成立的理由在前面：第 i 位出 1，贡献 2^i，低位的所有 1 加起来是 2^i-1，补不回来。所以每一高位先定死，低位的选择不影响已经定下的高位。</p>
+      <figure class="fig" id="figGreedy"></figure>
+      <p>代码很短，静态数组和上一讲一个套路，只是路从 26 条变成 2 条：</p>
+          <pre class="code"><span class="kw">static</span> <span class="kw">const</span> <span class="kw">int</span> MAXN = 3000001;
+    <span class="kw">static</span> <span class="kw">int</span> tree[MAXN][2], cnt, high;
+
+    <span class="cm">// 从高位到低位，逐位插成一条路</span>
+    <span class="kw">void</span> <span class="fn">insert</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> cur = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = high; i &gt;= 0; i--) {
+            <span class="kw">int</span> p = (num &gt;&gt; i) &amp; 1;
+            <span class="kw">if</span> (tree[cur][p] == 0) {
+                tree[cur][p] = ++cnt;
+            }
+            cur = tree[cur][p];
+        }
+    }
+
+    <span class="cm">// high 是数组最大值最高有效位的位置，前置的 0 不用建</span>
+    <span class="kw">void</span> <span class="fn">build</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums) {
+        cnt = 1;
+        <span class="kw">int</span> mx = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> num : nums) mx = max(mx, num);
+        high = mx ? 31 - __builtin_clz(mx) : 0;
+        <span class="kw">for</span> (<span class="kw">int</span> num : nums) insert(num);
+    }
+
+    <span class="cm">// num 和树里的某个数异或，最大能到多少</span>
+    <span class="kw">int</span> <span class="fn">maxXor</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> cur = 1, ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = high; i &gt;= 0; i--) {
+            <span class="kw">int</span> st = (num &gt;&gt; i) &amp; 1;      <span class="cm">// num 这一位</span>
+            <span class="kw">int</span> want = st ^ 1;            <span class="cm">// 希望遇到相反的位，异或出 1</span>
+            <span class="kw">if</span> (tree[cur][want] == 0) {   <span class="cm">// 没有相反的位，只能走一样的</span>
+                want ^= 1;
+            }
+            ans |= (st ^ want) &lt;&lt; i;      <span class="cm">// 这一位的异或结果写进答案</span>
+            cur = tree[cur][want];
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>build 里先找 max 算 high，再把所有数插进去；主流程对每个 num 调一次 maxXor，取最大值。单个 num 的查询 O(high+1)，整体 O(n×31)。</p>
+
+      <div class="viz" id="vizXor"></div>
+
+      <h2 id="hash">三、哈希表做法</h2>
+      <p>这道题还有一个不用树的写法，同一节课里给了，同样 O(n×31)：从 high 往下枚举目标答案的每一位，维护一个集合，查 better^num 在不在集合里。</p>
+      <p>思路是反过来的：不逐位走树，而是直接猜答案。第 i 轮假设「答案第 i 位是 1」得到 better，如果存在两个数异或能达成 better，就把这一位写死，否则放弃。</p>
+      <p>实测它比 Trie 还快：n=2×10^5 时哈希 12.8ms，Trie 39.7ms。代价是难想。Trie 版本是「顺着异或的位结构走」，哈希版本是「反着验证答案」，前者好理解，后者常数小。</p>
+      <figure class="fig" id="figSpeed"></figure>
+
+      <h2 id="complexity">复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>空间</th></tr>
+        <tr><td>暴力两两异或</td><td>O(n²)</td><td>O(1)</td></tr>
+        <tr><td>01-Trie</td><td>O(n×31)</td><td>O(n×31)</td></tr>
+        <tr><td>哈希表</td><td>O(n×31)</td><td>O(n)</td></tr>
+      </table>
+      <p>31 是位数上界，数组值域是 2^31-1，所以每个数的插入和查询都是常数步，比 O(n²) 高出一个量级的差距。</p>
+
+      <h2 id="sum">总结</h2>
+      <p>最大异或的位贪心只有一条：从最高有效位往下，能走相反位就走相反位。</p>
+      <p>01-Trie 的路只有 0/1 两条，静态数组开 tree[MAXN][2]，比 26 路的前缀树还省；high 从最高有效位起跳，省掉一整段全是 0 的路径。</p>
+      <p>哈希做法更快但难想，两种都是 O(n logV)。这一讲是树里查位，下一讲把 Trie 和 DFS 拼起来：二维网格里搜单词。下节课的题目里见。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>数组中两个数的最大异或值</td><td><a href="https://leetcode.cn/problems/maximum-xor-of-two-numbers-in-an-array/" target="_blank">leetcode.cn/problems/maximum-xor-of-two-numbers-in-an-array</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解045【必备】前缀树的相关题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-wiki</td><td>字典树（Trie）</td><td><a href="https://oi-wiki.org/string/trie/" target="_blank">oi-wiki.org/string/trie</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+/* ===== 01-Trie 绘制 ===== */
+function makeB(){
+  return { bit:'', children:[null,null], x:0, y:0 };
+}
+function layoutB(root, W){
+  var levels = [];
+  (function dfs(u,d){
+    if(!levels[d]) levels[d] = [];
+    levels[d].push(u);
+    if(u.children[0]) dfs(u.children[0], d+1);
+    if(u.children[1]) dfs(u.children[1], d+1);
+  })(root,0);
+  var maxW = 1;
+  levels.forEach(function(lv){ maxW = Math.max(maxW, lv.length); });
+  levels.forEach(function(lv,d){
+    var y = d===0 ? 46 : 58 + d*60;
+    lv.forEach(function(u,i){
+      u.y = y;
+      u.x = lv.length===1 ? W/2 : 24 + i*(W-48)/(lv.length-1);
+    });
+  });
+}
+function drawB(svg, root, opts){
+  opts = opts || {};
+  var cur = opts.cur || null, want = opts.want || null;
+  var edgeCur = opts.edgeCur || null, edgeWant = opts.edgeWant || null;
+  var s = '';
+  (function walk(u){
+    for(var b=0;b<2;b++){
+      var v = u.children[b];
+      if(!v) continue;
+      var cls = 'edge';
+      if(edgeCur && edgeCur[0]===u && edgeCur[1]===v) cls='edge cur';
+      if(edgeWant && edgeWant[0]===u && edgeWant[1]===v) cls='edge want';
+      s += '<line class="'+cls+'" x1="'+u.x+'" y1="'+u.y+'" x2="'+v.x+'" y2="'+v.y+'"/>';
+      s += '<text class="edge-tag" x="'+((u.x+v.x)/2)+'" y="'+((u.y+v.y)/2-6)+'" text-anchor="middle">'+b+'</text>';
+      walk(v);
+    }
+  })(root);
+  (function walk2(u){
+    var cls = 'btnode';
+    if(u.__want) cls='btnode want';
+    else if(u===cur) cls='btnode cur';
+    s += '<g class="'+cls+'">';
+    s += '<circle cx="'+u.x+'" cy="'+u.y+'" r="17"/>';
+    s += '<text class="ch" x="'+u.x+'" y="'+(u.y+4.5)+'" text-anchor="middle">'+u.bit+'</text>';
+    s += '</g>';
+    if(u.children[0]) walk2(u.children[0]);
+    if(u.children[1]) walk2(u.children[1]);
+  })(root);
+  svg.innerHTML = s;
+}
+function cloneB(u){
+  var c = { bit:u.bit, children:[null,null], x:u.x, y:u.y };
+  if(u.children[0]) c.children[0] = cloneB(u.children[0]);
+  if(u.children[1]) c.children[1] = cloneB(u.children[1]);
+  return c;
+}
+function bitStr(num, high){
+  var s = '';
+  for(var i=high;i>=0;i--) s += ((num>>i)&1);
+  return s;
+}
+
+/* ===== figBitTrie：5、25 插成 01-Trie ===== */
+(function(){
+  var root = makeB();
+  function ins(num, high){
+    var u = root;
+    for(var i=high;i>=0;i--){
+      var b = (num>>i)&1;
+      if(!u.children[b]) u.children[b] = { bit:''+b, children:[null,null], x:0, y:0 };
+      u = u.children[b];
+    }
+  }
+  ins(5, 4); ins(25, 4);
+  layoutB(root, 760);
+  var svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 760 400');
+  drawB(svg, root, {});
+  svg.innerHTML += '<text x="380" y="228" text-anchor="middle" style="font-size:12px;fill:#888">5 = 00101、25 = 11001，high=4，从前导 0 之后的第 4 位开始插</text>';
+  document.getElementById('figBitTrie').appendChild(svg);
+})();
+
+/* ===== figGreedy：num=6 走树逐位贪心 ===== */
+(function(){
+  var root = makeB();
+  var nums = [5,25,6,22];
+  var high = 4;
+  nums.forEach(function(num){
+    var u = root;
+    for(var i=high;i>=0;i--){
+      var b = (num>>i)&1;
+      if(!u.children[b]) u.children[b] = { bit:''+b, children:[null,null], x:0, y:0 };
+      u = u.children[b];
+    }
+  });
+  layoutB(root, 760);
+  var svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 760 400');
+  var cur = root, path = [], sts = [];
+  var num = 6; // 00110
+  var ok = true;
+  for(var i=high;i>=0;i--){
+    var st = (num>>i)&1, want = st^1;
+    if(!cur.children[want]){
+      if(!cur.children[st]){ ok = false; break; }
+      want = st;
+    }
+    path.push(cur.children[want]);
+    sts.push({st:st, want:want, i:i});
+    cur = cur.children[want];
+  }
+  // 逐层标出 num 走的路径
+  var s = '<g>';
+  (function walk(u, d){
+    for(var b=0;b<2;b++){
+      var v = u.children[b];
+      if(!v) continue;
+      var onPath = false, cls = 'edge';
+      for(var p=0;p<path.length;p++) if(path[p]===v){ onPath=true; break; }
+      if(onPath) cls = 'edge cur';
+      s += '<line class="'+cls+'" x1="'+u.x+'" y1="'+u.y+'" x2="'+v.x+'" y2="'+v.y+'"/>';
+      s += '<text class="edge-tag" x="'+((u.x+v.x)/2)+'" y="'+((u.y+v.y)/2-6)+'" text-anchor="middle">'+b+'</text>';
+      walk(v, d+1);
+    }
+  })(root,0);
+  s += '</g>';
+  (function walk2(u, d){
+    var cls = 'btnode', onPath = false;
+    for(var p=0;p<path.length;p++) if(path[p]===u){ onPath=true; break; }
+    if(onPath) cls='btnode cur';
+    s += '<g class="'+cls+'"><circle cx="'+u.x+'" cy="'+u.y+'" r="17"/>';
+    s += '<text class="ch" x="'+u.x+'" y="'+(u.y+4.5)+'" text-anchor="middle">'+u.bit+'</text></g>';
+    if(u.children[0]) walk2(u.children[0], d+1);
+    if(u.children[1]) walk2(u.children[1], d+1);
+  })(root,0);
+  s += '<text x="380" y="312" text-anchor="middle" style="font-size:12px;fill:#888">num=6（00110）走蓝色路径，每步挑相反位，异或结果 25^6 = 31（11111）</text>';
+  svg.innerHTML = s;
+  document.getElementById('figGreedy').appendChild(svg);
+})();
+
+/* ===== figSpeed：性能对比 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg">';
+  s += '<text x="60" y="30" style="font-size:13px;fill:#666">n=2×10^5 随机数（暴力为外推值，毫秒）</text>';
+  var bars = [
+    {l:'暴力 O(n²)', v:1600, c:'#ea580c', note:'外推 ~1600'},
+    {l:'01-Trie', v:39.7, c:'#2563eb', note:'39.7'},
+    {l:'哈希表', v:12.8, c:'#16a34a', note:'12.8'}
+  ];
+  var maxV = 1600;
+  bars.forEach(function(b, i){
+    var h = Math.max(10, 150 * Math.log10(b.v+1) / Math.log10(maxV+1));
+    var x = 90 + i*200, y = 185 - h;
+    s += '<rect x="'+x+'" y="'+y+'" width="70" height="'+h+'" rx="4" fill="'+b.c+'"/>';
+    s += '<text x="'+(x+35)+'" y="'+(y-8)+'" text-anchor="middle" style="font-size:13px;font-weight:600;fill:'+b.c+'">'+b.note+'</text>';
+    s += '<text x="'+(x+35)+'" y="205" text-anchor="middle" style="font-size:12.5px;fill:#444">'+b.l+'</text>';
+  });
+  s += '<line x1="50" y1="185" x2="720" y2="185" stroke="#ccc" stroke-width="1"/>';
+  s += '<text x="380" y="240" text-anchor="middle" style="font-size:12px;fill:#888">柱高按对数刻度，避免 1600ms 压扁另外两根</text>';
+  s += '</svg>';
+  document.getElementById('figSpeed').innerHTML = s;
+})();
+
+/* ===== vizXor：01-Trie 构建 + 贪心查询 ===== */
+(function(){
+  var box = document.getElementById('vizXor');
+  box.innerHTML =
+    '<p class="viz-title">操作台：插进 01-Trie，对每个数逐位贪心查最大异或</p>' +
+    '<div class="viz-ctl">' +
+      '<label>预设 <select id="vxSel">' +
+        '<option value="0">[5, 25]</option>' +
+        '<option value="1">[3, 10, 5, 25, 2]</option>' +
+        '<option value="2">[0]（单元素）</option>' +
+      '</select></label>' +
+      '<button type="button" id="vxNext">下一步</button>' +
+      '<button type="button" id="vxReset">重置</button>' +
+    '</div>' +
+    '<div class="viz-note" id="vxNote">准备</div>' +
+    '<div class="viz-answer" id="vxAns"></div>';
+  var svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 760 400');
+  box.appendChild(svg);
+  var root = makeB(), steps = [], step = 0;
+  var PRESETS = [
+    { nums:[5,25] },
+    { nums:[3,10,5,25,2] },
+    { nums:[0] }
+  ];
+  function load(){
+    root = makeB();
+    steps = [];
+    var nums = PRESETS[+document.getElementById('vxSel').value].nums;
+    var max = 0;
+    nums.forEach(function(x){ max = Math.max(max, x); });
+    var high = max ? 31 - Math.clz32(max) : 0;
+    function push(label, opt){ var o = opt||{}; o.label = label; o.snap = cloneB(root); steps.push(o); }
+    push('初始：空树，high = ' + high + '（max=' + max + ' 的最高有效位）');
+    nums.forEach(function(num, idx){
+      var u = root;
+      for(var i=high;i>=0;i--){
+        var b = (num>>i)&1;
+        var fresh = !u.children[b];
+        if(fresh) u.children[b] = { bit:''+b, children:[null,null], x:0, y:0 };
+        u = u.children[b];
+        push('插入 ' + num + '（' + bitStr(num,high) + '）：第 ' + i + ' 位 ' + b + (fresh ? '，新建' : '，复用'), {cur:u, edgeNew: fresh?[null,null]:null});
+      }
+      push('插完 ' + num);
+    });
+    var best = 0, bestPair = null;
+    nums.forEach(function(num){
+      var u = root, ans = 0, p = [];
+      for(var i=high;i>=0;i--){
+        var st = (num>>i)&1, want = st^1;
+        if(!u.children[want]) want = st;
+        ans |= (st^want) << i;
+        p.push({u:u.children[want], want:want, st:st, i:i});
+        u = u.children[want];
+      }
+      push('查 ' + num + '：逐位贪心，最大异或 ' + ans + (ans>best ? '（当前最优）' : ''), {optPath:p, cur: p.length? p[p.length-1].u : null});
+      if(ans > best){ best = ans; bestPair = [num, u&&u.bit!==undefined?num:num]; }
+    });
+    push('答案：' + best + '（全部数查完的最大值）', {final:true});
+    step = 0; redraw();
+  }
+  function redraw(){
+    var st = steps[step];
+    var t = st.snap;
+    // 贪心路径节点标记 want 色
+    (function clearWant(u){ u.__want = false; if(u.children[0]) clearWant(u.children[0]); if(u.children[1]) clearWant(u.children[1]); })(t);
+    if(st.optPath){
+      (function findMark(u){
+        for(var p=0;p<st.optPath.length;p++) if(st.optPath[p].u===u) u.__want = true;
+        if(u.children[0]) findMark(u.children[0]);
+        if(u.children[1]) findMark(u.children[1]);
+      })(t);
+    }
+    layoutB(t, 760);
+    drawB(svg, t, { cur: st.cur });
+    document.getElementById('vxNote').textContent = st.label;
+    var ansEl = document.getElementById('vxAns');
+    ansEl.textContent = st.final ? st.label : '';
+  }
+  document.getElementById('vxNext').addEventListener('click', function(){
+    if(step < steps.length-1){ step++; redraw(); }
+  });
+  document.getElementById('vxReset').addEventListener('click', function(){ step = 0; redraw(); });
+  document.getElementById('vxSel').addEventListener('change', load);
+  load();
+})();
+})();
+</script>
+</body>
+</html>

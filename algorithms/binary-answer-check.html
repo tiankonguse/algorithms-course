@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>二分答案的判定函数：溢出与双指针</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-ctl { margin: 8px 0 4px; }
+.viz-ctl label { font-size: 13px; margin-right: 6px; color: var(--fg2); }
+.viz-ctl select { font-size: 13px; padding: 2px 6px; border: 1px solid var(--bd); border-radius: 4px; background: #fff; }
+.viz-note { margin: 10px 0 4px; font-size: 13px; color: var(--fg); }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.legend .dot.queen { background: #1e293b; border-color: #1e293b; }
+.range-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
+.range-bar .seg { display: inline-block; border: 1px solid var(--bd); border-radius: 4px; padding: 2px 10px; font-size: 13px; background: #fff; }
+.range-bar .seg.cur { background: #dbeafe; border-color: #2563eb; }
+.range-bar .seg.done-no { background: #f1f5f9; border-color: #cbd5e1; color: #9aa0a6; }
+.bld { display: inline-flex; flex-direction: column; align-items: center; margin: 0 4px; }
+.bld .h { display: flex; align-items: flex-end; height: 96px; }
+.bld .bar { width: 34px; background: #93c5fd; border-radius: 4px 4px 0 0; }
+.bld .v { font-size: 12px; color: #64748b; margin-top: 2px; }
+.energy-tag { display: inline-block; margin: 2px 6px; padding: 2px 8px; border-radius: 4px; font-size: 13px; background: #fff; border: 1px solid var(--bd); }
+.energy-tag.hit { background: #dcfce7; border-color: #16a34a; }
+.energy-tag.dead { background: #fef2f2; border-color: #fca5a5; }
+.pair-row { display: flex; align-items: center; gap: 4px; margin: 4px 0; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.pair-cell { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid #e6e8eb; background: #fff; font-size: 13px; }
+.pair-cell.l { background: #dbeafe; border-color: #2563eb; }
+.pair-cell.r { background: #ffedd5; border-color: #ea580c; }
+.pair-cell.in { background: #f1f5f9; }
+.pair-cell.out { color: #cbd5e1; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>二分答案的判定函数：溢出与双指针</h1>
+      <p class="intro">二分骨架上一讲讲完了，真正费脑子的全在 f 函数。这一讲看两个 f：一个模拟能量时藏着指数增长，不剪枝整数直接溢出；一个数数对时不能两两枚举，得靠双指针。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>上一讲的两个 f 都是「一遍扫过去算个数」，直来直去。真实题目的 f 往往要扛住两件事：模拟过程会不会爆掉，计数能不能在 O(n) 内做完。</p>
+      <p>「机器人跳跃问题」的 f 是全程模拟，能量递推式 2E - H 会指数增长，处理不好连整数范围都出不来。「找出第 K 小的数对距离」的 f 是数数对，最笨的写法是 n² 枚举，n 到 10⁴ 就崩。</p>
+
+      <h2 id="q1">一、机器人跳跃问题</h2>
+      <p>机器人从第 0 栋楼出发，第 0 栋高度 0。依次跳到第 1..n 栋楼，跳到第 i 栋后根据当前能量 E 和新楼高度 H(i) 结算：若 E &lt; H(i)，失去 H(i) - E 能量；若 E ≥ H(i)，得到 E - H(i) 能量。能量任何时刻不能为负，问最小的初始能量能完成全程。</p>
+      <p>两个分支分别算：H &gt; E 时 E - (H - E) = 2E - H；H ≤ E 时 E + (E - H) = 2E - H。化简完是同一个式子 E' = 2E - H。这个合并是这一讲第一个坑：如果不化简，写两个分支还容易把符号写反；化简后一眼看清能量怎么变。</p>
+      <figure class="fig" id="figFormula"></figure>
+      <p>f(E) 的模拟：从 E 起步，每栋楼执行 E = 2E - H(i)，中间出现负数就失败。问题出在能量会指数翻倍：E 接近 maxH 时，2E - H 一步就翻倍，很快超出 int。实测全 1 高度、初始能量 2，第 31 步 E 溢出成 -2147483647，被判失败；可真实流程能量全程为正，早该判通关。</p>
+      <figure class="fig" id="figCurve"></figure>
+      <p>解法是剪枝：E ≥ maxH 时直接返回 true。E ≥ maxH 后，下一栋楼高度 ≤ maxH，E' = 2E - H ≥ 2maxH - maxH = maxH，能量只会保持在 maxH 以上，不可能跌回负值。所以「超过最高建筑」是一个充分条件，提前返回不影响正确性，还把指数增长拦在门外。</p>
+      <div class="viz">
+        <p class="viz-title">演示 1 · 机器人二分逐帧：二分初始能量，f 模拟跳跃，能量 ≥ maxH 立即剪枝通关</p>
+        <div class="viz-ctl">
+          <label>建筑：</label>
+          <select id="rbSel">
+            <option value="0">H = [3,1,2,4]</option>
+            <option value="1">H = [5]</option>
+          </select>
+        </div>
+        <div class="range-bar" id="rbRange"></div>
+        <div id="rbBld"></div>
+        <p class="viz-note" id="rbNote"></p>
+        <p class="viz-answer" id="rbAns"></p>
+        <div class="viz-controls">
+          <button id="rbPrev">上一步</button>
+          <button id="rbNext">下一步</button>
+          <button id="rbReset">重置</button>
+        </div>
+      </div>
+      <pre class="code">    vector&lt;<span class="kw">int</span>&gt; arr;                             <span class="cm">// 建筑高度，arr[0] = 0</span>
+    <span class="kw">int</span> n;
+
+    <span class="cm">// 初始能量 energy，能不能通关</span>
+    <span class="kw">bool</span> <span class="fn">f</span>(<span class="kw">int</span> energy, <span class="kw">int</span> maxH) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            energy = 2 * energy - arr[i];
+            <span class="kw">if</span> (energy &gt;= maxH) {                <span class="cm">// 超过最高建筑，后面必然通关</span>
+                <span class="kw">return</span> <span class="kw">true</span>;
+            }
+            <span class="kw">if</span> (energy &lt; 0) {
+                <span class="kw">return</span> <span class="kw">false</span>;
+            }
+        }
+        <span class="kw">return</span> <span class="kw">true</span>;
+    }
+
+    <span class="cm">// 二分初始能量，范围 [0, maxH]</span>
+    <span class="kw">int</span> <span class="fn">compute</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> maxH) {
+        <span class="kw">int</span> m, ans = -1;
+        <span class="kw">while</span> (l &lt;= r) {
+            m = l + ((r - l) &gt;&gt; 1);
+            <span class="kw">if</span> (f(m, maxH)) {
+                ans = m;
+                r = m - 1;
+            } <span class="kw">else</span> {
+                l = m + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>单调性：初始能量越大越容易通关，答案是最小达标值，二分范围 [0, maxH]。复杂度 O(n log maxH)，n 是建筑数，maxH 是最高楼。没有剪枝时 f 的模拟可能在几轮内溢出，所以剪枝是正确性的一部分，不只是优化。</p>
+
+      <h2 id="q2">二、找出第 K 小的数对距离</h2>
+      <p>nums 里任意两个下标 i &lt; j 的距离 |nums[i] - nums[j]|，一共 C(n, 2) 个距离，求排序后第 k 小的那个。n ≤ 10⁴，两两枚举 5×10⁷ 对勉强能算一次，但二分里每轮都枚举就彻底不行。</p>
+      <p>先把数组排序。排序后问「差 ≤ limit 的数对有几对」，就变成每个位置 l 右侧有多少个数跟它差不超过 limit。这个计数用双指针一趟做完：r 从 l 出发一路右移，直到 arr[r+1] - arr[l] &gt; limit，则 l 与 (l, r] 上每个位置都构成一对，对数加 r - l。</p>
+      <figure class="fig" id="figPair"></figure>
+      <p>r 的关键性质是不回退：l 右移一位后，arr[l+1] 变大了，跟它差 ≤ limit 的右边界只会更靠右，所以 r 从上一轮的位置继续走就行。l 和 r 各走一遍，O(n)。</p>
+      <p>f(limit) 单调不减：limit 越大，能配上的对越多。答案 = 第一个使 f(limit) ≥ k 的 limit。以 [1, 3, 1] 为例，排序后 [1, 1, 3]，三个距离是 0、2、2：k = 1 答案是 0，k = 3 答案是 2。再看 [1, 6, 1]，排序后 [1, 1, 6]，距离 0、5、5，k = 3 答案是 5。</p>
+      <div class="viz">
+        <p class="viz-title">演示 2 · 数对计数逐帧：排序后固定 limit，双指针扫一遍统计差 ≤ limit 的对数</p>
+        <div class="viz-ctl">
+          <label>limit：</label>
+          <select id="prSel">
+            <option value="0">limit = 0（[1,1,3]）</option>
+            <option value="1">limit = 1（[1,1,3]）</option>
+            <option value="2">limit = 2（[1,1,3]）</option>
+          </select>
+        </div>
+        <div id="prRow"></div>
+        <p class="viz-note" id="prNote"></p>
+        <p class="viz-answer" id="prAns"></p>
+        <div class="viz-controls">
+          <button id="prPrev">上一步</button>
+          <button id="prNext">下一步</button>
+          <button id="prReset">重置</button>
+        </div>
+      </div>
+      <pre class="code">    <span class="cm">// 排序后，差 &lt;= limit 的数对有几对</span>
+    <span class="kw">int</span> <span class="fn">f</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr, <span class="kw">int</span> limit) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> l = 0, r = 0; l &lt; (<span class="kw">int</span>)arr.size(); l++) {
+            <span class="kw">while</span> (r + 1 &lt; (<span class="kw">int</span>)arr.size() &amp;&amp; arr[r + 1] - arr[l] &lt;= limit) {
+                r++;                             <span class="cm">// r 一路不回退</span>
+            }
+            ans += r - l;                        <span class="cm">// l 和 (l, r] 上每个位置都配对</span>
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="cm">// 二分距离，范围 [0, max - min]</span>
+    <span class="kw">int</span> <span class="fn">smallestDistancePair</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> k) {
+        <span class="kw">int</span> n = nums.size();
+        sort(nums.begin(), nums.end());
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> l = 0, r = nums[n - 1] - nums[0]; l &lt;= r;) {
+            <span class="kw">int</span> m = l + ((r - l) &gt;&gt; 1);
+            <span class="kw">if</span> (f(nums, m) &gt;= k) {               <span class="cm">// 差 &lt;= m 的对数够 k 个，达标</span>
+                ans = m;
+                r = m - 1;
+            } <span class="kw">else</span> {
+                l = m + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>复杂度 O(n log n + n log range)：排序 O(n log n)，二分范围 [0, max - min] 每轮计数 O(n)。range 最大 10⁶ 也就 20 轮。</p>
+
+      <h2 id="comp">三、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>时间复杂度</th><th>额外空间</th><th>f 的形态</th></tr>
+        <tr><td>机器人跳跃问题</td><td>O(n log maxH)</td><td>O(1)</td><td>全程模拟 + 指数剪枝</td></tr>
+        <tr><td>找出第 K 小的数对距离</td><td>O(n log n + n log range)</td><td>O(1)</td><td>排序 + 双指针计数</td></tr>
+      </table>
+      <p>两个 f 各留一个教训：模拟型的 f 先看增长会不会爆炸，该剪枝就剪；计数型的 f 先想有没有办法把 n² 降下来，排序常常是第一步。</p>
+
+      <h2 id="sum">四、总结</h2>
+      <p>机器人跳跃把两分支化简成 E' = 2E - H 一个式子，能量指数增长，E ≥ maxH 就剪枝，剪枝是必需的一步：没有它，模拟会在几轮内溢出成负数。</p>
+      <p>第 K 小数对距离把「差 ≤ limit 的对数」做成排序 + 双指针一趟计数，r 不回退是 O(n) 的关键，答案是最小 limit 使对数 ≥ k。</p>
+      <p>f 函数还可以更狠：有的题 f 内部要贪心分析，靠直觉想清楚「一块电池怎么分配、每个回合选哪个动作」。下一讲三个题全是这种。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>牛客</td><td>机器人跳跃问题</td><td><a href="https://www.nowcoder.com/questionTerminal/7037a3d57bbd4336856b8e39a743133f" target="_blank">nowcoder.com/questionTerminal/7037a3d57bbd4336856b8e39a743133f</a></td></tr>
+        <tr><td>LeetCode</td><td>找出第 K 小的数对距离</td><td><a href="https://leetcode.cn/problems/find-k-th-smallest-pair-distance/" target="_blank">leetcode.cn/problems/find-k-th-smallest-pair-distance</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解051【必备】二分答案法与相关题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function rect(x,y,w,h,fill,stroke){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+(fill||'#fff')+'" stroke="'+(stroke||'#cbd5e1')+'"/>'; }
+
+// ===== 图 1：能量公式两分支合并 =====
+(function(){
+  var W = 720, H = 260;
+  var body = '';
+  body += txt(W/2, 24, '跳完一栋楼后的能量：两个分支化简成同一个式子', {fs:13});
+  // 分支 1
+  body += rect(50, 50, 290, 78, '#fef2f2', '#fca5a5');
+  body += txt(195, 76, 'H > E：失去 H - E', {fs:12, fill:'#991b1b'});
+  body += txt(195, 100, 'E′ = E − (H − E)', {fs:15, fill:'#991b1b'});
+  body += txt(195, 124, '    = 2E − H', {fs:15, fill:'#991b1b'});
+  // 分支 2
+  body += rect(380, 50, 290, 78, '#f0fdf4', '#86efac');
+  body += txt(525, 76, 'H ≤ E：得到 E − H', {fs:12, fill:'#166534'});
+  body += txt(525, 100, 'E′ = E + (E − H)', {fs:15, fill:'#166534'});
+  body += txt(525, 124, '    = 2E − H', {fs:15, fill:'#166534'});
+  body += '<line x1="340" y1="89" x2="380" y2="89" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr2)"/>';
+  body += '<defs><marker id="arr2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>';
+  body += rect(120, 170, 480, 56, '#eef4ff', '#93c5fd');
+  body += txt(360, 198, 'E′ = 2E − H', {fs:16, fill:'#1e40af'});
+  body += txt(360, 218, '能量从此只由一个式子决定，模拟不用再分情况', {fs:11, fill:'#475569'});
+  document.getElementById('figFormula').innerHTML = svg(W, H, body) + '<figcaption>失去能量和得到能量，写出来化简完都是 2E − H。合并后 f 只剩一个式子，少一半出错机会。</figcaption>';
+})();
+
+// ===== 图 2：能量轨迹 + 剪枝 =====
+(function(){
+  var W = 720, H = 300;
+  var body = '';
+  body += txt(W/2, 22, '初始能量 E = 2 失败、E = 3 中途剪枝通关（H = [3,1,2,4]）', {fs:13});
+  // E=2 轨迹
+  var t1 = [2, 1, 1, 0, -4];
+  var t2 = [3, 3, 5];
+  var x0 = 80, xw = 120;
+  var y0 = 230, yh = 170, ymax = 6;
+  body += '<line x1="'+x0+'" y1="'+y0+'" x2="'+(x0+4*xw)+'" y2="'+y0+'" stroke="#94a3b8"/>';
+  body += '<line x1="'+x0+'" y1="'+y0+'" x2="'+x0+'" y2="'+(y0-yh)+'" stroke="#94a3b8"/>';
+  for (var i = 0; i <= 5; i++) { var y = y0 - i*yh/5; body += txt(x0 - 8, y + 4, String(i), {fs:11, fill:'#64748b', an:'end'}); body += '<line x1="'+x0+'" y1="'+y+'" x2="'+(x0+4*xw)+'" y2="'+y+'" stroke="#f1f5f9"/>'; }
+  // 剪枝线 maxH=4
+  var my = y0 - 4*yh/5;
+  body += '<line x1="'+x0+'" y1="'+my+'" x2="'+(x0+4*xw)+'" y2="'+my+'" stroke="#ea580c" stroke-dasharray="6 4"/>';
+  body += txt(x0 + 4*xw - 4, my - 6, 'maxH = 4（剪枝线）', {fs:11, fill:'#9a3412', an:'end'});
+  // E=2 折线
+  var p1 = [];
+  for (var i = 0; i < t1.length; i++) p1.push([x0 + i*xw, y0 - Math.max(t1[i], -1)*yh/5]);
+  body += '<polyline points="'+p1.map(function(p){return p[0]+','+p[1];}).join(' ')+'" fill="none" stroke="#dc2626" stroke-width="2"/>';
+  for (var i = 0; i < t1.length; i++) body += '<circle cx="'+p1[i][0]+'" cy="'+p1[i][1]+'" r="3.5" fill="'+(t1[i]<0?'#dc2626':'#dc2626')+'"/>';
+  body += txt(x0 + 0*xw, y0 - 2*yh/5 - 10, 'E=2', {fs:11, fill:'#dc2626'});
+  for (var i = 0; i < t1.length; i++) body += txt(p1[i][0], p1[i][1] - 8, String(t1[i]), {fs:11, fill:'#dc2626'});
+  // E=3 折线
+  var p2 = [];
+  for (var i = 0; i < t2.length; i++) p2.push([x0 + i*xw, y0 - Math.min(t2[i],5)*yh/5]);
+  body += '<polyline points="'+p2.map(function(p){return p[0]+','+p[1];}).join(' ')+'" fill="none" stroke="#16a34a" stroke-width="2"/>';
+  for (var i = 0; i < t2.length; i++) body += '<circle cx="'+p2[i][0]+'" cy="'+p2[i][1]+'" r="3.5" fill="#16a34a"/>';
+  body += txt(x0 + 0*xw, y0 - 3*yh/5 - 10, 'E=3', {fs:11, fill:'#16a34a'});
+  for (var i = 0; i < t2.length; i++) body += txt(p2[i][0], p2[i][1] - 8, String(t2[i]), {fs:11, fill:'#16a34a'});
+  body += '<text x="'+(x0+4*xw)+'" y="'+(y0+30)+'" font-size="12" fill="#334155" text-anchor="end">E=3 第 2 步 5 ≥ 4，提前返回 true</text>';
+  document.getElementById('figCurve').innerHTML = svg(W, H, body) + '<figcaption>E=2 走到第 4 栋能量变负失败；E=3 第 2 步就到 5，越过剪枝线直接判通关。</figcaption>';
+})();
+
+// ===== 图 3：双指针计数 r 不回退 =====
+(function(){
+  var W = 720, H = 270;
+  var body = '';
+  body += txt(W/2, 22, 'arr = [1, 1, 3]，limit = 2：每个 l 的窗口 [l, r]', {fs:13});
+  var ox = 110, cell = 46;
+  var rows = [
+    {l:0, r:2, cnt:2, note:'arr[2]−arr[0] = 2 ≤ 2，r 到 2，对数 +2'},
+    {l:1, r:2, cnt:1, note:'arr[2]−arr[1] = 2 ≤ 2，r 不动（不回退），对数 +1'},
+    {l:2, r:2, cnt:0, note:'r 到头，对数 +0'},
+  ];
+  var y = 52;
+  rows.forEach(function(row, idx){
+    body += txt(ox - 40, y + 20, 'l=' + row.l, {fs:12, fill:'#1e40af', an:'end'});
+    for (var j = 0; j < 3; j++) {
+      var cx = ox + j*cell;
+      var fill = j === row.l ? '#dbeafe' : (j <= row.r ? '#f1f5f9' : '#fff');
+      var stroke = j === row.r ? '#ea580c' : (j === row.l ? '#2563eb' : '#e6e8eb');
+      body += rect(cx, y, cell, 34, fill, stroke);
+      body += txt(cx + cell/2, y + 22, String([1,1,3][j]), {fs:14});
+    }
+    body += txt(ox + 3*cell + 20, y + 22, row.cnt > 0 ? '配对 ' + row.cnt + ' 对' : '配对 0 对', {fs:12, fill: row.cnt > 0 ? '#166534' : '#64748b'});
+    body += txt(ox + 3*cell + 20, y + 0, row.note, {fs:11, fill:'#64748b'});
+    y += 56;
+  });
+  body += txt(W/2, y + 8, 'l 每右移一步，r 只可能向右、绝不回头，所以一趟 O(n) 数完', {fs:12, fill:'#334155'});
+  document.getElementById('figPair').innerHTML = svg(W, H, body) + '<figcaption>l 固定时 r 一路右移到越界前，贡献 r − l 对；l 递增后 r 从原位继续。</figcaption>';
+})();
+
+// ===== 演示 1：Robot 二分 =====
+(function(){
+  var BLD = [[3,1,2,4],[5]];
+  var presets = [
+    { H: [3,1,2,4], maxH: 4, l: 0, r: 4, steps: [
+      {m:2, ok:0, l:3, r:4, ans:0},
+      {m:3, ok:1, l:3, r:2, ans:3},
+      {m:0, ok:2, l:3, r:2, ans:3}
+    ]},
+    { H: [5], maxH: 5, l: 0, r: 5, steps: [
+      {m:2, ok:0, l:3, r:5, ans:0},
+      {m:4, ok:1, l:3, r:3, ans:4},
+      {m:3, ok:1, l:3, r:2, ans:3},
+      {m:0, ok:2, l:3, r:2, ans:3}
+    ]},
+  ];
+  function sim(H, E, maxH){
+    var trace = [];
+    for (var i = 0; i < H.length; i++) {
+      E = 2*E - H[i];
+      if (E >= maxH) { trace.push({e:E, hit:true, step:i+1, early:true}); return {ok:true, trace:trace}; }
+      trace.push({e:E, hit:false, step:i+1});
+      if (E < 0) return {ok:false, trace:trace};
+    }
+    return {ok:true, trace:trace};
+  }
+  var idx = 0, step = 0;
+  function draw(){
+    var ps = presets[idx];
+    var cur = ps.steps[Math.min(step, ps.steps.length-1)];
+    var range = document.getElementById('rbRange');
+    var html = '';
+    for (var v = ps.l; v <= ps.r; v++) {
+      var cls = 'seg';
+      if (cur.m === v) cls += ' cur';
+      else if (v < cur.l || v > cur.r) cls += ' done-no';
+      html += '<span class="'+cls+'">'+v+'</span>';
+    }
+    range.innerHTML = html;
+    var bld = document.getElementById('rbBld');
+    var bhtml = '';
+    ps.H.forEach(function(h, i){ bhtml += '<span class="bld"><span class="h"><span class="bar" style="height:'+(h*Math.max(1, 90/ps.maxH))+'px"></span></span><span class="v">'+h+'</span></span>'; });
+    bld.innerHTML = bhtml;
+    var note = document.getElementById('rbNote');
+    var res = null;
+    if (cur.ok === 2) {
+      note.textContent = 'l > r，二分结束。答案 = ' + cur.ans;
+    } else {
+      res = sim(ps.H, cur.m, ps.maxH);
+      var t = res.trace;
+      if (cur.ok === 1) {
+        var hit = t.filter(function(x){return x.hit;});
+        note.textContent = 'm = ' + cur.m + '：' + t.map(function(x){ return '第' + x.step + '栋后 E=' + x.e + (x.early ? '（≥ maxH 剪枝）' : ''); }).join('，') + ' → 通关，记 ans=' + cur.m + '，去左侧';
+      } else {
+        note.textContent = 'm = ' + cur.m + '：' + t.map(function(x){ return '第' + x.step + '栋后 E=' + x.e; }).join('，') + ' → E 变负失败，去右侧';
+      }
+    }
+    var ansEl = document.getElementById('rbAns');
+    if (cur.ok === 2) ansEl.textContent = '最小初始能量 = ' + cur.ans;
+    else {
+      var tag = document.createElement('span');
+      ansEl.textContent = 'ans 暂记 = ' + cur.ans;
+    }
+  }
+  document.getElementById('rbSel').addEventListener('change', function(){ idx = +this.value; step = 0; draw(); });
+  document.getElementById('rbNext').addEventListener('click', function(){ if (step < presets[idx].steps.length - 1) step++; draw(); });
+  document.getElementById('rbPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('rbReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+
+// ===== 演示 2：Pair 双指针计数 =====
+(function(){
+  var ARR = [1,1,3];
+  var LIM = [0,1,2];
+  // 每个 limit 的帧：l 从 0..2，显示 r 移动过程
+  var presets = [
+    {limit: 0, frames: [
+      {l:0, r:0, cnt:0, note:'l=0：arr[1]−arr[0]=0 ≤ 0，r 到 1'},
+      {l:0, r:1, cnt:1, note:'arr[2]−arr[0]=2 > 0，停。l 与 (0,1] 配对 1 对'},
+      {l:1, r:1, cnt:0, note:'l=1：arr[2]−arr[1]=2 > 0，r 不动，配对 0 对'},
+      {l:2, r:2, cnt:0, note:'l=2：r 已到头，配对 0 对'},
+      {l:0, r:0, cnt:0, note:'结束：limit=0 时共 1 对 → 第 1 小距离 = 0', fin:true}
+    ]},
+    {limit: 1, frames: [
+      {l:0, r:0, cnt:0, note:'l=0：arr[1]−arr[0]=0 ≤ 1，r 到 1'},
+      {l:0, r:1, cnt:1, note:'arr[2]−arr[0]=2 > 1，停。配对 1 对'},
+      {l:1, r:1, cnt:0, note:'l=1：arr[2]−arr[1]=2 > 1，r 不动，配对 0 对'},
+      {l:2, r:2, cnt:0, note:'l=2：配对 0 对'},
+      {l:0, r:0, cnt:0, note:'结束：limit=1 时共 1 对', fin:true}
+    ]},
+    {limit: 2, frames: [
+      {l:0, r:0, cnt:0, note:'l=0：arr[1]−arr[0]=0 ≤ 2，r 到 1'},
+      {l:0, r:1, cnt:0, note:'arr[2]−arr[0]=2 ≤ 2，r 到 2'},
+      {l:0, r:2, cnt:2, note:'r 到头。l 与 (0,2] 配对 2 对'},
+      {l:1, r:2, cnt:1, note:'l=1：r 不回退，配对 1 对'},
+      {l:2, r:2, cnt:0, note:'l=2：配对 0 对'},
+      {l:0, r:0, cnt:0, note:'结束：limit=2 时共 3 对 → 第 3 小距离 = 2', fin:true}
+    ]},
+  ];
+  var idx = 0, frame = 0;
+  function draw(){
+    var ps = presets[idx];
+    var f = ps.frames[Math.min(frame, ps.frames.length-1)];
+    var row = document.getElementById('prRow');
+    var html = '';
+    for (var j = 0; j < ARR.length; j++) {
+      var cls = 'pair-cell';
+      if (j === f.l) cls += ' l';
+      if (j === f.r && f.r !== f.l) cls += ' r';
+      else if (j > f.l && j < f.r) cls += ' in';
+      else if (j < f.l) cls += ' out';
+      html += '<span class="'+cls+'">'+ARR[j]+'</span>';
+    }
+    row.innerHTML = html;
+    document.getElementById('prNote').textContent = f.note;
+    var ansEl = document.getElementById('prAns');
+    if (f.fin) ansEl.textContent = 'f(' + ps.limit + ') = ' + (ps.limit === 2 ? 3 : 1) + ' 对';
+    else ansEl.textContent = '正在扫描 l=' + f.l + ', r=' + f.r;
+  }
+  document.getElementById('prSel').addEventListener('change', function(){ idx = +this.value; frame = 0; draw(); });
+  document.getElementById('prNext').addEventListener('click', function(){ if (frame < presets[idx].frames.length - 1) frame++; draw(); });
+  document.getElementById('prPrev').addEventListener('click', function(){ if (frame > 0) frame--; draw(); });
+  document.getElementById('prReset').addEventListener('click', function(){ frame = 0; draw(); });
+  draw();
+})();
+})();
+</script>
+</body>
+</html>

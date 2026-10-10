@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>折半搜索：半量展开，结果整合</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.sarr { font-family: ui-monospace,Menlo,Consolas,monospace; font-size: 12px; margin: 5px 0; }
+.scell { display: inline-block; min-width: 34px; padding: 3px 7px; border: 1px solid #cbd5e1; border-radius: 5px; margin-right: 5px; background: #fff; text-align: center; }
+.scell.l { background: #fef9c3; border-color: #ca8a04; }
+.scell.r { background: #dbeafe; border-color: #2563eb; }
+.scell.cur { outline: 2px solid #ea580c; }
+.scell.moved { background: #dcfce7; border-color: #16a34a; }
+.slab { display: inline-block; width: 70px; font-size: 12px; color: #64748b; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>折半搜索：半量展开，结果整合</h1>
+      <p class="intro">有一类题的数据量卡在中间：全量 2^40 种展开直接爆掉，但 2^20 种没问题。折半搜索把数据劈成两半各自展开，再设计两半结果的整合逻辑，把 2^40 变成 2·2^20。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>上一页的双向广搜是剪枝优化。这一页的折半搜索是另一个本体：它解决的不是「展开太慢」，而是「根本展不开」。特征一句话：全量样本不允许递归完全展开，但是半量样本可以完全展开。</p>
+      <p>过程三步：把数据分成两部分；每部分各自展开、算出结果；设计两部分结果的整合逻辑。展开从 2^n 掉到 2·2^(n/2)，中间那步整合是每道题各自设计的部分。</p>
+      <p>n ≤ 40 是这套题的典型信号：2^40 约 1 万亿，任何机器都跑不动；2^20 约 100 万，排序都只要几十毫秒。看到 n ≤ 40，先往折半搜索想。</p>
+
+      <h2 id="snacks">一、零食问题：半量子集和 + 排序双指针计数</h2>
+      <figure class="fig" id="figSnacks"></figure>
+      <p>牛牛背包容量 w，n 袋零食体积 v[i]，问总体积不超过 w 的放法总数（空包也算一种）。n ≤ 40、w 和 v[i] 都是 10^9 级别，背包 DP 按容量做不开，只能数子集。</p>
+      <p>左半 [0, n>>1) 递归展开所有子集和，s > w 直接剪枝返回；右半同样。两半各最多 2^20 个和，分别排序后配对：对左半每个和 lsum[i]，右半能配多少个 rsum[j] 满足 lsum[i] + rsum[j] ≤ w？</p>
+      <p>配对数用双指针一次扫完：lsum 从大到小遍历，rsum 升序，j 只前进不回退。lsum[i] 越小，能配的 rsum 越多，j 单调不减，ans 累加 j 就是答案。</p>
+      <div class="viz">
+        <p class="viz-title">演示 · 零食 [2,3,5,7] w=7：两半展开子集和，排序后双指针配对计数</p>
+        <div id="snGrid"></div>
+        <p class="viz-note" id="snNote"></p>
+        <p class="viz-answer" id="snAns"></p>
+        <div class="viz-controls">
+          <button id="snPrev">上一步</button>
+          <button id="snNext">下一步</button>
+          <button id="snReset">重置</button>
+        </div>
+      </div>
+      <p>实测：n = 40、w = 2×10^9、v 随机 10^9 级别，折半搜索加剪枝 2.66ms 出结果。全子集枚举在这个规模上约 1 万亿次，差 12 个数量级。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 零食问题 / 世界冰球锦标赛：折半搜索</span>
+    <span class="cm">// n &lt;= 40，全量 2^40 个放法展不开；分成左右两半，每半 2^20 个和完全展开</span>
+    <span class="cm">// 两半分别排序后双指针：lsum[i] 配多少个 rsum[j] 满足和 &lt;= w，逐 i 累加</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 40;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 1 &lt;&lt; 20;
+
+    <span class="kw">long</span> <span class="kw">long</span> arr[MAXN];
+    <span class="kw">long</span> <span class="kw">long</span> lsum[MAXM];
+    <span class="kw">long</span> <span class="kw">long</span> rsum[MAXM];
+    <span class="kw">int</span> n;
+    <span class="kw">long</span> <span class="kw">long</span> w;
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">f</span>(<span class="kw">int</span> i, <span class="kw">int</span> e, <span class="kw">long</span> <span class="kw">long</span> s, <span class="kw">long</span> <span class="kw">long</span> w, <span class="kw">long</span> <span class="kw">long</span>* ans, <span class="kw">int</span> j) {
+        <span class="kw">if</span> (s &gt; w) {
+            <span class="kw">return</span> j;
+        }
+        <span class="kw">if</span> (i == e) {
+            ans[j++] = s;
+        } <span class="kw">else</span> {
+            j = f(i + 1, e, s, w, ans, j);
+            j = f(i + 1, e, s + arr[i], w, ans, j);
+        }
+        <span class="kw">return</span> j;
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">compute</span>() {
+        <span class="kw">int</span> lsize = f(0, n &gt;&gt; 1, 0, w, lsum, 0);
+        <span class="kw">int</span> rsize = f(n &gt;&gt; 1, n, 0, w, rsum, 0);
+        sort(lsum, lsum + lsize);
+        sort(rsum, rsum + rsize);
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = lsize - 1, j = 0; i &gt;= 0; i--) {
+            <span class="kw">while</span> (j &lt; rsize &amp;&amp; lsum[i] + rsum[j] &lt;= w) {
+                j++;
+            }
+            ans += j;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2 id="closest">二、最接近目标值的子序列和：压缩相同数字 + 双指针逼近</h2>
+      <figure class="fig" id="figClosest"></figure>
+      <p>从 nums 里选一个子序列，让和尽量贴近 goal，返回 |sum - goal| 的最小值。n ≤ 40、|nums[i]| ≤ 10^7、|goal| ≤ 10^9。</p>
+      <p>先把全部正数和 max、全部负数和 min 算出来：max < goal 或 min > goal 时，全选正数或全选负数就是最优，直接返回，省掉大半展开。这是这题独有的特判。</p>
+      <p>展开前先排序，collect 里把相等数字一次处理：一段相同的 nums[i] 有 j-i 个，取 k = 0..j-i 个，用一个循环合并展开，常数优化。</p>
+      <p>两半排序后双指针逼近：lsum 升序，对每个 lsum[i]，j 从右往左走，只要 |goal - lsum[i] - rsum[j-1]| ≤ |goal - lsum[i] - rsum[j]| 就继续 j--。j 单调不回退，整个配对 O(2^(n/2))。ans 初始 abs(goal)，对应空子序列。</p>
+      <div class="viz">
+        <p class="viz-title">演示 · [-1,0,2,3] goal=4：左右各展开，双指针找 |sum-4| 的最小值</p>
+        <div id="clGrid"></div>
+        <p class="viz-note" id="clNote"></p>
+        <p class="viz-answer" id="clAns"></p>
+        <div class="viz-controls">
+          <button id="clPrev">上一步</button>
+          <button id="clNext">下一步</button>
+          <button id="clReset">重置</button>
+        </div>
+      </div>
+      <p>实测：n = 40、goal 落在正负和之间（特判不生效）时，折半搜索最差 96.69ms，仍完全可过。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 最接近目标值的子序列和：折半 + 相同数字压缩 + 排序双指针</span>
+    <span class="cm">// 先看全量 min/max 与 goal 的关系直接出答案；排序后 collect 把相等数字 k 个一起处理</span>
+    <span class="cm">// 左右各展开 2^20 个和，lsum 升序，对每个 lsum[i] 用 j 从右往左逼近 goal - lsum[i]</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 1 &lt;&lt; 20;
+
+    <span class="kw">int</span> lsum[MAXN];
+    <span class="kw">int</span> rsum[MAXN];
+    <span class="kw">int</span> fill;
+
+    <span class="kw">void</span> <span class="fn">collect</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> i, <span class="kw">int</span> e, <span class="kw">int</span> s, <span class="kw">int</span>* sum) {
+        <span class="kw">if</span> (i == e) {
+            sum[fill++] = s;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> j = i + 1;
+            <span class="kw">while</span> (j &lt; e &amp;&amp; nums[j] == nums[i]) {
+                j++;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> k = 0; k &lt;= j - i; k++) {
+                collect(nums, j, e, s + k * nums[i], sum);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">minAbsDifference</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> goal) {
+        <span class="kw">int</span> n = nums.size();
+        <span class="kw">long</span> <span class="kw">long</span> minv = 0, max = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> v : nums) {
+            <span class="kw">if</span> (v &gt;= 0) {
+                max += v;
+            } <span class="kw">else</span> {
+                minv += v;
+            }
+        }
+        <span class="kw">if</span> (max &lt; goal) {
+            <span class="kw">return</span> (<span class="kw">int</span>)llabs(max - goal);
+        }
+        <span class="kw">if</span> (minv &gt; goal) {
+            <span class="kw">return</span> (<span class="kw">int</span>)llabs(minv - goal);
+        }
+        sort(nums.begin(), nums.end());
+        fill = 0;
+        collect(nums, 0, n &gt;&gt; 1, 0, lsum);
+        <span class="kw">int</span> lsize = fill;
+        fill = 0;
+        collect(nums, n &gt;&gt; 1, n, 0, rsum);
+        <span class="kw">int</span> rsize = fill;
+        sort(lsum, lsum + lsize);
+        sort(rsum, rsum + rsize);
+        <span class="kw">int</span> ans = abs(goal);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, j = rsize - 1; i &lt; lsize; i++) {
+            <span class="kw">while</span> (j &gt; 0 &amp;&amp; llabs((<span class="kw">long</span> <span class="kw">long</span>)goal - lsum[i] - rsum[j - 1]) &lt;= llabs((<span class="kw">long</span> <span class="kw">long</span>)goal - lsum[i] - rsum[j])) {
+                j--;
+            }
+            ans = min(ans, (<span class="kw">int</span>)llabs((<span class="kw">long</span> <span class="kw">long</span>)goal - lsum[i] - rsum[j]));
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2 id="partition">三、分区最小化差：折半 + 按选取个数分桶</h2>
+      <figure class="fig" id="figPartition"></figure>
+      <p>这道题课上没讲，是题目 3 加了一个限制：把数组分成两个数组并最小化数组和的差，要求每个数组恰好 n 个元素（n = m >> 1）。全和 sum 已知，一个数组和是 s，差就是 |sum - 2s|。</p>
+      <p>区别在展开时多带一个「个数」维度：左半选了 k 个数，右半就必须选 n-k 个。于是 lsum[k] 存「左半恰好选 k 个数」的全部和，rsiz[need] 同理，need = n-k。配对时在对应桶里双指针逼近 |sum - 2·(lsum[k][i] + rsum[need][j])|，外层枚举 k 从 0 到 n。</p>
+      <p>注意静态桶容量 2^15：随机数据每侧最多 15 个元素（m ≤ 30）时够用；m = 40 时每侧 2^20 个和会越界，要换成动态数组，实测动态版 n = 40 跑 88.95ms。课上代码用静态数组，页面里保留原样并把这个上限写清楚。</p>
+      <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 将数组分成两个数组并最小化数组和的差：折半 + 按选取个数分桶</span>
+    <span class="cm">// 题目 3 的升级：每个数组必须恰好 n 个元素（n = m / 2），左半取 k 个、右半取 n-k 个</span>
+    <span class="cm">// lsum[k] 存「左半选 k 个数」的全部和，rsum[k] 同理；双指针逼近 sum - 2*(lsum[k][i] + rsum[need][j])</span>
+    <span class="cm">// 注意静态桶容量 2^15：随机数据每侧最多 15 个元素（m &lt;= 30），m 更大要换动态数组</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXK = 16;
+    <span class="kw">const</span> <span class="kw">int</span> MAXS = 1 &lt;&lt; 15;
+
+    <span class="kw">int</span> lsiz[MAXK];
+    <span class="kw">int</span> rsiz[MAXK];
+    <span class="kw">int</span> lsum[MAXK][MAXS];
+    <span class="kw">int</span> rsum[MAXK][MAXS];
+
+    <span class="kw">void</span> <span class="fn">collect</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums, <span class="kw">int</span> i, <span class="kw">int</span> end, <span class="kw">int</span> s, <span class="kw">int</span> c, <span class="kw">int</span> sum[MAXK][MAXS], <span class="kw">int</span>* siz) {
+        <span class="kw">if</span> (i == end) {
+            sum[c][siz[c]++] = s;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> j = i + 1;
+            <span class="kw">while</span> (j &lt; end &amp;&amp; nums[j] == nums[i]) {
+                j++;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> k = 0; k &lt;= j - i; k++) {
+                collect(nums, j, end, s + k * nums[i], c + k, sum, siz);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">minimumDifference</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums) {
+        <span class="kw">int</span> m = nums.size();
+        <span class="kw">int</span> n = m &gt;&gt; 1;
+        <span class="kw">long</span> <span class="kw">long</span> sum = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> v : nums) {
+            sum += v;
+        }
+        sort(nums.begin(), nums.end());
+        memset(lsiz, 0, <span class="kw">sizeof</span>(lsiz));
+        memset(rsiz, 0, <span class="kw">sizeof</span>(rsiz));
+        collect(nums, 0, n, 0, 0, lsum, lsiz);
+        collect(nums, n, m, 0, 0, rsum, rsiz);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt;= n; i++) {
+            sort(lsum[i], lsum[i] + lsiz[i]);
+            sort(rsum[i], rsum[i] + rsiz[i]);
+        }
+        <span class="kw">long</span> <span class="kw">long</span> ans = LLONG_MAX;
+        <span class="kw">for</span> (<span class="kw">int</span> k = 0; k &lt;= n; k++) {
+            <span class="kw">int</span> need = n - k;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0, j = rsiz[need] - 1; i &lt; lsiz[k]; i++) {
+                <span class="kw">while</span> (j &gt; 0 &amp;&amp; llabs(sum - 2LL * (lsum[k][i] + rsum[need][j - 1])) &lt;= llabs(sum - 2LL * (lsum[k][i] + rsum[need][j]))) {
+                    j--;
+                }
+                ans = min(ans, llabs(sum - 2LL * (lsum[k][i] + rsum[need][j])));
+            }
+        }
+        <span class="kw">return</span> (<span class="kw">int</span>)ans;
+    }</pre>
+
+      <h2 id="sum">总结</h2>
+      <p>折半搜索解决「全量展不开、半量可以」的一类题：劈两半各展开 2^(n/2) 个结果，再设计整合逻辑。零食问题用排序双指针计数，最接近目标值用排序双指针逼近，分区最小化差按个数分桶后配对，三题共用同一个骨架，差的全是整合那一步。</p>
+      <p>复杂度统一 O(2^(n/2)·log 2^(n/2))，n = 40 时约 2·2^20，排序 100 万个数毫秒级。看到 n ≤ 40、全量枚举必然超时的题，先判断半量能不能展开，能就折半。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>牛客</td><td><a href="https://www.nowcoder.com/practice/d94bb2fa461d42bcb4c0f2b94f5d4281" target="_blank">牛牛的背包问题</a></td><td><a href="https://www.nowcoder.com/practice/d94bb2fa461d42bcb4c0f2b94f5d4281" target="_blank">nowcoder.com</a></td></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P4799" target="_blank">世界冰球锦标赛</a></td><td><a href="https://www.luogu.com.cn/problem/P4799" target="_blank">luogu.com.cn</a></td></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/closest-subsequence-sum/" target="_blank">最接近目标值的子序列和</a></td><td><a href="https://leetcode.cn/problems/closest-subsequence-sum/" target="_blank">leetcode.cn</a></td></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/partition-array-into-two-arrays-to-minimize-sum-difference/" target="_blank">将数组分成两个数组并最小化数组和的差</a></td><td><a href="https://leetcode.cn/problems/partition-array-into-two-arrays-to-minimize-sum-difference/" target="_blank">leetcode.cn</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解063【必备】双向广搜</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+
+// ===== 图 1：零食配对 =====
+(function(){
+  var W = 720, H = 250;
+  var body = '';
+  body += txt(W/2, 20, '左半子集和 lsum 与右半 rsum 排序后，双指针统计 lsum[i]+rsum[j] <= w 的个数', {fs:13});
+  var ls = [0, 2, 3, 5], rs = [0, 5, 7];
+  var y0 = 60, cw = 46, ch = 34;
+  body += txt(120, y0 - 6, 'lsum（左半 [2,3]）', {fs:12, fill:'#ca8a04'});
+  for (var i = 0; i < ls.length; i++) {
+    body += '<rect x="'+(60+i*(cw+8))+'" y="'+y0+'" width="'+cw+'" height="'+ch+'" fill="#fef9c3" stroke="#ca8a04" rx="4"/>';
+    body += txt(60+i*(cw+8)+cw/2, y0+ch/2+4, String(ls[i]), {fs:13});
+  }
+  var y1 = y0 + 66;
+  body += txt(120, y1 - 6, 'rsum（右半 [5,7]）', {fs:12, fill:'#2563eb'});
+  for (var j = 0; j < rs.length; j++) {
+    body += '<rect x="'+(60+j*(cw+8))+'" y="'+y1+'" width="'+cw+'" height="'+ch+'" fill="#dbeafe" stroke="#2563eb" rx="4"/>';
+    body += txt(60+j*(cw+8)+cw/2, y1+ch/2+4, String(rs[j]), {fs:13});
+  }
+  body += txt(W/2, y1 + ch + 24, 'lsum 从大到小走，rsum 的指针 j 只前进：5 配 0；3 配 0；2 配 0、5；0 配 0、5、7 → 共 1+1+2+3 = 7 种', {fs:12, fill:'#334155'});
+  document.getElementById('figSnacks').innerHTML = svg(W, H, body) + '<figcaption>每种放法唯一对应「左半和 + 右半和」，双指针把配对计数压成一次扫描。</figcaption>';
+})();
+
+// ===== 图 2：最接近双指针逼近 =====
+(function(){
+  var W = 720, H = 220;
+  var body = '';
+  body += txt(W/2, 20, 'lsum 升序，j 从右往左逼近 goal - lsum[i]，条件用 abs 比较，j 单调不回退', {fs:13});
+  var vals = [0, 2, 3, 5];
+  var y0 = 60, cw = 46, ch = 34;
+  for (var i = 0; i < vals.length; i++) {
+    var x = 60 + i * (cw + 10);
+    body += '<rect x="'+x+'" y="'+y0+'" width="'+cw+'" height="'+ch+'" fill="#fff" stroke="#94a3b8" rx="4"/>';
+    body += txt(x + cw/2, y0 + ch/2 + 4, String(vals[i]), {fs:13});
+  }
+  body += txt(58, y0 + ch + 20, 'rsum 索引', {fs:11, fill:'#64748b', an:'start'});
+  body += txt(W/2, y0 + ch + 46, 'lsum[i] = -1 时目标和是 5，rsum[3] = 5 命中 → |4-(-1)-5| = 0，ans 直接归零', {fs:12, fill:'#334155'});
+  document.getElementById('figClosest').innerHTML = svg(W, H, body) + '<figcaption>双指针不是二分：j 单调向左，配合 abs 比较，一趟配完所有 lsum。</figcaption>';
+})();
+
+// ===== 图 3：分区桶 =====
+(function(){
+  var W = 720, H = 220;
+  var body = '';
+  body += txt(W/2, 20, '左半按「选 k 个数」分桶，右半按「选 n-k 个数」分桶，同 k 对桶配对', {fs:13});
+  var y0 = 55, ch = 32, cw = 120;
+  for (var k = 0; k < 4; k++) {
+    var x = 40 + k * (cw + 20);
+    body += '<rect x="'+x+'" y="'+y0+'" width="'+cw+'" height="'+ch+'" fill="#fef9c3" stroke="#ca8a04" rx="4"/>';
+    body += txt(x + cw/2, y0 + ch/2 + 4, 'lsum[' + k + '] 选' + k + '个', {fs:12});
+    body += '<rect x="'+x+'" y="'+(y0+44)+'" width="'+cw+'" height="'+ch+'" fill="#dbeafe" stroke="#2563eb" rx="4"/>';
+    body += txt(x + cw/2, y0 + 44 + ch/2 + 4, 'rsum[' + (3-k) + '] 选' + (3-k) + '个', {fs:12});
+  }
+  body += txt(W/2, y0 + 104, 'k 从 0 到 n，need = n - k，逐对桶双指针逼近 |sum - 2*(lsum[k][i] + rsum[need][j])|', {fs:12, fill:'#334155'});
+  document.getElementById('figPartition').innerHTML = svg(W, H, body) + '<figcaption>个数限制把「一个数组」变成「个数维度」：展开时多带一维，配对时按维度对齐。</figcaption>';
+})();
+
+// ===== 演示 1：零食配对 =====
+(function(){
+  var lsum = [5, 3, 2, 0];   // 左半 [2,3] 全部子集和（从大到小）
+  var rsum = [0, 5, 7];      // 右半 [5,7] 全部子集和（升序，12 已剪枝）
+  var w = 7;
+  var steps = [];
+  steps.push({i:-1, j:0, ans:0, note:'左半 [2,3] 子集和 {0,2,3,5}，右半 [5,7] 子集和 {0,5,7}（12 > 7 剪掉）。排序后双指针配对。'});
+  var j = 0, ans = 0;
+  for (var ii = 0; ii < lsum.length; ii++) {
+    while (j < rsum.length && lsum[ii] + rsum[j] <= w) j++;
+    ans += j;
+    steps.push({i:ii, j:j, ans:ans, note:'lsum[' + ii + '] = ' + lsum[ii] + '：配 rsum[0..' + (j-1) + '] 共 ' + j + ' 个（' + (lsum[ii] + rsum[j-1] <= w ? '最大和 ' + (lsum[ii] + rsum[j-1]) + ' <= 7' : '') + '），ans += ' + j + ' → ' + ans});
+  }
+  var step = 0;
+  function draw(){
+    var f = steps[Math.min(step, steps.length - 1)];
+    var html = '<div class="sarr"><span class="slab">lsum↓</span>';
+    for (var i = 0; i < lsum.length; i++) {
+      html += '<span class="scell l' + (i === f.i ? ' cur' : '') + '">' + lsum[i] + '</span>';
+    }
+    html += '</div><div class="sarr"><span class="slab">rsum↑</span>';
+    for (var jj = 0; jj < rsum.length; jj++) {
+      html += '<span class="scell r' + (jj < f.j ? ' moved' : '') + '">' + rsum[jj] + '</span>';
+    }
+    html += '</div><div class="sarr"><span class="slab">w = 7</span></div>';
+    document.getElementById('snGrid').innerHTML = html;
+    document.getElementById('snNote').textContent = f.note;
+    document.getElementById('snAns').textContent = '放法总数 ' + f.ans;
+  }
+  document.getElementById('snNext').addEventListener('click', function(){ if (step < steps.length - 1) step++; draw(); });
+  document.getElementById('snPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('snReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+
+// ===== 演示 2：最接近 =====
+(function(){
+  var lsum = [-1, -1, 0, 0];   // 左半 [-1,0] 子集和
+  var rsum = [0, 2, 3, 5];     // 右半 [2,3] 子集和（升序）
+  var goal = 4;
+  var steps = [];
+  steps.push({i:-1, j:3, best:4, note:'特判：max=5 不 < 4，min=-1 不 > 4，继续。左半 [-1,0] 子集和为 [-1,-1,0,0]，右半 [2,3] → [0,2,3,5]。'});
+  var ans = 4;
+  for (var ii = 0; ii < lsum.length; ii++) {
+    var j = 3;
+    while (j > 0 && Math.abs(goal - lsum[ii] - rsum[j-1]) <= Math.abs(goal - lsum[ii] - rsum[j])) j--;
+    ans = Math.min(ans, Math.abs(goal - lsum[ii] - rsum[j]));
+    steps.push({i:ii, j:j, best:ans, note:'lsum[' + ii + '] = ' + lsum[ii] + '：rsum 指针停到 ' + j + '（rsum[' + j + '] = ' + rsum[j] + '），|4-(' + lsum[ii] + ')-' + rsum[j] + '| = ' + Math.abs(goal - lsum[ii] - rsum[j]) + '，ans = ' + ans});
+  }
+  var step = 0;
+  function draw(){
+    var f = steps[Math.min(step, steps.length - 1)];
+    var html = '<div class="sarr"><span class="slab">lsum↑</span>';
+    for (var i = 0; i < lsum.length; i++) {
+      html += '<span class="scell l' + (i === f.i ? ' cur' : '') + '">' + lsum[i] + '</span>';
+    }
+    html += '</div><div class="sarr"><span class="slab">rsum↑</span>';
+    for (var jj = 0; jj < rsum.length; jj++) {
+      html += '<span class="scell r' + (jj === f.j ? ' cur' : '') + '">' + rsum[jj] + '</span>';
+    }
+    html += '</div><div class="sarr"><span class="slab">goal = 4</span></div>';
+    document.getElementById('clGrid').innerHTML = html;
+    document.getElementById('clNote').textContent = f.note;
+    document.getElementById('clAns').textContent = '最小绝对差 ' + f.best;
+  }
+  document.getElementById('clNext').addEventListener('click', function(){ if (step < steps.length - 1) step++; draw(); });
+  document.getElementById('clPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('clReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+})();
+</script>
+</body>
+</html>

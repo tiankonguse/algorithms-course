@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>前缀树：静态数组实现</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz-ctl{margin:8px 0 4px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;}
+.viz-ctl label{font-size:13px;color:var(--text-dim);white-space:nowrap;}
+.viz-ctl select{font-size:13px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:#fff;}
+.viz-note{margin:10px 0 4px;font-size:13px;color:var(--text);}
+.viz-answer{margin-top:6px;font-size:15px;font-weight:600;}
+.tnode circle{stroke:#9aa0a6;stroke-width:1.4;fill:#fff;}
+.tnode.cur circle{stroke:#2563eb;stroke-width:2.6;fill:#dbeafe;}
+.tnode.new circle{stroke:#ea580c;stroke-width:2.6;fill:#ffedd5;}
+.tnode.gone circle{stroke:#c2410c;stroke-width:2.2;fill:#fee2e2;stroke-dasharray:5 3;}
+.tnode text.ch{font-size:14px;font-weight:600;}
+.tnode text.pe{font-size:10.5px;fill:#444;}
+.tnode text.id{font-size:10px;fill:#2563eb;}
+.edge{stroke:#9aa0a6;stroke-width:1.4;}
+.edge.cur{stroke:#2563eb;stroke-width:2.2;}
+.edge.new{stroke:#ea580c;stroke-width:2.2;}
+.edge.cut{stroke:#c2410c;stroke-width:2.4;stroke-dasharray:6 4;}
+.edge-tag{font-size:11.5px;fill:#555;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>前缀树：静态数组实现</h1>
+      <p class="intro">类描述实现每插一个字符就 new 一个节点，几十万个节点就是几十万次堆分配。静态数组把「节点」换成预先开好的一段二维数组，新节点只是数组里下一个下标，全程没有一次 new。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>类描述实现慢在哪？new。插入 50 万随机单词，约 87 万个节点，就是 87 万次堆分配，加上 87 万次指针跳转。</p>
+      <p>本机实测这三份实现，同样的 50 万词：</p>
+      <figure class="fig" id="figSpeed"></figure>
+      <p>静态数组 19.79ms，类描述数组路 62.84ms，哈希路 138.65ms。静态是数组路的 3 倍快，是哈希路的 7 倍。</p>
+      <p>内存差得更多。每个类描述节点实测 216 字节：2 个 int 加 26 个指针；87 万节点吃掉 187MB 堆。静态数组每个节点只要 112 字节，而且是一段连续内存，没有碎片。</p>
+      <p>哈希路为什么最慢：每个字符一次哈希查找，节点在内存里散着，缓存一路落空。它省下的是「没有的槽位」，可这棵树上用到的路越密，哈希的劣势越明显。</p>
+
+      <h2 id="pool">一、把节点放进数组</h2>
+      <p>类描述的节点是 new 出来的对象，访问靠指针。静态数组把「指针」换成「编号」，把「对象」换成数组下标。</p>
+      <p>三样东西：</p>
+      <p>tree[MAXN][26]：tree[i][j] 是节点 i 的 j 号路指向的节点编号，0 表示没有路。pass[MAXN] 和 end[MAXN] 存每个节点的两个计数器。cnt 是已分配的节点数，新节点就是 ++cnt。</p>
+      <figure class="fig" id="figPool"></figure>
+      <p>build() 把 cnt 置 1，1 号是根。0 号整行都是 0，正好当「没有路」的哨兵，树空的时候不用清任何东西。</p>
+
+      <h2 id="ops">二、四个操作</h2>
+      <p>insert：cur 从 1 开始，先 pass[cur]++。逐字符走：tree[cur][path] 是 0，就分配 tree[cur][path] = ++cnt；cur 走过去，pass[cur]++。走完 end[cur]++。</p>
+      <p>search 和 prefixNumber 是同一条路：逐字符走，没路返回 0，走完分别读 end 和 pass。</p>
+      <p>erase 是唯一多一步的：先 search 确认 word 存在，再沿路把 pass 逐个减一。</p>
+
+      <div class="viz" id="vizStatic"></div>
+    <pre class="code"><span class="cm">// tree[i][j]：节点 i 的 j 号路指向的节点编号，0 表示没有路</span>
+    <span class="kw">static</span> <span class="kw">const</span> <span class="kw">int</span> MAXN = 150001;
+    <span class="kw">static</span> <span class="kw">int</span> tree[MAXN][26];
+    <span class="kw">static</span> <span class="kw">int</span> pass[MAXN];
+    <span class="kw">static</span> <span class="kw">int</span> end[MAXN];
+    <span class="kw">static</span> <span class="kw">int</span> cnt;
+
+    <span class="cm">// 1 号是根。0 号整行都是 0，正好当「没有路」的哨兵</span>
+    <span class="kw">void</span> <span class="fn">build</span>() {
+        cnt = 1;
+    }</pre>
+    <pre class="code"><span class="kw">void</span> <span class="fn">insert</span>(<span class="kw">string</span> word) {
+        <span class="kw">int</span> cur = 1;
+        pass[cur]++;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, path; i &lt; word.size(); i++) {
+            path = word[i] - 'a';
+            <span class="kw">if</span> (tree[cur][path] == 0) {
+                tree[cur][path] = ++cnt;    <span class="cm">// 没路就分配一个新节点</span>
+            }
+            cur = tree[cur][path];
+            pass[cur]++;
+        }
+        end[cur]++;
+    }
+
+    <span class="kw">int</span> <span class="fn">search</span>(<span class="kw">string</span> word) {
+        <span class="kw">int</span> cur = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, path; i &lt; word.size(); i++) {
+            path = word[i] - 'a';
+            <span class="kw">if</span> (tree[cur][path] == 0) {
+                <span class="kw">return</span> 0;
+            }
+            cur = tree[cur][path];
+        }
+        <span class="kw">return</span> end[cur];
+    }
+
+    <span class="kw">int</span> <span class="fn">prefixNumber</span>(<span class="kw">string</span> pre) {
+        <span class="kw">int</span> cur = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, path; i &lt; pre.size(); i++) {
+            path = pre[i] - 'a';
+            <span class="kw">if</span> (tree[cur][path] == 0) {
+                <span class="kw">return</span> 0;
+            }
+            cur = tree[cur][path];
+        }
+        <span class="kw">return</span> pass[cur];
+    }
+
+    <span class="cm">// C++ 里 delete 是关键字，删词函数叫 erase</span>
+    <span class="kw">void</span> <span class="fn">erase</span>(<span class="kw">string</span> word) {
+        <span class="kw">if</span> (search(word) &gt; 0) {
+            <span class="kw">int</span> cur = 1;
+            pass[cur]--;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0, path; i &lt; word.size(); i++) {
+                path = word[i] - 'a';
+                <span class="kw">if</span> (--pass[tree[cur][path]] == 0) {
+                    tree[cur][path] = 0;    <span class="cm">// pass 减到 0：后面的路整个剪掉</span>
+                    <span class="kw">return</span>;
+                }
+                cur = tree[cur][path];
+            }
+            end[cur]--;
+        }
+    }</pre>
+
+      <h2 id="cut">三、erase 剪枝</h2>
+      <p>erase 沿路走时，每到一个节点就把下一个节点的 pass 减一。减到 0，说明没有任何单词还经过这条路，后面整段都可以剪掉：tree[cur][path] = 0。</p>
+      <p>插 apple、app、apply，删 apple：root 的 pass 3 变 2，a、p、p、l 的 pass 各减 1。l 的 pass 从 2 变 1，因为 apply 还经过它；e 的 pass 从 1 变 0，l 到 e 的路被剪断，e 节点整体作废。</p>
+      <figure class="fig" id="figDelete"></figure>
+      <p>实测行为：插 abc、abcd 后删 abc，search(abc) = 0，prefix(ab) = 1，search(abcd) = 1；再删 abcd，整棵树空。三类实现加朴素计数表，30 万组随机操作对拍，0 处不一致。</p>
+
+      <div class="viz" id="vizDelete"></div>
+
+      <h2 id="space">四、空间开多少</h2>
+      <p>MAXN 要开「总字符数 + 1」。题目数据范围会告诉你总共多少个字符，直接照开。</p>
+      <p>牛客这题 MAXN = 150001，三份数组加起来 16.8MB，放全局，稳过。</p>
+      <p>哈希路「省空间」是假象：路的槽位是省了，但每个节点多一个哈希表对象，对象本身的开销比省下的槽位还大。</p>
+
+      <h2 id="complexity">复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>操作</th><th>时间</th><th>说明</th></tr>
+        <tr><td>insert</td><td>O(len)</td><td>逐字符走，分配节点是数组赋值，O(1)</td></tr>
+        <tr><td>search / prefixNumber</td><td>O(len)</td><td>走完读 end / pass</td></tr>
+        <tr><td>erase</td><td>O(len)</td><td>先查一次，再沿路减 pass</td></tr>
+      </table>
+      <p>空间 O(总字符数 × 26)，MAXN 一次性开在全局，运行中不增不减。</p>
+
+      <h2 id="sum">总结</h2>
+      <p>静态数组就是类描述的数组路版本：new 换成 ++cnt，指针换成编号，其余逻辑一字不改。</p>
+      <p>实测快 3 倍、每节点省一半内存，而且没有堆碎片，比赛里这是稳过的保障。</p>
+      <p>字符范围大、26 个槽位开不下的时候怎么办？用每一位的信息建树，下节课的题目里见。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>牛客</td><td>前缀树</td><td><a href="https://www.nowcoder.com/practice/7f8a8553ddbf4eaab749ec988726702b" target="_blank">nowcoder.com/practice/7f8a8553ddbf4eaab749ec988726702b</a></td></tr>
+        <tr><td>LeetCode</td><td>实现 Trie（前缀树）II</td><td><a href="https://leetcode.cn/problems/implement-trie-ii-prefix-tree/" target="_blank">leetcode.cn/problems/implement-trie-ii-prefix-tree</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解044【必备】前缀树原理和代码详解</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-wiki</td><td>Trie</td><td><a href="https://oi-wiki.org/string/trie/" target="_blank">oi-wiki.org/string/trie</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+/* ===== 树绘制（带节点编号） ===== */
+function makeTree(){
+  return { ch:'', pass:0, end:0, id:1, children:{}, x:0, y:0 };
+}
+function layoutTree(root){
+  var levels = [];
+  (function dfs(u,d){
+    if(!levels[d]) levels[d] = [];
+    levels[d].push(u);
+    for(var k in u.children) dfs(u.children[k], d+1);
+  })(root,0);
+  var W = 760;
+  levels.forEach(function(lv,d){
+    lv.sort(function(a,b){ return a.ch < b.ch ? -1 : a.ch > b.ch ? 1 : 0; });
+    var y = d===0 ? 56 : 66 + d*58;
+    lv.forEach(function(u,i){
+      u.y = y;
+      u.x = lv.length===1 ? W/2 : 30 + i*(W-60)/(lv.length-1);
+    });
+  });
+  return levels.length;
+}
+function drawTree(svg, root, opts){
+  opts = opts || {};
+  var cur = opts.cur || null, fresh = opts.fresh || null, gone = opts.gone || null;
+  var edgeCur = opts.edgeCur || null, edgeNew = opts.edgeNew || null, edgeCut = opts.edgeCut || null;
+  var showId = opts.showId;
+  var s = '';
+  (function walk(u){
+    for(var k in u.children){
+      var v = u.children[k];
+      var cls = 'edge';
+      if(edgeCut && edgeCut[0]===u && edgeCut[1]===v) cls='edge cut';
+      else if(edgeCur && edgeCur[0]===u && edgeCur[1]===v) cls='edge cur';
+      else if(edgeNew && edgeNew[0]===u && edgeNew[1]===v) cls='edge new';
+      s += '<line class="'+cls+'" x1="'+u.x+'" y1="'+u.y+'" x2="'+v.x+'" y2="'+v.y+'"/>';
+      s += '<text class="edge-tag" x="'+((u.x+v.x)/2)+'" y="'+((u.y+v.y)/2-7)+'" text-anchor="middle">'+k+'</text>';
+      walk(v);
+    }
+  })(root);
+  (function walk2(u){
+    var cls = 'tnode';
+    if(u===gone) cls='tnode gone';
+    else if(u===fresh) cls='tnode new';
+    else if(u===cur) cls='tnode cur';
+    s += '<g class="'+cls+'">';
+    s += '<circle cx="'+u.x+'" cy="'+u.y+'" r="19"/>';
+    if(u.ch) s += '<text class="ch" x="'+u.x+'" y="'+(u.y+5)+'" text-anchor="middle">'+u.ch+'</text>';
+    else s += '<text class="ch" x="'+u.x+'" y="'+(u.y+5)+'" text-anchor="middle" style="font-size:11px">根</text>';
+    s += '<text class="pe" x="'+u.x+'" y="'+(u.y+34)+'" text-anchor="middle">pass '+u.pass+'</text>';
+    s += '<text class="pe" x="'+u.x+'" y="'+(u.y+48)+'" text-anchor="middle">end '+u.end+'</text>';
+    if(showId) s += '<text class="id" x="'+(u.x+14)+'" y="'+(u.y-22)+'" text-anchor="middle">#'+u.id+'</text>';
+    s += '</g>';
+    for(var k in u.children) walk2(u.children[k]);
+  })(root);
+  svg.innerHTML = s;
+}
+
+/* ===== 图：figSpeed 性能柱状图 ===== */
+(function(){
+  var svg = document.getElementById('figSpeed');
+  var svgNS = 'http://www.w3.org/2000/svg';
+  var S = document.createElementNS(svgNS,'svg');
+  S.setAttribute('viewBox','0 0 760 240');
+  svg.appendChild(S);
+  var data = [
+    { name:'静态数组', ms:19.79, color:'#2563eb', note:'19.79 ms' },
+    { name:'类描述 · 数组路', ms:62.84, color:'#ea580c', note:'62.84 ms' },
+    { name:'类描述 · 哈希路', ms:138.65, color:'#9aa0a6', note:'138.65 ms' }
+  ];
+  var x0 = 210, wmax = 480, yTop = 30, rowH = 52;
+  var s = '<text x="30" y="44" style="font-size:13px;font-weight:600">插入 50 万随机单词（87 万节点）的耗时</text>';
+  data.forEach(function(d,i){
+    var y = yTop + i*rowH;
+    var bw = d.ms / 140 * wmax;
+    s += '<text x="'+x0+'" y="'+(y+22)+'" text-anchor="end" style="font-size:13px">'+d.name+'</text>';
+    s += '<rect x="'+x0+'" y="'+(y+8)+'" width="'+bw+'" height="24" rx="4" fill="'+d.color+'" opacity="0.9"/>';
+    s += '<text x="'+(x0+bw+8)+'" y="'+(y+25)+'" style="font-size:13px;font-weight:600">'+d.note+'</text>';
+  });
+  s += '<text x="'+x0+'" y="'+(yTop+3*rowH+16)+'" style="font-size:11.5px" fill="#888">0         20         40         60         80         100         120         140 ms</text>';
+  s += '<line x1="'+x0+'" y1="'+(yTop+3*rowH+6)+'" x2="'+(x0+wmax)+'" y2="'+(yTop+3*rowH+6)+'" stroke="#ccc" stroke-width="1"/>';
+  S.innerHTML = s;
+  var cap = document.createElement('figcaption');
+  cap.textContent = '同样的数据，静态数组 3 倍快于类描述数组路，7 倍快于哈希路。';
+  svg.appendChild(cap);
+})();
+
+/* ===== 图：figPool 节点池 ===== */
+(function(){
+  var svg = document.getElementById('figPool');
+  var svgNS = 'http://www.w3.org/2000/svg';
+  var S = document.createElementNS(svgNS,'svg');
+  S.setAttribute('viewBox','0 0 760 240');
+  svg.appendChild(S);
+  // 节点池：1..6 号节点，画非空槽
+  var nodes = [
+    {id:1, ch:'', next:{a:2}},
+    {id:2, ch:'a', next:{p:3}},
+    {id:3, ch:'p', next:{p:4}},
+    {id:4, ch:'p', next:{l:5}},
+    {id:5, ch:'l', next:{e:6}},
+    {id:6, ch:'e', next:{}}
+  ];
+  var s = '<text x="30" y="34" style="font-size:13px;font-weight:600">tree 是节点池：tree[i][j] = 编号，0 = 没有路</text>';
+  nodes.forEach(function(n){
+    var x = 34 + (n.id-1)*118, y = 66;
+    s += '<rect x="'+x+'" y="'+y+'" width="104" height="44" rx="6" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.2"/>';
+    s += '<text x="'+(x+8)+'" y="'+(y+18)+'" style="font-size:11px;fill:#2563eb;font-weight:600">#'+n.id+'</text>';
+    s += '<text x="'+(x+8)+'" y="'+(y+34)+'" style="font-size:11px" fill="#333">'+(n.ch?('节点 '+n.ch):'根')+'</text>';
+    var keys = Object.keys(n.next);
+    if(keys.length){
+      keys.forEach(function(k,i){
+        var kx = x + 30 + i*18;
+        s += '<text x="'+kx+'" y="'+(y+14)+'" style="font-size:10.5px" fill="#c2410c">'+k+'→'+n.next[k]+'</text>';
+      });
+    } else {
+      s += '<text x="'+(x+78)+'" y="'+(y+14)+'" style="font-size:10.5px" fill="#999">无路</text>';
+    }
+  });
+  // cur 指针
+  s += '<text x="140" y="140" style="font-size:12.5px;font-weight:600;fill:#2563eb">cur 从 1 开始：tree[cur][path] 是 0 就 ++cnt 分配，cur 再走过去</text>';
+  s += '<text x="140" y="166" style="font-size:12.5px;font-weight:600;fill:#2563eb">pass[cur] 和 end[cur] 各占一列，和 tree 按下标对齐</text>';
+  s += '<text x="140" y="192" style="font-size:12.5px" fill="#555">0 号整行是 0：树空时没有「没有路」要额外清</text>';
+  s += '<text x="140" y="218" style="font-size:12.5px" fill="#555">MAXN 开总字符数 + 1，多出来的槽位留着不用</text>';
+  S.innerHTML = s;
+  var cap = document.createElement('figcaption');
+  cap.textContent = '节点编号从 1 开始，0 当哨兵。新节点只是下一个下标，没有堆分配。';
+  svg.appendChild(cap);
+})();
+
+/* ===== 图：figDelete ===== */
+(function(){
+  var svg = document.getElementById('figDelete');
+  var svgNS = 'http://www.w3.org/2000/svg';
+  var S = document.createElementNS(svgNS,'svg');
+  S.setAttribute('viewBox','0 0 760 300');
+  svg.appendChild(S);
+  // 左侧：删之前（apple/app/apply），右侧：删 apple 之后
+  function build(){
+    var args = [].slice.call(arguments);
+    var root = { ch:'', pass:0, end:0, children:{}, x:0, y:0 };
+    args.forEach(function(w){
+      var u = root; u.pass++;
+      for(var i=0;i<w.length;i++){
+        var c = w[i];
+        if(!u.children[c]) u.children[c] = { ch:c, pass:0, end:0, children:{}, x:0, y:0 };
+        u = u.children[c]; u.pass++;
+      }
+      u.end++;
+    });
+    return root;
+  }
+  var left = build('apple','app','apply');
+  var right = build('app','apply');
+  // 给 right 标出被剪掉的位置
+  var S2 = document.createElementNS(svgNS,'svg');
+  S2.setAttribute('viewBox','0 0 360 250');
+  var S3 = document.createElementNS(svgNS,'svg');
+  S3.setAttribute('viewBox','0 0 360 250');
+  // 用内联函数画两颗小树（坐标写死）
+  function drawMini(svgEl, tree, cutL, cutE){
+    var ns = 'http://www.w3.org/2000/svg';
+    var pos = {};
+    // 手工布局：root(40,105) a(120,105) p(200,105) p(280,105) l(240,42) e(300,42) y(320,168)? 简化
+    // 改为两层：主链 a-p-p 一行，l 在中间下一层，e/y 分叉
+    var coords = {
+      '': [40,105], a:[120,105], p1:[200,105], p2:[280,105]
+    };
+    // 先收集树
+    var order = [];
+    (function collect(u,path){
+      order.push({u:u,path:path});
+      for(var k in u.children) collect(u.children[k], path+k);
+    })(tree,'');
+    var levels = {};
+    order.forEach(function(o){
+      var d = o.path.length;
+      if(!levels[d]) levels[d]=[];
+      levels[d].push(o);
+    });
+    // 手动坐标
+    var w = 340, h = 190;
+    var lv = [];
+    for(var d=0;d<6;d++) if(levels[d]) lv.push(levels[d]);
+    lv.forEach(function(l,d){
+      l.forEach(function(o,i){
+        var u = o.u;
+        u.x = l.length===1 ? w/2 : 20 + i*(w-40)/(l.length-1);
+        u.y = 40 + d*34;
+      });
+    });
+    var s = '';
+    (function walk(u){
+      for(var k in u.children){
+        var v = u.children[k];
+        var cls='edge';
+        if(cutL && cutL[0]===u && cutL[1]===v) cls='edge cut';
+        s += '<line class="'+cls+'" x1="'+u.x+'" y1="'+u.y+'" x2="'+v.x+'" y2="'+v.y+'"/>';
+        s += '<text class="edge-tag" x="'+((u.x+v.x)/2)+'" y="'+((u.y+v.y)/2-5)+'" text-anchor="middle">'+k+'</text>';
+        walk(v);
+      }
+    })(tree);
+    (function walk2(u){
+      var cls='tnode';
+      if(cutE && u===cutE) cls='tnode gone';
+      s += '<g class="'+cls+'">';
+      s += '<circle cx="'+u.x+'" cy="'+u.y+'" r="15"/>';
+      if(u.ch) s += '<text class="ch" x="'+u.x+'" y="'+(u.y+4)+'" text-anchor="middle" style="font-size:13px">'+u.ch+'</text>';
+      else s += '<text class="ch" x="'+u.x+'" y="'+(u.y+4)+'" text-anchor="middle" style="font-size:10px">根</text>';
+      s += '<text class="pe" x="'+u.x+'" y="'+(u.y+28)+'" text-anchor="middle" style="font-size:9.5px">p'+u.pass+' e'+u.end+'</text>';
+      s += '</g>';
+      for(var k in u.children) walk2(u.children[k]);
+    })(tree);
+    svgEl.innerHTML = s;
+  }
+  // 左侧树：l 节点在 p2 下面
+  function relayout(tree){
+    var order = [];
+    (function collect(u,path){ order.push({u:u,path:path}); for(var k in u.children) collect(u.children[k], path+k); })(tree,'');
+    var levels = {};
+    order.forEach(function(o){ var d=o.path.length; if(!levels[d]) levels[d]=[]; levels[d].push(o); });
+    var w=330, h=200;
+    for(var d=0;d<6;d++) if(levels[d]){
+      levels[d].forEach(function(o,i){
+        var u=o.u;
+        u.x = levels[d].length===1 ? w/2 : 24 + i*(w-48)/(levels[d].length-1);
+        u.y = 46 + d*36;
+      });
+    }
+  }
+  relayout(left); relayout(right);
+  var lE = left.children.a.children.p.children.p.children.l.children.e;
+  var rL = right.children.a.children.p.children.p.children.l;
+  var cutE = null;
+  S.innerHTML =
+    '<text x="180" y="26" text-anchor="middle" style="font-size:13px;font-weight:600">删 apple 之前</text>' +
+    '<text x="540" y="26" text-anchor="middle" style="font-size:13px;font-weight:600">删 apple 之后</text>';
+  var S1 = document.createElementNS(svgNS,'svg');
+  S1.setAttribute('viewBox','0 0 360 250');
+  S1.setAttribute('x','10'); S1.setAttribute('y','40'); S1.setAttribute('width','360'); S1.setAttribute('height','200');
+  drawMini(S1, left, null, null);
+  S.appendChild(S1);
+  var S2b = document.createElementNS(svgNS,'svg');
+  S2b.setAttribute('viewBox','0 0 360 250');
+  S2b.setAttribute('x','390'); S2b.setAttribute('y','40'); S2b.setAttribute('width','360'); S2b.setAttribute('height','200');
+  drawMini(S2b, right, null, null);
+  // 在右侧图上叠一个红叉提示
+  S2b.innerHTML += '<text x="180" y="16" text-anchor="middle" style="font-size:13px;fill:#c2410c;font-weight:700">× l→e 已剪断</text>';
+  S.appendChild(S2b);
+  var cap = document.createElement('figcaption');
+  cap.textContent = 'erase 沿路把 pass 减一，减到 0 就把路置 0。e 的 pass 变 0，整段剪掉；apply 的 l 还在。';
+  svg.appendChild(cap);
+})();
+
+/* ===== 演示：vizStatic 静态数组操作台 ===== */
+(function(){
+  var box = document.getElementById('vizStatic');
+  box.innerHTML =
+    '<p class="viz-title">演示：静态数组操作台（节点是编号，cur 在池里走）</p>' +
+    '<div class="viz-ctl"><label>操作序列</label><select id="vsSel"></select></div>' +
+    '<svg id="vsSvg" viewBox="0 0 760 430" style="width:100%;height:auto"></svg>' +
+    '<p class="viz-note" id="vsNote"></p>' +
+    '<div class="viz-controls"><button type="button" id="vsNext">下一步</button><button type="button" id="vsReset">重置</button></div>';
+  var PRESETS = [
+    [
+      ['insert','app'],['insert','apple'],['insert','apply'],
+      ['search','app'],['prefixNumber','ap'],['erase','apple'],['search','apple']
+    ],
+    [
+      ['insert','abc'],['insert','abcd'],['erase','abc'],
+      ['search','abcd'],['prefixNumber','a'],['erase','abcd'],['prefixNumber','a']
+    ],
+    [
+      ['insert','a'],['insert','ab'],['erase','a'],
+      ['search','ab'],['erase','ab'],['prefixNumber','a']
+    ]
+  ];
+  var sel = box.querySelector('#vsSel');
+  PRESETS.forEach(function(p,i){
+    sel.add(new Option(p.map(function(x){ return x[0]+' '+x[1]; }).join('；'), String(i)));
+  });
+  var svg = box.querySelector('#vsSvg');
+  var cnt, nodes, steps, step;
+
+  function cloneNodes(){
+    var c = {};
+    Object.keys(nodes).forEach(function(id){
+      var n = nodes[id];
+      c[id] = { ch:n.ch, pass:n.pass, end:n.end, next:Object.assign({}, n.next) };
+    });
+    return c;
+  }
+  function P(obj){ obj.state = cloneNodes(); steps.push(obj); }
+  function build(ops){
+    cnt = 1;
+    nodes = { 1:{ ch:'', pass:0, end:0, next:{}, x:0, y:0 } };
+    steps = [];
+    P({ label:'build()：cnt = 1，1 号是根。0 号整行是 0，当没有路的哨兵', cur:1, fresh:null });
+    ops.forEach(function(op){
+      var w = op[1];
+      if(op[0]==='insert'){
+        var cur = 1;
+        nodes[1].pass++;
+        P({ label:'insert "'+w+'"：pass[1] 从 '+(nodes[1].pass-1)+' 到 '+nodes[1].pass, cur:1, fresh:null });
+        for(var i=0;i<w.length;i++){
+          var c = w[i];
+          if(nodes[cur].next[c]===undefined){
+            cnt++;
+            nodes[cnt] = { ch:c, pass:1, end:0, next:{}, x:0, y:0 };
+            nodes[cur].next[c] = cnt;
+            P({ label:'字符 "'+c+'"：tree['+cur+']['+c+'] = 0，分配新节点 #'+cnt, cur:cnt, fresh:cnt });
+          } else {
+            nodes[nodes[cur].next[c]].pass++;
+            P({ label:'字符 "'+c+'"：有路，走到 #'+nodes[cur].next[c]+'，pass++ 到 '+nodes[nodes[cur].next[c]].pass, cur:nodes[cur].next[c], fresh:null });
+          }
+          cur = nodes[cur].next[c];
+        }
+        nodes[cur].end++;
+        P({ label:'"'+w+'" 结束：end #'+cur+' 变 '+nodes[cur].end, cur:cur, fresh:null });
+      } else if(op[0]==='search'){
+        var cur2 = 1, ok = true;
+        for(var j=0;j<w.length;j++){
+          var c2 = w[j];
+          if(nodes[cur2].next[c2]===undefined){
+            P({ label:'search "'+w+'"：走到 "'+c2+'" 没有路，返回 0', cur:cur2, fresh:null });
+            ok = false; break;
+          }
+          cur2 = nodes[cur2].next[c2];
+          P({ label:'search "'+w+'"：走到 #'+cur2, cur:cur2, fresh:null });
+        }
+        if(ok) P({ label:'search "'+w+'"：end #'+cur2+' = '+nodes[cur2].end, cur:cur2, fresh:null });
+      } else if(op[0]==='prefixNumber'){
+        var cur3 = 1, ok3 = true;
+        for(var k=0;k<w.length;k++){
+          var c3 = w[k];
+          if(nodes[cur3].next[c3]===undefined){
+            P({ label:'prefixNumber "'+w+'"：走到 "'+c3+'" 没有路，返回 0', cur:cur3, fresh:null });
+            ok3 = false; break;
+          }
+          cur3 = nodes[cur3].next[c3];
+          P({ label:'prefixNumber "'+w+'"：走到 #'+cur3, cur:cur3, fresh:null });
+        }
+        if(ok3) P({ label:'prefixNumber "'+w+'"：pass #'+cur3+' = '+nodes[cur3].pass, cur:cur3, fresh:null });
+      } else if(op[0]==='erase'){
+        // 先查存在
+        var cur4 = 1, exist = true;
+        for(var m=0;m<w.length;m++){
+          var c4 = w[m];
+          if(nodes[cur4].next[c4]===undefined){ exist = false; break; }
+          cur4 = nodes[cur4].next[c4];
+        }
+        if(!exist || nodes[cur4].end===0){
+          P({ label:'erase "'+w+'"：search = 0，什么都不做', cur:1, fresh:null });
+        } else {
+          var cur5 = 1;
+          nodes[1].pass--;
+          P({ label:'erase "'+w+'"：pass[1] 减到 '+nodes[1].pass, cur:1, fresh:null });
+          for(var n2=0;n2<w.length;n2++){
+            var c5 = w[n2];
+            var nxt = nodes[cur5].next[c5];
+            nodes[nxt].pass--;
+            if(nodes[nxt].pass===0){
+              P({ label:'"' + c5 + '" 的 pass 减到 0：tree['+cur5+']['+c5+'] = 0，'+(w.slice(n2+1))+' 整段剪掉', cur:cur5, fresh:null });
+              delete nodes[cur5].next[c5];
+              break;
+            }
+            P({ label:'"' + c5 + '"：pass #'+nxt+' 减到 '+nodes[nxt].pass, cur:nxt, fresh:null });
+            cur5 = nxt;
+          }
+          if(nodes[cur5] && w.length>0 && nodes[cur5].end>0 && !(nodes[1].pass<0)){
+            // 走完没剪枝才 end--
+            var check = cur5;
+            var full = true;
+            var tmp = 1;
+            for(var mm=0;mm<w.length;mm++){
+              if(nodes[tmp].next[w[mm]]===undefined){ full=false; break; }
+              tmp = nodes[tmp].next[w[mm]];
+            }
+            if(full){
+              nodes[tmp].end--;
+              P({ label:'erase "'+w+'"：end #'+tmp+' 减到 '+nodes[tmp].end, cur:tmp, fresh:null });
+            }
+          }
+        }
+      }
+    });
+    P({ label:'序列执行完。删掉的词再查就是 0，前缀统计始终一致', cur:1, fresh:null });
+  }
+  function redraw(){
+    var st = steps[step];
+    // 重建树对象供绘制：用当前帧的状态快照，而不是 nodes 的最终状态
+    var snap = st.state || nodes;
+    var root = { ch:'', pass:snap[1].pass, end:snap[1].end, id:1, children:{}, x:0, y:0 };
+    (function link(id, obj){
+      var keys = Object.keys(snap[id].next);
+      keys.forEach(function(k){
+        var vid = snap[id].next[k];
+        var child = { ch:k, pass:snap[vid].pass, end:snap[vid].end, id:vid, children:{}, x:0, y:0 };
+        obj.children[k] = child;
+        link(vid, child);
+      });
+    })(1, root);
+    // 找当前高亮节点
+    var curNode = null, freshNode = null;
+    var curId = st.cur, freshId = st.fresh;
+    (function find(u){
+      if(u.id===curId) curNode = u;
+      if(u.id===freshId) freshNode = u;
+      for(var k in u.children) find(u.children[k]);
+    })(root);
+    layoutTree(root);
+    drawTree(svg, root, { cur:curNode, fresh:freshNode, showId:true });
+    box.querySelector('#vsNote').textContent = st.label;
+  }
+  function load(){
+    build(PRESETS[+sel.value]);
+    step = 0; redraw();
+  }
+  sel.addEventListener('change', load);
+  box.querySelector('#vsNext').addEventListener('click', function(){
+    step = Math.min(step+1, steps.length-1); redraw();
+  });
+  box.querySelector('#vsReset').addEventListener('click', function(){ step = 0; redraw(); });
+  load();
+})();
+
+/* ===== 演示：vizDelete 剪枝演示 ===== */
+(function(){
+  var box = document.getElementById('vizDelete');
+  box.innerHTML =
+    '<p class="viz-title">演示：erase 剪枝（apple / app / apply，删 apple）</p>' +
+    '<svg id="vdSvg" viewBox="0 0 760 430" style="width:100%;height:auto"></svg>' +
+    '<p class="viz-note" id="vdNote"></p>' +
+    '<div class="viz-controls"><button type="button" id="vdNext">下一步</button><button type="button" id="vdReset">重置</button></div>';
+  var svg = box.querySelector('#vdSvg');
+  var root, steps, step;
+
+  function cloneTree(u){
+    var c = { ch:u.ch, pass:u.pass, end:u.end, id:u.id, children:{}, x:u.x, y:u.y };
+    for(var k in u.children) c.children[k] = cloneTree(u.children[k]);
+    return c;
+  }
+  function buildTree(){
+    root = makeTree();
+    ['apple','app','apply'].forEach(function(w){
+      var u = root; u.pass++;
+      for(var i=0;i<w.length;i++){
+        var c = w[i];
+        if(!u.children[c]) u.children[c] = { ch:c, pass:0, end:0, id:0, children:{}, x:0, y:0 };
+        u = u.children[c]; u.pass++;
+      }
+      u.end++;
+    });
+    var ids = 1;
+    (function mark(u){ u.id = ids++; for(var k in u.children) mark(u.children[k]); })(root);
+  }
+  function load(){
+    buildTree();
+    steps = [];
+    var a = root.children.a, p1 = a.children.p, p2 = p1.children.p, l = p2.children.l, e = l.children.e;
+    function P(obj){ obj.snap = cloneTree(root); steps.push(obj); }
+    P({ label:'初始：apple、app、apply 各插一次。删 apple：先 search 确认存在', cur:null, fresh:null, gone:null, edgeCut:null });
+    root.pass--;
+    P({ label:'root.pass 3 → 2', cur:root, fresh:null, gone:null, edgeCut:null });
+    a.pass--;
+    P({ label:'a.pass 3 → 2', cur:a, fresh:null, gone:null, edgeCut:null });
+    p1.pass--;
+    P({ label:'p.pass 3 → 2', cur:p1, fresh:null, gone:null, edgeCut:null });
+    p2.pass--;
+    P({ label:'p.pass 3 → 2（app 自己在这里结束，end 不动）', cur:p2, fresh:null, gone:null, edgeCut:null });
+    l.pass--;
+    P({ label:'l.pass 2 → 1（apply 还经过，保留）', cur:l, fresh:null, gone:null, edgeCut:null });
+    e.pass--;
+    P({ label:'e.pass 1 → 0：没有任何词还经过 e，tree[l][e] = 0，整段剪掉', cur:l, fresh:null, gone:e, edgeCut:[l,e] });
+    P({ label:'结果：apple 没了，app 和 apply 原样。search(apple)=0，prefix(ap)=2', cur:null, fresh:null, gone:null, edgeCut:null, final:true });
+    step = 0; redraw();
+  }
+  function redraw(){
+    var st = steps[step];
+    if(st.final){
+      // 重建去掉 e 的树
+      var r2 = makeTree();
+      ['app','apply'].forEach(function(w){
+        var u = r2; u.pass++;
+        for(var i=0;i<w.length;i++){
+          var c = w[i];
+          if(!u.children[c]) u.children[c] = { ch:c, pass:0, end:0, id:0, children:{}, x:0, y:0 };
+          u = u.children[c]; u.pass++;
+        }
+        u.end++;
+      });
+      layoutTree(r2);
+      drawTree(svg, r2, {});
+    } else {
+      var t = st.snap || root;
+      layoutTree(t);
+      var curNode = null, goneNode = null;
+      (function find(u){
+        if(u===st.cur && !curNode) curNode = u;
+        if(u===st.gone) goneNode = u;
+        for(var k in u.children) find(u.children[k]);
+      })(t);
+      drawTree(svg, t, { cur:curNode, gone:goneNode, edgeCut:st.edgeCut });
+    }
+    box.querySelector('#vdNote').textContent = st.label;
+  }
+  box.querySelector('#vdNext').addEventListener('click', function(){
+    step = Math.min(step+1, steps.length-1); redraw();
+  });
+  box.querySelector('#vdReset').addEventListener('click', function(){ step = 0; redraw(); });
+  load();
+})();
+})();
+</script>
+</body>
+</html>

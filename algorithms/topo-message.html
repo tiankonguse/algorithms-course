@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拓扑排序推送消息：食物链计数与最安静 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>拓扑排序推送消息：食物链计数与最安静</h1>
+      <p class="intro">拓扑排序不只是输出一个合法顺序。出队的点可以把信息推给下游：有多少条路径走到这里，上游谁最安静。这类题能成立的唯一前提是，u 出队的那一刻，所有能到 u 的点都已经处理完，所以 u 推下去的信息是完整的。</p>
+
+      <h2>零、为什么消息能「推」下去</h2>
+      <p>Kahn 算法里，一个点入队的前提是入度减到 0，也就是它的所有前驱都出过队了。反过来讲：u 出队时，指向 u 的每条边都已经结算过。所以任何「从上游聚合出来的信息」推到 u 就是最终值，再往下推不会错。</p>
+      <p>这套思路就是树形 dp 的雏形，只不过把树换成了 DAG。信息的聚合方式按题目变：食物链计数是加法累加，喧闹和富有是最值覆盖。两个都在这页。</p>
+
+      <h2>一、最大食物链计数（P4017）</h2>
+      <p>题面给一个有向无环图，边 a→b 代表 a 在食物链中被 b 捕食，也就是 b 吃 a。问从最初级动物（不捕食任何生物的入度为 0 的点）到最顶级捕食者（不被捕食的出度为 0 的点）一共有几条食物链，答案模 80112002。</p>
+      <p>方向别记反：箭头指向捕食者。生产者入度为 0，因为它不吃别人；顶级消费者出度为 0，因为没谁吃它。官方样例 5 个点 7 条边答案 5，下面这张图是它的推送过程。</p>
+
+      <figure class="fig" id="figFood"></figure>
+
+      <p>lines[i] 记「到 i 的食物链条数」。入度为 0 的点 lines 置 1，出队时把 lines[u] 加到每个下游 v 上。u 没有出边时，说明它是顶级消费者，lines[u] 直接累进答案。</p>
+      <p>注意答案很大，每次加法都要取模。中间值不取模会溢出，取早了也只是多花一点时间，不影响正确性。</p>
+
+      <div id="vizFood"></div>
+
+      <p>复杂度 O(n+m)，链式前向星存图，四个数组加一个 cnt，头插加边。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">namespace</span> FoodLines {
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 5001, MAXM = 500001, MOD = 80112002;
+    <span class="kw">int</span> head[MAXN], nxt[MAXM], to[MAXM], cnt;
+    <span class="kw">int</span> indeg[MAXN], lines[MAXN], que[MAXN];
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n) {
+      cnt = 1;
+      <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) head[i] = indeg[i] = lines[i] = 0;
+    }
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+      nxt[cnt] = head[u];
+      to[cnt] = v;
+      head[u] = cnt++;
+    }
+    <span class="cm">// 入度为 0 的初级动物 lines = 1；出队时把线路数推给下游；</span>
+    <span class="cm">// 没有出边的点（最顶级捕食者）把 lines 累进答案。</span>
+    <span class="kw">int</span> <span class="fn">ways</span>(<span class="kw">int</span> n) {
+      <span class="kw">int</span> l = 0, r = 0;
+      <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        <span class="kw">if</span> (indeg[i] == 0) {
+          que[r++] = i;
+          lines[i] = 1;
+        }
+      }
+      <span class="kw">int</span> ans = 0;
+      <span class="kw">while</span> (l &lt; r) {
+        <span class="kw">int</span> u = que[l++];
+        <span class="kw">if</span> (head[u] == 0) {
+          ans = (ans + lines[u]) % MOD;
+        } <span class="kw">else</span> {
+          <span class="kw">for</span> (<span class="kw">int</span> ei = head[u]; ei &gt; 0; ei = nxt[ei]) {
+            <span class="kw">int</span> v = to[ei];
+            lines[v] = (lines[v] + lines[u]) % MOD;
+            <span class="kw">if</span> (--indeg[v] == 0) que[r++] = v;
+          }
+        }
+      }
+      <span class="kw">return</span> ans;
+    }
+    } <span class="cm">// namespace FoodLines</span></pre>
+
+      <h2>二、喧闹和富有（LC851）</h2>
+      <p>richer[i] = [a, b] 表示 a 比 b 有钱。answer[x] 要求在「钱不少于 x」的所有人里，挑安静值 quiet 最小的人。钱不少于 x 的人包括 x 自己，再加上所有比 x 有钱的人。</p>
+      <p>直接做法是每个人反向跑一遍图找所有比自己有钱的，O(n²) 起步。推送消息的做法：a 比 b 有钱，建边 a→b，拓扑序里 a 先出队，a 的答案已经包含了「比 a 有钱的所有人 + a」，拿它去跟 b 的当前答案比安静值，谁安静覆盖谁。b 的入度归零时，所有比 b 有钱的人都已经推过它了。</p>
+
+      <figure class="fig" id="figLoud"></figure>
+
+      <p>ans[i] 初始化为 i 自己，这一步不能省，否则没人推过的点答案会是空的。官方样例 8 个人，答案是 5 5 2 5 4 5 6 7：0、1、3、5 的答案都收敛到 5，因为 5 是它们共同的「更富且更安静」的前辈。</p>
+
+      <div id="vizLoud"></div>
+
+      <p>复杂度同样是 O(n+m)。它和上一题的区别只在聚合方式：计数是加法，选人是比较后覆盖。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">namespace</span> LoudRich {
+    vector&lt;<span class="kw">int</span>&gt; <span class="fn">loudAndRich</span>(<span class="kw">int</span> n, <span class="kw">const</span> vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; richer, <span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; quiet) {
+      vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">graph</span>(n);
+      vector&lt;<span class="kw">int</span>&gt; <span class="fn">indeg</span>(n, 0);
+      <span class="kw">for</span> (auto&amp; r : richer) {
+        graph[r[0]].push_back(r[1]);
+        indeg[r[1]]++;
+      }
+      vector&lt;<span class="kw">int</span>&gt; <span class="fn">que</span>(n);
+      <span class="kw">int</span> l = 0, r = 0;
+      <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+        <span class="kw">if</span> (indeg[i] == 0) que[r++] = i;
+      }
+      vector&lt;<span class="kw">int</span>&gt; <span class="fn">ans</span>(n);
+      <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) ans[i] = i;
+      <span class="kw">while</span> (l &lt; r) {
+        <span class="kw">int</span> cur = que[l++];
+        <span class="kw">for</span> (<span class="kw">int</span> next : graph[cur]) {
+          <span class="kw">if</span> (quiet[ans[cur]] &lt; quiet[ans[next]]) ans[next] = ans[cur];
+          <span class="kw">if</span> (--indeg[next] == 0) que[r++] = next;
+        }
+      }
+      <span class="kw">return</span> ans;
+    }
+    } <span class="cm">// namespace LoudRich</span></pre>
+
+      <h2>总结</h2>
+      <p>拓扑排序推送消息的三步：入度 0 的点给初始值，出队时把聚合信息推给所有下游，信息按题意取加法或最值。前提永远是「u 出队时前驱都结算完」，这句话是这类题正确性的全部依据。</p>
+      <p>下一页的并行课程把「推送」换成「累加最大值」，是同一套东西的第三种形态。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P4017" target="_blank">P4017 最大食物链计数</a></td><td><a href="https://www.luogu.com.cn/problem/P4017" target="_blank">luogu.com.cn</a></td></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/loud-and-rich/" target="_blank">喧闹和富有</a></td><td><a href="https://leetcode.cn/problems/loud-and-rich/" target="_blank">leetcode.cn</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解060【必备】拓扑排序的扩展技巧</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+/* ===== figFood：P4017 官方样例的 lines 推送 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 900 400" xmlns="http://www.w3.org/2000/svg">';
+  var X = [150, 420, 690, 420, 690], Y = [90, 200, 200, 320, 320];
+  var names = ['1', '2', '3', '4', '5'];
+  var cols = ['#2563eb', '#7c3aed', '#7c3aed', '#059669', '#059669'];
+  for (var i = 0; i < 5; i++) {
+    s += '<circle cx="' + X[i] + '" cy="' + Y[i] + '" r="30" fill="#eef2ff" stroke="' + cols[i] + '" stroke-width="2"/>';
+    s += '<text x="' + X[i] + '" y="' + (Y[i] + 6) + '" text-anchor="middle" font-size="16" fill="#333">' + names[i] + '</text>';
+  }
+  var edges = [[0,1,'a 被 b 捕食'], [0,2,''], [1,2,''], [1,4,''], [2,4,''], [2,3,''], [3,4,'']];
+  for (var e = 0; e < edges.length; e++) {
+    var a = edges[e][0], b = edges[e][1];
+    var x1 = X[a] + 26 * (X[b] - X[a]) / Math.hypot(X[b] - X[a], Y[b] - Y[a]);
+    var y1 = Y[a] + 26 * (Y[b] - Y[a]) / Math.hypot(X[b] - X[a], Y[b] - Y[a]);
+    var x2 = X[b] - 32 * (X[b] - X[a]) / Math.hypot(X[b] - X[a], Y[b] - Y[a]);
+    var y2 = Y[b] - 32 * (Y[b] - Y[a]) / Math.hypot(X[b] - X[a], Y[b] - Y[a]);
+    s += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#c7d2fe" stroke-width="2" marker-end="url(#arrF)"/>';
+  }
+  s += '<defs><marker id="arrF" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#c7d2fe"/></marker></defs>';
+  s += '<text x="450" y="380" text-anchor="middle" font-size="13" fill="#64748b">边 1→2 表示 1 被 2 捕食：入度 0 的是生产者（1），出度 0 的是顶级消费者（5）</text>';
+  document.getElementById('figFood').innerHTML = s;
+})();
+
+/* ===== figLoud：LC851 官方样例的推送方向 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 900 360" xmlns="http://www.w3.org/2000/svg">';
+  // 8 个点：2,4,5,6 入度 0；推送方向 2/4/5/6 -> 3 -> 1,7 -> 0
+  var pos = [[150,110],[420,60],[690,110],[420,170],[690,170],[420,280],[690,280],[150,280]];
+  var quiet = [3,2,5,4,6,1,7,0];
+  for (var i = 0; i < 8; i++) {
+    s += '<circle cx="' + pos[i][0] + '" cy="' + pos[i][1] + '" r="26" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>';
+    s += '<text x="' + pos[i][0] + '" y="' + (pos[i][1] - 4) + '" text-anchor="middle" font-size="14" fill="#333">' + i + '</text>';
+    s += '<text x="' + pos[i][0] + '" y="' + (pos[i][1] + 18) + '" text-anchor="middle" font-size="11" fill="#7c3aed">quiet=' + quiet[i] + '</text>';
+  }
+  var lines = [[2,1,''], [4,3,''], [5,3,''], [6,3,''], [3,1,''], [3,7,''], [1,0,'']];
+  for (var e = 0; e < lines.length; e++) {
+    var a = lines[e][0], b = lines[e][1];
+    var x1 = pos[a][0] + 24 * (pos[b][0] - pos[a][0]) / Math.hypot(pos[b][0] - pos[a][0], pos[b][1] - pos[a][1]);
+    var y1 = pos[a][1] + 24 * (pos[b][1] - pos[a][1]) / Math.hypot(pos[b][0] - pos[a][0], pos[b][1] - pos[a][1]);
+    var x2 = pos[b][0] - 28 * (pos[b][0] - pos[a][0]) / Math.hypot(pos[b][0] - pos[a][0], pos[b][1] - pos[a][1]);
+    var y2 = pos[b][1] - 28 * (pos[b][1] - pos[a][1]) / Math.hypot(pos[b][0] - pos[a][0], pos[b][1] - pos[a][1]);
+    s += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#ddd6fe" stroke-width="2" marker-end="url(#arrL)"/>';
+  }
+  s += '<defs><marker id="arrL" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#ddd6fe"/></marker></defs>';
+  s += '<text x="450" y="340" text-anchor="middle" font-size="13" fill="#64748b">边 a→b 表示 a 比 b 有钱。出队的 a 把「更安静的前辈」推给 b</text>';
+  document.getElementById('figLoud').innerHTML = s;
+})();
+
+/* ===== 演示：食物链计数逐帧推送（P4017 官方样例） ===== */
+(function(){
+  var wrap = document.createElement('div');
+  wrap.className = 'viz';
+  var title = document.createElement('p');
+  title.className = 'viz-title';
+  title.textContent = '食物链计数：lines 逐帧推送';
+  var ctrl = document.createElement('div');
+  ctrl.className = 'viz-controls';
+  var stepBtn = document.createElement('button');
+  stepBtn.type = 'button'; stepBtn.textContent = '下一步';
+  var resetBtn = document.createElement('button');
+  resetBtn.type = 'button'; resetBtn.textContent = '重置';
+  ctrl.appendChild(stepBtn); ctrl.appendChild(resetBtn);
+  var note = document.createElement('p');
+  note.className = 'stepnote';
+  var board = document.createElement('div');
+  wrap.appendChild(title); wrap.appendChild(ctrl); wrap.appendChild(note); wrap.appendChild(board);
+  document.getElementById('vizFood').appendChild(wrap);
+
+  var edges = [[1,2],[1,3],[2,3],[3,5],[2,5],[4,5],[3,4]];
+  function buildSteps(){
+    var n = 5;
+    var steps = [];
+    var indeg = [0,0,0,0,0,0];
+    var out = [[],[],[],[],[],[]];
+    for (var e = 0; e < edges.length; e++) {
+      out[edges[e][0]].push(edges[e][1]);
+      indeg[edges[e][1]]++;
+    }
+    var lines = [0,0,0,0,0,0];
+    var que = [], l = 0;
+    for (var i = 1; i <= n; i++) if (indeg[i] === 0) { que.push(i); lines[i] = 1; }
+    steps.push({lines: lines.slice(), que: que.slice(), cur: -1, ans: 0, desc: '初始：入度为 0 的点是生产者，lines 置 1。当前队列 [' + que.join(',') + ']'});
+    var ans = 0;
+    while (l < que.length) {
+      var u = que[l++];
+      var pushed = [];
+      if (out[u].length === 0) {
+        ans = (ans + lines[u]) % 80112002;
+        steps.push({lines: lines.slice(), que: que.slice(l), cur: u, ans: ans, desc: '出队 ' + u + '：没有出边，是顶级消费者，lines=' + lines[u] + ' 累进答案 → ans=' + ans});
+      } else {
+        for (var k = 0; k < out[u].length; k++) {
+          var v = out[u][k];
+          lines[v] = (lines[v] + lines[u]) % 80112002;
+          pushed.push(v + '←' + u);
+          if (--indeg[v] === 0) que.push(v);
+        }
+        steps.push({lines: lines.slice(), que: que.slice(l), cur: u, ans: ans, desc: '出队 ' + u + '：把 lines[' + u + ']=' + lines[u] + ' 推给 ' + pushed.join('、') + '，入度归零的入队。队列 [' + que.slice(l).join(',') + ']'});
+      }
+    }
+    steps.push({lines: lines.slice(), que: [], cur: -1, ans: ans, desc: '完成：答案 ' + ans + '（模 80112002）'});
+    return steps;
+  }
+  var st = {steps: [], i: 0};
+  function redraw(){
+    var stp = st.steps[Math.min(st.i, st.steps.length - 1)];
+    var s = '<svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">';
+    var X = [0, 120, 330, 540, 330, 540], Y = [0, 70, 150, 150, 260, 260];
+    for (var i = 1; i <= 5; i++) {
+      var isCur = stp.cur === i;
+      s += '<circle cx="' + X[i] + '" cy="' + Y[i] + '" r="30" fill="' + (isCur ? '#fef3c7' : '#eef2ff') + '" stroke="' + (isCur ? '#d97706' : '#2563eb') + '" stroke-width="2"/>';
+      s += '<text x="' + X[i] + '" y="' + (Y[i] + 6) + '" text-anchor="middle" font-size="16" fill="#333">' + i + '</text>';
+      s += '<text x="' + X[i] + '" y="' + (Y[i] + 46) + '" text-anchor="middle" font-size="12" fill="' + (stp.lines[i] ? '#7c3aed' : '#94a3b8') + '">lines=' + stp.lines[i] + '</text>';
+    }
+    for (var e = 0; e < edges.length; e++) {
+      var a = edges[e][0], b = edges[e][1];
+      var x1 = X[a] + 26 * (X[b] - X[a]) / Math.hypot(X[b] - X[a], Y[b] - Y[a]);
+      var y1 = Y[a] + 26 * (Y[b] - Y[a]) / Math.hypot(X[b] - X[a], Y[b] - Y[a]);
+      var x2 = X[b] - 32 * (X[b] - X[a]) / Math.hypot(X[b] - X[a], Y[b] - Y[a]);
+      var y2 = Y[b] - 32 * (Y[b] - Y[a]) / Math.hypot(X[b] - X[a], Y[b] - Y[a]);
+      s += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#c7d2fe" stroke-width="2"/>';
+    }
+    var qx = 660, qy = 60;
+    s += '<text x="' + qx + '" y="' + (qy - 20) + '" font-size="13" fill="#2563eb">队列</text>';
+    for (var k = 0; k < stp.que.length; k++) {
+      s += '<rect x="' + qx + '" y="' + qy + '" width="32" height="26" rx="4" fill="#ffedd5" stroke="#fed7aa"/>';
+      s += '<text x="' + (qx + 16) + '" y="' + (qy + 18) + '" text-anchor="middle" font-size="13" fill="#9a3412">' + stp.que[k] + '</text>';
+      qx += 38;
+    }
+    if (!stp.que.length) s += '<text x="' + qx + '" y="' + (qy + 18) + '" font-size="12" fill="#cbd5e1">空</text>';
+    s += '<text x="660" y="150" font-size="13" fill="#059669">ans=' + stp.ans + '</text>';
+    board.innerHTML = s;
+    note.textContent = '第 ' + (st.i + 1) + '/' + st.steps.length + ' 步：' + stp.desc;
+  }
+  function load(){
+    st.steps = buildSteps();
+    st.i = 0;
+    redraw();
+  }
+  stepBtn.addEventListener('click', function(){ if (st.i < st.steps.length - 1) { st.i++; redraw(); } });
+  resetBtn.addEventListener('click', load);
+  load();
+})();
+
+/* ===== 演示：喧闹和富有逐帧推送（LC851 官方样例） ===== */
+(function(){
+  var wrap = document.createElement('div');
+  wrap.className = 'viz';
+  var title = document.createElement('p');
+  title.className = 'viz-title';
+  title.textContent = '喧闹和富有：ans 逐帧收敛';
+  var ctrl = document.createElement('div');
+  ctrl.className = 'viz-controls';
+  var stepBtn = document.createElement('button');
+  stepBtn.type = 'button'; stepBtn.textContent = '下一步';
+  var resetBtn = document.createElement('button');
+  resetBtn.type = 'button'; resetBtn.textContent = '重置';
+  ctrl.appendChild(stepBtn); ctrl.appendChild(resetBtn);
+  var note = document.createElement('p');
+  note.className = 'stepnote';
+  var board = document.createElement('div');
+  wrap.appendChild(title); wrap.appendChild(ctrl); wrap.appendChild(note); wrap.appendChild(board);
+  document.getElementById('vizLoud').appendChild(wrap);
+
+  var richer = [[1,0],[2,1],[3,1],[3,7],[4,3],[5,3],[6,3]];
+  var quiet = [3,2,5,4,6,1,7,0];
+  function buildSteps(){
+    var n = 8;
+    var steps = [];
+    var graph = [];
+    for (var i = 0; i < n; i++) graph.push([]);
+    var indeg = new Array(n).fill(0);
+    for (var e = 0; e < richer.length; e++) {
+      graph[richer[e][0]].push(richer[e][1]);
+      indeg[richer[e][1]]++;
+    }
+    var que = [], l = 0;
+    for (var i = 0; i < n; i++) if (indeg[i] === 0) que.push(i);
+    var ans = [];
+    for (var i = 0; i < n; i++) ans[i] = i;
+    steps.push({ans: ans.slice(), que: que.slice(), cur: -1, desc: '初始：ans[i]=i，入度为 0 的人（没有比他们更有钱的）先入队。队列 [' + que.join(',') + ']'});
+    while (l < que.length) {
+      var cur = que[l++];
+      var upd = [];
+      for (var k = 0; k < graph[cur].length; k++) {
+        var next = graph[cur][k];
+        if (quiet[ans[cur]] < quiet[ans[next]]) {
+          ans[next] = ans[cur];
+          upd.push(next + '←' + ans[cur]);
+        }
+        if (--indeg[next] === 0) que.push(next);
+      }
+      steps.push({ans: ans.slice(), que: que.slice(l), cur: cur, desc: '出队 ' + cur + '：' + (upd.length ? '把更安静的 ' + upd.join('、') + ' 推下去' : '没比下游更安静，不更新') + '。队列 [' + que.slice(l).join(',') + ']'});
+    }
+    steps.push({ans: ans.slice(), que: [], cur: -1, desc: '完成：ans = ' + ans.join(' ') + '（官方答案 5 5 2 5 4 5 6 7）'});
+    return steps;
+  }
+  var st = {steps: [], i: 0};
+  function redraw(){
+    var stp = st.steps[Math.min(st.i, st.steps.length - 1)];
+    var s = '<svg viewBox="0 0 900 240" xmlns="http://www.w3.org/2000/svg">';
+    var cell = 100;
+    s += '<text x="20" y="24" font-size="13" fill="#7c3aed">ans[]：每个格子里是「钱不少于我的人里最安静的」</text>';
+    for (var i = 0; i < 8; i++) {
+      var x = 20 + i * cell;
+      var isCur = stp.cur === i;
+      s += '<rect x="' + x + '" y="40" width="86" height="64" rx="6" fill="' + (isCur ? '#fef3c7' : '#f5f3ff') + '" stroke="' + (isCur ? '#d97706' : '#8b5cf6') + '" stroke-width="2"/>';
+      s += '<text x="' + (x + 43) + '" y="62" text-anchor="middle" font-size="14" fill="#333">' + i + '</text>';
+      s += '<text x="' + (x + 43) + '" y="88" text-anchor="middle" font-size="12" fill="#7c3aed">ans=' + stp.ans[i] + '</text>';
+    }
+    var qx = 20, qy = 140;
+    s += '<text x="' + qx + '" y="' + (qy - 12) + '" font-size="13" fill="#2563eb">队列</text>';
+    for (var k = 0; k < stp.que.length; k++) {
+      s += '<rect x="' + qx + '" y="' + qy + '" width="32" height="26" rx="4" fill="#ffedd5" stroke="#fed7aa"/>';
+      s += '<text x="' + (qx + 16) + '" y="' + (qy + 18) + '" text-anchor="middle" font-size="13" fill="#9a3412">' + stp.que[k] + '</text>';
+      qx += 38;
+    }
+    if (!stp.que.length) s += '<text x="' + qx + '" y="' + (qy + 18) + '" font-size="12" fill="#cbd5e1">空</text>';
+    s += '<text x="20" y="210" font-size="12" fill="#64748b">安静值 quiet = [3,2,5,4,6,1,7,0]，越小越安静。比较用 quiet[ans[a]] 而不是 ans 本身</text>';
+    board.innerHTML = s;
+    note.textContent = '第 ' + (st.i + 1) + '/' + st.steps.length + ' 步：' + stp.desc;
+  }
+  function load(){
+    st.steps = buildSteps();
+    st.i = 0;
+    redraw();
+  }
+  stepBtn.addEventListener('click', function(){ if (st.i < st.steps.length - 1) { st.i++; redraw(); } });
+  resetBtn.addEventListener('click', load);
+  load();
+})();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>大鱼吃小鱼与全 1 子矩形：反向扫描与逐行结算</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-ctl { margin: 8px 0 4px; }
+.viz-ctl label { font-size: 13px; margin-right: 6px; color: var(--fg2); }
+.viz-ctl select { font-size: 13px; padding: 2px 6px; border: 1px solid var(--bd); border-radius: 4px; background: #fff; }
+.viz-note { margin: 10px 0 4px; font-size: 13px; color: var(--fg); }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.cells { display: flex; align-items: flex-end; gap: 4px; min-height: 64px; margin: 8px 0; flex-wrap: wrap; }
+.cell { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; width: 46px; height: 46px; border: 1px solid #e6e8eb; background: #fff; font-size: 13px; position: relative; }
+.cell .idx { font-size: 10px; color: #9aa0a6; line-height: 1; margin-bottom: 2px; }
+.cell.in { background: #dbeafe; border-color: #2563eb; }
+.cell.pop { background: #ffedd5; border-color: #ea580c; }
+.cell.cur { border-color: #ea580c; border-width: 2px; }
+.cell.done { background: #f1f5f9; border-color: #cbd5e1; color: #9aa0a6; }
+.stack-out { font-size: 12px; color: #475569; margin: 4px 0; font-family: ui-monospace,Menlo,Consolas,monospace; }
+.grid { display: inline-grid; gap: 3px; margin: 8px 0; }
+.gcell { width: 34px; height: 34px; border: 1px solid #e6e8eb; display: flex; align-items: center; justify-content: center; font-size: 13px; background: #fff; }
+.gcell.one { background: #dbeafe; border-color: #93c5fd; }
+.gcell.rowcur { outline: 2px solid #ea580c; }
+.gcell.hl { background: #ffedd5; border-color: #ea580c; }
+.hbar { display: flex; align-items: flex-end; gap: 4px; min-height: 30px; margin: 6px 0; }
+.hcol { display: inline-flex; flex-direction: column; align-items: center; }
+.hcol .hval { font-size: 11px; color: #475569; font-family: ui-monospace,Menlo,Consolas,monospace; }
+.hcol .hbar-v { width: 26px; background: #2563eb; border-radius: 3px 3px 0 0; }
+.hcol .hbar-v.hl { background: #ea580c; }
+.hcol .hlabel { font-size: 10px; color: #9aa0a6; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>大鱼吃小鱼与全 1 子矩形：反向扫描与逐行结算</h1>
+      <p class="intro">单调栈的扫描方向不一定是「从左往右、边扫边答」。这一页的两个题一个从右往左扫，把答案一路带回来；一个把矩阵逐行压成一维，复用上一页的柱状图技巧。方向换了，弹栈结算的骨架没换。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>单调栈适合处理「一个对象只关心右边某个结构」的问题。上一页的两题，答案要的是全局最优，所以从左往右筛候选再结算。这一页的两题，答案和「过程」绑在一起：鱼要算几轮才稳定，矩形要按行累计高度。</p>
+      <p>先看鱼的题为什么从右往左：每条鱼只吃右边的鱼，那右边的鱼先算好，左边的鱼直接用结果。再看矩形的题为什么逐行：子矩形的底边在哪一行，答案就归那一行结算，行与行之间只共享一个高度数组。</p>
+
+      <h2 id="fish">一、大鱼吃小鱼</h2>
+      <p>给定体重数组，每轮每条鱼吃掉右边离它最近、体重比它小的鱼，吃这件事同时发生：A 吃 B 的同时，A 也可能被别的鱼吃；多条大鱼盯上同一条小鱼，这条小鱼被同时吃掉。问多少轮后鱼的数量不再变。</p>
+      <p>拿 8 3 1 5 6 7 2 4 走一遍。第一轮：8 吃 3，3 吃 1，5、6、7 同时吃 2，4 没人吃，剩下 8 5 6 7 4。第二轮：8 吃 5，5、6、7 同时吃 4，剩下 8 6 7。第三轮：8 吃 6，剩下 8 7。第四轮：8 吃 7，剩下 8。答案 4。</p>
+      <figure class="fig" id="figRounds"></figure>
+      <p>逐轮模拟最坏 O(n²)：每轮要扫一遍找谁吃谁。问题在于一轮里鱼的位置关系会变，反复重扫。而且「同时发生」让每轮之间的关联很隐蔽，直接模拟容易写错边界。</p>
+      <p>换个方向：从右往左处理每条鱼。处理到 i 时，右边所有鱼都已经算好「它们自己还要活几轮才轮到被吃」，存在栈里。栈里存 (体重, 轮数)，从底到顶体重严格递减。</p>
+      <figure class="fig" id="figFishStack"></figure>
+      <p>对 i 号鱼：栈顶比它小的鱼，都会被它吃掉。每弹出一条，轮数 +1（吃这条鱼要花 1 轮），再和被弹那条鱼自己的轮数取 max（那条鱼可能先要活几轮才轮到被吃）。弹完把 (arr[i], curTurns) 入栈，curTurns 就是 i 号鱼「活到被吃要几轮」。答案就是所有 curTurns 的最大值。</p>
+      <div class="viz">
+        <p class="viz-title">演示 1 · 大鱼吃小鱼逐帧：从右往左，弹掉比它小的并累计轮数</p>
+        <div class="viz-ctl">
+          <label>数据：</label>
+          <select id="fsSel">
+            <option value="0">[8,3,1,5,6,7,2,4] 答案 4</option>
+            <option value="1">[5,4,3,2,1] 递减一轮光</option>
+            <option value="2">[1,2,3,4,5] 递增零轮</option>
+          </select>
+        </div>
+        <div class="cells" id="fsCells"></div>
+        <p class="stack-out" id="fsStack"></p>
+        <p class="viz-note" id="fsNote"></p>
+        <p class="viz-answer" id="fsAns"></p>
+        <div class="viz-controls">
+          <button id="fsPrev">上一步</button>
+          <button id="fsNext">下一步</button>
+          <button id="fsReset">重置</button>
+        </div>
+      </div>
+          <pre class="code"><span class="cm">// 大鱼吃小鱼：多少轮后鱼的数量固定</span>
+    <span class="cm">// 栈里存「右边的幸存鱼」：(体重, 它自己被吃掉需要几轮)</span>
+    <span class="kw">int</span> <span class="fn">turns</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr) {
+        <span class="kw">int</span> n = arr.size();
+        <span class="kw">int</span> r = 0, ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = n - 1; i &gt;= 0; i--) {
+            <span class="kw">int</span> curTurns = 0;
+            <span class="kw">while</span> (r &gt; 0 &amp;&amp; stk[r - 1][0] &lt; arr[i]) {  <span class="cm">// 弹掉比 arr[i] 小的，它们被 arr[i] 吃掉</span>
+                curTurns = max(curTurns + 1, stk[--r][1]);
+            }
+            stk[r][0] = arr[i];
+            stk[r++][1] = curTurns;   <span class="cm">// arr[i] 自己活满 curTurns 轮后才可能被吃</span>
+            ans = max(ans, curTurns);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>复杂度 O(n)：每条鱼入栈一次、出栈最多一次。空间 O(n) 是栈。</p>
+      <p>实测 n = 10⁶：递增数组 0 轮（右边全比自己大，没得吃），2.55ms；递减数组 1 轮（第一轮 5 吃 4、4 吃 3……同时发生，一轮全光），4.33ms；随机数组 34 轮，9.17ms。别拿「数组越大轮数越多」当直觉，轮数由右边结构决定，不是由 n 决定。</p>
+
+      <h2 id="submat">二、统计全 1 子矩形的数量</h2>
+      <p>给一个 0/1 矩阵，统计元素全为 1 的子矩形有多少个。数据规模 m、n 都 ≤ 150。上一页的「最大矩形」找最大面积，这一题要数个数，先理解上一页再往下读。</p>
+      <p>核心还是逐行：从上往下扫每一行，维护 height[j]，表示第 j 列从当前行往上连续 1 的个数。扫到第 i 行时，height 数组就是一张柱状图，这一行的答案 = 底边贴在第 i 行的全 1 子矩形个数。</p>
+      <p>单调栈按列结算。弹出 cur 号柱子时，它的左边界 left 是栈里下一个（高度比 height[cur] 小），右边界是当前 i（高度 ≤ height[i]）。夹出来的区间长度 len = i - left - 1，里面所有连续子段都能作为底边，数量是 len × (len + 1) / 2。</p>
+      <figure class="fig" id="figSubmat"></figure>
+      <p>高从哪算起：底边高度只能取 (max(height[left], height[i]), height[cur]] 这一层，比它矮的底边归别的柱子结算，比它高的不可能。所以 cur 的贡献是 (height[cur] - bottom) × len × (len + 1) / 2，bottom 是左右边界高度的较大者。</p>
+      <p>有个细节和上一页一样：弹出条件用 &gt;=，但只有 height[cur] &gt; height[i] 才结算。相等的柱子弹出不结算，留给更右边的柱子一起算，否则同一批矩形会被数两次。</p>
+      <div class="viz">
+        <p class="viz-title">演示 2 · 全 1 子矩形逐帧：逐行更新 height，每行用单调栈结算</p>
+        <div class="viz-ctl">
+          <label>数据：</label>
+          <select id="smSel">
+            <option value="0">[[1,0,1],[1,1,0],[1,1,0]] 答案 13</option>
+            <option value="1">[[1,1],[1,1]] 全 1 答案 9</option>
+            <option value="2">[[1,0],[0,1]] 对角答案 2</option>
+          </select>
+        </div>
+        <div class="grid" id="smGrid"></div>
+        <div class="hbar" id="smHbar"></div>
+        <p class="stack-out" id="smStack"></p>
+        <p class="viz-note" id="smNote"></p>
+        <p class="viz-answer" id="smAns"></p>
+        <div class="viz-controls">
+          <button id="smPrev">上一步</button>
+          <button id="smNext">下一步</button>
+          <button id="smReset">重置</button>
+        </div>
+      </div>
+          <pre class="code"><span class="cm">// 统计全 1 子矩形数量：逐行维护 height[]，每行用单调栈结算</span>
+    <span class="kw">int</span> <span class="fn">countFromBottom</span>(<span class="kw">int</span> m) {
+        <span class="kw">int</span> r = 0, ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; m; i++) {
+            <span class="kw">while</span> (r &gt; 0 &amp;&amp; height[stk[r - 1]] &gt;= height[i]) {
+                <span class="kw">int</span> cur = stk[--r];
+                <span class="kw">if</span> (height[cur] &gt; height[i]) {      <span class="cm">// 相等不结算，留给后面的 i 一起算</span>
+                    <span class="kw">int</span> left = r == 0 ? -1 : stk[r - 1];
+                    <span class="kw">int</span> len = i - left - 1;
+                    <span class="kw">int</span> bottom = max(left == -1 ? 0 : height[left], height[i]);
+                    ans += (height[cur] - bottom) * len * (len + 1) / 2;
+                }
+            }
+            stk[r++] = i;
+        }
+        <span class="kw">while</span> (r &gt; 0) {                             <span class="cm">// 清算：右边没有更矮的</span>
+            <span class="kw">int</span> cur = stk[--r];
+            <span class="kw">int</span> left = r == 0 ? -1 : stk[r - 1];
+            <span class="kw">int</span> len = m - left - 1;
+            <span class="kw">int</span> down = left == -1 ? 0 : height[left];
+            ans += (height[cur] - down) * len * (len + 1) / 2;
+        }
+        <span class="kw">return</span> ans;
+    }
+    <span class="kw">int</span> <span class="fn">numSubmat</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; mat) {
+        <span class="kw">int</span> n = mat.size(), m = mat[0].size();
+        fill(height, height + m, 0);
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; m; j++) {
+                height[j] = mat[i][j] == 0 ? 0 : height[j] + 1;
+            }
+            ans += countFromBottom(m);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>复杂度 O(nm)：每行每列入栈一次、出栈最多一次。空间 O(m)。</p>
+      <p>实测 100 × 100 全 1 矩阵：暴力枚举所有子矩形再逐个检查，9.43 秒；单调栈 0.015ms，差六十万倍。150 × 150（题目上限）全 1 时答案 128255625，int 正好放得下，全 1 也只要 0.05ms。</p>
+
+      <h2 id="comp">三、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>时间复杂度</th><th>额外空间</th></tr>
+        <tr><td>大鱼吃小鱼</td><td>O(n)</td><td>O(n)</td></tr>
+        <tr><td>统计全 1 子矩形</td><td>O(nm)</td><td>O(m)</td></tr>
+      </table>
+      <p>两题都靠「每个对象入栈一次、出栈最多一次」拿到线性总代价。鱼题从右往左是方向选择，矩形题逐行是维度拆分，骨架都是弹栈即结算。</p>
+
+      <h2 id="sum">四、总结</h2>
+      <p>大鱼吃小鱼把「同时发生的吃」拆成从右往左的链：每条鱼的轮数只依赖右边被它吃的鱼，栈顶弹出一条轮数 +1 再取 max，递减数组一轮全光、递增数组零轮，别拿 n 猜答案。</p>
+      <p>全 1 子矩形把矩阵逐行压成柱状图，每行结算底边贴本行的矩形，公式 (height[cur] - bottom) × len(len+1)/2 一次算清一批；相等不结算，留给更右边。两题都是 052 那套单调栈在扫描方向和统计口径上的变体：同一个栈换个方向扫、换个口径数，就接住两类完全不同的题。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>牛客</td><td>大鱼吃小鱼</td><td><a href="https://www.nowcoder.com/practice/77199defc4b74b24b8ebf6244e1793de" target="_blank">nowcoder.com/practice/77199defc4b74b24b8ebf6244e1793de</a></td></tr>
+        <tr><td>LeetCode</td><td>使数组按非递减顺序排列（同一份逻辑）</td><td><a href="https://leetcode.cn/problems/steps-to-make-array-non-decreasing/" target="_blank">leetcode.cn/problems/steps-to-make-array-non-decreasing</a></td></tr>
+        <tr><td>LeetCode</td><td>统计全 1 子矩形</td><td><a href="https://leetcode.cn/problems/count-submatrices-with-all-ones/" target="_blank">leetcode.cn/problems/count-submatrices-with-all-ones</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解053【必备】单调栈-下</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function rect(x,y,w,h,fill,stroke){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+(fill||'#fff')+'" stroke="'+(stroke||'#cbd5e1')+'"/>'; }
+
+// ===== 图 1：大鱼吃小鱼四轮 =====
+(function(){
+  var W = 780, H = 300;
+  var body = '';
+  body += txt(W/2, 20, '8 3 1 5 6 7 2 4 的四轮：每轮大鱼吃右边最近的小鱼，同时发生', {fs:13});
+  var rounds = [
+    {t:'初始', arr:[8,3,1,5,6,7,2,4], dead:[]},
+    {t:'第 1 轮后', arr:[8,5,6,7,4], dead:[1,2,6]},
+    {t:'第 2 轮后', arr:[8,6,7], dead:[1,4]},
+    {t:'第 3 轮后', arr:[8,7], dead:[1]},
+    {t:'第 4 轮后', arr:[8], dead:[1]}
+  ];
+  var y = 46, rh = 34;
+  rounds.forEach(function(r, k){
+    body += txt(52, y + rh/2 + 4, r.t, {fs:12});
+    var x = 130;
+    r.arr.forEach(function(v){
+      body += rect(x, y, 44, rh - 6, k === 0 ? '#eef4ff' : (r.arr.length === 1 ? '#dbeafe' : '#fff'), '#cbd5e1');
+      body += txt(x + 22, y + rh/2 + 4, String(v), {fs:12});
+      x += 48;
+    });
+    if (k > 0) {
+      var del = r.dead.map(function(d){ return d + 1; }).join('、');
+      body += txt(x + 10, y + rh/2 + 4, '被吃：' + del, {fs:11, fill:'#ea580c', an:'start'});
+    }
+    y += rh + 6;
+  });
+  body += txt(W/2, y + 10, '5、6、7 同时吃 2（多条鱼盯上同一条），所以 2 在第一轮就被吃掉。', {fs:12, fill:'#475569'});
+  document.getElementById('figRounds').innerHTML = svg(W, H, body) + '<figcaption>每轮至少死一批，最多四轮只剩 8。答案是 4。</figcaption>';
+})();
+
+// ===== 图 2：从右往左扫描栈 =====
+(function(){
+  var W = 780, H = 240;
+  var body = '';
+  body += txt(W/2, 20, '从右往左压栈：栈里是右边幸存鱼（体重, 轮数），体重从底到顶严格递减', {fs:13});
+  var steps = [
+    {t:'i=7(4)：入栈', s:'(4,0)', d:'4 右边没鱼，0 轮'},
+    {t:'i=5(7)：弹 (2,0) 再弹 (4,0)', s:'(7,2)', d:'吃 2 花 1 轮，再吃 4 共 2 轮'},
+    {t:'i=1(3)：弹 (1,0)', s:'(3,1)', d:'3 吃 1，1 轮'},
+    {t:'i=0(8)：弹 (3,1)(5,0)(6,0)(7,2)', s:'(8,4)', d:'吃一串 4 条，最慢的 7 要 2 轮，共 4 轮'}
+  ];
+  var y = 48, rh = 32;
+  steps.forEach(function(st, k){
+    body += rect(30, y, 250, rh, '#eef4ff', '#cbd5e1');
+    body += txt(40, y + rh/2 + 4, st.t, {fs:11, an:'start'});
+    body += rect(310, y, 160, rh, '#fff', '#cbd5e1');
+    body += txt(390, y + rh/2 + 4, st.s, {fs:12, an:'start'});
+    body += rect(500, y, 250, rh, '#fff', '#cbd5e1');
+    body += txt(510, y + rh/2 + 4, st.d, {fs:11, fill:'#475569', an:'start'});
+    y += rh + 8;
+  });
+  body += txt(W/2, y + 12, 'i 号鱼吃掉的是一整串：每弹一条 +1 轮，被弹的鱼自己的轮数取 max，因为它可能要先活几轮。', {fs:12, fill:'#475569'});
+  document.getElementById('figFishStack').innerHTML = svg(W, H, body) + '<figcaption>8 的 curTurns = 4 就是答案：最长的吃鱼链。</figcaption>';
+})();
+
+// ===== 图 3：全 1 子矩形结算公式 =====
+(function(){
+  var W = 780, H = 280;
+  var body = '';
+  body += txt(W/2, 20, 'height = [3, 2, 0]：i = 2 弹出 1 号柱，left = -1，区间 [0, 1]，bottom = 0', {fs:13});
+  var hs = [3, 2, 0];
+  var x0 = 180, bw = 70, gap = 30, base = 210;
+  hs.forEach(function(h, k){
+    var bh = h * 36;
+    var fill = k === 1 ? '#ea580c' : '#2563eb';
+    body += rect(x0 + k*(bw+gap), base - bh, bw, bh, fill, '#fff');
+    body += txt(x0 + k*(bw+gap) + bw/2, base - bh - 8, String(h), {fs:13});
+    body += txt(x0 + k*(bw+gap) + bw/2, base + 18, '列 ' + k, {fs:11, fill:'#64748b'});
+  });
+  // 区间标注
+  var yL = base - 2*36 - 16;
+  body += '<path d="M '+(x0-10)+' '+yL+' L '+(x0+2*bw+gap+10)+' '+yL+'" stroke="#ea580c" stroke-width="1.5" stroke-dasharray="5 3" fill="none"/>';
+  body += txt(x0 + bw + gap/2, yL - 8, 'len = 2（列 0、1）', {fs:12, fill:'#ea580c'});
+  body += txt(W/2, base + 44, '以高 1、高 2 为顶的矩形各 len(len+1)/2 = 3 个，贡献 (2 - 0) × 3 = 6。', {fs:12, fill:'#475569'});
+  document.getElementById('figSubmat').innerHTML = svg(W, H, body) + '<figcaption>高 2 的柱子弹出：底边取 0 到 2 之间，区间内所有连续子段都能当底。</figcaption>';
+})();
+
+// ===== 演示 1：大鱼吃小鱼 =====
+(function(){
+  var presets = [
+    { arr: [8,3,1,5,6,7,2,4], frames: [
+      {i:7, stack:[], pops:[], ins:[[4,0]], note:'i=7：4 右边没有鱼，入栈 (4,0)。ans=0', ans:0, inIdx:7},
+      {i:6, stack:[], pops:[], ins:[[4,0],[2,0]], note:'i=6：2 右边最近的 4 比它大，吃不了，入栈 (2,0)。ans=0', ans:0, inIdx:6},
+      {i:5, stack:[], pops:[6,7], ins:[[7,2]], note:'i=5：弹 (2,0) cur=1，再弹 (4,0) cur=2。7 要 2 轮才被吃。ans=2', ans:2, inIdx:5},
+      {i:4, stack:[], pops:[], ins:[[7,2],[6,0]], note:'i=4：栈顶 7 比 6 大，吃不了，入栈 (6,0)。ans=2', ans:2, inIdx:4},
+      {i:3, stack:[], pops:[], ins:[[7,2],[6,0],[5,0]], note:'i=3：6 比 5 大，吃不了，入栈 (5,0)。ans=2', ans:2, inIdx:3},
+      {i:2, stack:[], pops:[], ins:[[7,2],[6,0],[5,0],[1,0]], note:'i=2：5 比 1 大，吃不了，入栈 (1,0)。ans=2', ans:2, inIdx:2},
+      {i:1, stack:[], pops:[2], ins:[[7,2],[6,0],[5,0],[3,1]], note:'i=1：弹 (1,0) cur=1；栈顶 5 比 3 大，停。3 要 1 轮才被吃。ans=2', ans:2, inIdx:1},
+      {i:0, stack:[], pops:[1,3,4,5], ins:[[8,4]], note:'i=0：弹 (3,1)→1、(5,0)→2、(6,0)→3、(7,2)→4。8 吃完整条链要 4 轮。ans=4', ans:4, inIdx:0},
+      {i:-1, stack:[], pops:[], ins:[[8,4]], note:'结束：答案 4，与逐轮模拟一致', ans:4, inIdx:-1}
+    ]},
+    { arr: [5,4,3,2,1], frames: [
+      {i:4, stack:[], pops:[], ins:[[1,0]], note:'i=4：1 入栈 (1,0)。ans=0', ans:0, inIdx:4},
+      {i:3, stack:[], pops:[4], ins:[[2,1]], note:'i=3：弹 (1,0) cur=1。2 吃 1 要 1 轮。ans=1', ans:1, inIdx:3},
+      {i:2, stack:[], pops:[3], ins:[[3,1]], note:'i=2：弹 (2,1) cur=max(1,1)=1。3 吃 2 也只要 1 轮。ans=1', ans:1, inIdx:2},
+      {i:1, stack:[], pops:[2], ins:[[4,1]], note:'i=1：弹 (3,1) cur=1。ans=1', ans:1, inIdx:1},
+      {i:0, stack:[], pops:[1], ins:[[5,1]], note:'i=0：弹 (4,1) cur=1。ans=1', ans:1, inIdx:0},
+      {i:-1, stack:[], pops:[], ins:[[5,1]], note:'结束：答案 1。第一轮 5 吃 4、4 吃 3、3 吃 2、2 吃 1 同时发生，一轮全光', ans:1, inIdx:-1}
+    ]},
+    { arr: [1,2,3,4,5], frames: [
+      {i:4, stack:[], pops:[], ins:[[5,0]], note:'i=4：5 入栈 (5,0)。ans=0', ans:0, inIdx:4},
+      {i:3, stack:[], pops:[], ins:[[5,0],[4,0]], note:'i=3：4 右边最近的 5 比它大，吃不了，入栈 (4,0)。ans=0', ans:0, inIdx:3},
+      {i:2, stack:[], pops:[], ins:[[5,0],[4,0],[3,0]], note:'i=2：3 入栈 (3,0)。ans=0', ans:0, inIdx:2},
+      {i:1, stack:[], pops:[], ins:[[5,0],[4,0],[3,0],[2,0]], note:'i=1：2 入栈 (2,0)。ans=0', ans:0, inIdx:1},
+      {i:0, stack:[], pops:[], ins:[[5,0],[4,0],[3,0],[2,0],[1,0]], note:'i=0：1 右边全比自己大，入栈 (1,0)。ans=0', ans:0, inIdx:0},
+      {i:-1, stack:[], pops:[], ins:[[5,0],[4,0],[3,0],[2,0],[1,0]], note:'结束：答案 0。每条鱼右边都更大，谁都不吃谁', ans:0, inIdx:-1}
+    ]}
+  ];
+  var pIdx = 0, step = 0;
+  function stackStr(ins){
+    if (!ins || !ins.length) return '栈：空';
+    return '栈（体重,轮数）：[' + ins.map(function(x){ return '(' + x[0] + ',' + x[1] + ')'; }).join(' ') + ']';
+  }
+  function draw(){
+    var p = presets[pIdx], f = p.frames[Math.min(step, p.frames.length-1)];
+    var html = '';
+    p.arr.forEach(function(v, i){
+      var cls = 'cell';
+      if (i === f.i) cls += ' cur';
+      else if (f.pops.indexOf(i) >= 0) cls += ' pop';
+      else {
+        var instack = false;
+        (f.ins || []).forEach(function(x){ if (x[0] === v) instack = true; });
+        if (instack && i > (f.i < 0 ? -1 : f.i)) cls += ' in';
+      }
+      html += '<span class="'+cls+'"><span class="idx">'+i+'</span>'+v+'</span>';
+    });
+    document.getElementById('fsCells').innerHTML = html;
+    document.getElementById('fsStack').textContent = stackStr(f.ins);
+    document.getElementById('fsNote').textContent = f.note;
+    document.getElementById('fsAns').textContent = '答案：' + f.ans + ' 轮';
+  }
+  document.getElementById('fsSel').addEventListener('change', function(){ pIdx = +this.value; step = 0; draw(); });
+  document.getElementById('fsNext').addEventListener('click', function(){ if (step < presets[pIdx].frames.length - 1) step++; draw(); });
+  document.getElementById('fsPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('fsReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+
+// ===== 演示 2：全 1 子矩形 =====
+(function(){
+  var presets = [
+    { mat: [[1,0,1],[1,1,0],[1,1,0]], frames: [
+      {row:0, h:[1,0,1], stk:[], pop:[], gain:0, note:'第 0 行：有 1 的列 height+1 → [1,0,1]。结算这一行', acc:0, hl:[]},
+      {row:0, h:[1,0,1], stk:[1], pop:[0], gain:1, note:'i=1 弹 0 号（高 1>0）：len=1，bottom=0，贡献 (1-0)×1 = 1', acc:1, hl:[0]},
+      {row:0, h:[1,0,1], stk:[1], pop:[2], gain:2, note:'清算：弹 2 号（left=1，len=1，down=0），贡献 1；1 号高度 0 不贡献。第 0 行合计 2', acc:2, hl:[2]},
+      {row:1, h:[2,1,0], stk:[], pop:[], gain:0, note:'第 1 行：height → [2,1,0]', acc:2, hl:[]},
+      {row:1, h:[2,1,0], stk:[2], pop:[0,1], gain:4, note:'i=1 弹 0 号（2>1）：len=1，bottom=1，贡献 1；i=2 弹 1 号（1>0）：len=2，bottom=0，贡献 3。共 4', acc:6, hl:[0,1]},
+      {row:1, h:[2,1,0], stk:[1], pop:[2], gain:4, note:'清算：弹 2 号贡献 0，1 号也贡献 0。第 1 行合计 4，累计 6', acc:6, hl:[2]},
+      {row:2, h:[3,2,0], stk:[], pop:[], gain:0, note:'第 2 行：height → [3,2,0]', acc:6, hl:[]},
+      {row:2, h:[3,2,0], stk:[2], pop:[0,1], gain:7, note:'i=1 弹 0 号（3>2）：len=1，bottom=2，贡献 1；i=2 弹 1 号（2>0）：len=2，bottom=0，贡献 6。共 7', acc:13, hl:[0,1]},
+      {row:2, h:[3,2,0], stk:[], pop:[2], gain:7, note:'清算：贡献 0。累计 13，结束', acc:13, hl:[2]}
+    ]},
+    { mat: [[1,1],[1,1]], frames: [
+      {row:0, h:[1,1], stk:[1], pop:[], gain:0, note:'第 0 行：height → [1,1]。i=1 弹 0 号但 1 > 1 不成立，相等不结算，贡献 0', acc:0, hl:[]},
+      {row:0, h:[1,1], stk:[], pop:[1], gain:3, note:'清算：弹 1 号（left=-1，len=2，down=0），贡献 (1-0)×3 = 3。第 0 行合计 3', acc:3, hl:[0,1]},
+      {row:1, h:[2,2], stk:[1], pop:[], gain:0, note:'第 1 行：height → [2,2]。相等不结算', acc:3, hl:[]},
+      {row:1, h:[2,2], stk:[], pop:[1], gain:6, note:'清算：弹 1 号，贡献 (2-0)×3 = 6。累计 9，结束', acc:9, hl:[0,1]}
+    ]},
+    { mat: [[1,0],[0,1]], frames: [
+      {row:0, h:[1,0], stk:[1], pop:[0], gain:1, note:'第 0 行：height → [1,0]。i=1 弹 0 号（1>0）：len=1，bottom=0，贡献 1', acc:1, hl:[0]},
+      {row:0, h:[1,0], stk:[], pop:[1], gain:1, note:'清算：弹 1 号（0 高）贡献 0。第 0 行合计 1', acc:1, hl:[]},
+      {row:1, h:[0,1], stk:[0,1], pop:[], gain:0, note:'第 1 行：height → [0,1]。i=1 弹不了 0 号（0 ≥ 1 不成立）', acc:1, hl:[]},
+      {row:1, h:[0,1], stk:[], pop:[1], gain:1, note:'清算：弹 1 号（left=0，len=1，down=0），贡献 1；弹 0 号贡献 0。累计 2，结束', acc:2, hl:[1]}
+    ]}
+  ];
+  var pIdx = 0, step = 0;
+  function draw(){
+    var p = presets[pIdx], f = p.frames[Math.min(step, p.frames.length-1)];
+    var n = p.mat.length, m = p.mat[0].length;
+    var html = '';
+    for (var i = 0; i < n; i++) {
+      for (var j = 0; j < m; j++) {
+        var cls = 'gcell';
+        if (p.mat[i][j] === 1) cls += ' one';
+        if (i === f.row) cls += ' rowcur';
+        if (f.hl.indexOf(j) >= 0 && i === f.row) cls += ' hl';
+        html += '<span class="'+cls+'">'+p.mat[i][j]+'</span>';
+      }
+    }
+    document.getElementById('smGrid').style.gridTemplateColumns = 'repeat('+m+', 34px)';
+    document.getElementById('smGrid').innerHTML = html;
+    var hb = '';
+    f.h.forEach(function(h, j){
+      var bh = h * 22;
+      hb += '<span class="hcol"><span class="hval">'+h+'</span><span class="hbar-v" style="height:'+bh+'px"></span><span class="hlabel">'+j+'</span></span>';
+    });
+    document.getElementById('smHbar').innerHTML = hb;
+    document.getElementById('smStack').textContent = '栈（列下标）：[' + f.stk.join(', ') + ']';
+    document.getElementById('smNote').textContent = f.note;
+    document.getElementById('smAns').textContent = '累计答案：' + f.acc;
+  }
+  document.getElementById('smSel').addEventListener('change', function(){ pIdx = +this.value; step = 0; draw(); });
+  document.getElementById('smNext').addEventListener('click', function(){ if (step < presets[pIdx].frames.length - 1) step++; draw(); });
+  document.getElementById('smPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('smReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>从递归到动态规划：斐波那契数与最低票价</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; margin: 6px 0; color: #334155; }
+.cell { display: inline-block; min-width: 40px; padding: 5px 6px; margin-right: 5px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; text-align: center; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+.cell .idx { display: block; font-size: 10px; color: #94a3b8; }
+.cell.fill { background: var(--full-bg); border-color: var(--full); }
+.cell.cur { outline: 2px solid var(--partial); }
+.cell.hit { background: var(--partial-bg); border-color: var(--partial); }
+.cell.none { color: #cbd5e1; }
+.stackline { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>从递归到动态规划：斐波那契数与最低票价</h1>
+      <p class="intro">动态规划听着吓人，做起来只有一件事：把递归里重复算的那部分记下来。这页拿斐波那契数把「暴力递归、记忆化搜索、严格位置依赖、空间压缩」这四步走一遍，再用最低票价看一个真题目里第一版递归该怎么设计。</p>
+
+      <h2 id="s0">零、递归慢在重复调用</h2>
+      <p>F(0) = 0，F(1) = 1，F(n) = F(n-1) + F(n-2)。照着定义写递归，一行都不用多想。算 F(4) 的时候调用过程长这样：</p>
+      <figure class="fig" id="figTree"></figure>
+      <p>九个节点里有五个是重复的：F(2) 算了 2 遍，F(1) 算了 3 遍，F(0) 算了 2 遍。真正不同的子问题只有 5 个，多出来的四次全是白跑。</p>
+      <p>实测的调用次数（本机 clang -O2）：n = 5 是 15 次，n = 10 是 177 次，n = 20 是 21891 次，n = 30 是 2692537 次，n = 40 是 331160281 次。规律是 2·F(n+1) − 1，每一项都翻着跟头往上长。</p>
+      <figure class="fig" id="figCalls"></figure>
+      <p>对应的耗时：n = 30 用 2.91ms，n = 35 用 33.58ms，n = 40 用 354.24ms。同一个 n，填表的写法是 0.0008ms 这个量级，差了五个数量级。递归本身不慢，慢在它把同一件事做了几亿遍。</p>
+      <p>这里有个判据：展开递归时如果总在重复调用同一个子问题，改成动态规划就有收益；如果每次展开都是新的子问题，那改了也是白改。</p>
+
+      <h2 id="s1">一、第一步永远是写出暴力递归</h2>
+      <p>别一上来就想状态转移方程。先回答一个问题：f(i) 的含义是什么。斐波那契里 f(i) 就是「第 i 项的值」，含义清楚了，递归体就是定义本身。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 暴力递归：完全照定义写</span>
+    <span class="kw">int</span> <span class="fn">f1</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == 0) <span class="kw">return</span> 0;
+        <span class="kw">if</span> (i == 1) <span class="kw">return</span> 1;
+        <span class="kw">return</span> f1(i - 1) + f1(i - 2);
+    }
+
+    <span class="kw">int</span> <span class="fn">fib1</span>(<span class="kw">int</span> n) {
+        <span class="kw">return</span> f1(n);
+    }</pre>
+      <p>这版代码除了慢没有别的毛病，而它正是后面三版的草稿。写错尝试的代价很低，删掉重写就行；反过来，直接硬想转移方程，想错了往往察觉不到。</p>
+
+      <h2 id="s2">二、记忆化搜索：算过的记下来</h2>
+      <p>加一个 dp 数组，dp[i] 记 f(i) 的答案，用 −1 表示「还没算过」。递归体不变，只在开头加一句查表、结尾加一句写表。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 记忆化搜索：dp[i] == -1 表示 i 这个位置还没算过</span>
+    <span class="kw">int</span> <span class="fn">f2</span>(<span class="kw">int</span> i, vector&lt;<span class="kw">int</span>&gt;&amp; dp) {
+        <span class="kw">if</span> (i == 0) <span class="kw">return</span> 0;
+        <span class="kw">if</span> (i == 1) <span class="kw">return</span> 1;
+        <span class="kw">if</span> (dp[i] != -1) <span class="kw">return</span> dp[i];
+        <span class="kw">int</span> ans = f2(i - 1, dp) + f2(i - 2, dp);
+        dp[i] = ans;
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">fib2</span>(<span class="kw">int</span> n) {
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(n + 1, -1);
+        <span class="kw">return</span> f2(n, dp);
+    }</pre>
+      <p>实测调用次数：n = 5 变成 9 次，n = 10 是 19 次，n = 20 是 39 次，n = 30 是 59 次，正好 2n − 1。每个 i 被真正计算一次，剩下那次是它作为别人孩子时被查表挡回来的。</p>
+      <p>记忆化搜索也叫从顶到底的动态规划。它的好处是不用管计算顺序：递归到哪算哪，算过的立刻记下。如果每个状态的枚举代价很低，到这一步就可以交了。</p>
+
+      <h2 id="s3">三、严格位置依赖：从底到顶</h2>
+      <p>再看一眼递归体：f(i) 只依赖 f(i-1) 和 f(i-2)。既然依赖关系是固定的，那就别递归了，从 2 一路填到 n，算 dp[i] 时它依赖的两个值已经在表里。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 严格位置依赖：dp[i] 只依赖 dp[i-1] 和 dp[i-2]，那就从 2 一路填到 n</span>
+    <span class="kw">int</span> <span class="fn">fib3</span>(<span class="kw">int</span> n) {
+        <span class="kw">if</span> (n == 0) <span class="kw">return</span> 0;
+        <span class="kw">if</span> (n == 1) <span class="kw">return</span> 1;
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(n + 1, 0);
+        dp[1] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            dp[i] = dp[i - 1] + dp[i - 2];
+        }
+        <span class="kw">return</span> dp[n];
+    }</pre>
+      <figure class="fig" id="figBottom"></figure>
+      <p>这版叫从底到顶的动态规划。它省掉了递归调用的开销，更重要的是把「每个位置依赖谁」摆到了明面上，接下来的优化都建立在这张明面上。</p>
+
+      <h2 id="s4">四、空间压缩</h2>
+      <p>dp[i] 只用到 dp[i-1] 和 dp[i-2]，更早的那些格子填完就再也没人看。那么数组整个可以不要，两个变量轮着滚。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 空间压缩：dp[i] 只用到前两项，两个变量就够</span>
+    <span class="kw">int</span> <span class="fn">fib4</span>(<span class="kw">int</span> n) {
+        <span class="kw">if</span> (n == 0) <span class="kw">return</span> 0;
+        <span class="kw">if</span> (n == 1) <span class="kw">return</span> 1;
+        <span class="kw">int</span> lastLast = 0, last = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2, cur; i &lt;= n; i++) {
+            cur = lastLast + last;
+            lastLast = last;
+            last = cur;
+        }
+        <span class="kw">return</span> last;
+    }</pre>
+      <p>实测（n = 2×10⁷，值会溢出 int，这里只比时间）：dp 数组版 10.91ms、占 76 MB；滚动变量版 4.99ms、占几个字节。省空间的同时也快了一倍，因为少写了一整片内存。</p>
+      <p>一维动态规划的空间压缩基本都是这个套路：先写出 dp[i] 依赖哪几个位置，再看哪些位置可以用变量替掉。</p>
+      <div class="viz">
+        <p class="viz-title">演示 · 斐波那契：四个版本逐帧对照</p>
+        <div class="viz-controls">
+          <select id="fibVer">
+            <option value="1">暴力递归</option>
+            <option value="2">记忆化搜索</option>
+            <option value="3">严格位置依赖</option>
+            <option value="4">空间压缩</option>
+          </select>
+          <select id="fibN">
+            <option value="5">n = 5</option>
+            <option value="6">n = 6</option>
+            <option value="8" selected>n = 8</option>
+            <option value="10">n = 10</option>
+            <option value="12">n = 12</option>
+          </select>
+        </div>
+        <div id="fibBoard"></div>
+        <p class="viz-note" id="fibNote"></p>
+        <p class="viz-answer" id="fibAns"></p>
+        <div class="viz-controls">
+          <button id="fibPrev">上一步</button>
+          <button id="fibNext">下一步</button>
+          <button id="fibReset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="s5">五、最低票价：递归怎么设计</h2>
+      <p>一年里某些天要出行，日子记在 days 数组里。通行证有三种：1 天期 costs[0]、7 天期 costs[1]、30 天期 costs[2]，买一张就能连着走那么多天。问覆盖所有出行日的最小花费。</p>
+      <p>照上一节的规矩，先定义 f(i)：把 days[i] 以及它后面所有出行日都覆盖掉，最少花多少钱。i 走到 days.length 时，后面没有出行日了，返回 0。</p>
+      <p>在 i 这个位置只有三种选择，买哪种票都行。买第 k 种票能盖住 days[i] 到 days[i] + durations[k] − 1，那么下一个要操心的出行日就是第一个 ≥ days[i] + durations[k] 的那个，记成 j。</p>
+      <figure class="fig" id="figTicket"></figure>
+      <p>j 用 while 往后推，最多推 30 次就到头了，所以这一层枚举可以当成 O(1)。三种票取最小，就是 f(i) 的答案。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">int</span> durations[3] = {1, 7, 30};
+
+    <span class="cm">// days[i...] 这些旅行日全都覆盖掉，最少花多少钱</span>
+    <span class="kw">int</span> <span class="fn">f1</span>(vector&lt;<span class="kw">int</span>&gt;&amp; days, vector&lt;<span class="kw">int</span>&gt;&amp; costs, <span class="kw">int</span> i) {
+        <span class="kw">int</span> n = days.size();
+        <span class="kw">if</span> (i == n) <span class="kw">return</span> 0;
+        <span class="kw">int</span> ans = INT_MAX;
+        <span class="kw">for</span> (<span class="kw">int</span> k = 0, j = i; k &lt; 3; k++) {
+            <span class="cm">// 买第 k 种票，它能盖住 days[i] + durations[k] 之前的所有日子</span>
+            <span class="kw">while</span> (j &lt; n &amp;&amp; days[i] + durations[k] &gt; days[j]) j++;
+            ans = min(ans, costs[k] + f1(days, costs, j));
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">mincostTickets1</span>(vector&lt;<span class="kw">int</span>&gt;&amp; days, vector&lt;<span class="kw">int</span>&gt;&amp; costs) {
+        <span class="kw">return</span> f1(days, costs, 0);
+    }</pre>
+      <p>实测调用次数（出行日连续 1 到 n）：n = 10 时暴力 49 次、记忆化 31 次；n = 15 是 157 对 46；n = 20 是 502 对 61；n = 25 是 1552 对 76。记忆化稳定在 3n + 1，暴力那边是指数级。LeetCode 的样例 days = [1,4,6,7,8,20]、costs = [2,7,15]，暴力 40 次、记忆化 19 次，答案 11。</p>
+
+      <h2 id="s6">六、最低票价的从底到顶</h2>
+      <p>f(i) 依赖的 j 都比 i 大，所以倒着填表：dp[n] = 0，i 从 n−1 填到 0。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">int</span> durations[3] = {1, 7, 30};
+
+    <span class="cm">// 从底到顶：dp[i] 只依赖下标更大的 dp[j]，倒着填即可</span>
+    <span class="kw">int</span> <span class="fn">mincostTickets3</span>(vector&lt;<span class="kw">int</span>&gt;&amp; days, vector&lt;<span class="kw">int</span>&gt;&amp; costs) {
+        <span class="kw">int</span> n = days.size();
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(n + 1, INT_MAX);
+        dp[n] = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = n - 1; i &gt;= 0; i--) {
+            <span class="kw">for</span> (<span class="kw">int</span> k = 0, j = i; k &lt; 3; k++) {
+                <span class="kw">while</span> (j &lt; n &amp;&amp; days[i] + durations[k] &gt; days[j]) j++;
+                dp[i] = min(dp[i], costs[k] + dp[j]);
+            }
+        }
+        <span class="kw">return</span> dp[0];
+    }</pre>
+      <p>样例 days = [1,4,6,7,8,20]、costs = [2,7,15] 的填表过程（j 那一列是三种票各自跳到的下标）：</p>
+      <figure class="fig" id="figTicketDp"></figure>
+      <p>答案是 11：第 1 天买 7 天期（7 块，盖到 1~7），第 8 天买 1 天期（2 块），第 20 天买 1 天期（2 块）。</p>
+      <p>两处容易写错的地方，实测各有对应的抓取率（2 万组随机数据，对照组是按天做的独立 dp）：while 的条件写成 <code>days[i] + durations[k] &gt;= days[j]</code>，多吞一天，16.23% 的样本答案偏小；只枚举 1 天和 7 天两种票，28.61% 的样本答案偏大。</p>
+      <p>这里的枚举只有 3 个分支，改动态规划之后复杂度是 O(n)，n 是出行日的个数，一年最多 365。</p>
+      <div class="viz">
+        <p class="viz-title">演示 · 最低票价：倒着填 dp，三种票逐个试</p>
+        <div class="viz-controls">
+          <select id="tkPreset">
+            <option>样例 days=[1,4,6,7,8,20] costs=[2,7,15]</option>
+            <option>连续出行 1~10 costs=[2,7,15]</option>
+            <option>稀疏 [1,15,30,60] costs=[2,7,15]</option>
+            <option>月票很贵 [1,5,10,20,40] costs=[3,10,60]</option>
+            <option>随机 8 个出行日</option>
+          </select>
+        </div>
+        <div id="tkBoard"></div>
+        <p class="viz-note" id="tkNote"></p>
+        <p class="viz-answer" id="tkAns"></p>
+        <div class="viz-controls">
+          <button id="tkPrev">上一步</button>
+          <button id="tkNext">下一步</button>
+          <button id="tkReset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="s7">七、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间复杂度</th><th>额外空间</th><th>实测</th></tr>
+        <tr><td>斐波那契 · 暴力递归</td><td>O(F(n))，调用 2·F(n+1)−1 次</td><td>O(n) 栈深</td><td>n = 40 用 354.24ms</td></tr>
+        <tr><td>斐波那契 · 记忆化搜索</td><td>O(n)，调用 2n−1 次</td><td>O(n)</td><td>n = 30 调用 59 次</td></tr>
+        <tr><td>斐波那契 · 严格位置依赖</td><td>O(n)</td><td>O(n)</td><td>n = 2×10⁷ 用 10.91ms / 76 MB</td></tr>
+        <tr><td>斐波那契 · 空间压缩</td><td>O(n)</td><td>O(1)</td><td>n = 2×10⁷ 用 4.99ms</td></tr>
+        <tr><td>最低票价 · 记忆化</td><td>O(n)</td><td>O(n)</td><td>出行日 365 天用 0.0041ms</td></tr>
+        <tr><td>最低票价 · 从底到顶</td><td>O(n)</td><td>O(n)</td><td>调用 3n+1 次</td></tr>
+      </table>
+      <p>记忆化和填表的复杂度同阶，差的是常数和那点递归开销。空间压缩是纯赚，前提是先看清 dp[i] 依赖哪几个位置。</p>
+
+      <h2 id="s8">八、总结</h2>
+      <p>四步的顺序不能颠倒：先写出含义清楚的暴力递归，再加 dp 数组做记忆化，再看依赖位置改成从底到顶，最后按依赖范围压空间。</p>
+      <p>判断要不要改动态规划，看递归展开时有没有重复调用同一个子问题；斐波那契重复得离谱，最低票价重复得温和一点，但记忆化之后都从指数掉到了 O(n)。</p>
+      <p>斐波那契还有个 O(log n) 的矩阵快速幂解法，属于另一条路子，后面会专门讲。这一页的四步才是动态规划的通用起手式，后面所有一维、二维的题都是在这四步上继续加东西。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/fibonacci-number/" target="_blank">斐波那契数</a></td><td><a href="https://leetcode.cn/problems/fibonacci-number/" target="_blank">leetcode.cn</a></td></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/minimum-cost-for-tickets/" target="_blank">最低票价</a></td><td><a href="https://leetcode.cn/problems/minimum-cost-for-tickets/" target="_blank">leetcode.cn</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解066【必备】从递归入手一维动态规划</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+/* ===== figTree：F(4) 的递归调用树 ===== */
+(function(){
+  var blue = '#2563eb', blueBg = '#dbeafe', orange = '#ea580c', orangeBg = '#ffedd5';
+  var green = '#16a34a', greenBg = '#dcfce7', gray = '#9aa0a6', grayBg = '#f1f3f5';
+  var nodes = [
+    {x:450, y:48,  t:'f(4)', f:blue,   b:blueBg},
+    {x:250, y:124, t:'f(3)', f:blue,   b:blueBg},
+    {x:650, y:124, t:'f(2)', f:orange, b:orangeBg},
+    {x:150, y:200, t:'f(2)', f:orange, b:orangeBg},
+    {x:330, y:200, t:'f(1)', f:green,  b:greenBg},
+    {x:570, y:200, t:'f(1)', f:green,  b:greenBg},
+    {x:730, y:200, t:'f(0)', f:gray,   b:grayBg},
+    {x:100, y:272, t:'f(1)', f:green,  b:greenBg},
+    {x:200, y:272, t:'f(0)', f:gray,   b:grayBg}
+  ];
+  var edges = [[0,1],[0,2],[1,3],[1,4],[2,5],[2,6],[3,7],[3,8]];
+  var s = '<svg viewBox="0 0 900 330" xmlns="http://www.w3.org/2000/svg">';
+  s += '<rect x="0" y="0" width="900" height="330" fill="#f6f7f9"/>';
+  for (var e = 0; e < edges.length; e++) {
+    var a = nodes[edges[e][0]], b = nodes[edges[e][1]];
+    s += '<line x1="' + a.x + '" y1="' + (a.y + 22) + '" x2="' + b.x + '" y2="' + (b.y - 22) + '" stroke="#c9ced4" stroke-width="1.6"/>';
+  }
+  for (var i = 0; i < nodes.length; i++) {
+    var nd = nodes[i];
+    s += '<circle cx="' + nd.x + '" cy="' + nd.y + '" r="22" fill="' + nd.b + '" stroke="' + nd.f + '" stroke-width="1.8"/>';
+    s += '<text x="' + nd.x + '" y="' + (nd.y + 5) + '" text-anchor="middle" font-size="14" fill="' + nd.f + '" font-family="ui-monospace,Menlo,monospace">' + nd.t + '</text>';
+  }
+  s += '<text x="450" y="22" text-anchor="middle" font-size="13" fill="#1f2328">算 F(4) 一共 9 次调用，只有 5 个不同的子问题</text>';
+  s += '<text x="795" y="150" font-size="12" fill="#ea580c">f(2) 算了 2 遍</text>';
+  s += '<text x="795" y="172" font-size="12" fill="#16a34a">f(1) 算了 3 遍</text>';
+  s += '<text x="795" y="194" font-size="12" fill="#6b7280">f(0) 算了 2 遍</text>';
+  s += '<text x="795" y="216" font-size="12" fill="#6b7280">f(3)、f(4) 各 1 遍</text>';
+  s += '</svg>';
+  document.getElementById('figTree').innerHTML = s +
+    '<figcaption>同一层的 f(2) 被算了两次，它下面的子树也被原样再走一遍</figcaption>';
+})();
+
+/* ===== figCalls：调用次数对数柱图 ===== */
+(function(){
+  var ns = [5, 10, 15, 20, 25, 30, 35, 40];
+  var brute = [15, 177, 1973, 21891, 242785, 2692537, 29860703, 331160281];
+  var memo  = [9, 19, 29, 39, 49, 59, 69, 79];
+  var base = 330, maxH = 250, x0 = 78, gw = 100;
+  var s = '<svg viewBox="0 0 900 400" xmlns="http://www.w3.org/2000/svg">';
+  s += '<rect x="0" y="0" width="900" height="400" fill="#f6f7f9"/>';
+  s += '<text x="450" y="24" text-anchor="middle" font-size="13" fill="#1f2328">斐波那契递归的调用次数（纵轴是对数刻度）</text>';
+  s += '<line x1="60" y1="' + base + '" x2="880" y2="' + base + '" stroke="#c9ced4" stroke-width="1.5"/>';
+  for (var i = 0; i < ns.length; i++) {
+    var gx = x0 + i * gw;
+    var hb = Math.log(brute[i]) / Math.log(4e8) * maxH;
+    var hm = Math.log(memo[i]) / Math.log(4e8) * maxH;
+    s += '<rect x="' + gx + '" y="' + (base - hb) + '" width="34" height="' + hb + '" fill="#ea580c" opacity="0.85"/>';
+    s += '<rect x="' + (gx + 38) + '" y="' + (base - hm) + '" width="34" height="' + hm + '" fill="#2563eb" opacity="0.85"/>';
+    s += '<text x="' + (gx + 17) + '" y="' + (base - hb - 6) + '" text-anchor="middle" font-size="10" fill="#ea580c">' + brute[i] + '</text>';
+    s += '<text x="' + (gx + 55) + '" y="' + (base - hm - 6) + '" text-anchor="middle" font-size="10" fill="#2563eb">' + memo[i] + '</text>';
+    s += '<text x="' + (gx + 36) + '" y="' + (base + 18) + '" text-anchor="middle" font-size="12" fill="#6b7280">n=' + ns[i] + '</text>';
+  }
+  s += '<text x="60" y="368" font-size="12" fill="#6b7280">橙：暴力递归　　蓝：记忆化搜索（2n−1）</text>';
+  s += '</svg>';
+  document.getElementById('figCalls').innerHTML = s +
+    '<figcaption>n = 40 时暴力递归要调用 3.3 亿次，记忆化只要 79 次</figcaption>';
+})();
+
+/* ===== figBottom：自底向上填表与空间压缩 ===== */
+(function(){
+  var v = [0, 1, 1, 2, 3, 5, 8, 13, 21];
+  var s = '<svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">';
+  s += '<rect x="0" y="0" width="900" height="300" fill="#f6f7f9"/>';
+  s += '<text x="24" y="30" font-size="13" fill="#1f2328">dp 数组：填 dp[5] 时只看 dp[4] 和 dp[3]</text>';
+  for (var i = 0; i <= 8; i++) {
+    var x = 40 + i * 88;
+    var bg = (i === 3 || i === 4) ? '#dbeafe' : (i === 5 ? '#ffedd5' : '#ffffff');
+    var bd = (i === 3 || i === 4) ? '#2563eb' : (i === 5 ? '#ea580c' : '#cbd5e1');
+    s += '<rect x="' + x + '" y="52" width="66" height="46" rx="6" fill="' + bg + '" stroke="' + bd + '" stroke-width="1.6"/>';
+    s += '<text x="' + (x + 33) + '" y="' + (52 + 29) + '" text-anchor="middle" font-size="15" fill="#1f2328">' + v[i] + '</text>';
+    s += '<text x="' + (x + 33) + '" y="' + (52 - 6) + '" text-anchor="middle" font-size="11" fill="#94a3b8">' + i + '</text>';
+  }
+  var x3 = 40 + 3 * 88 + 33, x4 = 40 + 4 * 88 + 33, x5 = 40 + 5 * 88 + 33;
+  s += '<path d="M' + x3 + ' 104 C ' + x3 + ' 140, ' + (x5 - 16) + ' 140, ' + (x5 - 16) + ' 100" fill="none" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arB)"/>';
+  s += '<path d="M' + x4 + ' 104 C ' + x4 + ' 132, ' + (x5 + 16) + ' 132, ' + (x5 + 16) + ' 100" fill="none" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arB)"/>';
+  s += '<defs><marker id="arB" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2563eb"/></marker></defs>';
+  s += '<text x="24" y="186" font-size="13" fill="#1f2328">空间压缩：只留两个变量，cur 算完就往前滚</text>';
+  var names = ['lastLast', 'last', 'cur'];
+  var vals = ['3', '5', '8'];
+  var cols = ['#ffffff', '#ffffff', '#ffedd5'];
+  for (var j = 0; j < 3; j++) {
+    var bx = 40 + j * 140;
+    s += '<rect x="' + bx + '" y="206" width="118" height="52" rx="6" fill="' + cols[j] + '" stroke="#cbd5e1" stroke-width="1.6"/>';
+    s += '<text x="' + (bx + 59) + '" y="228" text-anchor="middle" font-size="12" fill="#6b7280">' + names[j] + '</text>';
+    s += '<text x="' + (bx + 59) + '" y="248" text-anchor="middle" font-size="16" fill="#1f2328">' + vals[j] + '</text>';
+  }
+  s += '<path d="M170 232 L206 232" stroke="#ea580c" stroke-width="1.8" marker-end="url(#arO)"/>';
+  s += '<path d="M310 232 L346 232" stroke="#ea580c" stroke-width="1.8" marker-end="url(#arO)"/>';
+  s += '<defs><marker id="arO" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#ea580c"/></marker></defs>';
+  s += '<text x="470" y="228" font-size="12" fill="#6b7280">lastLast = 3、last = 5</text>';
+  s += '<text x="470" y="248" font-size="12" fill="#6b7280">cur = 3 + 5 = 8，滚动后丢弃 F(2)</text>';
+  s += '</svg>';
+  document.getElementById('figBottom').innerHTML = s +
+    '<figcaption>左：dp[5] 只依赖 dp[4] 与 dp[3]；右：压缩后同一时刻只有三个变量在场</figcaption>';
+})();
+
+/* ===== figTicket：三种票覆盖到哪，j 跳到哪 ===== */
+(function(){
+  var days = [1, 4, 6, 7, 8, 20];
+  var dur = [1, 7, 30];
+  var costs = [2, 7, 15];
+  var nextIdx = [2, 5, 6];
+  var nextDay = [6, 20, null];
+  var s = '<svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">';
+  s += '<rect x="0" y="0" width="900" height="300" fill="#f6f7f9"/>';
+  s += '<text x="24" y="24" font-size="13" fill="#1f2328">在 i = 1（第 4 天）买票，三种选择分别把 j 推到哪</text>';
+  var X = function(d) { return 50 + d * 20; };
+  var axisY = 232;
+  s += '<line x1="' + X(0) + '" y1="' + axisY + '" x2="' + X(40) + '" y2="' + axisY + '" stroke="#9aa0a6" stroke-width="1.5"/>';
+  for (var d = 1; d <= 24; d++) {
+    var tx = X(d);
+    s += '<line x1="' + tx + '" y1="' + axisY + '" x2="' + tx + '" y2="' + (axisY + 5) + '" stroke="#c9ced4" stroke-width="1"/>';
+  }
+  for (var i = 0; i < days.length; i++) {
+    var px = X(days[i]);
+    s += '<circle cx="' + px + '" cy="' + axisY + '" r="4" fill="#2563eb"/>';
+    s += '<text x="' + px + '" y="' + (axisY + 20) + '" text-anchor="middle" font-size="11" fill="#2563eb">' + days[i] + '</text>';
+  }
+  s += '<line x1="' + X(4) + '" y1="60" x2="' + X(4) + '" y2="' + axisY + '" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="4 3"/>';
+  s += '<text x="' + (X(4) + 6) + '" y="56" font-size="11" fill="#ea580c">第 4 天（i = 1）</text>';
+  for (var k = 0; k < 3; k++) {
+    var y = 80 + k * 44;
+    var end = 4 + dur[k] - 1;
+    var w = Math.max(12, X(Math.min(end, 24)) - X(4));
+    s += '<rect x="' + X(4) + '" y="' + y + '" width="' + w + '" height="22" rx="4" fill="' + (k === 2 ? '#ffedd5' : '#dbeafe') + '" stroke="' + (k === 2 ? '#ea580c' : '#2563eb') + '" stroke-width="1.4"/>';
+    s += '<text x="' + (X(4) - 6) + '" y="' + (y + 16) + '" text-anchor="end" font-size="11" fill="#6b7280">' + dur[k] + ' 天 ' + costs[k] + ' 元</text>';
+    var tip = X(Math.min(end, 24)) + 8;
+    var lab = nextDay[k] === null ? 'j = 6（没有下一天了）' : ('j = ' + nextIdx[k] + '（第 ' + nextDay[k] + ' 天）');
+    s += '<text x="' + tip + '" y="' + (y + 16) + '" font-size="11" fill="#1f2328">' + lab + '</text>';
+  }
+  s += '<text x="24" y="278" font-size="12" fill="#6b7280">蓝点是出行日。j 是第一个「没被这张票盖住」的出行日下标，票盖得越久 j 推得越远</text>';
+  s += '</svg>';
+  document.getElementById('figTicket').innerHTML = s +
+    '<figcaption>买第 k 种票之后，剩下的事就是 days[j...] 那段，正好是 f(j)</figcaption>';
+})();
+
+/* ===== figTicketDp：样例填表 ===== */
+(function(){
+  var rows = [
+    ['6', '—', '—', '0', '0'],
+    ['5', '20', '6, 6, 6', '2', '2'],
+    ['4', '8', '5, 5, 6', '4', '4'],
+    ['3', '7', '4, 5, 6', '6', '6'],
+    ['2', '6', '3, 5, 6', '8', '8'],
+    ['1', '4', '2, 5, 6', '9', '9'],
+    ['0', '1', '1, 4, 6', '11', '11']
+  ];
+  var s = '<svg viewBox="0 0 900 330" xmlns="http://www.w3.org/2000/svg">';
+  s += '<rect x="0" y="0" width="900" height="330" fill="#f6f7f9"/>';
+  s += '<text x="24" y="24" font-size="13" fill="#1f2328">days = [1,4,6,7,8,20]，costs = [2,7,15]，从 i = 6 倒着填到 i = 0</text>';
+  var cols = [40, 150, 300, 500, 700];
+  var head = ['i', 'days[i]', '三种票跳到的 j', 'min(cost + dp[j])', 'dp[i]'];
+  for (var c = 0; c < 5; c++) {
+    s += '<text x="' + cols[c] + '" y="54" font-size="12" fill="#6b7280">' + head[c] + '</text>';
+  }
+  s += '<line x1="34" y1="62" x2="860" y2="62" stroke="#c9ced4" stroke-width="1.2"/>';
+  for (var r = 0; r < rows.length; r++) {
+    var y = 92 + r * 32;
+    var hl = r === rows.length - 1;
+    if (hl) s += '<rect x="34" y="' + (y - 18) + '" width="826" height="28" rx="5" fill="#ffedd5" stroke="#ea580c" stroke-width="1.2"/>';
+    for (var c2 = 0; c2 < 5; c2++) {
+      s += '<text x="' + cols[c2] + '" y="' + y + '" font-size="13" fill="' + (hl ? '#ea580c' : '#1f2328') + '">' + rows[r][c2] + '</text>';
+    }
+  }
+  s += '<text x="24" y="316" font-size="12" fill="#6b7280">dp[6] = 0 是递归的终止条件：后面没有出行日，不再花钱</text>';
+  s += '</svg>';
+  document.getElementById('figTicketDp').innerHTML = s +
+    '<figcaption>每一行只在已经填好的行上取值，所以倒着填一路顺到底</figcaption>';
+})();
+
+/* ===== 演示一：斐波那契四个版本 ===== */
+(function(){
+  var verSel = document.getElementById('fibVer');
+  var nSel = document.getElementById('fibN');
+  var board = document.getElementById('fibBoard');
+  var note = document.getElementById('fibNote');
+  var ans = document.getElementById('fibAns');
+  var st = { steps: [], step: 0, ver: '1', n: 8 };
+
+  function cells(arr, curIdx, hitIdx) {
+    var out = '';
+    for (var i = 0; i < arr.length; i++) {
+      var cls = 'cell';
+      var val = arr[i];
+      if (val === null || val === -1) { cls += ' none'; val = '—'; }
+      else cls += ' fill';
+      if (i === curIdx) cls += ' cur';
+      if (i === hitIdx) cls += ' hit';
+      out += '<span class="' + cls + '"><span class="idx">' + i + '</span>' + val + '</span>';
+    }
+    return out;
+  }
+
+  function build() {
+    st.ver = verSel.value;
+    st.n = parseInt(nSel.value, 10);
+    var n = st.n, steps = [];
+    if (st.ver === '1') {
+      var cnt = 0;
+      (function go(i, depth) {
+        cnt++;
+        steps.push({ kind: 'call', i: i, depth: depth, cnt: cnt });
+        if (i === 0 || i === 1) return;
+        go(i - 1, depth + 1);
+        go(i - 2, depth + 1);
+      })(n, 0);
+      steps.push({ kind: 'done', cnt: cnt, value: [0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144][n] });
+    } else if (st.ver === '2') {
+      var dp = [];
+      for (var i = 0; i <= n; i++) dp.push(-1);
+      (function go(i) {
+        if (i === 0) { steps.push({ kind: 'base', i: i, dp: dp.slice(), v: 0 }); return 0; }
+        if (i === 1) { steps.push({ kind: 'base', i: i, dp: dp.slice(), v: 1 }); return 1; }
+        if (dp[i] !== -1) { steps.push({ kind: 'hit', i: i, dp: dp.slice(), v: dp[i] }); return dp[i]; }
+        steps.push({ kind: 'go', i: i, dp: dp.slice() });
+        var a = go(i - 1);
+        var b = go(i - 2);
+        dp[i] = a + b;
+        steps.push({ kind: 'store', i: i, dp: dp.slice(), v: dp[i] });
+        return dp[i];
+      })(n);
+      steps.push({ kind: 'done', dp: dp.slice(), value: dp[n] });
+    } else if (st.ver === '3') {
+      var d3 = [];
+      for (var i2 = 0; i2 <= n; i2++) d3.push(-1);
+      d3[0] = 0; d3[1] = 1;
+      steps.push({ kind: 'init', dp: d3.slice() });
+      for (var i3 = 2; i3 <= n; i3++) {
+        d3[i3] = d3[i3 - 1] + d3[i3 - 2];
+        steps.push({ kind: 'fill', i: i3, dp: d3.slice(), v: d3[i3] });
+      }
+      steps.push({ kind: 'done', dp: d3.slice(), value: d3[n] });
+    } else {
+      var lastLast = 0, last = 1;
+      steps.push({ kind: 'init', a: 0, b: 1, c: null });
+      for (var i4 = 2, cur; i4 <= n; i4++) {
+        cur = lastLast + last;
+        steps.push({ kind: 'roll', i: i4, a: lastLast, b: last, c: cur });
+        lastLast = last; last = cur;
+      }
+      steps.push({ kind: 'done', a: lastLast, b: last, c: last, value: last });
+    }
+    st.steps = steps; st.step = 0;
+    render();
+  }
+
+  function render() {
+    var s = st.steps[st.step], n = st.steps.length;
+    var head = '第 ' + (st.step + 1) + ' / ' + n + ' 步：';
+    var line = '';
+    if (st.ver === '1') {
+      if (s.kind === 'call') {
+        var pad = '';
+        for (var k = 0; k < s.depth; k++) pad += '　';
+        board.innerHTML = '<div class="stackline">' + pad + '└ f(' + s.i + ')</div>' +
+          '<div class="mono">已调用 ' + s.cnt + ' 次，当前递归深度 ' + s.depth + '</div>';
+        line = head + '调用 f(' + s.i + ')' + (s.i <= 1 ? '，到边界直接返回' : '，继续展开 f(' + (s.i - 1) + ') 和 f(' + (s.i - 2) + ')');
+      } else {
+        board.innerHTML = '<div class="mono">调用结束，一共 ' + s.cnt + ' 次</div>';
+        line = head + '递归跑完';
+      }
+    } else if (st.ver === '2') {
+      var cur = (s.kind === 'hit' || s.kind === 'store') ? s.i : (s.i === undefined ? -1 : s.i);
+      board.innerHTML = '<div>dp 数组：' + cells(s.dp, cur, s.kind === 'hit' ? cur : -1) + '</div>';
+      if (s.kind === 'base') line = head + 'f(' + s.i + ') 是边界，直接返回 ' + s.v + '，不写表';
+      else if (s.kind === 'hit') line = head + 'dp[' + s.i + '] = ' + s.v + ' 已算过，查表直接返回，不再往下展开';
+      else if (s.kind === 'go') line = head + 'dp[' + s.i + '] 还是 −1，这次真算，先去算 f(' + (s.i - 1) + ')';
+      else if (s.kind === 'store') line = head + 'f(' + (s.i - 1) + ') 和 f(' + (s.i - 2) + ') 都回来了，dp[' + s.i + '] = ' + s.v + ' 写进表';
+      else line = head + '填表完成';
+    } else if (st.ver === '3') {
+      board.innerHTML = '<div>dp 数组：' + cells(s.dp, s.i === undefined ? -1 : s.i, -1) + '</div>';
+      if (s.kind === 'init') line = head + 'dp[0] = 0、dp[1] = 1 先摆好，其余格子待填';
+      else if (s.kind === 'fill') line = head + 'dp[' + s.i + '] = dp[' + (s.i - 1) + '] + dp[' + (s.i - 2) + '] = ' + s.v;
+      else line = head + '填表完成';
+    } else {
+      board.innerHTML = '<div class="mono">lastLast = ' + s.a + '　　last = ' + s.b + '　　cur = ' + (s.c === null ? '（还没算）' : s.c) + '</div>';
+      if (s.kind === 'init') line = head + '初始 lastLast = 0、last = 1';
+      else if (s.kind === 'roll') line = head + 'cur = ' + s.a + ' + ' + s.b + ' = ' + s.c + '，然后 lastLast、last 一起往前滚';
+      else line = head + '滚动结束，last 就是答案';
+    }
+    note.textContent = line;
+    if (st.step >= st.steps.length - 1) ans.textContent = 'F(' + st.n + ') = ' + s.value + '　（演示共 ' + (st.steps.length - 1) + ' 步）';
+    else ans.textContent = '';
+    document.getElementById('fibPrev').disabled = (st.step === 0);
+    document.getElementById('fibNext').disabled = (st.step >= st.steps.length - 1);
+  }
+
+  verSel.addEventListener('change', build);
+  nSel.addEventListener('change', build);
+  document.getElementById('fibPrev').addEventListener('click', function () { if (st.step > 0) { st.step--; render(); } });
+  document.getElementById('fibNext').addEventListener('click', function () { if (st.step < st.steps.length - 1) { st.step++; render(); } });
+  document.getElementById('fibReset').addEventListener('click', function () { st.step = 0; render(); });
+  build();
+})();
+
+/* ===== 演示二：最低票价填表 ===== */
+(function(){
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), a | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  var PRESETS = [
+    { name: '样例 days=[1,4,6,7,8,20] costs=[2,7,15]', days: [1, 4, 6, 7, 8, 20], costs: [2, 7, 15] },
+    { name: '连续出行 1~10 costs=[2,7,15]', days: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], costs: [2, 7, 15] },
+    { name: '稀疏 [1,15,30,60] costs=[2,7,15]', days: [1, 15, 30, 60], costs: [2, 7, 15] },
+    { name: '月票很贵 [1,5,10,20,40] costs=[3,10,60]', days: [1, 5, 10, 20, 40], costs: [3, 10, 60] },
+    { name: '随机 8 个出行日', days: null, costs: [2, 7, 15] }
+  ];
+  var sel = document.getElementById('tkPreset');
+  var board = document.getElementById('tkBoard');
+  var note = document.getElementById('tkNote');
+  var ans = document.getElementById('tkAns');
+  var st = { steps: [], step: 0, p: null };
+  var DUR = [1, 7, 30];
+
+  function makeRandom() {
+    var rnd = mulberry32(20261007);
+    var days = [], last = 0;
+    for (var i = 0; i < 8; i++) { last += 1 + Math.floor(rnd() * 30); days.push(last); }
+    return days;
+  }
+
+  function build() {
+    var p = PRESETS[sel.selectedIndex];
+    var days = p.days ? p.days.slice() : makeRandom();
+    var costs = p.costs.slice();
+    var n = days.length;
+    var dp = [];
+    for (var i = 0; i <= n; i++) dp.push(null);
+    dp[n] = 0;
+    var steps = [{ kind: 'init', dp: dp.slice(), i: -1 }];
+    for (var i2 = n - 1; i2 >= 0; i2--) {
+      var best = null;
+      for (var k = 0; k < 3; k++) {
+        var j = i2;
+        while (j < n && days[i2] + DUR[k] > days[j]) j++;
+        var cand = costs[k] + dp[j];
+        if (best === null || cand < best) best = cand;
+        steps.push({ kind: 'try', i: i2, k: k, j: j, cand: cand, dp: dp.slice(), best: best });
+      }
+      dp[i2] = best;
+      steps.push({ kind: 'set', i: i2, dp: dp.slice(), v: best });
+    }
+    steps.push({ kind: 'done', dp: dp.slice(), v: dp[0] });
+    st.steps = steps; st.step = 0; st.p = { days: days, costs: costs };
+    render();
+  }
+
+  function dayCells(p) {
+    var out = '';
+    for (var i = 0; i < p.days.length; i++) {
+      out += '<span class="cell fill"><span class="idx">i=' + i + '</span>' + p.days[i] + '</span>';
+    }
+    return out;
+  }
+  function dpCells(dp, cur) {
+    var out = '';
+    for (var i = 0; i < dp.length; i++) {
+      var cls = 'cell', val = dp[i];
+      if (val === null) { cls += ' none'; val = '—'; } else cls += ' fill';
+      if (i === cur) cls += ' cur';
+      out += '<span class="' + cls + '"><span class="idx">' + i + '</span>' + val + '</span>';
+    }
+    return out;
+  }
+
+  function render() {
+    var s = st.steps[st.step], p = st.p;
+    var head = '第 ' + (st.step + 1) + ' / ' + st.steps.length + ' 步：';
+    var line = '';
+    board.innerHTML = '<div>出行日：' + dayCells(p) + '</div>' +
+      '<div>dp（下标 0~' + (p.days.length) + '）：' + dpCells(s.dp, s.i) + '</div>' +
+      '<div class="mono">票价：1 天 ' + p.costs[0] + '、7 天 ' + p.costs[1] + '、30 天 ' + p.costs[2] + '</div>';
+    if (s.kind === 'init') line = head + 'dp[' + p.days.length + '] = 0，倒着开始填';
+    else if (s.kind === 'try') {
+      line = head + 'i = ' + s.i + '（第 ' + p.days[s.i] + ' 天）买 ' + DUR[s.k] + ' 天票，盖到第 ' + (p.days[s.i] + DUR[s.k] - 1) +
+        ' 天，跳到 j = ' + s.j + '，花费 ' + p.costs[s.k] + ' + dp[' + s.j + '] = ' + s.cand;
+    } else if (s.kind === 'set') line = head + '三种票取最小，dp[' + s.i + '] = ' + s.v;
+    else line = head + '填完，dp[0] 就是答案';
+    note.textContent = line;
+    if (st.step >= st.steps.length - 1) ans.textContent = '最少花费 = ' + s.v + ' 元';
+    else ans.textContent = '';
+    document.getElementById('tkPrev').disabled = (st.step === 0);
+    document.getElementById('tkNext').disabled = (st.step >= st.steps.length - 1);
+  }
+
+  sel.addEventListener('change', build);
+  document.getElementById('tkPrev').addEventListener('click', function () { if (st.step > 0) { st.step--; render(); } });
+  document.getElementById('tkNext').addEventListener('click', function () { if (st.step < st.steps.length - 1) { st.step++; render(); } });
+  document.getElementById('tkReset').addEventListener('click', function () { st.step = 0; render(); });
+  build();
+})();
+</script>
+</body>
+</html>

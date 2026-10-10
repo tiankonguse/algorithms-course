@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多维费用背包：一和零与盈利计划</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.ctab { border-collapse: collapse; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; margin: 4px 0; }
+.ctab td, .ctab th { border: 1px solid #e2e8f0; padding: 3px 9px; text-align: center; min-width: 26px; }
+.ctab td.cur { outline: 2px solid var(--partial); background: var(--partial-bg); }
+.ctab td.hot { background: var(--full-bg); }
+.ctab th.dim, .ctab td.dim { color: #b6bcc4; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>多维费用背包：一和零与盈利计划</h1>
+      <p class="intro">背包的容量本来只有一个上限。一和零里上限有两条：0 的个数不超过 m、1 的个数不超过 n；盈利计划里限制换成「员工不超过 n」加「利润不少于 minProfit」。递归的参数因此多了一个，表从一张变成一叠。改法还是写递归、加记忆化、改严格位置依赖这三步，只是压掉最外层那一维时，另外两维都得倒着扫。</p>
+
+      <h2>零、两个额度就是两条容量轴</h2>
+      <p>先看一和零：给一堆只含 0 和 1 的字符串，从中挑出一个子集，要求整个子集里 0 的总数不超过 m、1 的总数不超过 n，问最多能挑几个。</p>
+      <p>01 背包挑不挑第 i 件物品，看的是「重量够不够」。这里够不够要两个条件同时成立，所以状态里得同时带着「还剩多少个 0 的额度」和「还剩多少个 1 的额度」。额度是消耗品，挑一个字符串就按它自己的用量扣，两条轴各扣各的。</p>
+      <figure class="fig" id="figAxes"></figure>
+      <p>状态里只要出现「还剩多少额度」这种量，它就是容量维度。一维容量出一条轴，二维容量出两条轴，轴的条数就是可变参数的个数。</p>
+
+      <h2>一、先把递归写出来</h2>
+      <p>定义 <code>f1(strs, i, z, o)</code>：strs[i..] 自由选择，0 的额度还剩 z、1 的额度还剩 o，最多能选几个。</p>
+              <pre class="code"><span class="cm">// 统计一个字符串里 0 和 1 的数量</span>
+    <span class="kw">int</span> zeros, ones;
+
+    <span class="kw">void</span> <span class="fn">countZerosOnes</span>(<span class="kw">const</span> <span class="kw">string</span>&amp; s) {
+        zeros = ones = 0;
+        <span class="kw">for</span> (<span class="kw">char</span> c : s) {
+            c == '0' ? zeros++ : ones++;
+        }
+    }
+
+    <span class="cm">// strs[i..] 自由选择，0 的额度是 z、1 的额度是 o，最多能选多少个</span>
+    <span class="kw">int</span> <span class="fn">f1</span>(vector&lt;<span class="kw">string</span>&gt;&amp; strs, <span class="kw">int</span> i, <span class="kw">int</span> z, <span class="kw">int</span> o) {
+        <span class="kw">if</span> (i == (<span class="kw">int</span>)strs.size()) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">int</span> p1 = f1(strs, i + 1, z, o);
+        <span class="kw">int</span> p2 = 0;
+        countZerosOnes(strs[i]);
+        <span class="kw">if</span> (zeros &lt;= z &amp;&amp; ones &lt;= o) {
+            p2 = 1 + f1(strs, i + 1, z - zeros, o - ones);
+        }
+        <span class="kw">return</span> max(p1, p2);
+    }</pre>
+      <p>两个分支就是选和不选。不选 strs[i]，额度原样交给后面；选它，先看两个额度够不够，够就各扣掉它自己的用量，答案再加一。每个字符串会数一遍 0 和 1 的个数，这一步是 O(字符串长度)，跟状态数比可以忽略。</p>
+      <p>这份递归的分支是指数级的，因为同一组 (i, z, o) 会被从不同的路径反复到达。实测 m = n = 5：</p>
+      <figure class="fig" id="figBlow"></figure>
+      <p>n = 10 时调用 1485 次，n = 25 时 313911 次。每加五个字符串调用次数涨四到十倍，而状态其实只有 len × 6 × 6 个。</p>
+
+      <h2>二、三个可变参数，就是一叠表</h2>
+      <p>加一张同形状的三维表，初始全填 −1，递归开头先查一下。表的大小是每个可变参数的可能性数量相乘：len × (m+1) × (n+1)。</p>
+              <pre class="code"><span class="cm">// 记忆化搜索：可变参数是 (i, z, o)</span>
+    <span class="kw">int</span> <span class="fn">f2</span>(vector&lt;<span class="kw">string</span>&gt;&amp; strs, <span class="kw">int</span> i, <span class="kw">int</span> z, <span class="kw">int</span> o, vector&lt;vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&gt;&amp; dp) {
+        <span class="kw">if</span> (i == (<span class="kw">int</span>)strs.size()) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (dp[i][z][o] != -1) {
+            <span class="kw">return</span> dp[i][z][o];
+        }
+        <span class="kw">int</span> p1 = f2(strs, i + 1, z, o, dp);
+        <span class="kw">int</span> p2 = 0;
+        countZerosOnes(strs[i]);
+        <span class="kw">if</span> (zeros &lt;= z &amp;&amp; ones &lt;= o) {
+            p2 = 1 + f2(strs, i + 1, z - zeros, o - ones, dp);
+        }
+        <span class="kw">return</span> dp[i][z][o] = max(p1, p2);
+    }</pre>
+      <p>LeetCode 的满规模是 600 个字符串、m = n = 100，表里 601 × 101 × 101 = 6130801 个 int，合 23.4 MiB。注意 <code>i == strs.length</code> 那一层不用存，它整层都是 0，这就是后面能压掉一维的入口。</p>
+
+      <h2>三、严格位置依赖：从最后一层往前填</h2>
+      <p>记忆化还带着递归。把依赖画出来就能改成循环：<code>dp[i][z][o]</code> 只读 <code>dp[i+1]</code> 那一层的两个格子，跟 <code>dp[i][z][o]</code> 自己在同一层的邻居没有任何关系。</p>
+              <pre class="code"><span class="cm">// 严格位置依赖：第 i 层的表由第 i+1 层推出来</span>
+    <span class="kw">int</span> <span class="fn">findMaxForm3</span>(vector&lt;<span class="kw">string</span>&gt;&amp; strs, <span class="kw">int</span> m, <span class="kw">int</span> n) {
+        <span class="kw">int</span> len = strs.size();
+        vector&lt;vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&gt; <span class="fn">dp</span>(len + 1, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;(m + 1, vector&lt;<span class="kw">int</span>&gt;(n + 1, 0)));
+        <span class="kw">for</span> (<span class="kw">int</span> i = len - 1; i &gt;= 0; i--) {
+            countZerosOnes(strs[i]);
+            <span class="kw">for</span> (<span class="kw">int</span> z = 0; z &lt;= m; z++) {
+                <span class="kw">for</span> (<span class="kw">int</span> o = 0; o &lt;= n; o++) {
+                    <span class="kw">int</span> p1 = dp[i + 1][z][o];
+                    <span class="kw">int</span> p2 = (zeros &lt;= z &amp;&amp; ones &lt;= o) ? 1 + dp[i + 1][z - zeros][o - ones] : 0;
+                    dp[i][z][o] = max(p1, p2);
+                }
+            }
+        }
+        <span class="kw">return</span> dp[0][m][n];
+    }
+
+    <span class="cm">// 空间压缩：i 这一维滚掉，只剩 z、o 一张二维表，两个额度都倒着扫</span>
+    <span class="kw">int</span> <span class="fn">findMaxForm4</span>(vector&lt;<span class="kw">string</span>&gt;&amp; strs, <span class="kw">int</span> m, <span class="kw">int</span> n) {
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">dp</span>(m + 1, vector&lt;<span class="kw">int</span>&gt;(n + 1, 0));
+        <span class="kw">for</span> (<span class="kw">const</span> <span class="kw">string</span>&amp; s : strs) {
+            countZerosOnes(s);
+            <span class="kw">for</span> (<span class="kw">int</span> z = m; z &gt;= zeros; z--) {
+                <span class="kw">for</span> (<span class="kw">int</span> o = n; o &gt;= ones; o--) {
+                    dp[z][o] = max(dp[z][o], 1 + dp[z - zeros][o - ones]);
+                }
+            }
+        }
+        <span class="kw">return</span> dp[m][n];
+    }</pre>
+      <figure class="fig" id="figDep"></figure>
+      <p>蓝色那条是「不选」，两个额度都不动，直接抄下一层的同一格；橙色那条是「选」，两个额度各减掉当前字符串的用量。i 从 len−1 递减，让 i+1 层永远先算好。</p>
+
+      <h2>四、空间压缩：把字符串那一维滚掉</h2>
+      <p>既然本层只读下一层，那第 i+2 层及以前就永远用不到了。整叠表可以只留一张 (m+1) × (n+1) 的二维表，让它在每一轮里换一次身份。</p>
+      <p>先记下当前字符串用了几个 0、几个 1，然后两个额度都从大到小扫。写成一行就是 <code>dp[z][o] = max(dp[z][o], 1 + dp[z−zeros][o−ones])</code>。</p>
+      <figure class="fig" id="figRoll"></figure>
+      <p>倒着扫的理由和 01 背包完全一样：等号右边的 <code>dp[z−zeros][o−ones]</code> 必须是上一层留下的旧值。正着扫会读到本层刚写好的新值，等于同一个字符串被挑了两次。</p>
+      <p>实测（600 个字符串、m = n = 100）：三维表 8.1 ms、23.4 MiB；压缩版 2.2 ms、39.8 KiB。空间差 601 倍，时间还快了 3.7 倍，因为 23.4 MiB 的表早就跑出 CPU 缓存了，而 39.8 KiB 塞得进 L1。</p>
+      <p>压缩版的内层循环次数也从 6120600 降到 3578630，因为 <code>z &lt; zeros</code>、<code>o &lt; ones</code> 的那些格子根本不用进循环。</p>
+
+      <div class="viz" id="viz1">
+        <p class="viz-title">演示一：一和零逐格填表，看看额度是怎么被扣掉的</p>
+        <div id="v1board"></div>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>数据
+            <select id="v1case"></select>
+          </label>
+          <button type="button" id="v1prev">上一步</button>
+          <button type="button" id="v1next">下一步</button>
+          <button type="button" id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <h2>五、盈利计划：第三个维度是「还差多少利润」</h2>
+      <p>再给一道同形状的题。集团里有 n 名员工，第 i 种工作需要 group[i] 个人、产生 profit[i] 的利润，同一个人不能同时做两项工作。选出一个工作子集，要求用工总数不超过 n、利润至少 minProfit，问有多少种选法，答案对 1e9+7 取模。</p>
+      <p>员工那一头是「不能超」，跟一和零的两个额度一样，用了就减；利润那一头是「不能少」，于是把参数定义成「还差多少」。三个可变参数 <code>(i, r, s)</code>：来到 i 号工作，员工还剩 r 个，利润还差 s 才达标。</p>
+              <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MOD = 1000000007;
+
+    <span class="cm">// i 号工作，员工还剩 r 个，利润还差 s 才达标，返回方案数</span>
+    <span class="kw">int</span> <span class="fn">f2</span>(vector&lt;<span class="kw">int</span>&gt;&amp; g, vector&lt;<span class="kw">int</span>&gt;&amp; p, <span class="kw">int</span> i, <span class="kw">int</span> r, <span class="kw">int</span> s, vector&lt;vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&gt;&amp; dp) {
+        <span class="kw">if</span> (r &lt;= 0) {
+            <span class="kw">return</span> s == 0 ? 1 : 0;
+        }
+        <span class="kw">if</span> (i == (<span class="kw">int</span>)g.size()) {
+            <span class="kw">return</span> s == 0 ? 1 : 0;
+        }
+        <span class="kw">if</span> (dp[i][r][s] != -1) {
+            <span class="kw">return</span> dp[i][r][s];
+        }
+        <span class="kw">long</span> <span class="kw">long</span> ans = f2(g, p, i + 1, r, s, dp);
+        <span class="kw">if</span> (g[i] &lt;= r) {
+            ans += f2(g, p, i + 1, r - g[i], max(0, s - p[i]), dp);
+        }
+        <span class="kw">return</span> dp[i][r][s] = ans % MOD;
+    }</pre>
+      <p>这里有个必须处理的细节：<code>s − p[i]</code> 要夹到 0。不夹的话 s 会一路减成负数，dp 表的下标跟着越界；夹到 0 之后，「还差 0」就等于「已经达标」，判定从 <code>s &lt;= 0</code> 简化成 <code>s == 0</code>。</p>
+      <figure class="fig" id="figProfit"></figure>
+      <p>员工用光了（r ≤ 0）也直接返回，因为再做不了任何工作。这个分支和 <code>i == g.length</code> 那个分支的判定条件是一样的，谁先命中都行。</p>
+      <p>严格填表时，i 从 m−1 递减，r 和 s 也都从大到小扫。初始状态是「一件工作都不选」，这时候只要利润要求不大于 0 就算达标，所以 <code>dp[r][0] = 1</code>，从 r = 0 铺到 r = n。</p>
+              <pre class="code"><span class="cm">// i 这一维滚掉：只剩「还剩多少员工 r」和「利润还差多少 s」</span>
+    <span class="kw">int</span> <span class="fn">profitableSchemes</span>(vector&lt;<span class="kw">int</span>&gt;&amp; group, vector&lt;<span class="kw">int</span>&gt;&amp; profit, <span class="kw">int</span> n, <span class="kw">int</span> minProfit) {
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">dp</span>(n + 1, vector&lt;<span class="kw">int</span>&gt;(minProfit + 1, 0));
+        <span class="kw">for</span> (<span class="kw">int</span> r = 0; r &lt;= n; r++) {
+            dp[r][0] = 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = (<span class="kw">int</span>)group.size() - 1; i &gt;= 0; i--) {
+            <span class="kw">for</span> (<span class="kw">int</span> r = n; r &gt;= 0; r--) {
+                <span class="kw">for</span> (<span class="kw">int</span> s = minProfit; s &gt;= 0; s--) {
+                    <span class="kw">long</span> <span class="kw">long</span> p1 = dp[r][s];
+                    <span class="kw">long</span> <span class="kw">long</span> p2 = group[i] &lt;= r ? dp[r - group[i]][max(0, s - profit[i])] : 0;
+                    dp[r][s] = (p1 + p2) % MOD;
+                }
+            }
+        }
+        <span class="kw">return</span> dp[n][minProfit];
+    }</pre>
+      <p>实测（100 项工作、n = 100、minProfit = 100）：记忆化三维 1.1 ms、3.9 MiB；压缩二维 0.76 ms、39.8 KiB。这题的规模小一号，空间从 3.9 MiB 降到 39.8 KiB，省了 100 倍。</p>
+
+      <div class="viz" id="viz2">
+        <p class="viz-title">演示二：盈利计划的扫描顺序，以及「谁读谁」</p>
+        <div id="v2board"></div>
+        <p class="viz-note" id="v2note"></p>
+        <p class="viz-answer" id="v2ans"></p>
+        <div class="viz-controls">
+          <label>数据
+            <select id="v2case"></select>
+          </label>
+          <button type="button" id="v2prev">上一步</button>
+          <button type="button" id="v2next">下一步</button>
+          <button type="button" id="v2last">跳到结果</button>
+          <button type="button" id="v2reset">重置</button>
+        </div>
+      </div>
+
+      <h2>六、两道题压掉的是同一维</h2>
+      <p>一和零压掉的是字符串下标 i，盈利计划压掉的是工作下标 i。两道题里这一维都排在最外面，而且都满足「本层只读下一层」，所以它是唯一能被滚掉的一维。另外两维是额度和要求，它们互相之间有依赖，压缩版里必须留在表上，而且要倒着扫。</p>
+      <p>反过来说，如果状态定义成 <code>(z, o, i)</code>、把 i 放在最里层，那谁也压不掉，只能老老实实开整叠表。谁在最外层不是随便定的。</p>
+
+      <h2>七、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间复杂度</th><th>空间复杂度</th><th>说明</th></tr>
+        <tr><td>一和零 · 暴力递归</td><td>指数级</td><td>O(len) 递归栈</td><td>实测 len=25 调用 313911 次</td></tr>
+        <tr><td>一和零 · 记忆化搜索</td><td>O(len · m · n)</td><td>O(len · m · n)</td><td>每个状态只算一次，表 23.4 MiB</td></tr>
+        <tr><td>一和零 · 严格三维</td><td>O(len · m · n)</td><td>O(len · m · n)</td><td>没有递归开销，层内缓存友好</td></tr>
+        <tr><td>一和零 · 压缩二维</td><td>O(len · m · n)</td><td>O(m · n)</td><td>39.8 KiB，实测还快 3.7 倍</td></tr>
+        <tr><td>盈利计划 · 记忆化搜索</td><td>O(m · n · p)</td><td>O(m · n · p)</td><td>p 是 minProfit，s 要夹到 0</td></tr>
+        <tr><td>盈利计划 · 压缩二维</td><td>O(m · n · p)</td><td>O(n · p)</td><td>r、s 都倒着扫</td></tr>
+      </table>
+      <p>两道题的时间复杂度都没变，压缩只动空间。这两个 O 里的 n 含义不同：一和零里是 1 的额度，盈利计划里是员工总数，别混着比较。</p>
+
+      <h2>八、总结</h2>
+      <p>容量维度有几个，可变参数就有几个，这是三维动态规划最直接的一类来源。写递归、加记忆化、改成严格位置依赖，这三步和二维完全一样。</p>
+      <p>压缩的对象是最外层那一维，判据是「本层只读下一层」。压完剩下两维还在同一张表上，只要它们之间存在依赖，就必须倒着扫，这条规矩从一维背包一路沿用到三维。</p>
+      <p>两个容易漏的地方：一个是 s 这类「要求」维度要夹到 0，不夹就下标越界；另一个是状态定义里谁放在最外层，放错了就没有可压的维度。</p>
+      <p>后面「每个格子的枚举代价不是 O(1)」这一类的题会越来越多，三维表也一样：表的大小乘上每格的枚举量，才是真实的时间。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/ones-and-zeroes/" target="_blank">一和零</a></td><td><a href="https://leetcode.cn/problems/ones-and-zeroes/" target="_blank">leetcode.cn/problems/ones-and-zeroes</a></td></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/profitable-schemes/" target="_blank">盈利计划</a></td><td><a href="https://leetcode.cn/problems/profitable-schemes/" target="_blank">leetcode.cn/problems/profitable-schemes</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解069【必备】从递归入手三维动态规划</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      (o.mono ? ' font-family="ui-monospace, Menlo, monospace"' : '') + '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx == null ? 4 : o.rx) +
+      '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.border) + '"' + (o.sw ? ' stroke-width="' + o.sw + '"' : '') + '/>';
+  }
+  function arrow(x1, y1, x2, y2, color) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + color +
+      '" stroke-width="1.6" marker-end="url(#' + (color === C.orange ? 'mkO' : 'mkB') + ')"/>';
+  }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' +
+      '<defs><marker id="mkB" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">' +
+      '<path d="M0,0 L7,3 L0,6 z" fill="' + C.blue + '"/></marker>' +
+      '<marker id="mkO" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">' +
+      '<path d="M0,0 L7,3 L0,6 z" fill="' + C.orange + '"/></marker></defs>' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+
+  // ---- 图 1：一条容量轴 vs 两条容量轴
+  function figAxes() {
+    var s = '';
+    s += txt(170, 26, '01 背包：一条容量轴', { size: 13, weight: '600' });
+    s += rect(60, 120, 180, 22, { fill: C.blueBg, stroke: C.blue });
+    s += txt(150, 135, '已用容量 ≤ m', { size: 11, fill: C.blue });
+    s += '<line x1="55" y1="142" x2="300" y2="142" stroke="' + C.blue + '" stroke-width="2"/>';
+    s += txt(178, 164, '0 的额度', { size: 12, fill: C.dim });
+    s += txt(178, 188, '一个上限，够不够一条线说了算', { size: 11, fill: C.dim });
+
+    s += txt(510, 26, '一和零：两条容量轴', { size: 13, weight: '600' });
+    s += rect(395, 82, 175, 60, { fill: C.blueBg, stroke: C.blue });
+    s += txt(482, 110, '两个上限', { size: 12, fill: C.blue });
+    s += txt(482, 130, '同时成立才能选', { size: 11, fill: C.blue });
+    s += '<line x1="390" y1="142" x2="625" y2="142" stroke="' + C.blue + '" stroke-width="2"/>';
+    s += '<line x1="390" y1="142" x2="390" y2="62" stroke="' + C.blue + '" stroke-width="2"/>';
+    s += txt(510, 164, '0 的额度', { size: 12, fill: C.dim });
+    s += txt(384, 56, '1 的额度', { size: 12, fill: C.dim, anchor: 'start' });
+    s += txt(510, 188, '两条上限都得扣', { size: 11, fill: C.dim });
+    wrap('figAxes', 200, s, '容量上限从一条轴变成两条轴，递归里就多出一个参数：额度剩下多少，它自己就是一个维度。');
+  }
+
+  // ---- 图 2：暴力递归的调用次数
+  function figBlow() {
+    var s = '';
+    var data = [[10, 1485], [15, 14892], [20, 82159], [25, 313911]];
+    var base = 190, x0 = 130, step = 130, bw = 56;
+    function yOf(v) { return base - (Math.log10(v) - 3) * 47; }
+    for (var e = 3; e <= 5; e++) {
+      var y = base - (e - 3) * 47;
+      s += '<line x1="95" y1="' + y + '" x2="620" y2="' + y + '" stroke="#eef1f4"/>';
+      s += txt(86, y + 4, '10^' + e, { size: 10, fill: C.dim, anchor: 'end' });
+    }
+    for (var i = 0; i < data.length; i++) {
+      var x = x0 + i * step, y2 = yOf(data[i][1]);
+      s += rect(x, y2, bw, base - y2, { fill: C.blueBg, stroke: C.blue });
+      s += txt(x + bw / 2, y2 - 8, String(data[i][1]), { size: 11, fill: C.blue });
+      s += txt(x + bw / 2, base + 20, 'n=' + data[i][0], { size: 11, fill: C.dim });
+    }
+    s += '<line x1="95" y1="' + base + '" x2="620" y2="' + base + '" stroke="' + C.border + '"/>';
+    s += txt(357, 232, '字符串个数 n（m = n = 5，纵轴是对数刻度）', { size: 11, fill: C.dim });
+    wrap('figBlow', 250, s, '状态只有 len × 6 × 6 个，调用次数却按指数长：反复到达同一组 (i, z, o)，每次都要从头再算。');
+  }
+
+  // ---- 图 3：dp[i] 依赖 dp[i+1]
+  function figDep() {
+    var s = '', cw = 26, gap = 5, M = 3, N = 3, pitch = cw + gap;
+    var gw = (N + 1) * cw + N * gap;
+    var tx = 310, ty = 46, bx = 310, by = 200;
+    s += txt(tx + gw / 2, ty - 14, '本层 dp[i]', { size: 12, fill: C.blue, weight: '600' });
+    s += txt(bx + gw / 2, by - 14, '下一层 dp[i+1]', { size: 12, fill: C.dim, weight: '600' });
+    for (var z = 0; z <= M; z++) {
+      for (var o = 0; o <= N; o++) {
+        var tgt = (z === 3 && o === 2);
+        s += rect(tx + o * pitch, ty + z * pitch, cw, cw, { fill: tgt ? C.orangeBg : '#fff', stroke: tgt ? C.orange : C.border });
+        s += txt(tx + o * pitch + cw / 2, ty + z * pitch + 17, z + ',' + o, { size: 8, fill: tgt ? C.orange : C.dim });
+        s += rect(bx + o * pitch, by + z * pitch, cw, cw, { fill: '#fff', stroke: C.border });
+        s += txt(bx + o * pitch + cw / 2, by + z * pitch + 17, z + ',' + o, { size: 8, fill: C.dim });
+      }
+    }
+    function route(sz, so, y2, lane, color) {
+      var y1 = by + sz * pitch + cw / 2;
+      return '<path d="M ' + bx + ' ' + y1 + ' H ' + lane + ' V ' + y2 + ' H ' + (tx - 2) + '" fill="none" stroke="' +
+        color + '" stroke-width="1.6" marker-end="url(#' + (color === C.orange ? 'mkO' : 'mkB') + ')"/>';
+    }
+    s += route(3, 2, 142, 272, C.blue);
+    s += route(2, 1, 154, 246, C.orange);
+    s += txt(452, 96, '蓝色 = 不选 strs[i]', { size: 12, fill: C.blue, anchor: 'start' });
+    s += txt(452, 116, '额度不动，抄下一层同一格', { size: 11, fill: C.dim, anchor: 'start' });
+    s += txt(452, 158, '橙色 = 选 strs[i]', { size: 12, fill: C.orange, anchor: 'start' });
+    s += txt(452, 178, '两个额度各减掉自己的用量', { size: 11, fill: C.dim, anchor: 'start' });
+    s += txt(452, 198, '这里取 zeros=1、ones=1', { size: 11, fill: C.dim, anchor: 'start' });
+    s += txt(452, 232, '橙框就是本层正在算的那一格', { size: 11, fill: C.dim, anchor: 'start' });
+    wrap('figDep', 330, s, '两个箭头都指向同一格 dp[i][z][o]：本层只读下一层，读的位置全在下一层里，同一层的邻居一个都不碰。');
+  }
+
+  // ---- 图 4：压缩后倒着扫
+  function figRoll() {
+    var s = '', cw = 34, gap = 8, M = 3, N = 3, zeros = 1, ones = 1;
+    var x0 = 60, y0 = 60;
+    var order = {}, idx = 0;
+    for (var z = M; z >= 0; z--) for (var o = N; o >= 0; o--) order[z + ',' + o] = ++idx;
+    var cur = order['2,1'];
+    for (var z2 = 0; z2 <= M; z2++) {
+      for (var o2 = 0; o2 <= N; o2++) {
+        var k = order[z2 + ',' + o2];
+        var isCur = (z2 === 2 && o2 === 1);
+        var fill = isCur ? C.orangeBg : (k < cur ? C.blueBg : '#fff');
+        var stroke = isCur ? C.orange : (k < cur ? C.blue : C.border);
+        s += rect(x0 + o2 * (cw + gap), y0 + z2 * (cw + gap), cw, cw, { fill: fill, stroke: stroke });
+        s += txt(x0 + o2 * (cw + gap) + cw / 2, y0 + z2 * (cw + gap) + 23, String(k), { size: 12, fill: stroke, weight: '600' });
+        s += txt(x0 + o2 * (cw + gap) + cw / 2, y0 + z2 * (cw + gap) + 12, 'z' + z2 + o2, { size: 8, fill: C.dim });
+      }
+    }
+    s += txt(x0 + 210, 60, '圆角框里的数字是扫描顺序', { size: 11, fill: C.dim, anchor: 'start' });
+    s += txt(x0 + 210, 84, '蓝色 1~6：本轮已经更新过', { size: 11, fill: C.blue, anchor: 'start' });
+    s += txt(x0 + 210, 108, '橙色 7：正在写的格子', { size: 11, fill: C.orange, anchor: 'start' });
+    s += txt(x0 + 210, 132, '白色 8~16：还是上一层旧值', { size: 11, fill: C.dim, anchor: 'start' });
+    s += txt(x0 + 210, 164, '第 7 个格子读 dp[z−1][o−1] = (1,0)，', { size: 11, fill: C.dim, anchor: 'start' });
+    s += txt(x0 + 210, 184, '它在顺序里排第 12 位，本次还没被碰过', { size: 11, fill: C.dim, anchor: 'start' });
+    var cc = [x0 + 1 * (cw + gap) + cw / 2, y0 + 1 * (cw + gap) + cw / 2];
+    var dd = [x0 + 1 * (cw + gap) + cw / 2, y0 + 2 * (cw + gap) + cw / 2];
+    s += arrow(cc[0], cc[1] - 4, dd[0], dd[1] - cw / 2 - 2, C.orange);
+    wrap('figRoll', 230, s, 'z、o 都从大到小扫，读到的 (z−zeros, o−ones) 一定排在当前格后面，也就是还没被本轮改过的旧值。');
+  }
+
+  // ---- 图 5：盈利计划的 s 夹到 0
+  function figProfit() {
+    var s = '';
+    s += txt(150, 26, '三个可变参数', { size: 13, weight: '600' });
+    var items = [['i', '来到第几号工作'], ['r', '员工额度还剩几个'], ['s', '利润还差多少才达标']];
+    for (var i = 0; i < items.length; i++) {
+      var y = 50 + i * 44;
+      s += rect(56, y, 190, 34, { fill: C.bg, stroke: C.border });
+      s += txt(74, y + 23, items[i][0], { size: 13, fill: C.orange, weight: '600' });
+      s += txt(150, y + 22, items[i][1], { size: 12, fill: C.text });
+    }
+    s += txt(470, 26, 's − p[i] 要夹到 0', { size: 13, weight: '600' });
+    var ax = 380, ay = 130, unit = 38;
+    function X(sv) { return ax + (sv + 3) * unit; }
+    s += rect(X(-3), ay - 22, 3 * unit, 44, { fill: C.blueBg, stroke: C.blue });
+    s += txt(X(-1.5), ay + 42, 's ≤ 0 就是达标', { size: 11, fill: C.blue });
+    s += '<line x1="' + X(-3) + '" y1="' + ay + '" x2="' + X(3.4) + '" y2="' + ay + '" stroke="' + C.gray + '" stroke-width="1.5"/>';
+    [-2, 0, 2].forEach(function (v) {
+      s += '<line x1="' + X(v) + '" y1="' + (ay - 4) + '" x2="' + X(v) + '" y2="' + (ay + 4) + '" stroke="' + C.gray + '"/>';
+      s += txt(X(v), ay + 18, String(v), { size: 10, fill: C.dim });
+    });
+    s += '<circle cx="' + X(1) + '" cy="' + ay + '" r="4" fill="' + C.orange + '"/>';
+    s += txt(X(1) + 14, ay - 8, 's=1', { size: 11, fill: C.orange, anchor: 'start' });
+    s += arrow(X(1) - 4, ay - 12, X(-1.6), ay - 12, C.gray);
+    s += txt(X(-0.5), ay - 26, '减 p[i]=3 会到 −2', { size: 11, fill: C.dim });
+    s += arrow(X(-2.4), ay + 30, X(-0.2), ay + 30, C.blue);
+    s += txt(470, 186, '夹到 0 之后下标安全，', { size: 11, fill: C.dim });
+    s += txt(470, 204, '「还差 0」就等于「已经达标」', { size: 11, fill: C.dim });
+    wrap('figProfit', 240, s, '「不能少」的那一维记成「还差多少」，减过 0 就夹在 0 上：表的下标不越界，达标判定也变成一次相等比较。');
+  }
+
+  figAxes(); figBlow(); figDep(); figRoll(); figProfit();
+
+  // ================= 演示一：一和零 =================
+  var ONES = {
+    0: { strs: ['10', '0', '1'], m: 1, n: 1, ans: 2, label: '["10","0","1"]，m=1，n=1' },
+    1: { strs: ['10', '0', '1'], m: 2, n: 2, ans: 3, label: '["10","0","1"]，m=2，n=2' },
+    2: { strs: ['01', '10', '1'], m: 2, n: 2, ans: 2, label: '["01","10","1"]，m=2，n=2' }
+  };
+
+  function onesSteps(cfg) {
+    var m = cfg.m, n = cfg.n, dp = [], z, o, i;
+    for (z = 0; z <= m; z++) { dp.push([]); for (o = 0; o <= n; o++) dp[z].push(0); }
+    var steps = [];
+    for (i = 0; i < cfg.strs.length; i++) {
+      var str = cfg.strs[i], zc = 0, oc = 0, t;
+      for (t = 0; t < str.length; t++) { if (str[t] === '0') zc++; else oc++; }
+      for (z = m; z >= zc; z--) {
+        for (o = n; o >= oc; o--) {
+          var before = dp[z][o], src = dp[z - zc][o - oc], after = Math.max(before, 1 + src);
+          dp[z][o] = after;
+          steps.push({ i: i, str: str, zc: zc, oc: oc, z: z, o: o, before: before, src: src, after: after,
+                       snap: dp.map(function (row) { return row.slice(); }) });
+        }
+      }
+    }
+    return { steps: steps, ans: dp[m][n] };
+  }
+
+  var v1 = { step: 0, data: null, cfg: null };
+
+  function v1Table(snap, cfg, cell) {
+    var h = '<table class="ctab"><tr><th>z \\ o</th>', o, z;
+    for (o = 0; o <= cfg.n; o++) h += '<th>o=' + o + '</th>';
+    h += '</tr>';
+    for (z = 0; z <= cfg.m; z++) {
+      h += '<tr><th>z=' + z + '</th>';
+      for (o = 0; o <= cfg.n; o++) {
+        var cls = (cell && cell[0] === z && cell[1] === o) ? 'cur' : (((z >= (cell ? cell[2] : -1)) && (o >= (cell ? cell[3] : -1))) ? 'hot' : '');
+        h += '<td class="' + cls + '">' + snap[z][o] + '</td>';
+      }
+      h += '</tr>';
+    }
+    return h + '</table>';
+  }
+
+  function v1Render() {
+    var st = v1.data.steps, cfg = v1.cfg;
+    var at = Math.min(v1.step, st.length - 1);
+    var cur = st[at];
+    document.getElementById('v1board').innerHTML = v1Table(cur.snap, cfg, [cur.z, cur.o, cur.zc, cur.oc]);
+    document.getElementById('v1note').textContent =
+      '第 ' + (at + 1) + ' / ' + st.length + ' 步：处理 strs[' + cur.i + '] = "' + cur.str + '"（0 有 ' + cur.zc +
+      ' 个、1 有 ' + cur.oc + ' 个），写 dp[' + cur.z + '][' + cur.o + ']。不选 = ' + cur.before +
+      '；选 = 1 + dp[' + (cur.z - cur.zc) + '][' + (cur.o - cur.oc) + '] = 1 + ' + cur.src + ' = ' + (1 + cur.src) +
+      '，取 ' + cur.after + '。';
+    document.getElementById('v1ans').textContent = (v1.step >= st.length - 1)
+      ? '答案 = dp[' + cfg.m + '][' + cfg.n + '] = ' + v1.data.ans : '';
+    document.getElementById('v1prev').disabled = (v1.step === 0);
+    document.getElementById('v1next').disabled = (v1.step >= st.length - 1);
+  }
+
+  function v1Build() {
+    v1.cfg = ONES[document.getElementById('v1case').value];
+    v1.data = onesSteps(v1.cfg);
+    v1.step = 0;
+    v1Render();
+  }
+
+  (function () {
+    var sel = document.getElementById('v1case'), k;
+    for (k = 0; k < 3; k++) {
+      var op = document.createElement('option');
+      op.value = String(k); op.textContent = ONES[k].label;
+      sel.appendChild(op);
+    }
+  })();
+  document.getElementById('v1case').addEventListener('change', v1Build);
+  document.getElementById('v1prev').addEventListener('click', function () { if (v1.step > 0) { v1.step--; v1Render(); } });
+  document.getElementById('v1next').addEventListener('click', function () { if (v1.step < v1.data.steps.length - 1) { v1.step++; v1Render(); } });
+  document.getElementById('v1reset').addEventListener('click', function () { v1.step = 0; v1Render(); });
+  v1Build();
+
+  // ================= 演示二：盈利计划 =================
+  var PROF = {
+    0: { n: 5, mp: 3, g: [2, 2], p: [2, 3], ans: 2, label: 'n=5，minProfit=3，group=[2,2]，profit=[2,3]' },
+    1: { n: 4, mp: 2, g: [2, 2], p: [2, 3], ans: 3, label: 'n=4，minProfit=2，group=[2,2]，profit=[2,3]' },
+    2: { n: 4, mp: 2, g: [1, 2, 3], p: [1, 1, 1], ans: 2, label: 'n=4，minProfit=2，group=[1,2,3]，profit=[1,1,1]' }
+  };
+
+  function profSteps(cfg) {
+    var n = cfg.n, mp = cfg.mp, r, s, i, dp = [];
+    for (r = 0; r <= n; r++) { dp.push([]); for (s = 0; s <= mp; s++) dp[r].push(0); }
+    for (r = 0; r <= n; r++) dp[r][0] = 1;
+    var steps = [{ init: true, snap: dp.map(function (x) { return x.slice(); }) }];
+    for (i = cfg.g.length - 1; i >= 0; i--) {
+      for (r = n; r >= 0; r--) {
+        for (s = mp; s >= 0; s--) {
+          var p1 = dp[r][s];
+          var p2 = cfg.g[i] <= r ? dp[r - cfg.g[i]][Math.max(0, s - cfg.p[i])] : 0;
+          dp[r][s] = (p1 + p2) % 1000000007;
+          steps.push({ i: i, r: r, s: s, p1: p1, p2: p2, after: dp[r][s],
+                       snap: dp.map(function (x) { return x.slice(); }) });
+        }
+      }
+    }
+    return { steps: steps, ans: dp[n][mp] };
+  }
+
+  var v2 = { step: 0, data: null, cfg: null };
+
+  function v2Table(snap, cfg, cell) {
+    var h = '<table class="ctab"><tr><th>r \\ s</th>', s, r;
+    for (s = 0; s <= cfg.mp; s++) h += '<th>s=' + s + '</th>';
+    h += '</tr>';
+    for (r = 0; r <= cfg.n; r++) {
+      h += '<tr><th>r=' + r + '</th>';
+      for (s = 0; s <= cfg.mp; s++) {
+        var cls = (cell && cell[0] === r && cell[1] === s) ? 'cur' : '';
+        h += '<td class="' + cls + '">' + snap[r][s] + '</td>';
+      }
+      h += '</tr>';
+    }
+    return h + '</table>';
+  }
+
+  function v2Render() {
+    var st = v2.data.steps, cfg = v2.cfg;
+    var at = Math.min(v2.step, st.length - 1);
+    var cur = st[at];
+    document.getElementById('v2board').innerHTML = v2Table(cur.snap, cfg, cur.init ? null : [cur.r, cur.s]);
+    if (cur.init) {
+      document.getElementById('v2note').textContent = '初始状态：一件工作都不选，dp[r][0] = 1，其余是 0。';
+    } else {
+      document.getElementById('v2note').textContent =
+        '第 ' + at + ' / ' + (st.length - 1) + ' 步：i=' + cur.i + '（需要 ' + cfg.g[cur.i] + ' 人、赚 ' + cfg.p[cur.i] +
+        '），写 dp[' + cur.r + '][' + cur.s + ']。不选 = ' + cur.p1 +
+        '；要做这件工作就读 dp[' + (cur.r - cfg.g[cur.i]) + '][' + Math.max(0, cur.s - cfg.p[cur.i]) + '] = ' + cur.p2 +
+        '，相加取模得 ' + cur.after + '。';
+    }
+    document.getElementById('v2ans').textContent = (v2.step >= st.length - 1)
+      ? '答案 = dp[' + cfg.n + '][' + cfg.mp + '] = ' + v2.data.ans : '';
+    document.getElementById('v2prev').disabled = (v2.step === 0);
+    document.getElementById('v2next').disabled = (v2.step >= st.length - 1);
+  }
+
+  function v2Build() {
+    v2.cfg = PROF[document.getElementById('v2case').value];
+    v2.data = profSteps(v2.cfg);
+    v2.step = 0;
+    v2Render();
+  }
+
+  (function () {
+    var sel = document.getElementById('v2case'), k;
+    for (k = 0; k < 3; k++) {
+      var op = document.createElement('option');
+      op.value = String(k); op.textContent = PROF[k].label;
+      sel.appendChild(op);
+    }
+  })();
+  document.getElementById('v2case').addEventListener('change', v2Build);
+  document.getElementById('v2prev').addEventListener('click', function () { if (v2.step > 0) { v2.step--; v2Render(); } });
+  document.getElementById('v2next').addEventListener('click', function () { if (v2.step < v2.data.steps.length - 1) { v2.step++; v2Render(); } });
+  document.getElementById('v2last').addEventListener('click', function () { v2.step = v2.data.steps.length - 1; v2Render(); });
+  document.getElementById('v2reset').addEventListener('click', function () { v2.step = 0; v2Render(); });
+  v2Build();
+})();
+</script>
+</body>
+</html>

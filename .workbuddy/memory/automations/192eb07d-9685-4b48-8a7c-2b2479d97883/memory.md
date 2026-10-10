@@ -1,6 +1,24 @@
 # 自动化运行记录：转换下一课
 
-## 2026-10-03 00:00
+## 2026-10-10 00:00
+- 任务：转换下一课 → prompt.md「下一课 073（背包dp-01背包、有依赖的背包）」，抢锁成功，主循环直做。
+- 执行：产出 4 页并入「入门」组（lis-ext 之后、graph-build 之前）：knapsack-01 / knapsack-subset / knapsack-dependent / knapsack-topk。
+  - 七题 C++ 手改（低号课无「C++ 塞注释」版），4 种子 × 3000 轮对拍全绿；全部正文数字在 /tmp/cpp073 实测（耗时、内存、错误率、具体反例）。
+  - 8 个演示 × 40 个 select 组合逐帧点到末帧，答案与 C++ 逐项一致（自写 /tmp/br073.js）。
+  - 自检：四页 verify_pages PASS、verify_home 283 卡片 PASS、杂字/AI 味扫描 CLEAN（修掉两处修辞否定、两处破折号）。
+  - json 279 → 283（六字段全齐），锁已释放。
+- 环境备忘：本环境 node 路径是 `~/.workbuddy/binaries/node/versions/22.22.2-6/bin/node`（不是 22.22.2）；verify_pages.js 这次正常工作（不像 071 那次全 0）。
+- 无遗留问题。下一课 074。
+
+## 2026-10-09 00:08
+- 任务：转换下一课 → prompt.md「下一课 071（子数组最大累加和与扩展-下）」，抢锁成功，主循环直做。
+- 执行：产出 3 页并入「入门」组（house-robber 之后）：subarray-product-mod7 / subarray-pre-suffix / subarray-change-once。
+  - 六题 C++ 手改 + 4 种子 × 3000 轮对拍 0 mismatch；全部正文数字实测（错误率、性能、具体反例）。
+  - 环境坑：verify_pages.js 在 Chrome 155 下对任何页全 0（已知好页也 0），自写 /tmp/probe071.js（/json/new + 页面级 WS）等价覆盖；verify_home 正常。
+  - 自写 br071.js 把 6 演示 55 个 select 组合逐帧点到末帧，答案与 C++ 逐项一致；修掉 LC689 演示 prefix 索引错、大数显示、figWin 文本越界三处。
+  - json 273 → 276（只增不删、六字段全齐），首页 276 卡片 PASS，杂字/AI 味扫描 CLEAN，锁已释放。
+- 无遗留问题。下一课 072。
+
 - 任务：转换下一课 → 读取 prompt.md 得到「下一课 164（Kruskal 重构树）」。
 - 执行：按技能 course-site-page 主循环直做模式完成全部流程。
   - 抽取 PPT 文本（/tmp/ppt164.txt）与 7 份 C++（/tmp/cpp164），全部编译通过（题 4 需 -std=c++14，因 `visit` 与 std::visit 冲突）。
@@ -31,6 +49,15 @@
   - 5 张 SVG + 2 个演示（环形数组操作台 3 序列 × 4 版本；双链表操作台 2 × 2）；自写 `/tmp/br016.js` 把 12 + 4 个分支全跑完，无 JS 错误、无 bbox 越界。
   - 自检：verify_pages PASS（figs/svg 5/5、nav 161、viz 2、code 4、pager「最小栈 | 离散化」）、verify_home PASS（161 卡片）、AI 味与杂字扫描干净。json 160 → 161。
   - 收口：prompt.md（016 已完成、下一课 017）、memory 日志 2026-10-05.md、技能第十二节补了四条经验（切片替换炸文件、rebuild 停末帧、模拟器要防断链、随机序列要加权）。
+- 无遗留问题。
+
+## 2026-10-07 00:00
+- 任务：转换下一课 → prompt.md「下一课 058（洪水填充）」，抢锁成功后按技能 course-site-page 主循环直做。
+- 执行：产出 3 页并入「入门」组（union-find-malware 之后、discretize 之前）：flood-fill-basic（原理 + 岛屿数量 + 被围绕的区域）、flood-fill-island（最大人工岛：编号 + 面积表 + visited 去重）、flood-fill-bricks（打砖块：反向补砖 + 感染计数）。
+  - 4 题各 6000 组对拍全绿（打砖块暴力生成器要先滤出「开局稳定」的砖）；全部正文数字实测（调用次数 4n²+1、272×272 能过 274×274 段错误、被围绕顺向 vs 反向 2126.76/0.44ms、不去重错误率 58.31%、三坑 14.82%/69.46%/0%、正向模拟 2596.87ms vs 反向 0.72ms）。
+  - 13 张 SVG + 6 个演示；`/tmp/br058.js` 走 CDP 把 24 组预设逐帧点到末帧，答案与 C++ 实测全一致（两次 FAIL 均为验证脚本期望串写错）。
+  - 自检：三页 verify_pages PASS、相邻页 pager 链双向正确、verify_home 240 卡片 PASS、全站 240 页 verify_pages 全 PASS、杂字/AI 味扫描 CLEAN（修掉三处破折号、一处修辞否定、三处图内重叠）。
+  - 收口：json 237 → 240（六字段全齐）、prompt.md（058 完成、下一课 059）、memory 日志 2026-10-07.md、锁释放。
 - 无遗留问题。
 
 ## 2026-10-06 00:00

@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多重背包的单调队列优化</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); min-height: 22px; }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); min-height: 22px; }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.kv { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; color: var(--text-dim); margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>多重背包的单调队列优化</h1>
+      <p class="intro">二进制分组把每种货物的数量折成 log c，代价还是随 c 涨。单调队列更彻底：它把每种货物的状态按「余数相同」分组，每一组摆在一条线上，于是「从这一格往回数 c 个里挑最大」就变成一个标准的滑动窗口最大值，一趟 O(t) 扫完。要付的代价是理解难度：同一个结论得多绕两个弯才能看明白。</p>
+
+      <h2>零、问题</h2>
+      <p>还是 P1776：n 种货物、容量 t，每种有重量 w[i]、价值 v[i]、数量 c[i]。</p>
+      <p class="kv">dp[i][j] = max<sub>k=0…c[i]</sub>( dp[i-1][j − k·w[i]] + k·v[i] )</p>
+      <p>朴素做法把 k 从 0 试到 c[i]，复杂度里多一个 c 因子；二进制分组把 c 折成 log c。这一页的目标是把 c 彻底拿掉，做到 O(n · t)。</p>
+
+      <h2>一、按余数分组，把位置摆到一条线上</h2>
+      <p>先固定第 i 种货物，只看它的 w[i]。容量 j 和 j − w[i] 之间差一个 w[i]，只差一件货。把所有容量按 <code>j mod w[i]</code> 分类：余数相同的那些位置彼此相差整数个 w[i]，正好是一条链。</p>
+      <figure class="fig" id="figChain"></figure>
+      <p>每条链上的位置是 mod、mod + w、mod + 2w、…。链与链之间互不干扰：dp[i][j] 的转移只会用到同一条链上左侧的位置，绝不会跨到别的余数去。所以整张表可以拆成 w[i] 条互不相干的链，每条单独处理。</p>
+
+      <h2>二、指标：把 k 提炼成一个只跟位置有关的量</h2>
+      <p>链上的位置写成 j = mod + m·w（m = ⌊j / w⌋）。把它代进转移：</p>
+      <p class="kv">dp[i][j] = m·v + max<sub>t = m−c … m</sub>( dp[i-1][mod + t·w] − t·v )</p>
+      <p>中间那个减掉 k·v 的动作，和「把 j 写成 m·w + 余数」是同一件事。于是括号里剩下的东西只跟位置有关，跟「现在要求的 j 是哪一个」没关系。给它起个名字，叫指标：</p>
+      <p class="kv">value(j) = dp[i-1][j] − (j / w) · v</p>
+      <p>这里 <code>j / w</code> 是整除，正好等于链上的序号 m（因为 j = mod + m·w 且 0 ≤ mod &lt; w）。重写一遍：</p>
+      <p class="kv">dp[i][j] = (j / w) · v + max{ value(t) : t 在链上且 j − c·w ≤ t ≤ j }</p>
+      <figure class="fig" id="figIndex"></figure>
+      <p>到这一步，问题就变成了：一条线上有一串数，每次问「从当前位置往左数 c + 1 个里的最大值」。这是滑动窗口最大值，单调队列的正业。</p>
+
+      <h2>三、窗口右移，队列进出</h2>
+      <p>把 j 沿着链从小到大走一遍，窗口 <code>[j − c·w, j]</code> 就跟着往右滑。窗口里的指标要用单调队列维护成递减的，队头永远是窗口内最大的那个。</p>
+      <p>每一个 j 做两件事：</p>
+      <p>1）进队：把当前 j 的指标压下去，先把队尾所有不大于它的元素踢掉，再压进去。</p>
+      <p>2）出队：如果队头的位置已经掉出窗口（<code>queue[l] == j − w·(c+1)</code>），就弹掉。</p>
+      <p>那两个 <code>1</code> 别漏：窗口是闭区间，最左边允许的位置是 j − c·w；掉出窗口的第一个位置是 j − c·w − w = j − w·(c+1)。如果写成 <code>j − w·c</code>，窗口就少了一格，答案会偏小。</p>
+      <figure class="fig" id="figQueue"></figure>
+      <p>队头的位置 j* 拿到之后，dp[i][j] = value(j*) + (j / w)·v，一趟就算完了。整条链扫一遍，所有 dp[i][·] 都填好，不会回头。</p>
+
+      <h2>四、空间压缩要从右往左刷</h2>
+      <p>dp[i][j] 读的是 dp[i−1][·]，上一行的左侧格子。压成一维之后，同一件事变成：算 dp[j] 的时候，它左边的那些格子必须还是「上一行」的旧值。办法和 01 背包一样，每一行从右往左刷，右边的先被覆盖，左边的还没动。</p>
+      <figure class="fig" id="figRight2Left"></figure>
+      <p>具体写法上，每处理一条链，先把链头上 c[i] 个位置的指标塞进队列（它们是窗口最初的成员），然后 j 从链尾往链头走，每走一格就有一个更靠左的位置「新滑进窗口」，同时当前 j 自己用完就滑出。代码里那个 <code>enter</code> 指针指的就是新滑进来的位置，它和 j 一起往左退。</p>
+            <pre class="code"><span class="cm">// dp[i][j] 要读上一行左侧的格子，所以压缩后每一行从右往左刷</span>
+    <span class="cm">// 这样左边的格子还没被本轮覆盖，读到的就是真正的「上一行」</span>
+    <span class="kw">int</span> <span class="fn">mqueue1d</span>(<span class="kw">int</span> n, <span class="kw">int</span> t, vector&lt;<span class="kw">int</span>&gt;&amp; v, vector&lt;<span class="kw">int</span>&gt;&amp; w, vector&lt;<span class="kw">int</span>&gt;&amp; c) {
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(t + 1, 0), q(t + 2);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            auto val = [&amp;](<span class="kw">int</span> j) { <span class="kw">return</span> dp[j] - j / w[i] * v[i]; };
+            <span class="kw">for</span> (<span class="kw">int</span> mod = 0; mod &lt;= min(t, w[i] - 1); mod++) {
+                <span class="kw">int</span> l = 0, r = 0;
+                <span class="kw">for</span> (<span class="kw">int</span> j = t - mod, k = 1; j &gt;= 0 &amp;&amp; k &lt;= c[i]; j -= w[i], k++) {  <span class="cm">// 先塞进 c[i] 个</span>
+                    <span class="kw">while</span> (l &lt; r &amp;&amp; val(q[r - 1]) &lt;= val(j)) r--;
+                    q[r++] = j;
+                }
+                <span class="kw">for</span> (<span class="kw">int</span> j = t - mod, enter = j - w[i] * c[i]; j &gt;= 0; j -= w[i], enter -= w[i]) {
+                    <span class="kw">if</span> (enter &gt;= 0) {                        <span class="cm">// 新的一格滑进窗口</span>
+                        <span class="kw">while</span> (l &lt; r &amp;&amp; val(q[r - 1]) &lt;= val(enter)) r--;
+                        q[r++] = enter;
+                    }
+                    dp[j] = val(q[l]) + j / w[i] * v[i];
+                    <span class="kw">if</span> (q[l] == j) l++;                      <span class="cm">// 自己用完 c[i] 次，滑出窗口</span>
+                }
+            }
+        }
+        <span class="kw">return</span> dp[t];
+    }</pre>
+      <p>二维版写起来更直白：j 从小到大走，进队之后判一次出队。两者答案完全一样，只是循环方向相反。</p>
+            <pre class="code"><span class="cm">// dp[i][j]：只在前 i 种货物里挑、容量不超过 j 的最大价值</span>
+    <span class="cm">// 同一条 mod w[i] 的链上，给每个位置算一个指标 dp[i-1][j] - (j / w[i]) * v[i]</span>
+    <span class="cm">// 窗口 [j - c[i] * w[i], j] 里指标最大的那个，就是最划算的取法</span>
+    <span class="kw">int</span> <span class="fn">mqueue2d</span>(<span class="kw">int</span> n, <span class="kw">int</span> t, vector&lt;<span class="kw">int</span>&gt;&amp; v, vector&lt;<span class="kw">int</span>&gt;&amp; w, vector&lt;<span class="kw">int</span>&gt;&amp; c) {
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">dp</span>(n + 1, vector&lt;<span class="kw">int</span>&gt;(t + 1, 0));
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">q</span>(t + 2);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> mod = 0; mod &lt;= min(t, w[i] - 1); mod++) {   <span class="cm">// 按 mod w[i] 同余分组</span>
+                <span class="kw">int</span> l = 0, r = 0;
+                <span class="kw">for</span> (<span class="kw">int</span> j = mod; j &lt;= t; j += w[i]) {
+                    <span class="kw">int</span> vj = dp[i - 1][j] - j / w[i] * v[i];
+                    <span class="kw">while</span> (l &lt; r &amp;&amp; dp[i - 1][q[r - 1]] - q[r - 1] / w[i] * v[i] &lt;= vj) r--;
+                    q[r++] = j;
+                    <span class="kw">if</span> (q[l] == j - w[i] * (c[i] + 1)) l++;        <span class="cm">// 用够 c[i] 件的滑出窗口</span>
+                    dp[i][j] = dp[i - 1][q[l]] - q[l] / w[i] * v[i] + j / w[i] * v[i];
+                }
+            }
+        }
+        <span class="kw">return</span> dp[n][t];
+    }</pre>
+
+      <h2>五、写错的代价</h2>
+      <p>最常踩的坑是忘掉出队那一句。队列只进不出，等于允许无限多件，多重背包就退化成完全背包，两万组随机数据错 60.27%，而且不管价值值域怎么变，误差都是这个数。这一条和「把多重当完全背包做」是同一个错，别当成两个问题。</p>
+      <p>另一个坑是出队判据里的 <code>c + 1</code>：写成 <code>c</code> 会让窗口少一格，恰好需要拿满 c 件才最优的样本就丢了；写成 <code>c + 2</code> 则多放一件进来，会超数量。</p>
+      <p>指标本身也容易写歪。<code>dp[i−1][j]</code> 不能换成 <code>dp[i][j]</code>，那样读的是本行已经算过的值，含义完全变了；<code>j / w[i]</code> 必须是整除，不能顺手写成浮点。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示：单调队列在一条链上跑一遍</p>
+        <div id="v1svg"></div>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>数据
+            <select id="v1case">
+              <option value="0">t=9，w=3，c=2</option>
+              <option value="1">t=10，w=4，c=2</option>
+              <option value="2">t=12，w=3，c=3</option>
+            </select>
+          </label>
+          <button id="v1prev">上一步</button>
+          <button id="v1next">下一步</button>
+          <button id="v1last">到末尾</button>
+          <button id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <h2>六、复杂度分析</h2>
+      <table class="complexity">
+        <thead><tr><th>做法</th><th>时间</th><th>额外空间</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>二进制分组</td><td>O(t · Σ log c[i])</td><td>O(t + Σ log c[i])</td><td>c 每翻一倍多一包，c = 40000 时每种 16 包</td></tr>
+          <tr><td>单调队列（二维）</td><td>O(n · t)</td><td>O(n · t)</td><td>c 不出现在复杂度里</td></tr>
+          <tr><td>单调队列（压缩）</td><td>O(n · t)</td><td>O(t)</td><td>外加一个长度 t 的队列数组</td></tr>
+        </tbody>
+      </table>
+      <figure class="fig" id="figPerf"></figure>
+      <p>两边的实测差距没有理论上那么大，因为二进制的常数很小、单调队列的分组循环有开销。真正拉开的地方是 c 很大：w = 1、c = 40000 时二进制 55.91 ms，单调队列 11.29 ms，差 5 倍。c 只有几百的时候两者基本打平（n = 1000、t = 40000、c ≤ 1000 时 137.62 ms 对 117.70 ms）。所以比赛里更常见的还是二进制分组，单调队列留着对付数量特别大的数据。</p>
+
+      <h2>七、总结</h2>
+      <p>单调队列把多重背包里那个 c 因子彻底消掉，代价是多绕两个弯。</p>
+      <p>几个要点：</p>
+      <p>1）按 <code>j mod w[i]</code> 把容量分成 w[i] 条互不干扰的链，链上位置相差整数个 w。</p>
+      <p>2）指标 <code>value(j) = dp[i-1][j] − (j / w)·v</code>，把 k 从转移里提出来，剩下的就是滑动窗口最大值。</p>
+      <p>3）窗口是闭区间 <code>[j − c·w, j]</code>，出队判据用 <code>j − w·(c+1)</code>，那个 1 不能省。</p>
+      <p>4）压缩版每一行从右往左刷，保证读到的左侧格子还是上一行。</p>
+      <p>5）忘掉出队 = 完全背包，错 60.27%；这个失误和「当完全背包做」是同一件事。</p>
+      <p>6）P1776 用二进制分组也能过；单调队列的优势在 c 远大于 n 时才明显。理解不了这页就先跳过，把二进制分组用熟。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>宝物筛选</td><td><a href="https://www.luogu.com.cn/problem/P1776" target="_blank">P1776</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解075【必备】背包dp-多重背包、混合背包</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            green: '#2e7d32', greenBg: '#e8f5e9', gray: '#9aa0a6', bg: '#f6f7f9',
+            border: '#e6e8eb', text: '#1e293b', dim: '#6b7280' };
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      (o.mono ? ' font-family="ui-monospace, Menlo, monospace"' : '') + '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx == null ? 4 : o.rx) +
+      '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.border) + '"' + (o.sw ? ' stroke-width="' + o.sw + '"' : '') + '/>';
+  }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+  function cell(x, y, w, h, v, o) {
+    o = o || {};
+    var s = rect(x, y, w, h, { fill: o.fill || '#fff', stroke: o.stroke || C.border, sw: o.sw });
+    s += txt(x + w / 2, y + h / 2 + 4, String(v), { size: o.size || 12, mono: true, fill: o.tc || C.text, weight: o.weight });
+    return s;
+  }
+
+  var MODCOL = [C.blue, C.orange, C.green];
+
+  // ---------- 图 1：同余分组 ----------
+  function figChain() {
+    var s = txt(340, 18, 'w = 3 时，容量按 j mod 3 分成三条链', { size: 12, weight: '600' });
+    var cw = 40, x0 = 60, y = 44, t = 11, mod, j;
+    for (mod = 0; mod < 3; mod++) {
+      s += txt(x0 - 14, y + 20, 'mod ' + mod, { size: 11, anchor: 'end', mono: true, fill: MODCOL[mod], weight: '600' });
+      for (j = mod; j <= t; j += 3) {
+        var x = x0 + j * (cw + 4);
+        s += cell(x, y, cw, 26, String(j), { fill: mod === 0 ? C.blueBg : (mod === 1 ? C.orangeBg : C.greenBg),
+          stroke: MODCOL[mod], tc: MODCOL[mod], size: 11, sw: 1.4 });
+      }
+      y += 38;
+    }
+    s += txt(340, y + 8, '链内相邻位置差一个 w；转移只在同一条链上发生，三条链互不干涉', { size: 11, fill: C.dim });
+    wrap('figChain', y + 28, s, '同余分组把容量拆成三条独立的链，每条链单独做一次滑动窗口');
+  }
+
+  // ---------- 图 2：指标折线 + 窗口 ----------
+  function figIndex() {
+    var vals = [0, 2, 0, -3, 0], js = [0, 3, 6, 9, 12];
+    var s = txt(340, 18, '取 w = 3、v = 5、c = 2，mod = 0 这条链上的指标 value(j) = dp[i-1][j] − (j/3)·5',
+      { size: 11.5, weight: '600' });
+    var x0 = 90, w = 500, y0 = 70, hgt = 110, i;
+    var mn = -5, mx = 4;
+    var px = function (k) { return x0 + w * k / (js.length - 1); };
+    var py = function (v) { return y0 + hgt * (mx - v) / (mx - mn); };
+    s += rect(x0, y0, w, hgt, { fill: C.bg, stroke: C.border });
+    // 零线
+    s += '<line x1="' + x0 + '" y1="' + py(0) + '" x2="' + (x0 + w) + '" y2="' + py(0) + '" stroke="' + C.border + '" stroke-dasharray="4 4"/>';
+    // 窗口 [6,12] -> 下标 2..4
+    s += rect(px(2) - 22, y0, px(4) - px(2) + 44, hgt, { fill: C.orangeBg, stroke: 'none', rx: 4 });
+    s += txt((px(2) + px(4)) / 2, y0 - 8, '窗口 [6, 12]：位置 6、9、12', { size: 11, fill: C.orange, weight: '600' });
+    var pts = [];
+    for (i = 0; i < vals.length; i++) pts.push(px(i) + ',' + py(vals[i]));
+    s += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + C.blue + '" stroke-width="2"/>';
+    for (i = 0; i < vals.length; i++) {
+      var isMax = i === 2 || i === 4;
+      s += '<circle cx="' + px(i) + '" cy="' + py(vals[i]) + '" r="4" fill="' + (isMax ? C.green : C.blue) + '"/>';
+      s += txt(px(i), py(vals[i]) - 10, String(vals[i]), { size: 11, mono: true, fill: isMax ? C.green : C.blue, weight: '600' });
+      s += txt(px(i), y0 + hgt + 18, 'j=' + js[i], { size: 10, mono: true, fill: C.dim });
+    }
+    var y2 = y0 + hgt + 42;
+    s += txt(340, y2, '窗口里最大的指标是 0（位置 12），所以 dp[i][12] = (12/3)·5 + 0 = 20', { size: 11.5, fill: C.text });
+    wrap('figIndex', y2 + 20, s, '指标折线 + 滑动窗口：队头就是窗口内指标最大的那个位置');
+  }
+
+  // ---------- 图 3：队列随时间变化 ----------
+  function figQueue() {
+    var s = txt(340, 18, '同一条链 j = 0、3、6、9、12（w = 3、c = 2），指标取 0、−1、−1、−2、0',
+      { size: 11.5, weight: '600' });
+    var frames = [
+      { j: 0, idx: 0, q: [0], out: '' },
+      { j: 3, idx: -1, q: [3], out: '踢出 0' },
+      { j: 6, idx: -1, q: [6], out: '踢出 3' },
+      { j: 9, idx: -2, q: [6, 9], out: '队尾留 9' },
+      { j: 12, idx: 0, q: [6, 9, 12], out: '队头 6 最大' }
+    ];
+    var y = 46, x0 = 40, cw = 118, i;
+    for (i = 0; i < frames.length; i++) {
+      var f = frames[i], x = x0 + i * (cw + 6);
+      var isOpen = f.j === 12;
+      s += rect(x, y, cw, 106, { fill: isOpen ? C.blueBg : '#fff', stroke: isOpen ? C.blue : C.border, sw: isOpen ? 1.6 : 1 });
+      s += txt(x + cw / 2, y + 18, 'j = ' + f.j, { size: 12, mono: true, weight: '600', fill: isOpen ? C.blue : C.text });
+      s += txt(x + cw / 2, y + 36, '窗口 [' + Math.max(0, f.j - 6) + ', ' + f.j + ']', { size: 10.5, mono: true, fill: C.orange });
+      s += txt(x + cw / 2, y + 54, '指标 ' + f.idx, { size: 10.5, mono: true, fill: C.dim });
+      s += txt(x + cw / 2, y + 76, '队列 ' + f.q.join(' → '), { size: 11, mono: true, fill: C.blue, weight: '600' });
+      s += txt(x + cw / 2, y + 94, f.out, { size: 9.5, fill: C.dim });
+    }
+    y += 124;
+    s += txt(340, y, '队列里的指标递减排好，队头就是窗口内最大的那个位置',
+      { size: 11, fill: C.dim });
+    wrap('figQueue', y + 20, s, '进队前先把队尾所有指标不大于它的位置踢掉，所以队列里的指标递减；j=3 踢掉 0，j=6 踢掉 3，j=12 时队头 6 就是窗口内最划算的那一格');
+  }
+
+  // ---------- 图 4：压缩从右往左 ----------
+  function figRight2Left() {
+    var cw = 44, ch = 28, t = 9, w = 3, c = 2, jl = 9;
+    var s = txt(340, 18, '压缩版：算 dp[9] 需要上一行的 dp[9]、dp[6]、dp[3]，它们必须还没被本轮覆盖',
+      { size: 11.5, weight: '600' });
+    var x0 = 60, y = 44, j;
+    s += txt(340, y - 4, '一维 dp 数组，本轮从右往左刷', { size: 11, fill: C.dim });
+    y += 14;
+    for (j = 0; j <= t; j++) {
+      var x = x0 + j * (cw + 4);
+      var isOld = j <= jl, isCur = j === jl;
+      s += cell(x, y, cw, ch, 'dp', { fill: isCur ? C.blueBg : (isOld ? '#fff' : C.orangeBg),
+        stroke: isCur ? C.blue : (isOld ? C.border : C.orange), tc: isCur ? C.blue : (isOld ? C.text : C.orange),
+        size: 11, sw: isCur ? 1.6 : 1 });
+      s += txt(x + cw / 2, y + ch + 14, String(j), { size: 10, mono: true, fill: C.dim });
+    }
+    y += ch + 30;
+    s += txt(340, y, '此刻 j = 9 站在最右端，还没有格子被本轮覆盖；它往左走一步，右边就多一格橙色', { size: 11, fill: C.dim });
+    y += 20;
+    s += txt(340, y, 'j 从右往左走，轮到自己时右边的已覆盖、左边还是旧值，读 dp[j−k·w] 拿到的就是上一行',
+      { size: 11, fill: C.text });
+    wrap('figRight2Left', y + 20, s, '从右往左刷，是为了让左侧格子保持上一行的样子；正着刷会把同一件货物拿第二次');
+  }
+
+  // ---------- 图 5：耗时对比 ----------
+  function figPerf() {
+    var s = txt(340, 18, '同一组数据下二进制分组与单调队列的耗时（n = 100、t = 40000）', { size: 12, weight: '600' });
+    var items = [
+      { t: 'w=1  c=40000', a: 55.91, b: 11.29 },
+      { t: 'w=2  c=20000', a: 29.38, b: 9.53 },
+      { t: '随机 w  c≤1000', a: 33.54, b: 18.54 }
+    ];
+    var y = 50, x0 = 180, w = 380, i;
+    var mx = 60;
+    for (i = 0; i < items.length; i++) {
+      var it = items[i];
+      s += txt(x0 - 12, y + 14, it.t, { size: 11, anchor: 'end', mono: true, fill: C.dim });
+      var wa = Math.max(6, w * it.a / mx), wb = Math.max(6, w * it.b / mx);
+      s += rect(x0, y, w, 15, { fill: C.bg });
+      s += '<rect x="' + x0 + '" y="' + y + '" width="' + wa + '" height="15" rx="3" fill="' + C.orange + '"/>';
+      s += txt(x0 + wa + 6, y + 12, it.a.toFixed(2) + ' ms', { size: 10, anchor: 'start', mono: true, fill: C.orange });
+      var y2 = y + 19;
+      s += rect(x0, y2, w, 15, { fill: C.bg });
+      s += '<rect x="' + x0 + '" y="' + y2 + '" width="' + wb + '" height="15" rx="3" fill="' + C.blue + '"/>';
+      s += txt(x0 + wb + 6, y2 + 12, it.b.toFixed(2) + ' ms', { size: 10, anchor: 'start', mono: true, fill: C.blue });
+      y += 48;
+    }
+    s += txt(640, 32, '橙：二进制', { size: 10, anchor: 'end', fill: C.orange });
+    s += txt(640, 46, '蓝：单调队列', { size: 10, anchor: 'end', fill: C.blue });
+    s += txt(340, y + 8, 'c 越大差得越多：二进制的代价随 log c 涨，单调队列的代价与 c 无关', { size: 11, fill: C.dim });
+    wrap('figPerf', y + 28, s, 'c = 40000 时单调队列比二进制快 5 倍；c 只有几百时两者基本打平');
+  }
+
+  figChain(); figIndex(); figQueue(); figRight2Left(); figPerf();
+
+  // ================= 演示：单调队列跑一条链 =================
+  var CASES = [
+    { t: 9, w: 3, v: 5, c: 2, prev: [0, 4, 4, 9, 9, 9, 9, 9, 9, 9] },
+    { t: 10, w: 4, v: 3, c: 2, prev: [0, 0, 0, 0, 5, 5, 5, 5, 9, 9, 9] },
+    { t: 12, w: 3, v: 4, c: 3, prev: [0, 3, 3, 7, 7, 7, 11, 11, 11, 11, 11, 11, 11] }
+  ];
+  var st = { ci: 0, step: 0, steps: [] };
+
+  function buildSteps(cs) {
+    var t = cs.t, w = cs.w, v = cs.v, c = cs.c;
+    var dp = cs.prev.slice();          // 一维表，初值是上一行的结果
+    var steps = [];
+    steps.push({ kind: 'start', dp: dp.slice(), chain: [], note: '开始：dp 里是上一行的结果' });
+    var val = function (p) { return dp[p] - Math.floor(p / w) * v; };
+    for (var mod = 0; mod <= Math.min(t, w - 1); mod++) {
+      var chain = [];
+      for (var j = mod; j <= t; j += w) chain.push(j);
+      if (!chain.length) continue;
+      var desc = chain.slice().reverse();          // 压缩版：从右往左刷
+      var l = 0, r = 0, q = [], k;
+      for (k = 0; k < desc.length && k < c; k++) {  // 先塞进链尾的 c 个
+        while (r > l && val(q[r - 1]) <= val(desc[k])) r--;
+        q[r++] = desc[k];
+      }
+      for (k = 0; k < desc.length; k++) {
+        var jj = desc[k];
+        var enter = jj - w * c;                     // 新滑进窗口的那一格
+        var pushed = null;
+        if (enter >= 0) {
+          while (r > l && val(q[r - 1]) <= val(enter)) r--;
+          q[r++] = enter;
+          pushed = enter;
+        }
+        var head = q[l];
+        var before = dp[jj];
+        dp[jj] = val(head) + Math.floor(jj / w) * v;
+        var popped = null;
+        if (q[l] === jj) { popped = q[l]; l++; }
+        steps.push({ kind: 'cell', dp: dp.slice(), chain: chain.slice(), mod: mod, j: jj, head: head,
+          pushed: pushed, queue: q.slice(l, r), pop: popped, value: dp[jj], before: before });
+      }
+    }
+    steps.push({ kind: 'done', dp: dp.slice(), chain: [], t: t, note: '' });
+    return steps;
+  }
+
+  function render() {
+    var cs = CASES[st.ci], s = '', y = 20, t = cs.t;
+    var stp = st.steps[st.step];
+    var cw = Math.min(46, Math.floor(560 / (t + 1))), gap = cw > 30 ? 6 : 3;
+    var x0 = Math.max(40, (VW - (t + 1) * (cw + gap)) / 2);
+    s += txt(340, y, 'dp 数组（一张一维表，每算一格就刷新）', { size: 12, weight: '600' });
+    y += 20;
+    var j;
+    for (j = 0; j <= t; j++) {
+      var x = x0 + j * (cw + gap);
+      var inChain = stp.chain && stp.chain.indexOf(j) >= 0;
+      var inWin = stp.kind === 'cell' && inChain && j >= stp.j - cs.w * cs.c && j <= stp.j;
+      var isCur = stp.kind === 'cell' && j === stp.j;
+      var fillc = isCur ? C.blueBg : (inWin ? C.orangeBg : '#fff');
+      var stroke = isCur ? C.blue : (inWin ? C.orange : C.border);
+      s += cell(x, y, cw, 26, String(stp.dp[j]), { size: 11, mono: true, fill: fillc, stroke: stroke,
+        tc: isCur ? C.blue : C.text, weight: isCur ? '600' : '400', sw: (isCur || inWin) ? 1.5 : 1 });
+      s += txt(x + cw / 2, y + 38, String(j), { size: 9, mono: true, fill: isCur ? C.blue : C.dim });
+    }
+    y += 58;
+    if (stp.kind === 'cell') {
+      s += txt(340, y, '第 ' + (stp.mod + 1) + ' 条链（mod ' + stp.mod + '）：j = ' + stp.j +
+        '，这一格原来存 ' + stp.before, { size: 12, weight: '600', fill: C.blue });
+      y += 22;
+      s += txt(340, y, (stp.pushed === null ? '没有新格子滑进窗口' : '位置 ' + stp.pushed + ' 滑进窗口') +
+        '；队列（指标递减）：' + (stp.queue.length ? stp.queue.join(' → ') : '空') +
+        (stp.pop !== null ? '；位置 ' + stp.pop + ' 滑出窗口' : ''),
+        { size: 11.5, mono: true, fill: C.text });
+      y += 22;
+      s += txt(340, y, 'dp[' + stp.j + '] = value(' + stp.head + ') + (' + stp.j + '/' + cs.w + ')·' + cs.v +
+        ' = ' + stp.value, { size: 11.5, mono: true, fill: C.green });
+      y += 22;
+    } else if (stp.kind === 'done') {
+      s += txt(340, y, '答案：容量 ' + t + ' 能拿到 ' + stp.dp[t] + ' 的价值', { size: 12, weight: '600', fill: C.green });
+      y += 22;
+    } else {
+      s += txt(340, y, '第 i 种货物：w = ' + cs.w + '、v = ' + cs.v + '、c = ' + cs.c, { size: 11.5, fill: C.dim });
+      y += 22;
+    }
+    var host = document.getElementById('v1svg');
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + (y + 8) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    var note = '第 ' + st.step + ' / ' + (st.steps.length - 1) + ' 步';
+    if (stp.kind === 'cell') note += '：正在算 mod ' + stp.mod + ' 这条链上的 j = ' + stp.j + '。';
+    else if (stp.kind === 'done') note += '：所有链扫完，答案出来。';
+    document.getElementById('v1note').textContent = note;
+    document.getElementById('v1ans').textContent = stp.kind === 'done'
+      ? '最大价值 ' + stp.dp[t] + '（t = ' + t + '）' : '';
+    document.getElementById('v1next').disabled = st.step >= st.steps.length - 1;
+    document.getElementById('v1prev').disabled = st.step <= 0;
+  }
+
+  function rebuild() {
+    st.steps = buildSteps(CASES[st.ci]);
+    st.step = 0;
+    render();
+  }
+  document.getElementById('v1case').addEventListener('change', function () { st.ci = +this.value; rebuild(); });
+  document.getElementById('v1prev').addEventListener('click', function () { if (st.step > 0) { st.step--; render(); } });
+  document.getElementById('v1next').addEventListener('click', function () { if (st.step < st.steps.length - 1) { st.step++; render(); } });
+  document.getElementById('v1last').addEventListener('click', function () { st.step = st.steps.length - 1; render(); });
+  document.getElementById('v1reset').addEventListener('click', function () { st.step = 0; render(); });
+  rebuild();
+})();
+</script>
+</body>
+</html>

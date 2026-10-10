@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打砖块：把时间倒过来感染</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; min-height: 20px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.viz-controls select { margin-right: 6px; }
+.cell-grid { display: grid; gap: 3px; margin: 8px 0; }
+.cell { width: 32px; height: 32px; border: 1px solid #cbd5e1; background: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cell.empty { background: #f6f7f9; color: #9aa0a6; }
+.cell.brick { background: #dbeafe; color: #1e40af; border-color: #2563eb; }
+.cell.stable { background: #dcfce7; color: #14532d; border-color: #16a34a; }
+.cell.fall { background: #fee2e2; color: #991b1b; border-color: #dc2626; }
+.cell.cur { outline: 2px solid #ea580c; }
+.cell.neg { background: #f3f4f6; color: #6b7280; border-style: dashed; }
+.ansrow { font-size: 13px; font-family: ui-monospace, Menlo, Consolas, monospace; margin: 6px 0; }
+.ansrow .hit { color: #ea580c; }
+.ansrow .on { background: #ffedd5; padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>打砖块：把时间倒过来感染</h1>
+      <p class="intro">每次敲掉一块砖，够不着顶部的砖就会掉。正向模拟每敲一次就要把全网格重新算一遍连通性。反过来做，先把要敲的全敲掉，再一块块补回来，总代价就和网格大小同阶。</p>
+
+      <h2 id="q">零、问题</h2>
+      <p>网格里 1 是砖、0 是空。一块砖稳定，当且仅当它直接在第 0 行，或者它上下左右有一块稳定的砖。依次敲掉 hits 里的位置（那个位置可能本来就是空的），每次敲完会有一些砖失去支撑、立刻消失，问每次掉了几块（被敲掉的那块不算）。</p>
+      <p>顺着做很自然：敲一块，从顶部 BFS 一遍找出所有还稳的砖，剩下的删掉。k 次敲击就是 k 遍全网格。200×200 的网格敲一万次，实测 2596.87ms，直接超时。</p>
+      <figure class="fig" id="figReverse"></figure>
+      <p>关键一步是意识到「删掉」不好做，「补回来」好做。先把所有要敲的位置一次性处理掉，得到最终状态；再从最后一次敲击倒着往前，把砖一块块补回去。补回去时新增的、够得着顶部的砖，正是那一次敲击会带下来的砖。</p>
+
+      <h2 id="state">一、三种值：没有砖、有砖待定、已经连到顶</h2>
+      <figure class="fig" id="figState"></figure>
+      <p>网格里的值被赋予了三种含义：0 和负数表示这里没有砖，1 表示有砖但还不知道稳不稳，2 表示已经确认连到顶部。</p>
+      <p>处理敲击用的是减一而不是置零，因为同一个位置可能本来就是空的：原本是 1 减完变 0，原本是 0 减完变 -1。补回来时统一加一，1 能变回 1、-1 变回 0，worth 判据自然就把「敲了个空位置」这种情况挡掉了。</p>
+      <p>最开始从第 0 行的每一格出发感染一遍，把所有还连着顶部的砖改成 2。这时候的 1 全是悬空的砖，它们在正向过程里早就掉光了。</p>
+
+    <pre class="code"><span class="kw">int</span> n, m;
+    vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; grid;
+
+    <span class="cm">// 从 (i,j) 出发，遇到 1 就感染成 2，返回这次新感染了几块</span>
+    <span class="kw">int</span> <span class="fn">dfs</span>(<span class="kw">int</span> i, <span class="kw">int</span> j) {
+        <span class="kw">if</span> (i &lt; 0 || i == n || j &lt; 0 || j == m || grid[i][j] != 1) {
+            <span class="kw">return</span> 0;
+        }
+        grid[i][j] = 2;
+        <span class="kw">return</span> 1 + dfs(i + 1, j) + dfs(i, j + 1) + dfs(i - 1, j) + dfs(i, j - 1);
+    }
+
+    <span class="cm">// 补回来的这块砖够得着顶部吗：自己在第 0 行，或者四邻已经是 2</span>
+    <span class="kw">bool</span> <span class="fn">worth</span>(<span class="kw">int</span> i, <span class="kw">int</span> j) {
+        <span class="kw">return</span> grid[i][j] == 1
+            &amp;&amp; (i == 0
+                || (i &gt; 0 &amp;&amp; grid[i - 1][j] == 2)
+                || (i &lt; n - 1 &amp;&amp; grid[i + 1][j] == 2)
+                || (j &gt; 0 &amp;&amp; grid[i][j - 1] == 2)
+                || (j &lt; m - 1 &amp;&amp; grid[i][j + 1] == 2));
+    }</pre>
+
+      <h2 id="worth">二、worth：这块砖补回来够得着顶部吗</h2>
+      <figure class="fig" id="figWorth"></figure>
+      <p>补回来的砖只有两种稳法：它自己在第 0 行，或者它上下左右有一块已经是 2。四邻都是 0 或者 1 的话，这块砖连同它接出去的一串都还是悬空的，敲掉它什么也不会掉。</p>
+      <p>判据成立才值得感染，于是有了 worth 这个名字。不成立就不管，这一格保持 1，等以后它旁边出现 2 时再说。</p>
+      <p>感染返回的是这次新改成的 2 的个数，减掉补回来的这块自己，就是答案。被敲掉的那块题目明说不计数，这个减一是必须的。</p>
+
+    <pre class="code">vector&lt;<span class="kw">int</span>&gt; <span class="fn">hitBricks</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; g, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; hits) {
+        grid = g;
+        n = grid.size();
+        m = grid[0].size();
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">ans</span>(hits.size(), 0);
+        <span class="kw">if</span> (n == 1) <span class="kw">return</span> ans;   <span class="cm">// 只有一行时每块砖都吊在天花板上，答案恒为 0</span>
+        <span class="cm">// 先把要敲的都敲掉，再倒着一块块补回来</span>
+        <span class="kw">for</span> (auto&amp; hit : hits) grid[hit[0]][hit[1]]--;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; m; i++) dfs(0, i);
+        <span class="kw">for</span> (<span class="kw">int</span> i = (<span class="kw">int</span>)hits.size() - 1, row, col; i &gt;= 0; i--) {
+            row = hits[i][0];
+            col = hits[i][1];
+            grid[row][col]++;
+            <span class="kw">if</span> (worth(row, col)) ans[i] = dfs(row, col) - 1;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2 id="bugs">三、三个容易写错的地方</h2>
+      <figure class="fig" id="figBugs"></figure>
+      <p>第一个是省掉 worth 判据，只要补回来是 1 就感染。这样会把悬空的砖也当成稳定的，随机测试里 14.82% 的样本答案偏大。</p>
+      <p>第二个是忘了减一，把被敲的那块也算进掉落数，随机测试里 69.46% 的样本会错。这个是错得最多的一处，因为它只在有砖掉落时才现形，而大多数敲击什么都没掉。</p>
+      <p>第三个是开头的单行特判。只有一行时每块砖都吊在天花板上，敲掉任何一块都不会带掉别的，答案恒为全 0。这一句省的是时间：实测去掉它，2000 组单行样本的答案依然全对：补回来的砖四邻要么是 2 要么是空，感染只能扩散到自己，减一之后正好是 0。</p>
+
+      <div class="viz" id="vizBricks">
+        <p class="viz-title">演示：先全敲掉，再倒着一块块补回来</p>
+        <div class="viz-controls">
+          <select id="bkSel"></select>
+          <button id="bkPrev">上一步</button>
+          <button id="bkNext">下一步</button>
+          <button id="bkReset">重置</button>
+        </div>
+        <div class="cell-grid" id="bkGrid"></div>
+        <p class="ansrow" id="bkHits"></p>
+        <p class="viz-note" id="bkNote"></p>
+        <p class="viz-answer" id="bkAns"></p>
+      </div>
+
+      <h2 id="fwd">四、正向模拟长什么样</h2>
+      <p>为了对照，把顺向做法也写一遍：敲掉一块，从顶部 BFS 找出所有稳定的砖，其余的全部删掉并计数。它和反向做法的答案完全一致，实测 200×200 网格、一万次敲击两边逐项相同，只是慢了三个数量级。</p>
+      <div class="viz" id="vizFwd">
+        <p class="viz-title">演示：正向模拟，每敲一次重算一遍稳定集合</p>
+        <div class="viz-controls">
+          <select id="fwSel"></select>
+          <button id="fwPrev">上一步</button>
+          <button id="fwNext">下一步</button>
+          <button id="fwReset">重置</button>
+        </div>
+        <div class="cell-grid" id="fwGrid"></div>
+        <p class="ansrow" id="fwHits"></p>
+        <p class="viz-note" id="fwNote"></p>
+        <p class="viz-answer" id="fwAns"></p>
+      </div>
+
+      <h2 id="comp">五、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>指标</th><th>值</th></tr>
+        <tr><td>时间复杂度</td><td>O(n×m + k)，网格 n×m、敲击 k 次</td></tr>
+        <tr><td>额外空间</td><td>O(n×m)（递归栈，最坏等于砖块总数）</td></tr>
+        <tr><td>正向模拟</td><td>O(k×n×m)，200×200 敲一万次实测 2596.87ms</td></tr>
+      </table>
+      <p>反向做法的总感染量有硬上界：每块砖最多被从 1 改成 2 一次，之后就再也不会进入感染函数。所以全部敲击加起来，感染函数的总执行次数不超过格子数。200×200 满砖、四万次敲击实测 0.79ms，掉落的砖一共 23241 块。</p>
+
+      <h2 id="sum">六、总结</h2>
+      <p>倒着做是这题的全部：一次性敲掉所有目标，从顶部感染出「还稳着的」2，再逆序补砖，补的时候新增的 2 就是那一次会掉下来的砖。</p>
+      <p>三个细节决定对错。用减一而不是置零，好让「敲在空位置上」自己变成 -1 被 worth 挡掉；worth 判据不能省，省了会有近一成半的样本把悬空砖算成稳定的；感染完一定要减一，被敲的那块不计入掉落。</p>
+      <p>「删操作不好做就反过来做补操作」这个转换不止用在砖块上，凡是一次次删除、每次都要重新算全局连通性的题，都可以先想想倒过来是不是更好写。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>打砖块</td><td><a href="https://leetcode.cn/problems/bricks-falling-when-hit/" target="_blank">leetcode.cn/problems/bricks-falling-when-hit</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解058【必备】洪水填充</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function rect(x,y,w,h,fill,stroke){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+(fill||'#fff')+'" stroke="'+(stroke||'#cbd5e1')+'"/>'; }
+function box(x,y,w,h,fill,stroke){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="4" fill="'+(fill||'#f6f7f9')+'" stroke="'+(stroke||'#e6e8eb')+'"/>'; }
+function put(id,body){ var e=document.getElementById(id); if(e) e.innerHTML=body; }
+
+// ===== 图 1：正向 vs 反向 =====
+(function(){
+  var W=720,H=250, b='';
+  b += txt(W/2, 20, '正向：敲一次算一次　　反向：全敲完再倒着补', {fs:13});
+  b += box(30, 40, 300, 150, '#fef2f2', '#fecaca');
+  b += txt(180, 60, '正向模拟', {fs:13, fill:'#991b1b'});
+  var l1 = ['敲掉第 i 块 → 从顶部 BFS → 删掉不稳的',
+            '每敲一次扫描全网格',
+            '代价 O(k × n × m)',
+            '200×200 敲一万次：2596.87ms'];
+  l1.forEach(function(s,k){ b += txt(44, 86+k*24, s, {fs:12, an:'start', fill:'#7f1d1d'}); });
+  b += box(390, 40, 300, 150, '#f0fdf4', '#bbf7d0');
+  b += txt(540, 60, '倒着做', {fs:13, fill:'#166534'});
+  var l2 = ['先把 k 个目标一次性敲掉',
+            '从顶部感染一遍，得到 2',
+            '从最后一次往前补砖，补一次算一次',
+            '200×200 敲一万次：0.72ms'];
+  l2.forEach(function(s,k){ b += txt(404, 86+k*24, s, {fs:12, an:'start', fill:'#14532d'}); });
+  b += txt(W/2, 208, '补回来时「新增的 2」= 那一次敲掉会带下来的砖', {fs:12, fill:'#1f2937'});
+  b += txt(W/2, 230, '删除会让连通性变差，补回只会变好，后者才好用感染函数计数', {fs:12, fill:'#4b5563'});
+  put('figReverse', svg(W,H,b));
+})();
+
+// ===== 图 2：三种值 =====
+(function(){
+  var W=720,H=250, b='';
+  b += txt(W/2, 20, '网格里的三种值', {fs:13});
+  var rows = [
+    ['0 或负数', '这里没有砖', '#f6f7f9', '#e6e8eb', '负数表示「本来就是空的，还被敲了一下」'],
+    ['1', '有砖，还不知道稳不稳', '#dbeafe', '#2563eb', '初始感染之后剩下的 1 全是悬空砖'],
+    ['2', '有砖，已经确认连到顶部', '#dcfce7', '#16a34a', '感染函数只把 1 改成 2，且只改一次']
+  ];
+  rows.forEach(function(r,k){
+    var y = 44 + k*62;
+    b += rect(40, y, 60, 40, r[2], r[3]);
+    b += txt(70, y+26, r[0], {fs:13, fill:'#1f2937'});
+    b += box(115, y, 320, 40, '#fff', '#cbd5e1');
+    b += txt(127, y+25, r[1], {fs:12, an:'start', fill:'#1f2937'});
+    b += box(450, y, 230, 40, '#f6f7f9', '#e6e8eb');
+    b += txt(462, y+25, r[4], {fs:11, an:'start', fill:'#4b5563'});
+  });
+  b += txt(W/2, 240, '每块砖最多从 1 变成 2 一次，总感染量不超过格子数', {fs:12, fill:'#4b5563'});
+  put('figState', svg(W,H,b));
+})();
+
+// ===== 图 3：worth 的四种情形 =====
+(function(){
+  var W=720,H=270, b='';
+  b += txt(W/2, 20, 'worth(i, j)：补回来的这块有没有可能够得着顶部', {fs:13});
+  var cases = [
+    ['自己在第 0 行', 'i == 0', true],
+    ['上方是 2', 'grid[i-1][j] == 2', true],
+    ['下方是 2', 'grid[i+1][j] == 2', true],
+    ['左右有 2', 'grid[i][j±1] == 2', true],
+    ['四邻都不是 2', '全是 0 或 1', false]
+  ];
+  cases.forEach(function(c,k){
+    var x = 30 + (k%3)*230, y = 40 + Math.floor(k/3)*100;
+    b += box(x, y, 210, 82, c[2] ? '#f0fdf4' : '#fef2f2', c[2] ? '#bbf7d0' : '#fecaca');
+    b += txt(x+105, y+22, c[0], {fs:12, fill: c[2]?'#166534':'#991b1b'});
+    b += txt(x+105, y+44, c[1], {fs:11, fill:'#4b5563'});
+    b += txt(x+105, y+66, c[2] ? 'worth 成立，开始感染' : 'worth 不成立，这一格保持 1', {fs:11, fill: c[2]?'#166534':'#991b1b'});
+  });
+  b += box(30, 240, 660, 26, '#fff7ed', '#fdba74');
+  b += txt(360, 257, 'ans[i] = dfs(row, col) - 1：减掉的 1 是被敲掉的那块，题目不计入掉落', {fs:12, fill:'#9a3412'});
+  put('figWorth', svg(W,H,b));
+})();
+
+// ===== 图 4：三个坑 =====
+(function(){
+  var W=720,H=270, b='';
+  b += txt(W/2, 20, '三种写法的实测错误率（两万组随机网格）', {fs:13});
+  var data = [['忘减 1', 69.46, '#fca5a5'], ['省掉 worth', 14.82, '#fdba74'], ['去掉单行特判', 0.00, '#bbf7d0']];
+  var x0=110, bw=130, gap=40;
+  b += '<line x1="80" y1="210" x2="660" y2="210" stroke="#cbd5e1"/>';
+  data.forEach(function(d,k){
+    var x = x0 + k*(bw+gap);
+    var h = Math.max(d[1]/100*130, 2);
+    b += rect(x, 210-h, bw, h, d[2], '#9aa0a6');
+    b += txt(x+bw/2, 210-h-8, d[1]===0 ? '0%' : d[1].toFixed(2)+'%', {fs:12, fill:'#1f2937'});
+    b += txt(x+bw/2, 228, d[0], {fs:12, fill:'#4b5563'});
+  });
+  b += txt(80, 210, '0', {fs:11, an:'end', fill:'#6b7280'});
+  b += txt(80, 80, '100%', {fs:11, an:'end', fill:'#6b7280'});
+  b += txt(W/2, 252, '单行特判省的是时间：去掉它两万组里没有一组答案变化', {fs:12, fill:'#4b5563'});
+  put('figBugs', svg(W,H,b));
+})();
+
+function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+var PRESETS = [
+  {name:'样例一（答案 2）', g:[[1,0,0,0],[1,1,1,0]], h:[[1,0]], ans:[2]},
+  {name:'样例二（答案 0 0）', g:[[1,0,0,0],[1,1,0,0]], h:[[1,1],[1,0]], ans:[0,0]},
+  {name:'敲断柱子（答案 2 0 0）', g:[[1,1,1],[1,0,0],[1,0,0],[1,0,0]], h:[[1,0],[2,0],[3,0]], ans:[2,0,0]},
+  {name:'5 次敲击（答案 0 0 3 0 0）', g:[[1,0,1,1],[1,1,1,1],[0,1,0,1]], h:[[2,0],[1,2],[0,0],[1,1],[2,2]], ans:[0,0,3,0,0]},
+  {name:'随机', g:null, h:null, ans:null}
+];
+function randCase(){
+  var rnd = mulberry32(20261007);
+  var n = 3 + Math.floor(rnd()*3), m = 4 + Math.floor(rnd()*3);
+  var g = [];
+  for(var i=0;i<n;i++){ var r=[]; for(var j=0;j<m;j++) r.push(rnd()<0.6?1:0); g.push(r); }
+  // 只保留连到顶部的砖，符合题面「开局都是稳的」
+  var ok = [], q = [];
+  for(var i2=0;i2<n;i2++){ ok.push(new Array(m).fill(0)); }
+  for(var j2=0;j2<m;j2++) if(g[0][j2]===1){ ok[0][j2]=1; q.push([0,j2]); }
+  var dr=[1,-1,0,0], dc=[0,0,1,-1];
+  while(q.length){
+    var c=q.shift(), x=c[0], y=c[1];
+    for(var d=0;d<4;d++){
+      var nx=x+dr[d], ny=y+dc[d];
+      if(nx<0||nx>=n||ny<0||ny>=m||g[nx][ny]!==1||ok[nx][ny]) continue;
+      ok[nx][ny]=1; q.push([nx,ny]);
+    }
+  }
+  for(var i3=0;i3<n;i3++) for(var j3=0;j3<m;j3++) if(!ok[i3][j3]) g[i3][j3]=0;
+  var k = 3 + Math.floor(rnd()*4);
+  var h = [];
+  for(var t=0;t<k;t++) h.push([Math.floor(rnd()*n), Math.floor(rnd()*m)]);
+  return {g:g, h:h};
+}
+
+// ===== 演示 1：反向补砖 =====
+(function(){
+  function gen(g, hits){
+    var n=g.length, m=g[0].length;
+    var b = g.map(function(r){ return r.slice(); });
+    var ans = new Array(hits.length).fill(0);
+    var steps = [];
+    function snap(){ return b.map(function(r){ return r.slice(); }); }
+    function push(msg, cur, hi){ steps.push({grid:snap(), msg:msg, cur:cur||null, hit:hi===undefined?-1:hi, ans:ans.slice()}); }
+    if(n === 1){
+      push('只有一行：每块砖都吊在天花板上，答案恒为全 0');
+      return {steps:steps, n:n, m:m, ans:ans, hits:hits};
+    }
+    push('原始网格，开局每块砖都是稳的');
+    for(var t=0;t<hits.length;t++){
+      b[hits[t][0]][hits[t][1]]--;
+      push('先把第 '+(t+1)+' 次敲击的位置减一', [hits[t][0], hits[t][1]]);
+    }
+    push('全部敲完了，接下来从顶部感染');
+    for(var j=0;j<m;j++){
+      var sx=0, sy=j, st=[[sx,sy]];
+      while(st.length){
+        var c=st.pop(), x=c[0], y=c[1];
+        if(x<0||x>=n||y<0||y>=m||b[x][y]!==1) continue;
+        b[x][y]=2;
+        push('('+x+','+y+') 连着顶部，改成 2', [x,y]);
+        st.push([x+1,y]); st.push([x,y+1]); st.push([x-1,y]); st.push([x,y-1]);
+      }
+    }
+    push('初始感染完成：还剩下的 1 全是悬空砖');
+    for(var i=hits.length-1, row, col; i>=0; i--){
+      row = hits[i][0]; col = hits[i][1];
+      b[row][col]++;
+      if(b[row][col] !== 1){
+        push('补回第 '+(i+1)+' 次敲击的 ('+row+','+col+')：这里本来就是空的，worth 不成立，答案 0', [row,col], i);
+        continue;
+      }
+      var w = (row === 0)
+        || (row > 0 && b[row-1][col] === 2)
+        || (row < n-1 && b[row+1][col] === 2)
+        || (col > 0 && b[row][col-1] === 2)
+        || (col < m-1 && b[row][col+1] === 2);
+      if(!w){
+        push('补回 ('+row+','+col+')，但四邻没有 2：worth 不成立，保持 1', [row,col], i);
+        continue;
+      }
+      push('补回 ('+row+','+col+')，worth 成立：从这里开始感染', [row,col], i);
+      var cnt = 0, st2 = [[row,col]];
+      while(st2.length){
+        var c2=st2.pop(), x2=c2[0], y2=c2[1];
+        if(x2<0||x2>=n||y2<0||y2>=m||b[x2][y2]!==1) continue;
+        b[x2][y2]=2; cnt++;
+        push('新感染 ('+x2+','+y2+')，累计 '+cnt+' 块', [x2,y2], i);
+        st2.push([x2+1,y2]); st2.push([x2,y2+1]); st2.push([x2-1,y2]); st2.push([x2,y2-1]);
+      }
+      ans[i] = cnt - 1;
+      push('ans['+i+'] = '+cnt+' - 1 = '+ans[i]+'（减掉被敲的那块）', [row,col], i);
+    }
+    push('倒着补完，答案出来了');
+    return {steps:steps, n:n, m:m, ans:ans, hits:hits};
+  }
+  var sel=document.getElementById('bkSel'), gridEl=document.getElementById('bkGrid'), hitsEl=document.getElementById('bkHits'),
+      noteEl=document.getElementById('bkNote'), ansEl=document.getElementById('bkAns');
+  if(!sel) return;
+  var cur=null, idx=0;
+  PRESETS.forEach(function(p,k){ var o=document.createElement('option'); o.value=k; o.textContent=p.name; sel.appendChild(o); });
+  function build(){
+    var p = PRESETS[+sel.value];
+    var g, h;
+    if(p.g){ g = p.g.map(function(r){return r.slice();}); h = p.h.map(function(r){return r.slice();}); }
+    else { var rc = randCase(); g = rc.g; h = rc.h; }
+    cur = gen(g, h);
+    idx = 0;
+    gridEl.style.gridTemplateColumns = 'repeat('+cur.m+', 32px)';
+    redraw();
+  }
+  function redraw(){
+    var s = cur.steps[idx];
+    var html='';
+    for(var i=0;i<cur.n;i++) for(var j=0;j<cur.m;j++){
+      var v = s.grid[i][j], cls='cell ', show=v;
+      if(v>=2){ cls += 'stable'; }
+      else if(v===1){ cls += 'brick'; }
+      else if(v===0){ cls += 'empty'; }
+      else { cls += 'neg'; }
+      if(s.cur && s.cur[0]===i && s.cur[1]===j) cls += ' cur';
+      html += '<span class="'+cls+'">'+show+'</span>';
+    }
+    gridEl.innerHTML = html;
+    var hh = 'hits：';
+    cur.hits.forEach(function(p,k){
+      hh += '<span class="'+(s.hit===k?'on':'')+'">['+p[0]+','+p[1]+'] </span>';
+    });
+    hitsEl.innerHTML = hh;
+    noteEl.textContent = s.msg;
+    var av = s.ans.map(function(v){ return v; }).join(' ');
+    ansEl.textContent = 'ans = [ '+av+' ]　进度 '+(idx+1)+'/'+cur.steps.length;
+  }
+  sel.addEventListener('change', build);
+  document.getElementById('bkNext').addEventListener('click', function(){ if(idx<cur.steps.length-1){ idx++; redraw(); } });
+  document.getElementById('bkPrev').addEventListener('click', function(){ if(idx>0){ idx--; redraw(); } });
+  document.getElementById('bkReset').addEventListener('click', function(){ idx=0; redraw(); });
+  build();
+})();
+
+// ===== 演示 2：正向模拟 =====
+(function(){
+  function gen(g, hits){
+    var n=g.length, m=g[0].length;
+    var b = g.map(function(r){ return r.slice(); });
+    var ans = new Array(hits.length).fill(0);
+    var steps = [];
+    var dr=[1,-1,0,0], dc=[0,0,1,-1];
+    function snap(){ return b.map(function(r){ return r.slice(); }); }
+    function push(msg, cur, hi, falling){ steps.push({grid:snap(), msg:msg, cur:cur||null, hit:hi===undefined?-1:hi, ans:ans.slice(), falling:falling||null}); }
+    push('原始网格，开局每块砖都是稳的');
+    for(var t=0;t<hits.length;t++){
+      var r = hits[t][0], c = hits[t][1];
+      if(b[r][c] <= 0){ push('第 '+(t+1)+' 次敲的是空位置，什么也没掉', [r,c], t); continue; }
+      b[r][c] = 0;
+      push('敲掉 ('+r+','+c+')', [r,c], t);
+      var ok = [];
+      for(var i=0;i<n;i++) ok.push(new Array(m).fill(0));
+      var q = [];
+      for(var j=0;j<m;j++) if(b[0][j]===1){ ok[0][j]=1; q.push([0,j]); }
+      while(q.length){
+        var p=q.shift(), x=p[0], y=p[1];
+        for(var d=0;d<4;d++){
+          var nx=x+dr[d], ny=y+dc[d];
+          if(nx<0||nx>=n||ny<0||ny>=m||b[nx][ny]!==1||ok[nx][ny]) continue;
+          ok[nx][ny]=1; q.push([nx,ny]);
+        }
+      }
+      var fall = [];
+      for(var i2=0;i2<n;i2++) for(var j2=0;j2<m;j2++) if(b[i2][j2]===1 && !ok[i2][j2]) fall.push([i2,j2]);
+      if(fall.length === 0){
+        push('从顶部重新 BFS：剩下的砖都还稳着，掉了 0 块', null, t, []);
+      } else {
+        fall.forEach(function(p){ b[p[0]][p[1]] = 0; });
+        ans[t] = fall.length;
+        push('够不着顶部的有 '+fall.length+' 块，全部消失', null, t, fall);
+      }
+    }
+    push('正向模拟结束');
+    return {steps:steps, n:n, m:m, ans:ans, hits:hits};
+  }
+  var sel=document.getElementById('fwSel'), gridEl=document.getElementById('fwGrid'), hitsEl=document.getElementById('fwHits'),
+      noteEl=document.getElementById('fwNote'), ansEl=document.getElementById('fwAns');
+  if(!sel) return;
+  var cur=null, idx=0;
+  PRESETS.forEach(function(p,k){ var o=document.createElement('option'); o.value=k; o.textContent=p.name; sel.appendChild(o); });
+  function build(){
+    var p = PRESETS[+sel.value];
+    var g, h;
+    if(p.g){ g = p.g.map(function(r){return r.slice();}); h = p.h.map(function(r){return r.slice();}); }
+    else { var rc = randCase(); g = rc.g; h = rc.h; }
+    cur = gen(g, h);
+    idx = 0;
+    gridEl.style.gridTemplateColumns = 'repeat('+cur.m+', 32px)';
+    redraw();
+  }
+  function redraw(){
+    var s = cur.steps[idx];
+    var html='';
+    for(var i=0;i<cur.n;i++) for(var j=0;j<cur.m;j++){
+      var v = s.grid[i][j], cls='cell ';
+      if(v===1) cls += 'brick'; else cls += 'empty';
+      if(s.falling && s.falling.some(function(p){ return p[0]===i && p[1]===j; })) cls += ' fall';
+      if(s.cur && s.cur[0]===i && s.cur[1]===j) cls += ' cur';
+      html += '<span class="'+cls+'">'+v+'</span>';
+    }
+    gridEl.innerHTML = html;
+    var hh = 'hits：';
+    cur.hits.forEach(function(p,k){ hh += '<span class="'+(s.hit===k?'on':'')+'">['+p[0]+','+p[1]+'] </span>'; });
+    hitsEl.innerHTML = hh;
+    noteEl.textContent = s.msg + (s.falling && s.falling.length ? '（标红的是掉下来的）' : '');
+    ansEl.textContent = 'ans = [ '+s.ans.join(' ')+' ]　进度 '+(idx+1)+'/'+cur.steps.length;
+  }
+  sel.addEventListener('change', build);
+  document.getElementById('fwNext').addEventListener('click', function(){ if(idx<cur.steps.length-1){ idx++; redraw(); } });
+  document.getElementById('fwPrev').addEventListener('click', function(){ if(idx>0){ idx--; redraw(); } });
+  document.getElementById('fwReset').addEventListener('click', function(){ idx=0; redraw(); });
+  build();
+})();
+})();
+</script>
+</body>
+</html>

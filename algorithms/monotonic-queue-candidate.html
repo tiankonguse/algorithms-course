@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>单调队列配前缀和：最短子数组与最大价值 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>单调队列配前缀和：最短子数组与最大价值</h1>
+      <p class="intro">数组里掺了负数，滑动窗口那套「和大了就缩 l」立刻失效：l 该往哪缩没有单调性。前缀和把「子数组和」变成「两个前缀和的差」，问题就转成找一对前缀和：早的尽量小、晚的尽量大。单调队列在中间维护候选，两个维度（值要小、下标要早）一个靠队尾淘汰、一个靠队头结算。</p>
+
+      <h2>零、背景</h2>
+      <p>数组全正时，「和至少为 K 的最短子数组」用双指针就能扫：和不够 r 右移，够了 l 左移收缩。加入负数后这套全崩：l 收缩后和可能变大（因为甩掉了负数），也可能变小，没有单调性可依赖，暴力只能枚举所有子数组。</p>
+      <p>先看前缀和。定义 sum[i] 为前 i 个数的累加和，子数组 [l, r) 的和就是 sum[r] - sum[l]。于是问题变成：找 l < r，sum[r] - sum[l] >= K，让 r - l 最小。</p>
+      <p>对固定的 r，要凑出 sum[r] - sum[l] >= K，sum[l] 越小越容易；要长度短，l 越靠后越好（r - l 小）。这两个要求打架：越早的 l 离得远但可能很小，越晚的 l 离得近但可能不够小。</p>
+
+      <h2>一、单调队列维护前缀和候选</h2>
+      <p>从 l 的角度想：一个候选 l，如果被后来的 l' 全面压制（sum[l'] <= sum[l] 且 l' > l），那 l 永远等不到出场：l' 值更小更容易凑够 K，下标更晚长度更短。留着 l 没有意义，弹掉。</p>
+      <p>单调队列里存的就是这样一条「前缀和递增」的候选链：从头到尾下标递增、值也递增。值越大的越靠后，一旦出现更小的，前面所有更大的全部淘汰。</p>
+
+      <figure class="fig" id="figSum"></figure>
+
+      <p>结算发生在队头：r 扫描到每个位置，看队头候选能不能凑够（sum[r] - sum[队头] >= K）。能凑够就结算 r - 队头并弹出队头：它已经以最短长度完成任务，留着只会让后面的 r 更长。弹出后下一个队头继续试。</p>
+      <p>每个前缀和入队一次、出队至多一次，总代价 O(n)。实测 n=1e5、值域 [-1e4, 1e4]、K=5000 的随机数组，单调队列 1.40ms；暴力扫 O(n²) 在 n=5000 就要 12.77ms。</p>
+
+      <h2>二、题 1 代码</h2>
+              <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 和至少为K的最短子数组</span>
+    <span class="cm">// 前缀和 + 单调队列（队头是最早且最小的前缀和候选）</span>
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">long</span> <span class="kw">long</span> sumArr[MAXN];
+    <span class="kw">int</span> dq[MAXN];
+    <span class="kw">int</span> h, t;
+
+    <span class="kw">int</span> <span class="fn">shortestSubarray</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr, <span class="kw">int</span> K) {
+        <span class="kw">int</span> n = (<span class="kw">int</span>)arr.size();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            sumArr[i + 1] = sumArr[i] + arr[i];
+        }
+        h = t = 0;
+        <span class="kw">int</span> ans = INT_MAX;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt;= n; i++) {
+            <span class="kw">while</span> (h != t &amp;&amp; sumArr[i] - sumArr[dq[h]] &gt;= K) {
+                ans = min(ans, i - dq[h]);
+                h++;
+            }
+            <span class="kw">while</span> (h != t &amp;&amp; sumArr[dq[t - 1]] &gt;= sumArr[i]) {
+                t--;
+            }
+            dq[t++] = i;
+        }
+        <span class="kw">return</span> ans != INT_MAX ? ans : -1;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        <span class="kw">int</span> n, k;
+        cin &gt;&gt; n &gt;&gt; k;
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">arr</span>(n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) cin &gt;&gt; arr[i];
+        cout &lt;&lt; shortestSubarray(arr, k) &lt;&lt; endl;
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <figure class="fig" id="figSpeed1"></figure>
+
+      <p>两个 while 各司其职：前一个结算队头，后一个维护「递增」结构。注意结算用 >=，等于 K 也算达标；答案没更新过就返回 -1。</p>
+      <p>样例：K=3 的 [2,-1,2]，前缀和 [0,2,1,3]，答案 3（整个数组）；[1,2] K=4 无解返回 -1；[84,-37,32,40,95] K=167 答案 3（[32,40,95]）。</p>
+
+      <h2>三、题 2：满足不等式的最大值（LeetCode 1499）</h2>
+      <p>点按 x 排序，对 i < j 有 xj > xi，绝对值号直接去掉：yi + yj + xj - xi，整理成 (xj + yj) + (yi - xi)。前一半属于当前点 j，后一半是之前某个点 i 的贡献，还带约束 xj - xi <= k。</p>
+      <p>对每个 j，要的是「x 距离不超过 k 的 i 里 yi - xi 最大」。这又是候选问题：候选 i 的价值是 yi - xi，越大越好；距离约束是 x 差 <= k，超窗就过期。</p>
+
+      <figure class="fig" id="figCand"></figure>
+
+      <p>队列从队头淘汰过期（队头 x + k < 当前 x），队头就是窗口内 yi - xi 最大的候选，直接结算；从队尾淘汰「价值更差」的候选（新候选的 y - x 更大，旧的留着没用）。</p>
+      <p>复杂度 O(n)，额外空间 O(n)。实测 n=1e5、x 递增、y 值域 [-1e6, 1e6]、k=1e4，单调队列 1.02ms；暴力 O(n²) 在 n=3000 就要 2.34ms。</p>
+
+      <h2>四、题 2 代码</h2>
+              <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 满足不等式的最大值</span>
+    <span class="cm">// 点按 x 排序，yi + yj + |xi - xj| = (xi + yi) + (yj - xj)</span>
+    <span class="cm">// 单调队列维护 y-x 递减的候选，队头过期条件 x 距离超过 k</span>
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">int</span> dq[MAXN][2];
+    <span class="kw">int</span> h, t;
+
+    <span class="kw">int</span> <span class="fn">findMaxValueOfEquation</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; points, <span class="kw">int</span> k) {
+        h = t = 0;
+        <span class="kw">int</span> n = (<span class="kw">int</span>)points.size();
+        <span class="kw">int</span> ans = INT_MIN;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">int</span> x = points[i][0];
+            <span class="kw">int</span> y = points[i][1];
+            <span class="kw">while</span> (h &lt; t &amp;&amp; dq[h][0] + k &lt; x) {
+                h++;
+            }
+            <span class="kw">if</span> (h &lt; t) {
+                ans = max(ans, x + y + dq[h][1] - dq[h][0]);
+            }
+            <span class="kw">while</span> (h &lt; t &amp;&amp; dq[t - 1][1] - dq[t - 1][0] &lt;= y - x) {
+                t--;
+            }
+            dq[t][0] = x;
+            dq[t][1] = y;
+            t++;
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        <span class="kw">int</span> n, k;
+        cin &gt;&gt; n &gt;&gt; k;
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">points</span>(n, vector&lt;<span class="kw">int</span>&gt;(2));
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) cin &gt;&gt; points[i][0] &gt;&gt; points[i][1];
+        cout &lt;&lt; findMaxValueOfEquation(points, k) &lt;&lt; endl;
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <figure class="fig" id="figSpeed2"></figure>
+
+      <p>队列元素是 (x, y)，比较口径是 y - x。入队时机在结算之后：当前点结算完自己，再作为候选供后面的点使用。</p>
+      <p>样例：[[1,3],[2,0],[5,10],[6,-10]] k=1 答案 4（点 0 和点 1）；[[0,0],[3,0],[9,2]] k=3 答案 3（点 0 和点 1）。</p>
+
+      <h2>总结</h2>
+      <p>两题共享一个骨架：候选有两个维度，一个维度「值更优」靠队尾淘汰维护单调性，一个维度「不超窗」靠队头过期处理。题 1 的窗口是前缀和下标（最短长度约束），题 2 的窗口是 x 坐标差，本质是同一件事。</p>
+      <p>题 1 里队列单调递增、结算在队头弹「达标」的候选；题 2 里队列单调递减、结算在队头弹「过期」的候选。方向不同，是因为题 1 要最短（早达标早结算），题 2 要最大（候选存活到过期）。</p>
+
+      <p>题 3 把同一个队列用进二分答案的贪心检查，是单调队列的另一个去处，下一页单独讲。</p>
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/shortest-subarray-with-sum-at-least-k/" target="_blank">和至少为 K 的最短子数组</a></td><td>leetcode.cn/problems/shortest-subarray-with-sum-at-least-k/</td></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/max-value-of-equation/" target="_blank">满足不等式的最大值</a></td><td>leetcode.cn/problems/max-value-of-equation/</td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解055【必备】单调队列-下</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+/* ===== figSum：前缀和 + 单调队列步骤 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 940 640" xmlns="http://www.w3.org/2000/svg">';
+  var x0 = 90, y0 = 80, cell = 52;
+  var arr = [3,1,-4,2,5,-1,6];
+  var sum = [0,3,4,0,2,7,6,12];
+  var rows = [
+    {i:0, note:'i=0：sum=0，队空，入队 0 → 队列 [0]', q:[0], hl:null, ans:null},
+    {i:1, note:'i=1：sum=3，3-0=3<7 不结算；0≥3 不弹；入队 1 → [0,1]', q:[0,1], hl:null, ans:null},
+    {i:2, note:'i=2：sum=4，4-0=4<7；0≥4 不弹；入队 2 → [0,1,2]', q:[0,1,2], hl:null, ans:null},
+    {i:3, note:'i=3：sum=0，不结算；4≥0、3≥0、0≥0 全弹，入队 3 → [3]', q:[3], hl:[0,1,2], ans:null},
+    {i:4, note:'i=4：sum=2，2-0=2<7；0≥2 不弹；入队 4 → [3,4]', q:[3,4], hl:null, ans:null},
+    {i:5, note:'i=5：sum=7，7-0=7≥7 → ans=5-3=2；2≥7 不弹；入队 5 → [4,5]', q:[4,5], hl:[3], ans:2},
+    {i:6, note:'i=6：sum=6，6-2=4<7；7≥6 弹 5；2≥6 不弹；入队 6 → [4,6]', q:[4,6], hl:[5], ans:2},
+    {i:7, note:'i=7：sum=12，12-2=10≥7 → ans 保持 2；6≥12 不弹；入队 7 → [6,7]', q:[6,7], hl:[4], ans:2}
+  ];
+  s += '<text x="'+x0+'" y="'+(y0-26)+'" font-size="14" fill="#444">arr=[3,1,-4,2,5,-1,6]，K=7。前缀和 sum=[0,3,4,0,2,7,6,12]</text>';
+  s += '<text x="'+(x0+8*cell+14)+'" y="'+(y0-26)+'" font-size="14" fill="#ea580c">答案 2（子数组 [2,5]）</text>';
+  for (var row = 0; row < rows.length; row++) {
+    var gy = y0 + row * 68;
+    var rr = rows[row];
+    for (var i = 0; i < 8; i++) {
+      var x = x0 + i * cell;
+      var fill = '#f6f7f9';
+      if (rr.hl !== null && rr.hl.indexOf(i) >= 0) fill = '#fee2e2';
+      if (i === rr.i) fill = '#dbeafe';
+      s += '<rect x="'+x+'" y="'+gy+'" width="'+(cell-4)+'" height="40" fill="'+fill+'" stroke="#e6e8eb"/>';
+      s += '<text x="'+(x+(cell-4)/2)+'" y="'+(gy+26)+'" text-anchor="middle" font-size="13">'+sum[i]+'</text>';
+    }
+    s += '<text x="'+(x0+8*cell+14)+'" y="'+(gy+16)+'" font-size="12" fill="#888">队:</text>';
+    var qx = x0 + 8 * cell + 14;
+    for (var d = 0; d < rr.q.length; d++) {
+      var qxx = qx + 40 + d * 46;
+      s += '<rect x="'+qxx+'" y="'+(gy+2)+'" width="40" height="28" fill="#ffedd5" stroke="#e6e8eb"/>';
+      s += '<text x="'+(qxx+20)+'" y="'+(gy+21)+'" text-anchor="middle" font-size="12">'+sum[rr.q[d]]+'</text>';
+    }
+    if (rr.ans !== null) s += '<text x="'+(qx+40+rr.q.length*46+8)+'" y="'+(gy+20)+'" font-size="13" fill="#ea580c">ans='+rr.ans+'</text>';
+    s += '<text x="'+x0+'" y="'+(gy+58)+'" font-size="12" fill="#444">'+rr.note+'</text>';
+  }
+  s += '</svg>';
+  document.getElementById('figSum').innerHTML = s;
+})();
+
+/* ===== figSpeed1：题1 性能柱图 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">';
+  var x0 = 260, y0 = 60, base = 220, bw = 90;
+  var data = [
+    {name:'单调队列 n=1e5', v:1.40, color:'#2563eb'},
+    {name:'暴力 n=5000', v:12.77, color:'#ea580c'}
+  ];
+  var maxV = 14;
+  s += '<text x="40" y="34" font-size="14" fill="#444">耗时（毫秒）</text>';
+  for (var i = 0; i < data.length; i++) {
+    var h = Math.max(8, data[i].v / maxV * (base - y0));
+    var x = x + 0;
+    var xx = x0 + i * 210;
+    s += '<rect x="'+xx+'" y="'+(base-h)+'" width="'+bw+'" height="'+h+'" fill="'+data[i].color+'" rx="4"/>';
+    s += '<text x="'+(xx+bw/2)+'" y="'+(base-h-8)+'" text-anchor="middle" font-size="14" fill="#444">'+data[i].v+'ms</text>';
+    s += '<text x="'+(xx+bw/2)+'" y="'+(base+18)+'" text-anchor="middle" font-size="12" fill="#444">'+data[i].name+'</text>';
+  }
+  s += '<text x="40" y="'+(base+44)+'" font-size="13" fill="#888">暴力 O(n²) 连 n=5000 都吃力，单调队列 1e5 只要 1.40ms（g++ -O2，macOS aarch64）</text>';
+  s += '</svg>';
+  document.getElementById('figSpeed1').innerHTML = s;
+})();
+
+/* ===== figCand：题2 候选队列步骤 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 940 600" xmlns="http://www.w3.org/2000/svg">';
+  var x0 = 60, y0 = 90, cell = 70;
+  var pts = [[1,3],[2,0],[4,5],[6,-10],[8,12],[10,-2]];
+  var k = 3;
+  var rows = [
+    {i:0, cand:'', note:'点 (1,3)：队空，无候选。入队，y-x=2 → [(1,3)]', q:[[1,3]], ans:'—'},
+    {i:1, cand:'(1,3) → 2+0+2=4', note:'点 (2,0)：队头 1+3≥2 没过期。结算 4。入队，y-x=-2 不优 → [(1,3),(2,0)]', q:[[1,3],[2,0]], ans:4},
+    {i:2, cand:'(1,3) → 4+5+2=11', note:'点 (4,5)：队头 1+3≥4 没过期。结算 11。入队 → [(1,3),(2,0),(4,5)]', q:[[1,3],[2,0],[4,5]], ans:11},
+    {i:3, cand:'全过期，无候选', note:'点 (6,-10)：1+3<6、2+3<6、4+3<6 全过期弹出。入队 → [(6,-10)]', q:[[6,-10]], ans:11},
+    {i:4, cand:'(6,-10) → 8+12-16=4', note:'点 (8,12)：队头 6+3≥8 没过期。结算 4。y-x=4 更大，弹旧候选，入队 → [(8,12)]', q:[[8,12]], ans:11},
+    {i:5, cand:'(8,12) → 10-2+4=12', note:'点 (10,-2)：队头 8+3≥10 没过期。结算 12。入队 → [(8,12),(10,-2)]', q:[[8,12],[10,-2]], ans:12}
+  ];
+  s += '<text x="'+x0+'" y="'+(y0-28)+'" font-size="14" fill="#444">points=[[1,3],[2,0],[4,5],[6,-10],[8,12],[10,-2]]，k=3。答案 12</text>';
+  for (var row = 0; row < rows.length; row++) {
+    var gy = y0 + row * 82;
+    var rr = rows[row];
+    s += '<text x="'+x0+'" y="'+(gy+12)+'" font-size="11" fill="#888">i='+rr.i+'</text>';
+    for (var p = 0; p < 6; p++) {
+      var x = x0 + 30 + p * cell;
+      var fill = (p === rr.i) ? '#dbeafe' : '#f6f7f9';
+      s += '<rect x="'+x+'" y="'+gy+'" width="'+(cell-4)+'" height="36" fill="'+fill+'" stroke="#e6e8eb"/>';
+      s += '<text x="'+(x+(cell-4)/2)+'" y="'+(gy+23)+'" text-anchor="middle" font-size="12">('+pts[p][0]+','+pts[p][1]+')</text>';
+    }
+    s += '<text x="'+(x0+30+6*cell+12)+'" y="'+(gy+14)+'" font-size="12" fill="#888">队:</text>';
+    var qx = x0 + 30 + 6 * cell + 12;
+    for (var d = 0; d < rr.q.length; d++) {
+      var qxx = qx + 46 + d * 96;
+      s += '<rect x="'+qxx+'" y="'+gy+'" width="88" height="28" fill="#ffedd5" stroke="#e6e8eb"/>';
+      s += '<text x="'+(qxx+44)+'" y="'+(gy+19)+'" text-anchor="middle" font-size="11">('+rr.q[d][0]+','+rr.q[d][1]+')</text>';
+    }
+    s += '<text x="'+x0+'" y="'+(gy+56)+'" font-size="12" fill="#ea580c">'+rr.cand+'  ans='+rr.ans+'</text>';
+    s += '<text x="'+x0+'" y="'+(gy+74)+'" font-size="12" fill="#444">'+rr.note+'</text>';
+  }
+  s += '</svg>';
+  document.getElementById('figCand').innerHTML = s;
+})();
+
+/* ===== figSpeed2：题2 性能柱图 ===== */
+(function(){
+  var s = '<svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">';
+  var x0 = 260, y0 = 60, base = 220, bw = 90;
+  var data = [
+    {name:'单调队列 n=1e5', v:1.02, color:'#2563eb'},
+    {name:'暴力 n=3000', v:2.34, color:'#ea580c'}
+  ];
+  var maxV = 3;
+  s += '<text x="40" y="34" font-size="14" fill="#444">耗时（毫秒）</text>';
+  for (var i = 0; i < data.length; i++) {
+    var h = Math.max(8, data[i].v / maxV * (base - y0));
+    var xx = x0 + i * 210;
+    s += '<rect x="'+xx+'" y="'+(base-h)+'" width="'+bw+'" height="'+h+'" fill="'+data[i].color+'" rx="4"/>';
+    s += '<text x="'+(xx+bw/2)+'" y="'+(base-h-8)+'" text-anchor="middle" font-size="14" fill="#444">'+data[i].v+'ms</text>';
+    s += '<text x="'+(xx+bw/2)+'" y="'+(base+18)+'" text-anchor="middle" font-size="12" fill="#444">'+data[i].name+'</text>';
+  }
+  s += '<text x="40" y="'+(base+44)+'" font-size="13" fill="#888">暴力 O(n²) n=3000 就 2.34ms，单调队列 1e5 只要 1.02ms（g++ -O2，macOS aarch64）</text>';
+  s += '</svg>';
+  document.getElementById('figSpeed2').innerHTML = s;
+})();
+
+/* ===== 演示1：题1 前缀和 + 单调队列操作台 ===== */
+(function(){
+  var presets = {
+    p1: {name:'[3,1,-4,2,5,-1,6] K=7', arr:[3,1,-4,2,5,-1,6], k:7},
+    p2: {name:'[2,-1,2] K=3', arr:[2,-1,2], k:3},
+    p3: {name:'[1,2] K=4（无解）', arr:[1,2], k:4},
+    p4: {name:'[4,-2,3,1,5,-3,2] K=6', arr:[4,-2,3,1,5,-3,2], k:6}
+  };
+  var wrap = document.createElement('div');
+  wrap.className = 'viz';
+  var title = document.createElement('p');
+  title.className = 'viz-title';
+  title.textContent = '题 1 操作台：前缀和 + 单调队列（预设可切）';
+  var ctrl = document.createElement('div');
+  ctrl.className = 'viz-controls';
+  var sel = document.createElement('select');
+  var stepBtn = document.createElement('button');
+  stepBtn.type = 'button'; stepBtn.textContent = '下一步';
+  var resetBtn = document.createElement('button');
+  resetBtn.type = 'button'; resetBtn.textContent = '重置';
+  Object.keys(presets).forEach(function(k){ var o = document.createElement('option'); o.value = k; o.textContent = presets[k].name; sel.appendChild(o); });
+  ctrl.appendChild(sel); ctrl.appendChild(stepBtn); ctrl.appendChild(resetBtn);
+  var note = document.createElement('p');
+  note.className = 'stepnote';
+  var board = document.createElement('div');
+  wrap.appendChild(title); wrap.appendChild(ctrl); wrap.appendChild(note); wrap.appendChild(board);
+  document.querySelector('.algo-section').appendChild(wrap);
+  var answerEl = document.createElement('p');
+  answerEl.className = 'viz-answer';
+  wrap.insertBefore(answerEl, wrap.firstChild);
+
+  var st = {arr:[], k:0, sum:[], steps:[], i:0};
+  function buildSteps(arr, K){
+    var n = arr.length, sum = [0];
+    for (var i = 0; i < n; i++) sum.push(sum[i] + arr[i]);
+    var steps = [], q = [], h = 0, ans = Infinity;
+    steps.push({i:0, q:[], qv:[], head:null, tail:null, cand:null, ans:'∞', desc:'初始：sum[0]=0，队列空，答案 ∞'});
+    for (var i = 0; i <= n; i++) {
+      var evicted = [];
+      while (q.length > h && sum[i] - sum[q[h]] >= K) {
+        ans = Math.min(ans, i - q[h]);
+        evicted.push(q[h]);
+        h++;
+      }
+      if (evicted.length) {
+        steps.push({i:i, q:q.slice(h), qv:q.slice(h).map(function(x){return sum[x];}), head:q[h-0], tail:null, evicted:evicted.map(function(x){return sum[x];}), cand:(i-evicted[evicted.length-1]), ans:(ans===Infinity?'∞':ans), desc:'i='+i+'：sum='+sum[i]+'，队头 '+sum[evicted[0]]+' 凑够（'+sum[i]+'-'+sum[evicted[0]]+'≥'+K+'），ans='+(ans===Infinity?'∞':ans)+'，弹出'});
+      }
+      var popped = [];
+      while (q.length > h && sum[q[q.length-1]] >= sum[i]) { popped.push(q.pop()); }
+      q.push(i);
+      steps.push({i:i, q:q.slice(h), qv:q.slice(h).map(function(x){return sum[x];}), head:null, tail:popped.map(function(x){return sum[x];}), evicted:null, cand:null, ans:(ans===Infinity?'∞':ans), desc:'i='+i+'：sum='+sum[i]+'，'+(popped.length?'弹队尾 '+popped.map(function(x){return sum[x];}).join('、')+'（≥'+sum[i]+'）':'队尾更小不弹')+'，入队 → 队列 ['+q.slice(h).map(function(x){return sum[x];}).join(' ')+']'});
+    }
+    steps.push({i:n, q:[], qv:[], head:null, tail:null, cand:null, ans:(ans===Infinity?'-1':ans), desc:'结束，答案 '+(ans===Infinity?'-1（无解）':ans)});
+    return {arr:arr, k:K, sum:sum, steps:steps};
+  }
+  function redraw(){
+    var stp = st.steps[Math.min(st.i, st.steps.length-1)];
+    var n = st.sum.length, cell = 44, x0 = 40, y0 = 30;
+    var svg = '<svg viewBox="0 0 '+(Math.max(620, x0+n*cell+280))+' 140" xmlns="http://www.w3.org/2000/svg">';
+    for (var i = 0; i < n; i++) {
+      var fill = (i === stp.i) ? '#dbeafe' : '#f6f7f9';
+      svg += '<rect x="'+(x0+i*cell)+'" y="'+y0+'" width="'+(cell-3)+'" height="42" fill="'+fill+'" stroke="#e6e8eb"/>';
+      svg += '<text x="'+(x0+i*cell+(cell-3)/2)+'" y="'+(y0+28)+'" text-anchor="middle" font-size="13">'+st.sum[i]+'</text>';
+    }
+    svg += '<text x="'+(x0+n*cell+14)+'" y="'+(y0+16)+'" font-size="12" fill="#888">K='+st.k+'</text>';
+    svg += '<text x="'+(x0+n*cell+14)+'" y="'+(y0+38)+'" font-size="12" fill="#888">队列(sum): '+(stp.qv.length?stp.qv.join(' '):'空')+'</text>';
+    svg += '<text x="'+(x0+n*cell+14)+'" y="'+(y0+60)+'" font-size="13" fill="#ea580c">ans='+stp.ans+'</text>';
+    if (stp.evicted) svg += '<text x="'+(x0+n*cell+14)+'" y="'+(y0+82)+'" font-size="12" fill="#ea580c">弹出 '+stp.evicted.join(' ')+'</text>';
+    if (stp.tail && stp.tail.length) svg += '<text x="'+(x0+n*cell+14)+'" y="'+(y0+82)+'" font-size="12" fill="#888">弹队尾 '+stp.tail.join(' ')+'</text>';
+    svg += '</svg>';
+    board.innerHTML = svg;
+    note.textContent = '第 '+(st.i+1)+'/'+st.steps.length+' 步：'+stp.desc;
+    answerEl.textContent = '答案：'+stp.ans;
+  }
+  function load(k){
+    st = buildSteps(presets[k].arr, presets[k].k);
+    st.i = 0;
+    redraw();
+  }
+  sel.addEventListener('change', function(){ load(sel.value); });
+  stepBtn.addEventListener('click', function(){ if (st.i < st.steps.length-1) { st.i++; redraw(); } });
+  resetBtn.addEventListener('click', function(){ load(sel.value); });
+  load('p1');
+})();
+
+/* ===== 演示2：题2 候选队列操作台 ===== */
+(function(){
+  var presets = {
+    p1: {name:'[[1,3],[2,0],[4,5],[6,-10],[8,12],[10,-2]] k=3', pts:[[1,3],[2,0],[4,5],[6,-10],[8,12],[10,-2]], k:3},
+    p2: {name:'[[1,3],[2,0],[5,10],[6,-10]] k=1', pts:[[1,3],[2,0],[5,10],[6,-10]], k:1},
+    p3: {name:'[[0,0],[3,0],[9,2]] k=3', pts:[[0,0],[3,0],[9,2]], k:3}
+  };
+  var wrap = document.createElement('div');
+  wrap.className = 'viz';
+  var title = document.createElement('p');
+  title.className = 'viz-title';
+  title.textContent = '题 2 操作台：候选队列（预设可切）';
+  var ctrl = document.createElement('div');
+  ctrl.className = 'viz-controls';
+  var sel = document.createElement('select');
+  var stepBtn = document.createElement('button');
+  stepBtn.type = 'button'; stepBtn.textContent = '下一步';
+  var resetBtn = document.createElement('button');
+  resetBtn.type = 'button'; resetBtn.textContent = '重置';
+  Object.keys(presets).forEach(function(k){ var o = document.createElement('option'); o.value = k; o.textContent = presets[k].name; sel.appendChild(o); });
+  ctrl.appendChild(sel); ctrl.appendChild(stepBtn); ctrl.appendChild(resetBtn);
+  var note = document.createElement('p');
+  note.className = 'stepnote';
+  var board = document.createElement('div');
+  wrap.appendChild(title); wrap.appendChild(ctrl); wrap.appendChild(note); wrap.appendChild(board);
+  document.querySelector('.algo-section').appendChild(wrap);
+  var answerEl = document.createElement('p');
+  answerEl.className = 'viz-answer';
+  wrap.insertBefore(answerEl, wrap.firstChild);
+
+  var st = {pts:[], k:0, steps:[], i:0};
+  function buildSteps(pts, k){
+    var steps = [], q = [], h = 0, ans = -Infinity, n = pts.length;
+    steps.push({i:0, q:[], cand:null, ans:'—', desc:'初始：队列空，答案 —'});
+    for (var i = 0; i < n; i++) {
+      var x = pts[i][0], y = pts[i][1], expired = [];
+      while (q.length > h && q[h][0] + k < x) { expired.push(q[h]); h++; }
+      var cand = null;
+      if (q.length > h) {
+        cand = x + y + q[h][1] - q[h][0];
+        ans = Math.max(ans, cand);
+      }
+      var c = cand;
+      var popped = [];
+      while (q.length > h && q[q.length-1][1] - q[q.length-1][0] <= y - x) { popped.push(q.pop()); }
+      q.push([x, y]);
+      var cur = x + y;
+      var cv = y - x;
+      var candText = expired.length ? (q.length > h ? '过期后队头 '+(q[h][0]+','+q[h][1])+' → '+(x+y+q[h][1]-q[h][0]) : '全过期，无候选') : (c !== null ? '('+pts[i-0][0]+','+pts[i-0][1]+')…' : '');
+      steps.push({i:i, q:q.slice(h), cand:c, ans:(ans===-Infinity?'—':ans), desc:'点 ('+x+','+y+')：'+(expired.length?'弹过期 '+expired.map(function(p){return '('+p[0]+','+p[1]+')';}).join(' ')+'；':'')+(c!==null?'结算 '+(x+y+q[h][1]-q[h][0])+'；':'')+(popped.length?'弹旧候选 '+popped.map(function(p){return '('+p[0]+','+p[1]+')';}).join(' ')+'（y-x='+popped[0][1]-popped[0][0]+'≤'+cv+'）；':'')+'入队 ('+x+','+y+') → 队列 ['+q.slice(h).map(function(p){return '('+p[0]+','+p[1]+')';}).join(' ')+']'});
+    }
+    steps.push({i:n, q:[], cand:null, ans:(ans===-Infinity?'—':ans), desc:'结束，答案 '+(ans===-Infinity?'—':ans)});
+    return {pts:pts, k:k, steps:steps};
+  }
+  function redraw(){
+    var stp = st.steps[Math.min(st.i, st.steps.length-1)];
+    var n = st.pts.length, cell = 72, x0 = 40, y0 = 30;
+    var svg = '<svg viewBox="0 0 '+(Math.max(640, x0+n*cell+300))+' 140" xmlns="http://www.w3.org/2000/svg">';
+    for (var i = 0; i < n; i++) {
+      var fill = (stp.i > 0 && i === stp.i) ? '#dbeafe' : '#f6f7f9';
+      svg += '<rect x="'+(x0+i*cell)+'" y="'+y0+'" width="'+(cell-4)+'" height="40" fill="'+fill+'" stroke="#e6e8eb"/>';
+      svg += '<text x="'+(x0+i*cell+(cell-4)/2)+'" y="'+(y0+26)+'" text-anchor="middle" font-size="12">('+st.pts[i][0]+','+st.pts[i][1]+')</text>';
+    }
+    svg += '<text x="'+(x0+n*cell+14)+'" y="'+(y0+16)+'" font-size="12" fill="#888">k='+st.k+'</text>';
+    var qtxt = stp.q.length ? stp.q.map(function(p){return '('+p[0]+','+p[1]+')';}).join(' ') : '空';
+    svg += '<text x="'+(x0+n*cell+14)+'" y="'+(y0+38)+'" font-size="12" fill="#888">队列: '+qtxt+'</text>';
+    svg += '<text x="'+(x0+n*cell+14)+'" y="'+(y0+60)+'" font-size="13" fill="#ea580c">ans='+stp.ans+'</text>';
+    svg += '</svg>';
+    board.innerHTML = svg;
+    note.textContent = '第 '+(st.i+1)+'/'+st.steps.length+' 步：'+stp.desc;
+    answerEl.textContent = '答案：'+stp.ans;
+  }
+  function load(k){
+    st = buildSteps(presets[k].pts, presets[k].k);
+    st.i = 0;
+    redraw();
+  }
+  sel.addEventListener('change', function(){ load(sel.value); });
+  stepBtn.addEventListener('click', function(){ if (st.i < st.steps.length-1) { st.i++; redraw(); } });
+  resetBtn.addEventListener('click', function(){ load(sel.value); });
+  load('p1');
+})();
+})();</script>
+</body>
+</html>

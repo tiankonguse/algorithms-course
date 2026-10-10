@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bellman-Ford 与 SPFA：负权单源最短路</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.viz-controls select { margin-right: 8px; }
+.mono { font-family: ui-monospace,Menlo,Consolas,monospace; font-size: 12px; margin: 5px 0; color: #334155; }
+.chip { display: inline-block; min-width: 26px; padding: 3px 8px; border: 1px solid #cbd5e1; border-radius: 5px; margin-right: 5px; background: #fff; text-align: center; }
+.chip.in { background: #dcfce7; border-color: #16a34a; }
+.chip.cur { outline: 2px solid #ea580c; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>Bellman-Ford 与 SPFA：负权单源最短路</h1>
+      <p class="intro">边权出现负数之后，Dijkstra 那句「弹出即定死」就不再成立，得换成一轮一轮扫边的松弛法。Bellman-Ford 每轮把所有边看一遍，最多 n-1 轮收敛；SPFA 只把上一轮被改动过的点放回队列，多数图上快得多。</p>
+
+      <h2 id="relax">零、松弛操作</h2>
+      <figure class="fig" id="figRelax"></figure>
+      <p>一条从 P 到 S、权为 W 的边。如果 distance[P] + W 比当前的 distance[S] 还小，就用它把 distance[S] 改小。这一步叫这条边对 S 做了一次松弛。</p>
+      <p>一轮的意思是：把图里所有边都试着松弛一次。Bellman-Ford 就是不停地重复这个动作，直到某一轮一条边也没能松弛成功，说明所有距离都定下来了。</p>
+
+      <h2 id="rounds">一、为什么最多 n-1 轮</h2>
+      <p>一次成功的松弛，会让「到该点的最短路走了几条边」这个数至少加 1。从源点出发的最短路最多经过 n 个点，也就是 n-1 条边，所以 n-1 轮之内一定收敛。</p>
+      <figure class="fig" id="figRounds"></figure>
+      <p>实测（本机 clang -O2，链状图 1 到 2 到 … 到 n，每条边权 1）：n = 100 需要 99 轮，n = 1000 需要 999 轮，n = 5000 需要 4999 轮，正好是 n-1。每轮都要把 m 条边看一遍，最坏情况就是 O(n·m)。</p>
+      <p>收敛了就能提前退出：某一轮一条边都没松弛成功，后面的轮次全是白扫。</p>
+      <div class="viz">
+        <p class="viz-title">演示 · 逐轮松弛：一轮推进多少，什么时候该停</p>
+        <div class="viz-controls">
+          <select id="bfPreset">
+            <option>链 1→2→…→6（权 1）</option>
+            <option>LC787 例一（k=1，跑 2 轮）</option>
+            <option>负环例（3 点）</option>
+          </select>
+        </div>
+        <div id="bfBoard"></div>
+        <p class="viz-note" id="bfNote"></p>
+        <p class="viz-answer" id="bfAns"></p>
+        <div class="viz-controls">
+          <button id="bfPrev">上一步</button>
+          <button id="bfNext">下一步</button>
+          <button id="bfReset">重置</button>
+        </div>
+      </div>
+
+
+      <h2 id="negcycle">二、判负环：第 n 轮还能松弛</h2>
+      <p>如果从源点能走到一个负环，绕着环转一圈距离还会变小，松弛永远不会停。所以跑满 n 轮之后再看一眼：第 n 轮还有边能松弛成功，就说明源点能到达负环。</p>
+      <figure class="fig" id="figNegRounds"></figure>
+      <p>要留意判断的范围：整张图里可能有负环，但源点走不到它，那就不算。想判整张图有没有负环，得加一个虚拟源点连到所有点上，再从虚拟源点跑一遍。</p>
+
+      <h2 id="lc787">三、LC787：最多中转 k 次</h2>
+      <p>题意是 n 个城市、一批单向航班，求 src 到 dst 最多中转 k 次的最便宜价格。把轮数定死在 k+1 轮就行：第 i 轮结束后 cur[v] 表示「最多坐 i 段航班」的最便宜价格，跑完 k+1 轮就是最多 k 次中转。</p>
+      <p>关键在于每一轮的松弛要基于上一轮的 cur，结果写进 next。直接在 cur 上改的话，同一轮里刚算出来的价格会被再拿去做中转，等于中转次数不限，答案偏小。</p>
+      <p>实测（40000 组随机小图，用「枚举所有不超过 k+1 条边的路径」做暴力参考）：复制版 0 处不符；原地版 1413 处偏小，占 3.53%。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// Bellman-Ford 的思路，但只跑 k + 1 轮：第 i 轮结束表示「最多坐 i 段航班」</span>
+    <span class="cm">// 返回 src 到 dst 最多中转 k 次的最便宜价格</span>
+    <span class="kw">int</span> <span class="fn">findCheapestPrice</span>(<span class="kw">int</span> n, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; flights, <span class="kw">int</span> src, <span class="kw">int</span> dst, <span class="kw">int</span> k) {
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">cur</span>(n, INT_MAX);
+        cur[src] = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt;= k; i++) {
+            <span class="cm">// 这一轮的松弛全部基于上一轮的 cur，结果写进 next</span>
+            vector&lt;<span class="kw">int</span>&gt; next = cur;
+            <span class="kw">for</span> (vector&lt;<span class="kw">int</span>&gt;&amp; edge : flights) {
+                <span class="kw">if</span> (cur[edge[0]] != INT_MAX) {
+                    next[edge[1]] = min(next[edge[1]], cur[edge[0]] + edge[2]);
+                }
+            }
+            cur = next;
+        }
+        <span class="kw">return</span> cur[dst] == INT_MAX ? -1 : cur[dst];
+    }</pre>
+      <p>两个样例：例一 n = 4、flights 是 [[0,1,100],[1,2,100],[2,0,100],[1,3,600],[2,3,200]]、src = 0、dst = 3、k = 1，答案是 700。例二 n = 3、flights 是 [[0,1,100],[1,2,100],[0,2,500]]、k = 1 得 200，把 k 改成 0 就得 500。</p>
+      <p>代价是 O(k·m)。n = 2000、m = 4998 时，k = 100 用 0.22ms，k = 1000 用 2.20ms，k = 5000 用 10.97ms，k = 10000 用 21.94ms，和 k+1 乘 m 成正比。</p>
+
+      <h2 id="spfa">四、SPFA：只把动过的点放回队列</h2>
+      <p>朴素 Bellman-Ford 每轮扫所有边，可实际上绝大多数点这一轮根本没变。没变的点，它的出边不可能引起新的松弛，扫了也是白扫。</p>
+      <p>SPFA 用一个队列装「上一轮距离变小了的点」，每轮只考察这些点的出边。同一个点已经在队列里就不重复放，用一个 enter 标记拦住。</p>
+      <figure class="fig" id="figCompare"></figure>
+      <p>复杂度并没有变好，最坏还是 O(n·m)，链那种最短路要一路传到底的图它也就快在常数上；稀疏随机图上优势才明显。所以有不带负权的边时优先用 Dijkstra，非得用 SPFA 就把数据规模看清楚。</p>
+      <p>判负环也靠它：一个点入队次数超过 n-1 次，说明它在环上转圈。洛谷 P3385 就是这套揉在一起的模版。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 2001;
+    <span class="cm">// 边权非负时题目给的是一条无向边，要占两个数组位置，所以开到 2m</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 12001;
+
+    <span class="kw">int</span> head[MAXN], nextEdge[MAXM], to[MAXM], weight[MAXM], cnt;
+    <span class="kw">int</span> dis[MAXN];
+    <span class="kw">int</span> updateCnt[MAXN];   <span class="cm">// 每个点被松弛的次数</span>
+    <span class="kw">int</span> queue1[MAXN * MAXN];<span class="cm">// 一个点最多入队 n 次，队列开 n * n 足够</span>
+    <span class="kw">int</span> l, r;
+    <span class="kw">bool</span> enter[MAXN];
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n) {
+        cnt = 1;
+        l = r = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            head[i] = 0;
+            enter[i] = <span class="kw">false</span>;
+            dis[i] = INT_MAX;
+            updateCnt[i] = 0;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nextEdge[cnt] = head[u];
+        to[cnt] = v;
+        weight[cnt] = w;
+        head[u] = cnt++;
+    }
+
+    <span class="cm">// 从 1 号点出发能不能走到负环</span>
+    <span class="kw">bool</span> <span class="fn">spfa</span>(<span class="kw">int</span> n) {
+        dis[1] = 0;
+        updateCnt[1]++;
+        queue1[r++] = 1;
+        enter[1] = <span class="kw">true</span>;
+        <span class="kw">while</span> (l &lt; r) {
+            <span class="kw">int</span> u = queue1[l++];
+            enter[u] = <span class="kw">false</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> ei = head[u]; ei &gt; 0; ei = nextEdge[ei]) {
+                <span class="kw">int</span> v = to[ei], w = weight[ei];
+                <span class="kw">if</span> (dis[u] + w &lt; dis[v]) {
+                    dis[v] = dis[u] + w;
+                    <span class="kw">if</span> (!enter[v]) {
+                        <span class="cm">// 松弛次数超过 n - 1 次，说明它在负环上转圈</span>
+                        <span class="kw">if</span> (++updateCnt[v] &gt; n - 1) {
+                            <span class="kw">return</span> <span class="kw">true</span>;
+                        }
+                        queue1[r++] = v;
+                        enter[v] = <span class="kw">true</span>;
+                    }
+                }
+            }
+        }
+        <span class="kw">return</span> <span class="kw">false</span>;
+    }</pre>
+      <div class="viz">
+        <p class="viz-title">演示 · SPFA 的队列：只有动过的点才回到队尾</p>
+        <div class="viz-controls">
+          <select id="spPreset">
+            <option>负环例（3 点）</option>
+            <option>P3385 第一组（3 点 4 边）</option>
+          </select>
+        </div>
+        <div id="spBoard"></div>
+        <p class="viz-note" id="spNote"></p>
+        <p class="viz-answer" id="spAns"></p>
+        <div class="viz-controls">
+          <button id="spPrev">上一步</button>
+          <button id="spNext">下一步</button>
+          <button id="spReset">重置</button>
+        </div>
+      </div>
+      <p>读入有个细节：w 不小于 0 的边是双向的，题目给 u 到 v 一条非负边，等于 v 到 u 也有一条同权的；w 小于 0 的边才是单向。所以边数组要按 2m 开，不然 m = 6000 的时候会写越界。</p>
+      <p>样例两组数据分别输出 NO、YES。第一组的环 1 到 2 到 3 到 1 权值是 2 + 1 - 3 = 0，不是负环；第二组的环是 3 + 4 - 8 = -1，是负环。</p>
+
+      <h2 id="sum">总结</h2>
+      <p>松弛是共同的那一步：distance[P] + W 比 distance[S] 小就更新。Bellman-Ford 一轮扫全部边，最多 n-1 轮，代价 O(n·m)，第 n 轮还能松弛就说明源点能走到负环。</p>
+      <p>LC787 那类限定中转次数的题，把轮数定在 k+1 轮，而且每轮的松弛必须基于上一轮的快照，否则中转次数会失控。</p>
+      <p>SPFA 把没动过的点跳过，实测在链、随机稀疏图、网格上比朴素版少看几十到上千倍的边，判负环也是同一套结构。代价是最坏情况仍然退化成 O(n·m)，边权非负时没有理由不用 Dijkstra。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/cheapest-flights-within-k-stops/" target="_blank">K 站中转内最便宜的航班</a></td><td><a href="https://leetcode.cn/problems/cheapest-flights-within-k-stops/" target="_blank">leetcode.cn</a></td></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P3385" target="_blank">【模板】负环</a></td><td><a href="https://www.luogu.com.cn/problem/P3385" target="_blank">luogu.com.cn</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解065【必备】A星、Floyd、Bellman-Ford与SPFA</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+var INF=Infinity;
+function fnum(v){ return v===INF ? '∞' : String(v); }
+
+// ===== 图 1：松弛操作 =====
+(function(){
+  var W=720, H=250, body='';
+  body += txt(W/2, 22, '边 P 到 S、权 W：distance[P] + W 比 distance[S] 小就更新', {fs:12});
+  var P=[150,90], S=[430,90];
+  body += '<line x1="'+(P[0]+24)+'" y1="'+P[1]+'" x2="'+(S[0]-24)+'" y2="'+S[1]+'" stroke="#94a3b8" stroke-width="2" marker-end="url(#rel)"/>';
+  body += '<defs><marker id="rel" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#94a3b8"/></marker></defs>';
+  body += txt(290, 78, 'W = 5', {fs:12, fill:'#2563eb'});
+  body += '<circle cx="'+P[0]+'" cy="'+P[1]+'" r="24" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+  body += '<circle cx="'+S[0]+'" cy="'+S[1]+'" r="24" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+  body += txt(P[0], P[1]+5, 'P', {fs:14});
+  body += txt(S[0], S[1]+5, 'S', {fs:14});
+  body += txt(P[0], P[1]+45, 'distance[P] = 2', {fs:11, fill:'#64748b'});
+  body += '<rect x="80" y="164" width="250" height="34" rx="6" fill="#eef4ff" stroke="#2563eb"/>';
+  body += txt(205, 186, 'distance[S] 原来是 12', {fs:12, fill:'#1e3a8a'});
+  body += '<rect x="390" y="164" width="250" height="34" rx="6" fill="#ffedd5" stroke="#ea580c"/>';
+  body += txt(515, 186, '2 + 5 = 7 < 12，改成 7', {fs:12, fill:'#7c2d12'});
+  body += txt(W/2, 224, '距离变小才叫松弛成功；这次的改动会影响到 S 的出边', {fs:11, fill:'#334155'});
+  document.getElementById('figRelax').innerHTML = svg(W, H, body) +
+    '<figcaption>松弛只看一条边和目标点的当前距离，不需要知道 S 原来是怎么被算出来的，负权边照样能用。</figcaption>';
+})();
+
+// ===== 图 2：轮数 =====
+(function(){
+  var W=720, H=270, body='';
+  body += txt(W/2, 22, '链 1 → 2 → … → n，每条边权 1：需要的松弛轮数', {fs:12});
+  var y0=70, rowH=46;
+  function row(i, name, rounds, note){
+    var y=y0+i*rowH;
+    body += '<rect x="70" y="'+y+'" width="580" height="30" rx="5" fill="#ffffff" stroke="#cbd5e1"/>';
+    body += txt(160, y+20, name, {fs:12, fill:'#1f2937'});
+    body += txt(340, y+20, rounds+' 轮', {fs:12, fill:'#ea580c'});
+    body += txt(480, y+20, note, {fs:11, fill:'#64748b'});
+  }
+  row(0,'n = 100','99','正好 n-1 轮');
+  row(1,'n = 1000','999','正好 n-1 轮');
+  row(2,'n = 5000','4999','每轮扫 4999 条边');
+  body += txt(160, y0+3*rowH+4, '链上', {fs:11, fill:'#1f2937'});
+  body += txt(W/2, y0+3*rowH+30, '最短路要走 n-1 条边，所以一轮只推进一格，n-1 轮刚好铺满', {fs:11, fill:'#334155'});
+  document.getElementById('figRounds').innerHTML = svg(W, H, body) +
+    '<figcaption>每轮把所有边看一遍，所以链上的总代价是轮数乘边数，约等于 n²。</figcaption>';
+})();
+
+// ===== 图 3：负环每轮 =====
+(function(){
+  var W=720, H=320, body='';
+  body += txt(W/2, 22, '负环例：1 到 2 权 1、2 到 3 权 -5、3 到 2 权 -1', {fs:12});
+  var P={1:[150,110], 2:[360,70], 3:[360,160]};
+  var E=[[1,2,1],[2,3,-5],[3,2,-1]];
+  body += '<defs><marker id="negar" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#94a3b8"/></marker></defs>';
+  for(var e=0;e<E.length;e++){
+    var a=P[E[e][0]], b=P[E[e][1]];
+    body += '<line x1="'+(a[0]+24)+'" y1="'+(a[1]-6)+'" x2="'+(b[0]-24)+'" y2="'+(b[1]-6)+'" stroke="#94a3b8" stroke-width="2" marker-end="url(#negar)"/>';
+    body += txt((a[0]+b[0])/2, (a[1]+b[1])/2-12, String(E[e][2]), {fs:11, fill: E[e][2]<0?'#ea580c':'#2563eb'});
+  }
+  Object.keys(P).forEach(function(k){
+    var p=P[k];
+    body += '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="22" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+    body += txt(p[0], p[1]+5, k, {fs:13});
+  });
+  var rows=['初始 distance = [0, ∞, ∞]','第 1 轮后 = [0, 1, ∞]','第 2 轮后 = [0, 1, -4]','第 3 轮后 = [0, -5, -4]'];
+  for(var i=0;i<rows.length;i++){
+    var y=196+i*22;
+    var last=(i===rows.length-1);
+    body += '<rect x="450" y="'+(y-15)+'" width="250" height="20" rx="4" fill="'+(last?'#ffedd5':'#f6f7f9')+'" stroke="'+(last?'#ea580c':'#e6e8eb')+'"/>';
+    body += txt(575, y, rows[i], {fs:11, fill: last?'#7c2d12':'#334155'});
+  }
+  body += txt(210, 292, '第 3 轮 = 第 n 轮，还能松弛，判负环', {fs:11, fill:'#c2410c'});
+  document.getElementById('figNegRounds').innerHTML = svg(W, H, body) +
+    '<figcaption>每一轮距离都在往下掉，永远等不到「没有松弛」的那一刻。轮数到 n 还在动，就是负环。</figcaption>';
+})();
+
+// ===== 图 4：SPFA 与朴素 BF 的看边次数 =====
+(function(){
+  var W=720, H=300, body='';
+  body += txt(W/2, 22, '同一个算法，跳过没动过的点能省多少：看边的次数', {fs:12});
+  var rows=[
+    ['链 n=2000',   '1999',      '2000999',  '1001 倍'],
+    ['随机稀疏 n=2000 m=20000', '53033', '281002', '5.3 倍'],
+    ['网格 n=2025 m=3960', '3960', '180180', '45 倍']
+  ];
+  body += '<rect x="40" y="42" width="640" height="30" fill="#eef4ff" stroke="#cbd5e1"/>';
+  body += txt(150, 62, '图', {fs:12, fill:'#1e3a8a'});
+  body += txt(430, 62, 'SPFA 看边', {fs:12, fill:'#1e3a8a'});
+  body += txt(545, 62, '朴素 BF 看边', {fs:12, fill:'#1e3a8a'});
+  body += txt(650, 62, '倍数', {fs:12, fill:'#1e3a8a'});
+  for(var i=0;i<rows.length;i++){
+    var y=72+i*44;
+    body += '<rect x="40" y="'+y+'" width="640" height="44" fill="'+(i%2?'#f6f7f9':'#ffffff')+'" stroke="#e6e8eb"/>';
+    body += txt(150, y+27, rows[i][0], {fs:11});
+    body += txt(430, y+27, rows[i][1], {fs:11, fill:'#2563eb'});
+    body += txt(545, y+27, rows[i][2], {fs:11, fill:'#ea580c'});
+    body += txt(650, y+27, rows[i][3], {fs:11, fill:'#7c2d12'});
+  }
+  body += txt(360, 262, '耗时：链 0.01ms 对 3.70ms；随机稀疏 0.34ms 对 0.79ms；网格 0.01ms 对 0.30ms', {fs:11, fill:'#334155'});
+  body += txt(360, 284, '最坏复杂度没变，都是 O(n·m)，省下来的是「没动过的点」那部分', {fs:11, fill:'#334155'});
+  document.getElementById('figCompare').innerHTML = svg(W, H, body) +
+    '<figcaption>链上差距最大：最短路要一路传到底，朴素版得扫 n 轮，SPFA 每个点只出队一次。</figcaption>';
+})();
+
+// ===== 演示 1：Bellman-Ford 逐轮 =====
+(function(){
+  var presets={
+    '链 1→2→…→6（权 1）': {
+      n:6, kind:'chain',
+      labels:['1','2','3','4','5','6'],
+      start:1,
+      edges:[[1,2,1],[2,3,1],[3,4,1],[4,5,1],[5,6,1]],
+      rounds:6
+    },
+    'LC787 例一（k=1，跑 2 轮）': {
+      n:4, kind:'flight',
+      labels:['城市 0','城市 1','城市 2','城市 3'],
+      start:1,
+      edges:[[1,2,100],[2,3,100],[3,1,100],[2,4,600],[3,4,200]],
+      rounds:2
+    },
+    '负环例（3 点）': {
+      n:3, kind:'neg',
+      labels:['点 1','点 2','点 3'],
+      start:1,
+      edges:[[1,2,1],[2,3,-5],[3,2,-1]],
+      rounds:3
+    }
+  };
+  var board=document.getElementById('bfBoard');
+  var note=document.getElementById('bfNote');
+  var ansEl=document.getElementById('bfAns');
+  var sel=document.getElementById('bfPreset');
+  var st={};
+
+  function build(){
+    var p=presets[sel.value];
+    var dis=[]; for(var i=0;i<=p.n;i++) dis.push(INF);
+    dis[p.start]=0;
+    var steps=[{r:0, dis:dis.slice(), changed:[], note:'还没开跑，只有源点的距离是 0'}];
+    var negAt=-1;
+    for(var r=1;r<=p.rounds;r++){
+      var nxt=dis.slice(), changed=[];
+      for(var e=0;e<p.edges.length;e++){
+        var a=p.edges[e][0], b=p.edges[e][1], w=p.edges[e][2];
+        if(dis[a]!==INF && dis[a]+w<nxt[b]){ nxt[b]=dis[a]+w; changed.push(p.labels[b-1]+' 变成 '+nxt[b]); }
+      }
+      dis=nxt;
+      steps.push({r:r, dis:dis.slice(), changed:changed});
+      if(changed.length && r===p.n){ negAt=r; break; }
+      if(!changed.length){ steps[steps.length-1].note='这一轮没有任何松弛，已经收敛，可以提前停'; break; }
+    }
+    st.p=p; st.steps=steps; st.neg=(negAt>=0); st.step=0;
+    render();
+  }
+  function render(){
+    var s=st.steps[st.step], p=st.p;
+    var cells='';
+    for(var i=1;i<=p.n;i++) cells += '<span class="chip">'+p.labels[i-1]+'<br>'+fnum(s.dis[i])+'</span>';
+    board.innerHTML='<div class="mono">'+cells+'</div>';
+    var line=(s.r===0)?s.note:('第 '+s.r+' 轮：'+(s.changed.length?('松弛成功 '+s.changed.length+' 次，'+s.changed.join('、')):'一条边也没松弛成功'));
+    if(s.note && s.r>0) line += '；'+s.note;
+    note.textContent=line;
+    var over=(st.step>=st.steps.length-1);
+    var last=st.steps[st.steps.length-1].dis;
+    if(over && p.kind==='neg'){
+      ansEl.textContent='第 n 轮还有松弛，从点 1 出发能走到负环';
+    } else if(over && p.kind==='chain'){
+      ansEl.textContent='收敛：dis[点 6] = '+fnum(last[6]);
+    } else if(over){
+      ansEl.textContent='最多中转 '+(p.rounds-1)+' 次：城市 3 的最便宜价格 = '+fnum(last[4]);
+    } else {
+      ansEl.textContent='';
+    }
+    document.getElementById('bfPrev').disabled=(st.step===0);
+    document.getElementById('bfNext').disabled=over;
+  }
+  sel.addEventListener('change', build);
+  document.getElementById('bfPrev').addEventListener('click', function(){ if(st.step>0){ st.step--; render(); } });
+  document.getElementById('bfNext').addEventListener('click', function(){ if(st.step<st.steps.length-1){ st.step++; render(); } });
+  document.getElementById('bfReset').addEventListener('click', function(){ st.step=0; render(); });
+  build();
+})();
+
+// ===== 演示 2：SPFA 队列 =====
+(function(){
+  var presets={
+    '负环例（3 点）': { n:3, edges:[[1,2,1],[2,3,-5],[3,2,-1]] },
+    'P3385 第一组（3 点 4 边）': { n:3, edges:[[1,2,2],[2,1,2],[1,3,4],[3,1,4],[2,3,1],[3,2,1],[3,1,-3]] }
+  };
+  var board=document.getElementById('spBoard');
+  var note=document.getElementById('spNote');
+  var ansEl=document.getElementById('spAns');
+  var sel=document.getElementById('spPreset');
+  var st={};
+
+  function build(){
+    var p=presets[sel.value], n=p.n;
+    var adj=[]; for(var i=0;i<=n;i++) adj.push([]);
+    for(var e=0;e<p.edges.length;e++) adj[p.edges[e][0]].push([p.edges[e][1], p.edges[e][2]]);
+    var dis=[], up=[], enter=[];
+    for(var i=0;i<=n;i++){ dis.push(INF); up.push(0); enter.push(false); }
+    dis[1]=0; up[1]=1; enter[1]=true;
+    var q=[1], l=0;
+    var steps=[{kind:'init', q:q.slice(), l:0, dis:dis.slice(), up:up.slice(), enter:enter.slice()}];
+    var verdict=null;
+    while(l<q.length && !verdict){
+      var u=q[l++]; enter[u]=false;
+      var relaxed=[];
+      for(var i=0;i<adj[u].length;i++){
+        var v=adj[u][i][0], w=adj[u][i][1];
+        if(dis[u]+w<dis[v]){
+          dis[v]=dis[u]+w; relaxed.push('点 '+v+' 变 '+dis[v]);
+          if(!enter[v]){
+            up[v]++;
+            if(up[v]>n-1){ verdict='节点 '+v+' 第 '+up[v]+' 次入队，超过 n-1 = '+(n-1)+'，判负环'; break; }
+            q.push(v); enter[v]=true;
+          }
+        }
+      }
+      steps.push({kind:'pop', u:u, q:q.slice(), l:l, dis:dis.slice(), up:up.slice(), enter:enter.slice(), relaxed:relaxed});
+    }
+    st.p=p; st.steps=steps; st.verdict=verdict; st.step=0;
+    render();
+  }
+  function render(){
+    var s=st.steps[st.step], p=st.p;
+    var chips='';
+    for(var i=s.l;i<s.q.length;i++){
+      var v=s.q[i];
+      chips += '<span class="chip'+((v===s.q[s.l]&&i===s.l&&s.kind==='pop')?' cur':'')+'">'+v+'</span>';
+    }
+    if(!chips) chips='<span class="mono">队列空</span>';
+    var rows='';
+    for(var i=1;i<=p.n;i++){
+      rows += '<span class="chip">点 '+i+'<br>'+fnum(s.dis[i])+'</span>';
+    }
+    board.innerHTML='<div class="mono">队列（左边先出）：'+chips+'</div><div class="mono">距离：'+rows+'</div>'+
+      '<div class="mono">入队次数：'+s.up.slice(1).join(' / ')+'　　在队列里：'+s.enter.slice(1).map(function(x){ return x?'是':'否'; }).join(' / ')+'</div>';
+    var line;
+    if(s.kind==='init') line='起点 1 入队，距离 0';
+    else line='出队 '+s.u+(s.relaxed&&s.relaxed.length?('，松弛了 '+s.relaxed.join('、')):'，没有改动');
+    note.textContent=line;
+    var over=(st.step>=st.steps.length-1);
+    if(over){
+      ansEl.textContent = st.verdict ? ('从点 1 出发能走到负环：'+st.verdict+'，输出 YES') : '队列清空、没有负环，输出 NO';
+    } else {
+      ansEl.textContent='';
+    }
+    document.getElementById('spPrev').disabled=(st.step===0);
+    document.getElementById('spNext').disabled=over;
+  }
+  sel.addEventListener('change', build);
+  document.getElementById('spPrev').addEventListener('click', function(){ if(st.step>0){ st.step--; render(); } });
+  document.getElementById('spNext').addEventListener('click', function(){ if(st.step<st.steps.length-1){ st.step++; render(); } });
+  document.getElementById('spReset').addEventListener('click', function(){ st.step=0; render(); });
+  build();
+})();
+})();</script>
+</body>
+</html>

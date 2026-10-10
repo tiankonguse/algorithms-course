@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>优化枚举：买卖股票（下）</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>优化枚举：买卖股票（下）</h1>
+      <p class="intro">把交易次数从「最多两笔」换成参数 k，枚举层就从一层变成两层。这一页讲 k 笔、手续费、冷冻期三道题。k 笔那道的优化和上一类股票题是同一套动作，只是候选集合从一维数组换成了二维表的一行。</p>
+
+      <h2>零、最多 k 笔：二维表里的一层枚举</h2>
+      <p>设 <code>dp[i][j]</code> 是「用不超过 <code>i</code> 笔交易、只看 <code>0..j</code> 天」的最优值。第 <code>i</code> 笔要么在第 <code>j</code> 天之前就结束了，要么正好在第 <code>j</code> 天卖出。</p>
+      <p>把「正好在第 <code>j</code> 天卖出」展开：买入日设为 <code>p</code>，<code>p &lt; j</code>，那么前 <code>i−1</code> 笔必须在第 <code>p</code> 天之前收完，也就是 <code>dp[i−1][p]</code>。于是</p>
+      <p style="text-align:center"><code>dp[i][j] = max( dp[i][j−1], max over p&lt;j 的 ( dp[i−1][p] + prices[j] − prices[p] ) )</code></p>
+      <p>这个内层 <code>p</code> 又要枚举。k 行、n 列、每格再扫 n 次，是 O(k·n²)。</p>
+          <pre class="code"><span class="cm">// 最多 k 笔：dp[i][j] 是「用前 i 笔、在 j 之前」的最优，转移里枚举上一笔的卖出位置</span>
+    <span class="kw">int</span> <span class="fn">maxProfit</span>(<span class="kw">int</span> k, vector&lt;<span class="kw">int</span>&gt;&amp; prices) {
+        <span class="kw">int</span> n = prices.size();
+        <span class="kw">if</span> (k &gt;= n / 2) <span class="kw">return</span> freeTrade(prices);      <span class="cm">// 无限次，见下一节</span>
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">dp</span>(k + 1, vector&lt;<span class="kw">int</span>&gt;(n, 0));
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= k; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt; n; j++) {
+                dp[i][j] = dp[i][j - 1];
+                <span class="kw">for</span> (<span class="kw">int</span> p = 0; p &lt; j; p++) {                          <span class="cm">// 枚举买入日 p</span>
+                    dp[i][j] = max(dp[i][j], dp[i - 1][p] + prices[j] - prices[p]);
+                }
+            }
+        }
+        <span class="kw">return</span> dp[k][n - 1];
+    }</pre>
+      <p>规模感：n = 4000、k = 50 实测 21.7 ms；k 拉到 800 是 349 ms，二维表本身要 12.2 MB。k 再大就要超时了。</p>
+
+      <h2>一、观察：把内层搬到「扫 j 的路上」</h2>
+      <p>和上一类题一样，把内层的括号拆开，<code>dp[i−1][p] − prices[p]</code> 跟 <code>j</code> 没关系。固定第 <code>i</code> 行往下扫 <code>j</code>，新增的候选只有 <code>p = j−1</code> 这一个，维护一个变量就够：</p>
+      <p style="text-align:center"><code>best = max( dp[i−1][p] − prices[p] ), p &lt; j</code></p>
+      <p>顺序上要注意：先用 <code>best</code> 算 <code>dp[i][j]</code>，再把 <code>p = j</code> 这个候选并进去。写反了就把「第 <code>j</code> 天买入又在第 <code>j</code> 天卖出」当成一次真实交易，实测 24.86% 出错。</p>
+          <pre class="code"><span class="cm">// 内层要的是 max(dp[i-1][p] - prices[p])，p 从小到大扫，它就是上一轮的一个后缀最大值</span>
+    <span class="kw">int</span> <span class="fn">maxProfit</span>(<span class="kw">int</span> k, vector&lt;<span class="kw">int</span>&gt;&amp; prices) {
+        <span class="kw">int</span> n = prices.size();
+        <span class="kw">if</span> (k &gt;= n / 2) <span class="kw">return</span> freeTrade(prices);
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">dp</span>(k + 1, vector&lt;<span class="kw">int</span>&gt;(n, 0));
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, best; i &lt;= k; i++) {
+            best = dp[i - 1][0] - prices[0];               <span class="cm">// 先放进 p = 0</span>
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt; n; j++) {
+                dp[i][j] = max(dp[i][j - 1], best + prices[j]);
+                best = max(best, dp[i - 1][j] - prices[j]); <span class="cm">// 再把 p = j 这个候选加进来</span>
+            }
+        }
+        <span class="kw">return</span> dp[k][n - 1];
+    }</pre>
+      <p>内层没了，O(k·n²) 变 O(k·n)。同一批数据上 O(k·n) 是 0.13 ms，差一百多倍。</p>
+      <figure class="fig" id="figKEnum"></figure>
+
+      <h2>二、剪枝：k 大到一定程度就不用管了</h2>
+      <p>无限次交易的答案就是把所有上坡加起来。什么时候 k 笔能吃到所有上坡？只要交易次数够多，多到能一笔一段上坡。</p>
+      <p>相邻两天之间最多形成一段上坡，所以上坡段数不超过 <code>n/2</code> 段。于是 <code>k ≥ n/2</code> 时答案和无限次完全一样，可以直接调题 2 的一次遍历返回。这一步是严格等价的。</p>
+      <p>实测：n = 4000 时 <code>k = n/2 = 2000</code> 触发剪枝，两个版本都掉到 0.001 ms 以下；<code>k = 1999</code> 不触发，O(k·n²) 还是 875 ms。</p>
+      <figure class="fig" id="figPrune"></figure>
+
+      <h2>三、空间压缩</h2>
+      <p>第 <code>i</code> 行只读第 <code>i−1</code> 行的 <code>dp</code>，加上 <code>prices</code>。既然如此，一行就够。</p>
+      <p>唯一要小心的是 <code>dp[j]</code> 被覆盖前先存下来，因为算 <code>best</code> 时要用旧值，它代表的是第 <code>i−1</code> 行的 <code>dp[j]</code>。写成先更新 <code>best</code> 再算 <code>dp[j]</code>，读到的就是本行的值了。</p>
+          <pre class="code"><span class="cm">// 第 i 行只读第 i-1 行的 dp 和 prices，滚动一维：先取旧值，再写新值</span>
+    <span class="kw">int</span> <span class="fn">maxProfit</span>(<span class="kw">int</span> k, vector&lt;<span class="kw">int</span>&gt;&amp; prices) {
+        <span class="kw">int</span> n = prices.size();
+        <span class="kw">if</span> (k &gt;= n / 2) <span class="kw">return</span> freeTrade(prices);
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(n, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, best, tmp; i &lt;= k; i++) {
+            best = dp[0] - prices[0];
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt; n; j++) {
+                tmp = dp[j];                              <span class="cm">// tmp 是第 i-1 行的 dp[j]</span>
+                dp[j] = max(dp[j - 1], best + prices[j]);
+                best = max(best, tmp - prices[j]);
+            }
+        }
+        <span class="kw">return</span> dp[n - 1];
+    }</pre>
+      <p>空间从 O(k·n) 降到 O(n)。k = 800、n = 4000 时那张二维表占 12.2 MB，一维只要 16 KB。</p>
+
+      <h2>四、含手续费：两个状态就够</h2>
+      <p>交易次数回到无限，但每笔交易要交一次手续费。这次不去数上坡，改用两个状态：</p>
+      <ol>
+        <li><code>prepare</code>：手上持股、并且收益里已经扣掉买入价和手续费的最好情况；</li>
+        <li><code>done</code>：已经落袋的最好收益。</li>
+      </ol>
+      <p>第 <code>i</code> 天能做的只有两件事：把手里的卖掉，或者拿落袋的钱再买一手。</p>
+          <pre class="code"><span class="cm">// 含手续费：prepare 是「手上持股」的最好情况，done 是「已经落袋」的最好情况</span>
+    <span class="kw">int</span> <span class="fn">maxProfit</span>(vector&lt;<span class="kw">int</span>&gt;&amp; prices, <span class="kw">int</span> fee) {
+        <span class="kw">int</span> prepare = -prices[0] - fee;               <span class="cm">// 第 0 天买入，付一次手续费</span>
+        <span class="kw">int</span> done = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; (<span class="kw">int</span>)prices.size(); i++) {
+            done = max(done, prepare + prices[i]);    <span class="cm">// 今天卖出</span>
+            prepare = max(prepare, done - prices[i] - fee); <span class="cm">// 今天买入</span>
+        }
+        <span class="kw">return</span> done;
+    }</pre>
+      <p><code>done</code> 先用旧的 <code>prepare</code> 更新，<code>prepare</code> 再用新的 <code>done</code> 更新，两行顺序不能反。手续费在买入那一侧扣，所以 <code>prepare</code> 的初值就带着 <code>−fee</code>。</p>
+      <p>两处漏 <code>fee</code> 的写法：更新那一行忘了减，实测 71.29% 出错；初值忘了减，实测 42.41% 出错。前者错得更狠，因为每次买入都少算一次手续费。</p>
+      <figure class="fig" id="figFee"></figure>
+
+      <h2>五、含冷冻期：把依赖挪到 i−2</h2>
+      <p>规则改成卖出的第二天不能买。<code>prepare</code> 和 <code>done</code> 的含义不变，变的只有一条：第 <code>i</code> 天买入，只能接在第 <code>i−2</code> 天卖出的收益后面。</p>
+      <p style="text-align:center"><code>done[i] = max( done[i−1], prepare[i−1] + prices[i] )</code><br><code>prepare[i] = max( prepare[i−1], done[i−2] − prices[i] )</code></p>
+      <p>冷冻期就卡在这一个下标上：写成 <code>done[i−1]</code>，等于允许卖出的第二天就买回，实测 64.20% 出错。</p>
+          <pre class="code"><span class="cm">// 含冷冻期：pre[i] 和 done[i] 的定义不变，只是买入要用 i-2 的 done</span>
+    <span class="kw">int</span> <span class="fn">maxProfit</span>(vector&lt;<span class="kw">int</span>&gt;&amp; prices) {
+        <span class="kw">int</span> n = prices.size();
+        <span class="kw">if</span> (n &lt; 2) <span class="kw">return</span> 0;
+        <span class="kw">int</span> prepare = max(-prices[0], -prices[1]);
+        <span class="kw">int</span> done2 = 0, done1 = max(0, prices[1] - prices[0]);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2, curDone; i &lt; n; i++) {
+            curDone = max(done1, prepare + prices[i]);
+            prepare = max(prepare, done2 - prices[i]); <span class="cm">// 冷冻期就卡在这一个下标上</span>
+            done2 = done1;
+            done1 = curDone;
+        }
+        <span class="kw">return</span> done1;
+    }</pre>
+      <p>这里有个细节。把 <code>done[i]</code> 和 <code>prepare[i]</code> 的计算顺序调换，先算 <code>prepare[i]</code>、再算 <code>done[i]</code>，答案一点不变。因为多进来的那一项是「第 <code>i</code> 天买入又第 <code>i</code> 天卖出」，收益正好是 0，不会把答案抬上去。这处实测 0.00% 差异，属于「看着像错、其实等价」。</p>
+      <figure class="fig" id="figCool"></figure>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>空间</th></tr>
+        <tr><td>最多 k 笔·枚举买入日</td><td>O(k·n²)</td><td>O(k·n)</td></tr>
+        <tr><td>最多 k 笔·best 变量</td><td>O(k·n)</td><td>O(k·n)</td></tr>
+        <tr><td>最多 k 笔·滚动一维</td><td>O(k·n)</td><td>O(n)</td></tr>
+        <tr><td>k ≥ n/2（剪枝后）</td><td>O(n)</td><td>O(1)</td></tr>
+        <tr><td>含手续费</td><td>O(n)</td><td>O(1)</td></tr>
+        <tr><td>含冷冻期</td><td>O(n)</td><td>O(1)</td></tr>
+      </table>
+      <p>手续费和冷冻期两道题只有常数个滚动变量，空间是 O(1)。k 笔那道题的空间从 O(k·n) 压到 O(n)，压不掉的 n 来自「同一行从左往右扫」这个方向本身。</p>
+
+      <figure class="fig" id="figPerf2"></figure>
+
+      <h2>总结</h2>
+      <p>k 笔这道题就是「两笔」的推广。内层要的还是那个和 <code>i</code> 无关的量 <code>dp[i−1][p] − prices[p]</code>，只是它现在躺在上一行，扫 <code>j</code> 的时候顺手维护即可。</p>
+      <p>剪枝值得单独记一笔：<code>k ≥ n/2</code> 时问题退化成无限次交易，可以直接掉头走题 2 的 O(n) 写法。理由是上坡段数不超过 <code>n/2</code>，多出来的交易次数没有东西可买。</p>
+      <p>手续费和冷冻期把「观察」的对象从转移式换成了状态本身：一个状态不够，就拆成持股和落袋两个；一条依赖被规则挡住，就往回挪一格。这两道题各自的错法也都在状态上：漏手续费在买入侧，冷冻期在 <code>done[i−2]</code> 那个下标上。</p>
+      <p>还有一处提醒：<code>prepare</code> 的初值、<code>done</code> 和 <code>prepare</code> 的更新顺序，这两处看起来是细节，实测加起来能覆盖七成以上的随机数据。写这类滚动 dp 时先把这两处的依赖关系在纸上画一遍，比事后调输出快得多。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>买卖股票的最佳时机 IV</td><td><a href="https://leetcode.cn/problems/best-time-to-buy-and-sell-stock-iv/" target="_blank">best-time-to-buy-and-sell-stock-iv</a></td></tr>
+        <tr><td>LeetCode</td><td>买卖股票的最佳时机含手续费</td><td><a href="https://leetcode.cn/problems/best-time-to-buy-and-sell-stock-with-transaction-fee/" target="_blank">best-time-to-buy-and-sell-stock-with-transaction-fee</a></td></tr>
+        <tr><td>LeetCode</td><td>买卖股票的最佳时机含冷冻期</td><td><a href="https://leetcode.cn/problems/best-time-to-buy-and-sell-stock-with-cooldown/" target="_blank">best-time-to-buy-and-sell-stock-with-cooldown</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解082【必备】动态规划中用观察优化枚举的技巧-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, fill, stroke, rx) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx == null ? 4 : rx) +
+      '" fill="' + fill + '" stroke="' + (stroke || 'none') + '"/>';
+  }
+  function line(x1, y1, x2, y2, stroke, w, dash) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke +
+      '" stroke-width="' + (w || 1) + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
+  }
+  function poly(pts, stroke, w, dash) {
+    return '<polyline points="' + pts + '" fill="none" stroke="' + stroke + '" stroke-width="' + w + '"' +
+      (dash ? ' stroke-dasharray="' + dash + '"' : '') + ' stroke-linejoin="round"/>';
+  }
+  function arrow(x1, y1, x2, y2, stroke) {
+    var ang = Math.atan2(y2 - y1, x2 - x1), L = 8;
+    return line(x1, y1, x2, y2, stroke, 1.6) +
+      '<polygon points="' + x2 + ',' + y2 + ' ' + (x2 - L * Math.cos(ang - 0.4)) + ',' + (y2 - L * Math.sin(ang - 0.4)) +
+      ' ' + (x2 - L * Math.cos(ang + 0.4)) + ',' + (y2 - L * Math.sin(ang + 0.4)) + '" fill="' + stroke + '"/>';
+  }
+  function put(id, inner) { var el = document.getElementById(id); if (el) el.innerHTML = inner; }
+  function svgWrap(h, body) { return '<svg viewBox="0 0 680 ' + h + '" role="img">' + body + '</svg>'; }
+
+  // ---------- 图 1：二维表里的一层枚举被 best 替代 ----------
+  (function () {
+    var g = '';
+    var P = [3, 3, 5, 0, 0, 3];
+    var x0 = 74, y0 = 66, cw = 62, rh = 34, rows = 3;
+    g += txt(x0 - 12, y0 - 18, 'j', { size: 11, fill: C.dim, anchor: 'end' });
+    for (var j = 0; j < P.length; j++) g += txt(x0 + j * cw + cw / 2, y0 - 10, String(j), { size: 11, fill: C.dim });
+    for (var i = 0; i < rows; i++) {
+      g += txt(x0 - 12, y0 + i * rh + rh / 2 + 4, 'i=' + i, { size: 11, fill: C.dim, anchor: 'end' });
+      for (var j2 = 0; j2 < P.length; j2++) {
+        var inRow2 = (i === 2);
+        g += rect(x0 + j2 * cw, y0 + i * rh, cw - 6, rh - 6, inRow2 ? C.orangeBg : C.bg, inRow2 ? C.orange : C.border, 3);
+        g += txt(x0 + j2 * cw + (cw - 6) / 2, y0 + i * rh + rh / 2 + 2, inRow2 ? '·' : '0', { size: 11, fill: inRow2 ? C.orange : C.dim });
+      }
+    }
+    g += txt(x0, y0 + rows * rh + 26, '第 i 行每个格子都要问「上一行的某个前缀最大值」，这个值随 j 单调不减', { size: 12, fill: C.text, anchor: 'start' });
+    g += txt(24, 28, '枚举 p 的位置在「上一行」，扫 j 时把它顺手带上', { size: 13, fill: C.blue, weight: '600', anchor: 'start' });
+    put('figKEnum', svgWrap(208, g) + '<figcaption>橙色这一行从左往右扫。每个格子要的东西都来自上一行、并且都落在比 j 更靠前的列上，所以一圈扫下来就能同步维护。</figcaption>');
+  })();
+
+  // ---------- 图 2：剪枝 ----------
+  (function () {
+    var P = [7, 1, 5, 3, 6, 4, 8, 2];
+    var X0 = 56, Y0 = 158, W = 560, H = 108, VW = 9;
+    function px(i) { return X0 + i * (W / (P.length - 1)); }
+    function py(v) { return Y0 - v / VW * H; }
+    var g = '';
+    g += line(X0, Y0, X0 + W, Y0, C.gray, 1);
+    var pts = [];
+    for (var i = 0; i < P.length; i++) pts.push(px(i) + ',' + py(P[i]));
+    g += poly(pts.join(' '), C.gray, 2, '5 4');
+    var seg = 0;
+    for (var j = 1; j < P.length; j++) {
+      if (P[j] > P[j - 1]) {
+        seg++;
+        g += line(px(j - 1), py(P[j - 1]), px(j), py(P[j]), C.orange, 4);
+        g += txt((px(j - 1) + px(j)) / 2, py(Math.max(P[j], P[j - 1])) - 10, '第 ' + seg + ' 段', { size: 11, fill: C.orange });
+      }
+    }
+    g += txt(24, 26, '这段折线里上坡只有 3 段，k ≥ n/2 = 4 时 k 已经用不完', { size: 13, fill: C.blue, weight: '600', anchor: 'start' });
+    g += txt(X0 + W, Y0 + 20, '上坡段数 ≤ n/2', { size: 12, fill: C.dim, anchor: 'end' });
+    put('figPrune', svgWrap(190, g) + '<figcaption>n = 8 时上坡最多 4 段。k 超过这个数，多出来的交易次数没有东西可买，答案自然停在无限次的水平。</figcaption>');
+  })();
+
+  // ---------- 图 3：手续费两个状态 ----------
+  (function () {
+    var g = '';
+    var bx = 120, by = 74, bw = 150, bh = 52;
+    g += rect(bx, by, bw, bh, C.blueBg, C.blue);
+    g += txt(bx + bw / 2, by + 24, 'prepare', { size: 14, fill: C.blue, weight: '600' });
+    g += txt(bx + bw / 2, by + 42, '持股，已扣买入价 + 手续费', { size: 11, fill: C.dim });
+    var dx = 410, dy = 74;
+    g += rect(dx, dy, bw, bh, C.orangeBg, C.orange);
+    g += txt(dx + bw / 2, dy + 24, 'done', { size: 14, fill: C.orange, weight: '600' });
+    g += txt(dx + bw / 2, dy + 42, '落袋，收益已经拿到手', { size: 11, fill: C.dim });
+    g += arrow(bx + bw + 6, by + 16, dx - 6, dy + 16, C.orange);
+    g += txt((bx + bw + dx) / 2, by + 4, '卖出：+ prices[i]', { size: 12, fill: C.orange });
+    g += arrow(dx - 6, dy + bh - 8, bx + bw + 6, by + bh - 8, C.blue);
+    g += txt((bx + bw + dx) / 2, by + bh + 26, '买入：− prices[i] − fee', { size: 12, fill: C.blue });
+    g += txt(24, 34, '两个状态互相喂饭，一天各更新一次', { size: 13, fill: C.text, weight: '600', anchor: 'start' });
+    put('figFee', svgWrap(188, g) + '<figcaption>手续费在买入那一侧扣一次。<code>done</code> 先用旧 <code>prepare</code> 算，<code>prepare</code> 再用新 <code>done</code> 算，允许当天先卖后买。</figcaption>');
+  })();
+
+  // ---------- 图 4：冷冻期把依赖挪到 i-2 ----------
+  (function () {
+    var g = '';
+    var days = ['i−3', 'i−2', 'i−1', 'i'];
+    var x0 = 90, cw = 130, y0 = 66, rh = 52;
+    for (var d = 0; d < 4; d++) {
+      g += txt(x0 + d * cw + cw / 2, y0 - 12, days[d], { size: 12, fill: C.dim });
+    }
+    g += rect(x0 + 1 * cw + 10, y0, cw - 20, rh, C.blueBg, C.blue);
+    g += txt(x0 + 1 * cw + cw / 2, y0 + 30, 'done[i−2]', { size: 13, fill: C.blue, weight: '600' });
+    g += rect(x0 + 2 * cw + 10, y0, cw - 20, rh, C.bg, C.border);
+    g += txt(x0 + 2 * cw + cw / 2, y0 + 30, '卖出的第二天', { size: 12, fill: C.dim });
+    g += rect(x0 + 3 * cw + 10, y0, cw - 20, rh, C.orangeBg, C.orange);
+    g += txt(x0 + 3 * cw + cw / 2, y0 + 30, 'prepare[i]', { size: 13, fill: C.orange, weight: '600' });
+    g += line(x0 + 2 * cw + 10, y0 + rh + 6, x0 + 2 * cw + 10, y0 + rh + 22, C.gray, 1.5);
+    g += line(x0 + 2 * cw + 10, y0 + rh + 22, x0 + 3 * cw + 10, y0 + rh + 22, C.gray, 1.5);
+    g += arrow(x0 + 3 * cw + 10, y0 + rh + 22, x0 + 3 * cw + 10, y0 + rh + 8, C.gray);
+    g += txt(x0 + 2.5 * cw + 12, y0 + rh + 38, '这一天不能买', { size: 11, fill: C.dim });
+    g += txt(24, 30, '买入只能接在 i−2 的落袋收益后面', { size: 13, fill: C.text, weight: '600', anchor: 'start' });
+    g += txt(x0 + cw, y0 + rh + 70, '写成 done[i−1] 就等于跳过冷冻期，实测 64.20% 出错', { size: 12, fill: C.orange, anchor: 'start' });
+    put('figCool', svgWrap(212, g) + '<figcaption>卖出之后的一天被规则占住，所以 <code>prepare[i]</code> 只能从 <code>done[i−2]</code> 拿钱。滚动写法里就要多留一个 <code>done2</code>。</figcaption>');
+  })();
+
+  // ---------- 图 5：性能 ----------
+  (function () {
+    var data = [[50, 21.7, 0.13], [200, 87.6, 0.50], [800, 349.3, 2.79]];
+    var g = '';
+    var X0 = 84, Y0 = 200, W = 500, H = 140;
+    function py(v) { return Y0 - Math.log10(v / 0.05) / Math.log10(400 / 0.05) * H; }
+    g += line(X0, Y0, X0 + W, Y0, C.gray, 1);
+    var ticks = [0.1, 1, 10, 100];
+    for (var t = 0; t < ticks.length; t++) {
+      g += line(X0, py(ticks[t]), X0 + W, py(ticks[t]), C.border, 1);
+      g += txt(X0 - 8, py(ticks[t]) + 4, ticks[t] + '', { size: 11, fill: C.dim, anchor: 'end' });
+    }
+    g += txt(X0 - 8, 26, '毫秒（对数轴）', { size: 11, fill: C.dim, anchor: 'end' });
+    var gw = W / data.length, bw = 56;
+    for (var i = 0; i < data.length; i++) {
+      var cx = X0 + gw * i + gw / 2;
+      var yA = py(data[i][1]), yB = py(data[i][2]);
+      g += rect(cx - bw - 6, yA, bw, Y0 - yA, C.orangeBg, C.orange);
+      g += txt(cx - bw / 2 - 6, yA - 6, data[i][1] + '', { size: 11, fill: C.orange, weight: '600' });
+      g += rect(cx + 6, yB, bw, Y0 - yB, C.blueBg, C.blue);
+      g += txt(cx + bw / 2 + 6, yB - 6, data[i][2] + '', { size: 11, fill: C.blue, weight: '600' });
+      g += txt(cx, Y0 + 18, 'k = ' + data[i][0], { size: 12, fill: C.text });
+    }
+    g += rect(X0 + 6, 34, 12, 12, C.orangeBg, C.orange, 3); g += txt(X0 + 24, 44, '枚举买入日 O(k·n²)', { size: 11, fill: C.text, anchor: 'start' });
+    g += rect(X0 + 200, 34, 12, 12, C.blueBg, C.blue, 3); g += txt(X0 + 218, 44, 'best 变量 O(k·n)', { size: 11, fill: C.text, anchor: 'start' });
+    g += txt(668, 26, 'n = 4000', { size: 11, fill: C.dim, anchor: 'end' });
+    put('figPerf2', svgWrap(236, g) + '<figcaption>固定 n = 4000，k 从 50 涨到 800：枚举版从 21.7 ms 涨到 349.3 ms，best 版从 0.13 ms 到 2.79 ms。两条线的比值随 k 拉大。</figcaption>');
+  })();
+
+  // ---------- 演示一：k 笔填表 ----------
+  (function () {
+    var PRESET = [
+      { name: '[3,3,5,0,0,3] k=2', p: [3, 3, 5, 0, 0, 3], k: 2 },
+      { name: '[1,2,3,4,5] k=1', p: [1, 2, 3, 4, 5], k: 1 },
+      { name: '[5,4,3,2,1] k=2', p: [5, 4, 3, 2, 1], k: 2 },
+      { name: '[4,1,5,2,6,3] k=2', p: [4, 1, 5, 2, 6, 3], k: 2 }
+    ];
+    var host = document.createElement('div');
+    host.className = 'viz';
+    host.innerHTML = '<p class="viz-title">k 笔填表台：一行一行扫，best 一路跟着走</p><div id="viz2Body"></div>' +
+      '<p class="viz-note" id="viz2Note"></p><p class="viz-answer" id="viz2Ans"></p>' +
+      '<div class="viz-controls"><label>数据 <select id="viz2Data"></select></label>' +
+      '<button id="viz2Next" type="button">下一步</button><button id="viz2Reset" type="button">重置</button></div>';
+    document.getElementById('figCool').parentNode.insertBefore(host, document.getElementById('figCool').nextSibling);
+    var dsel = host.querySelector('#viz2Data');
+    PRESET.forEach(function (d, i) { var o = document.createElement('option'); o.value = i; o.textContent = d.name; dsel.appendChild(o); });
+    var body = host.querySelector('#viz2Body'), note = host.querySelector('#viz2Note'), ansEl = host.querySelector('#viz2Ans');
+    var nxt = host.querySelector('#viz2Next'), rst = host.querySelector('#viz2Reset');
+    var st = null;
+
+    function build() {
+      var d = PRESET[+dsel.value], p = d.p, k = d.k, n = p.length;
+      var dp = [], i, j;
+      for (i = 0; i <= k; i++) dp.push(new Array(n).fill(0));
+      var frames = [];
+      for (i = 1; i <= k; i++) {
+        var best = dp[i - 1][0] - p[0], bestAt = 0;
+        frames.push({ i: i, j: 0, best: best, bestAt: 0, kind: 'init' });
+        for (j = 1; j < n; j++) {
+          var cand = dp[i - 1][j - 1] - p[j - 1];
+          if (cand > best) { best = cand; bestAt = j - 1; }
+          dp[i][j] = Math.max(dp[i][j - 1], best + p[j]);
+          frames.push({ i: i, j: j, best: best, bestAt: bestAt, kind: 'fill' });
+        }
+      }
+      st = { p: p, k: k, n: n, dp: dp, frames: frames, step: 0 };
+    }
+    function draw() {
+      var p = st.p, n = st.n, k = st.k;
+      var f = st.step > 0 ? st.frames[st.step - 1] : null;
+      var filled = {};
+      for (var t = 0; t < st.step; t++) filled[st.frames[t].i + ',' + st.frames[t].j] = 1;
+      var x0 = 86, y0 = 74, cw = 66, rh = 36, g = '';
+      g += txt(x0 - 10, y0 - 24, 'prices', { size: 11, fill: C.dim, anchor: 'end' });
+      for (var j = 0; j < n; j++) {
+        g += txt(x0 + j * cw + cw / 2, y0 - 24, String(p[j]), { size: 12, fill: C.dim });
+        g += txt(x0 + j * cw + cw / 2, y0 - 8, 'j=' + j, { size: 10, fill: C.dim });
+      }
+      for (var i = 0; i <= k; i++) {
+        g += txt(x0 - 10, y0 + i * rh + rh / 2 + 4, 'i=' + i, { size: 11, fill: C.dim, anchor: 'end' });
+        for (var j2 = 0; j2 < n; j2++) {
+          var key = i + ',' + j2, isFilled = filled[key];
+          var isCur = f && f.i === i && f.j === j2;
+          g += rect(x0 + j2 * cw, y0 + i * rh, cw - 6, rh - 6, isCur ? C.orangeBg : (isFilled ? C.blueBg : C.bg), isCur ? C.orange : C.border, 3);
+          g += txt(x0 + j2 * cw + (cw - 6) / 2, y0 + i * rh + rh / 2 + 3, String(st.dp[i][j2]), { size: 12, fill: isCur ? C.orange : (isFilled ? C.blue : C.dim) });
+        }
+      }
+      body.innerHTML = svgWrap(y0 + (k + 1) * rh + 26, g);
+      if (!f) { note.innerHTML = '点「下一步」开始第 1 行。'; ansEl.textContent = ''; nxt.disabled = false; }
+      else {
+        note.innerHTML = '第 ' + f.i + ' 行：best = ' + f.best + '（来自 p = ' + f.bestAt + '），本格 dp[' + f.i + '][' + f.j + '] = ' + st.dp[f.i][f.j];
+        if (st.step === st.frames.length) { ansEl.textContent = '答案：' + st.dp[k][n - 1]; nxt.disabled = true; }
+        else { ansEl.textContent = ''; nxt.disabled = false; }
+      }
+    }
+    function reset() { build(); draw(); }
+    nxt.addEventListener('click', function () { if (st.step < st.frames.length) { st.step++; draw(); } });
+    rst.addEventListener('click', reset);
+    dsel.addEventListener('change', reset);
+    reset();
+  })();
+
+  // ---------- 演示二：手续费 / 冷冻期逐天状态 ----------
+  (function () {
+    var DATA = {
+      '锯齿：7,1,5,3,6,4,8,2': [7, 1, 5, 3, 6, 4, 8, 2],
+      '震荡：1,3,2,8,4,9': [1, 3, 2, 8, 4, 9],
+      '单调跌：5,4,3,2,1': [5, 4, 3, 2, 1]
+    };
+    var host = document.createElement('div');
+    host.className = 'viz';
+    host.innerHTML = '<p class="viz-title">手续费 / 冷冻期：两个状态逐天走</p><div id="viz3Body"></div>' +
+      '<p class="viz-note" id="viz3Note"></p><p class="viz-answer" id="viz3Ans"></p>' +
+      '<div class="viz-controls"><label>数据 <select id="viz3Data"></select></label>' +
+      '<label>题目 <select id="viz3Mode"><option value="fee">含手续费（fee = 2）</option><option value="cool">含冷冻期</option></select></label>' +
+      '<button id="viz3Next" type="button">下一步</button><button id="viz3Reset" type="button">重置</button></div>';
+    document.getElementById('figPerf2').parentNode.insertBefore(host, document.getElementById('figPerf2').nextSibling);
+    var dsel = host.querySelector('#viz3Data'), msel = host.querySelector('#viz3Mode');
+    Object.keys(DATA).forEach(function (kk) { var o = document.createElement('option'); o.value = kk; o.textContent = kk; dsel.appendChild(o); });
+    var body = host.querySelector('#viz3Body'), note = host.querySelector('#viz3Note'), ansEl = host.querySelector('#viz3Ans');
+    var nxt = host.querySelector('#viz3Next'), rst = host.querySelector('#viz3Reset');
+    var st = null, FEE = 2;
+
+    function build() {
+      var p = DATA[dsel.value], mode = msel.value, steps = [], i;
+      if (mode === 'fee') {
+        var prep = -p[0] - FEE, done = 0;
+        steps.push({ i: 0, prep: prep, done: done });
+        for (i = 1; i < p.length; i++) {
+          done = Math.max(done, prep + p[i]);
+          prep = Math.max(prep, done - p[i] - FEE);
+          steps.push({ i: i, prep: prep, done: done });
+        }
+        st = { p: p, mode: mode, steps: steps, step: 0, ans: done };
+      } else {
+        if (p.length < 2) { st = { p: p, mode: mode, steps: [], step: 0, ans: 0 }; return; }
+        var prep2 = Math.max(-p[0], -p[1]), d2 = 0, d1 = Math.max(0, p[1] - p[0]);
+        steps.push({ i: 0, prep: -p[0], done: 0 });
+        steps.push({ i: 1, prep: prep2, done: d1 });
+        for (i = 2; i < p.length; i++) {
+          var cur = Math.max(d1, prep2 + p[i]);
+          prep2 = Math.max(prep2, d2 - p[i]);
+          d2 = d1; d1 = cur;
+          steps.push({ i: i, prep: prep2, done: cur, d2: d2 });
+        }
+        st = { p: p, mode: mode, steps: steps, step: 0, ans: d1 };
+      }
+    }
+    function draw() {
+      var p = st.p, W = 660, X0 = 12, bw = (W - 2 * X0) / p.length;
+      var maxV = Math.max.apply(null, p), H = 110, Y0 = 140, g = '';
+      var s = st.step > 0 ? st.steps[st.step - 1] : null;
+      for (var d = 0; d < p.length; d++) {
+        var h = p[d] / maxV * H, x = X0 + d * bw;
+        var cur = s && d === s.i, past = s && d <= s.i;
+        g += rect(x + 6, Y0 - h, bw - 12, h, cur ? C.orangeBg : (past ? C.blueBg : C.bg), cur ? C.orange : C.border, 3);
+        g += txt(x + bw / 2, Y0 - h - 6, String(p[d]), { size: 11, fill: cur ? C.orange : C.text });
+        g += txt(x + bw / 2, Y0 + 16, String(d), { size: 10, fill: C.dim });
+      }
+      g += line(X0, Y0, X0 + W - 2 * X0 + X0, Y0, C.gray, 1);
+      body.innerHTML = svgWrap(166, g);
+      if (!s) { note.innerHTML = '点「下一步」逐天推进。'; ansEl.textContent = ''; nxt.disabled = false; }
+      else {
+        note.innerHTML = '第 ' + s.i + ' 天：prepare = ' + s.prep + '，done = ' + s.done;
+        if (st.step === st.steps.length) { ansEl.textContent = '答案：' + st.ans; nxt.disabled = true; }
+        else { ansEl.textContent = ''; nxt.disabled = false; }
+      }
+    }
+    function reset() { build(); draw(); }
+    nxt.addEventListener('click', function () { if (st.step < st.steps.length) { st.step++; draw(); } });
+    rst.addEventListener('click', reset);
+    dsel.addEventListener('change', reset);
+    msel.addEventListener('change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

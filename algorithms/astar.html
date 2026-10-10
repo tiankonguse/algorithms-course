@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A* 算法：给启发式一个上界</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.viz-controls select { margin-right: 8px; }
+.asgrid { font-family: ui-monospace,Menlo,Consolas,monospace; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>A* 算法：给启发式一个上界</h1>
+      <p class="intro">网格上求两点之间的最短步数，Dijkstra 会把小半个棋盘翻一遍。A* 只改一处：堆里排的数从「起点到这里的距离」换成「起点到这里的距离，加上这里到终点的预估距离」。流程和 Dijkstra 一模一样，边权非负的要求也一样。</p>
+
+      <h2 id="waste">零、Dijkstra 在网格上做无用功</h2>
+      <figure class="fig" id="figExpand"></figure>
+      <p>301 行 301 列的网格，三成格子是障碍，从左上角 (0,0) 走到右下角 (300,300)，Dijkstra 一共弹出了 62386 个格子。终点在右下角，而左上、左下、右上三片离终点很远的格子也被挨个弹了一遍。</p>
+      <p>这些格子对答案没有贡献。弹到它们的时候，终点其实早就可以确定，只是堆里还压着一批键更小的记录，得先清掉才能轮到终点。键是「起点到当前格的距离」，离起点近的格子键小，于是搜索从起点开始均匀地往外铺，不管终点在哪一边。</p>
+      <p>要让搜索偏着往终点走，得先能回答一个问题：这个格子离终点大概还有多远。</p>
+
+      <h2 id="key">一、把预估值加进堆的键</h2>
+      <figure class="fig" id="figKey"></figure>
+      <p>记 g 是起点到当前格的已知距离，h 是当前格到终点的预估距离。Dijkstra 拿 g 当堆键，A* 拿 g + h 当堆键。弹出规则、visited 判断、d 表的维护全部不动。</p>
+      <p>键换了，弹出顺序就变了：同一个 g 下，h 小的格子在堆里更靠前，也就是离终点近的那些先被处理。弹到终点时返回 d 表里的值，和 Dijkstra 给出的是同一个数。</p>
+      <p>落到代码上只改两个地方：起点入堆的键，和每个邻居入堆的键。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">int</span> mv[5] = {-1, 0, 1, 0, -1};
+
+    <span class="cm">// 曼哈顿距离：只能上下左右走时，它恰好是两点之间的真实最短距离</span>
+    <span class="kw">int</span> <span class="fn">f1</span>(<span class="kw">int</span> x, <span class="kw">int</span> y, <span class="kw">int</span> tx, <span class="kw">int</span> ty) {
+        <span class="kw">return</span> abs(tx - x) + abs(ty - y);
+    }
+
+    <span class="cm">// A*：除了堆里排的是「起点到当前点的距离 + 当前点到终点的预估距离」，其余和 Dijkstra 一模一样</span>
+    <span class="kw">int</span> <span class="fn">minDistance2</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; grid, <span class="kw">int</span> sx, <span class="kw">int</span> sy, <span class="kw">int</span> tx, <span class="kw">int</span> ty) {
+        <span class="kw">if</span> (grid[sx][sy] == 0 || grid[tx][ty] == 0) {
+            <span class="kw">return</span> -1;
+        }
+        <span class="kw">int</span> n = grid.size(), m = grid[0].size();
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">distance</span>(n, vector&lt;<span class="kw">int</span>&gt;(m, INT_MAX));
+        vector&lt;vector&lt;<span class="kw">bool</span>&gt;&gt; <span class="fn">visited</span>(n, vector&lt;<span class="kw">bool</span>&gt;(m, <span class="kw">false</span>));
+        distance[sx][sy] = 1;
+        priority_queue&lt;array&lt;<span class="kw">int</span>, 3&gt;, vector&lt;array&lt;<span class="kw">int</span>, 3&gt;&gt;, greater&lt;array&lt;<span class="kw">int</span>, 3&gt;&gt;&gt; heap;
+        heap.push({1 + f1(sx, sy, tx, ty), sx, sy});
+        <span class="kw">while</span> (!heap.empty()) {
+            array&lt;<span class="kw">int</span>, 3&gt; cur = heap.top();
+            heap.pop();
+            <span class="kw">int</span> x = cur[1], y = cur[2];
+            <span class="kw">if</span> (visited[x][y]) {
+                <span class="kw">continue</span>;
+            }
+            visited[x][y] = <span class="kw">true</span>;
+            <span class="kw">if</span> (x == tx &amp;&amp; y == ty) {
+                <span class="kw">return</span> distance[x][y];
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 4; i++) {
+                <span class="kw">int</span> nx = x + mv[i], ny = y + mv[i + 1];
+                <span class="kw">if</span> (nx &gt;= 0 &amp;&amp; nx &lt; n &amp;&amp; ny &gt;= 0 &amp;&amp; ny &lt; m &amp;&amp; grid[nx][ny] == 1 &amp;&amp; !visited[nx][ny]
+                    &amp;&amp; distance[x][y] + 1 &lt; distance[nx][ny]) {
+                    distance[nx][ny] = distance[x][y] + 1;
+                    heap.push({distance[nx][ny] + f1(nx, ny, tx, ty), nx, ny});
+                }
+            }
+        }
+        <span class="kw">return</span> -1;
+    }</pre>
+
+      <div class="viz">
+        <p class="viz-title">演示 · 逐步展开：换一种堆键，看弹出多少个格子</p>
+        <div class="viz-controls">
+          <select id="asPreset">
+            <option>A 6×6 绕障碍</option>
+            <option>B 8×8 空旷</option>
+            <option>C 9×7 一堵墙</option>
+          </select>
+          <select id="asAlgo">
+            <option value="dij">键是 g（Dijkstra）</option>
+            <option value="astar">键是 g + 曼哈顿（A*）</option>
+          </select>
+        </div>
+        <div id="asBoard" class="asgrid"></div>
+        <p class="viz-note" id="asNote"></p>
+        <p class="viz-answer" id="asAns"></p>
+        <div class="viz-controls">
+          <button id="asPrev">上一步</button>
+          <button id="asNext">下一步</button>
+          <button id="asReset">重置</button>
+        </div>
+      </div>
+      <p>切到空旷网格（预设 B）时，两种键弹的格子数一样多：没有障碍，条条大路都是最短路，谁先弹都一样。</p>
+
+      <h2 id="admissible">二、预估距离不能超过真实距离</h2>
+      <p>唯一的要求是：对任意格子，h 都不能大于该格子到终点的真实最短距离。</p>
+      <p>超了会发生什么。堆里的键被人为抬高，一条本来更优、只是 h 估得偏大的路径被压到了后面；终点带着一个次优的键先弹出来，函数直接返回，那条更优的路再也没机会被走到。</p>
+      <p>实测（本机 clang -O2，20000 组 2 到 13 行的随机网格，障碍率 30%）：三种合规的预估函数与 Dijkstra 的答案 0 处不符；把键改成 g 加两倍曼哈顿距离，127 组答案偏大，占 0.64%；改成五倍，345 组，占 1.73%。</p>
+      <p>网格放大到 30 到 70 行、3000 组用例时，两倍曼哈顿错 1439 组（48.0%），五倍错 1810 组（60.3%）。图越大，一条被高估的路压在终点后面的机会越多。</p>
+      <p>h 取 0 就是 Dijkstra，一定对但一点没提速；h 越贴近真实距离，弹出的格子越少；h 一旦越过真实距离，速度可能更快，答案开始出错。</p>
+
+      <h2 id="three">三、三种常见的预估函数</h2>
+      <figure class="fig" id="figHeuristic"></figure>
+      <p>曼哈顿距离 |dx| + |dy|：只能上下左右走的时候，它恰好是两点之间的真实最短距离，这是最紧的合规下界。</p>
+      <p>对角线距离 max(|dx|, |dy|)：允许斜着走时最紧；四方向移动时偏小，dx = dy = 8 时它给出 8，真实要走 16 步。</p>
+      <p>欧式距离 sqrt(dx² + dy²)：允许朝任意方向走时用它；四方向移动时同样偏小。</p>
+          <pre class="code"><span class="cm">// 曼哈顿距离：只能上下左右走时最紧，它就是真实距离</span>
+    <span class="kw">int</span> <span class="fn">f1</span>(<span class="kw">int</span> x, <span class="kw">int</span> y, <span class="kw">int</span> tx, <span class="kw">int</span> ty) {
+        <span class="kw">return</span> abs(tx - x) + abs(ty - y);
+    }
+
+    <span class="cm">// 对角线距离：允许斜着走时最紧，四方向移动时会偏小</span>
+    <span class="kw">int</span> <span class="fn">f2</span>(<span class="kw">int</span> x, <span class="kw">int</span> y, <span class="kw">int</span> tx, <span class="kw">int</span> ty) {
+        <span class="kw">return</span> max(abs(tx - x), abs(ty - y));
+    }
+
+    <span class="cm">// 欧式距离：允许朝任意方向走时的自然选择，四方向移动时同样偏小</span>
+    <span class="kw">double</span> <span class="fn">f3</span>(<span class="kw">int</span> x, <span class="kw">int</span> y, <span class="kw">int</span> tx, <span class="kw">int</span> ty) {
+        <span class="kw">return</span> sqrt((<span class="kw">double</span>)(tx - x) * (tx - x) + (<span class="kw">double</span>)(ty - y) * (ty - y));
+    }</pre>
+      <p>三个都合规，答案都对，差别只在弹多少格。还是那张 301×301、障碍率 30% 的网格，从 (0,0) 到 (300,300)，最短路是 601 步。</p>
+      <figure class="fig" id="figPops"></figure>
+      <p>曼哈顿版弹出 7886 格、1.6ms，Dijkstra 弹出 62386 格、9.4ms，弹出量压到不足八分之一。对角线版 54362 格、8.3ms，欧式版 53988 格、7.6ms，几乎退回 Dijkstra。原因很直白：终点在对角，对角线和欧式给的都是 300 上下，真实距离是 600 上下，估得太松，吸引力就弱。曼哈顿给的是 600，差的那 1 是起点自己占的格子，d 表把起点记成 1。</p>
+      <p>换个反例。网格完全没有障碍时，三个预估函数的弹出格数都是整格 90601。任何一条只向右、向下的路径都是最短路，所有格子的 f 都相等，堆怎么排都得把它们弹完。启发式能起作用，靠的是障碍把路挤窄。</p>
+      <p>网格放大到 3000×3000，Dijkstra 648ms，A* 曼哈顿版 33ms，约 20 倍；弹出 204142 格，占全部 900 万格的 2.3%。</p>
+
+      <h2 id="sum">总结</h2>
+      <p>A* 和 Dijkstra 的差别只有堆键：g 换成 g + h，其余一行不改。</p>
+      <p>h 不超过真实距离是正确性的全部条件。h 越紧、弹得越少；越过这条线，速度可能更快，答案就开始偏大。四方向的网格上曼哈顿最紧，对角线、欧式都偏松，省不下来多少。</p>
+      <p>启发式也有失灵的时候。空旷网格上每条路径都是最短路，f 全相等，A* 只能把整格弹完。想让搜索更快，功夫下在设计 h 上，把 h 调大只会换来错误答案。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>—</td><td>A* 算法模版：网格上从起点到终点的最短步数（本题用对数器验证，没有在线评测）</td><td>—</td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解065【必备】A星、Floyd、Bellman-Ford与SPFA</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+var MV=[-1,0,1,0,-1];
+
+function parseGrid(rows){ return rows.map(function(r){ return r.split('').map(Number); }); }
+
+// useH 为真时堆键是 g + 曼哈顿距离，否则就是 Dijkstra 的 g
+function runGrid(grid, sx, sy, tx, ty, useH){
+  var n=grid.length, m=grid[0].length, INF=1e9;
+  var dis=[], vis=[];
+  for(var i=0;i<n;i++){ var a=[], b=[]; for(var j=0;j<m;j++){ a.push(INF); b.push(false); } dis.push(a); vis.push(b); }
+  dis[sx][sy]=1;
+  var heap=[[1+(useH?Math.abs(tx-sx)+Math.abs(ty-sy):0), sx, sy]];
+  var popped=[];
+  function cmp(a,b){ if(a[0]!==b[0]) return a[0]-b[0]; if(a[1]!==b[1]) return a[1]-b[1]; return a[2]-b[2]; }
+  while(heap.length){
+    heap.sort(cmp);
+    var cur=heap.shift(), x=cur[1], y=cur[2];
+    if(vis[x][y]) continue;
+    vis[x][y]=true; popped.push([x,y]);
+    if(x===tx&&y===ty) return {ans:dis[x][y], popped:popped};
+    for(var d=0; d<4; d++){
+      var nx=x+MV[d], ny=y+MV[d+1];
+      if(nx>=0&&nx<n&&ny>=0&&ny<m&&grid[nx][ny]===1&&!vis[nx][ny]&&dis[x][y]+1<dis[nx][ny]){
+        dis[nx][ny]=dis[x][y]+1;
+        var h=useH?(Math.abs(tx-nx)+Math.abs(ty-ny)):0;
+        heap.push([dis[nx][ny]+h, nx, ny]);
+      }
+    }
+  }
+  return {ans:-1, popped:popped};
+}
+
+// ===== 图 1：两种算法的展开范围 =====
+(function(){
+  var grid=parseGrid([
+    '111111111',
+    '111111111',
+    '111111111',
+    '000010000',
+    '111111111',
+    '111111111',
+    '111111111'
+  ]);
+  var sx=0, sy=1, tx=6, ty=7;
+  var d1=runGrid(grid, sx, sy, tx, ty, false);
+  var d2=runGrid(grid, sx, sy, tx, ty, true);
+  var CELL=26, W=720;
+  function panel(ox, res, title, color){
+    var n=grid.length, m=grid[0].length, body='';
+    body += txt(ox+m*CELL/2, 20, title, {fs:13});
+    var set={}; for(var i=0;i<res.popped.length;i++) set[res.popped[i][0]+','+res.popped[i][1]]=true;
+    for(var r=0;r<n;r++){
+      for(var c=0;c<m;c++){
+        var fill='#ffffff';
+        if(grid[r][c]===0) fill='#64748b';
+        else if(set[r+','+c]) fill=color;
+        if(r===sx&&c===sy) fill='#16a34a';
+        if(r===tx&&c===ty) fill='#ea580c';
+        body += '<rect x="'+(ox+c*CELL)+'" y="'+(30+r*CELL)+'" width="'+CELL+'" height="'+CELL+'" fill="'+fill+'" stroke="#cbd5e1" stroke-width="1"/>';
+      }
+    }
+    body += txt(ox+m*CELL/2, 30+n*CELL+20, '弹出 '+res.popped.length+' 格，答案 '+res.ans, {fs:12, fill:'#334155'});
+    return body;
+  }
+  var body = panel(20, d1, 'Dijkstra：键是 g', '#dbeafe');
+  body += panel(20+9*CELL+50, d2, 'A*：键是 g + 曼哈顿', '#ffedd5');
+  body += txt(W/2, 30+7*CELL+48, '绿色是起点 (0,1)，橙色是终点 (6,7)，深灰是障碍，浅色是弹出过的格子', {fs:11, fill:'#64748b'});
+  document.getElementById('figExpand').innerHTML = svg(W, 30+7*CELL+62, body) +
+    '<figcaption>同一张网格、同一个终点，Dijkstra 把左上、左下、右上三片都翻了一遍；A* 的展开范围明显偏向右下角。</figcaption>';
+})();
+
+// ===== 图 2：堆键的构成 =====
+(function(){
+  var W=720, H=250, body='';
+  body += txt(W/2, 20, '堆里排的是 g + h：g 已经走过、h 还没走', {fs:13});
+  var CELL=30, ox=60, oy=52, cols=8, rows=5;
+  for(var r=0;r<rows;r++)
+    for(var c=0;c<cols;c++)
+      body += '<rect x="'+(ox+c*CELL)+'" y="'+(oy+r*CELL)+'" width="'+CELL+'" height="'+CELL+'" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>';
+  var S=[0,0], P=[3,3], T=[4,7];
+  function cx(p){ return ox+p[1]*CELL+CELL/2; }
+  function cy(p){ return oy+p[0]*CELL+CELL/2; }
+  body += '<path d="M '+cx(S)+' '+cy(S)+' L '+cx([0,3])+' '+cy([0,3])+' L '+cx(P)+' '+cy(P)+'" fill="none" stroke="#ea580c" stroke-width="2.5"/>';
+  body += '<path d="M '+cx(P)+' '+cy(P)+' L '+cx(T)+' '+cy(T)+'" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="5 4"/>';
+  body += '<rect x="'+(ox+S[1]*CELL)+'" y="'+(oy+S[0]*CELL)+'" width="'+CELL+'" height="'+CELL+'" fill="#16a34a" stroke="#cbd5e1"/>';
+  body += '<rect x="'+(ox+T[1]*CELL)+'" y="'+(oy+T[0]*CELL)+'" width="'+CELL+'" height="'+CELL+'" fill="#ea580c" stroke="#cbd5e1"/>';
+  body += '<rect x="'+(ox+P[1]*CELL)+'" y="'+(oy+P[0]*CELL)+'" width="'+CELL+'" height="'+CELL+'" fill="#fef3c7" stroke="#ea580c" stroke-width="2"/>';
+  body += txt(cx(S), cy(S)+4, 'S', {fs:13});
+  body += txt(cx(T), cy(T)+4, 'T', {fs:13});
+  body += txt(cx(P), cy(P)-CELL/2-6, 'g=7', {fs:11, fill:'#ea580c'});
+  body += txt((cx(P)+cx(T))/2, (cy(P)+cy(T))/2-8, 'h=6', {fs:11, fill:'#2563eb'});
+  var bx=470;
+  body += txt(bx+120, 50, '小根堆（键 = g + h）', {fs:12});
+  var recs=[[13,'P',7,6],[14,'C',5,9],[14,'D',9,5],[16,'E',4,12]];
+  for(var i=0;i<recs.length;i++){
+    var y=66+i*26;
+    body += '<rect x="'+bx+'" y="'+y+'" width="240" height="22" rx="4" fill="#eef4ff" stroke="#2563eb"/>';
+    body += txt(bx+34, y+15, '键 '+recs[i][0], {fs:11, fill:'#1f2937'});
+    body += txt(bx+150, y+15, recs[i][1]+'  g='+recs[i][2]+' h='+recs[i][3], {fs:11, fill:'#64748b'});
+  }
+  body += txt(bx+120, 66+recs.length*26+16, '键小的先弹，离 T 近的格子排到了前面', {fs:11, fill:'#334155'});
+  document.getElementById('figKey').innerHTML = svg(W, H, body) +
+    '<figcaption>橙色实线是起点到当前格已经走过的 g，蓝色虚线是到终点的预估 h。堆按 g 加 h 排序，h 越小越靠前。</figcaption>';
+})();
+
+// ===== 图 3：三种预估函数 =====
+(function(){
+  var W=720, H=310, body='';
+  body += txt(W/2, 22, '同一个格子：dx = 6、dy = 8，四方向移动的真实最短距离 14', {fs:12});
+  var x0=150, y0=58, rowH=52;
+  function bar(i, name, val, note, over){
+    var y=y0+i*rowH;
+    var w=Math.min(300, Math.round(val/14*300));
+    body += txt(x0-12, y+19, name, {fs:12, an:'end'});
+    body += '<rect x="'+x0+'" y="'+y+'" width="300" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>';
+    body += '<rect x="'+x0+'" y="'+y+'" width="'+w+'" height="24" rx="4" fill="'+(over?'#9aa0a6':'#2563eb')+'"/>';
+    body += txt(x0+318, y+17, String(val), {fs:12, an:'start', fill:'#1f2937'});
+    body += txt(x0+342, y+17, note, {fs:11, an:'start', fill: over?'#7c2d12':'#334155'});
+  }
+  bar(0,'曼哈顿',14,'|6| + |8| = 14，与真实距离相等，最紧',false);
+  bar(1,'对角线',8,'max(6, 8) = 8，合规但偏松',false);
+  bar(2,'欧式',10,'sqrt(36 + 64) = 10，合规但偏松',false);
+  bar(3,'三倍曼哈顿',42,'超过真实距离 14，答案可能偏大',true);
+  body += txt(W/2, y0+4*rowH+16, '前三个都落在真实距离之内，所以都合规；最后一个越界', {fs:11, fill:'#7c2d12'});
+  document.getElementById('figHeuristic').innerHTML = svg(W, H, body) +
+    '<figcaption>快不代表对。前三个函数算出来的数都不超过真实距离 14，第四个越过了这条线。</figcaption>';
+})();
+
+// ===== 图 4：弹出格数实测 =====
+(function(){
+  var W=720, H=290, body='';
+  body += txt(W/2, 20, '301×301 网格、障碍率 30%、从 (0,0) 到 (300,300)：弹出的格子数', {fs:12});
+  var data=[['Dijkstra',62386,'#9aa0a6'],['A* 曼哈顿',7886,'#2563eb'],['A* 对角线',54362,'#ea580c'],['A* 欧式',53988,'#f59e0b']];
+  var maxv=62386, x0=150, y0=56, rowH=46, barW=400;
+  for(var i=0;i<data.length;i++){
+    var y=y0+i*rowH;
+    var w=Math.round(data[i][1]/maxv*barW);
+    body += txt(x0-12, y+19, data[i][0], {fs:12, an:'end'});
+    body += '<rect x="'+x0+'" y="'+y+'" width="'+barW+'" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>';
+    body += '<rect x="'+x0+'" y="'+y+'" width="'+w+'" height="24" rx="4" fill="'+data[i][2]+'"/>';
+    body += txt(x0+w+8, y+17, String(data[i][1]), {fs:11, an:'start', fill:'#334155'});
+  }
+  body += txt(W/2, H-22, '完全空旷的网格上，三个预估的弹出格数都是 90601，也就是整格', {fs:11, fill:'#7c2d12'});
+  document.getElementById('figPops').innerHTML = svg(W, H, body) +
+    '<figcaption>预估越贴近真实距离，弹出的格子越少。曼哈顿把 62386 压到 7886，对角线、欧式几乎没省。</figcaption>';
+})();
+
+// ===== 演示：逐步展开 =====
+(function(){
+  var presets={
+    'A 6×6 绕障碍': {rows:[
+      '111111',
+      '100001',
+      '101101',
+      '101001',
+      '101111',
+      '111111'], sx:0, sy:0, tx:5, ty:5},
+    'B 8×8 空旷': {rows:[
+      '11111111',
+      '11111111',
+      '11111111',
+      '11111111',
+      '11111111',
+      '11111111',
+      '11111111',
+      '11111111'], sx:0, sy:0, tx:7, ty:7},
+    'C 9×7 一堵墙': {rows:[
+      '111111111',
+      '111111111',
+      '111111111',
+      '000010000',
+      '111111111',
+      '111111111',
+      '111111111'], sx:0, sy:1, tx:6, ty:7}
+  };
+  var board=document.getElementById('asBoard');
+  var note=document.getElementById('asNote');
+  var ansEl=document.getElementById('asAns');
+  var sel=document.getElementById('asPreset');
+  var selAlgo=document.getElementById('asAlgo');
+  var st={};
+
+  function build(){
+    var p=presets[sel.value], useH=(selAlgo.value==='astar');
+    var grid=parseGrid(p.rows);
+    st.grid=grid; st.p=p; st.useH=useH;
+    st.res=runGrid(grid, p.sx, p.sy, p.tx, p.ty, useH);
+    st.step=0;
+    render();
+  }
+  function render(){
+    var grid=st.grid, p=st.p, res=st.res;
+    var n=grid.length, m=grid[0].length;
+    var shown=res.popped.slice(0, st.step);
+    var set={}; for(var i=0;i<shown.length;i++) set[shown[i][0]+','+shown[i][1]]=true;
+    var cur=st.step>0 ? shown[st.step-1] : null;
+    var html='';
+    for(var r=0;r<n;r++){
+      html+='<div>';
+      for(var c=0;c<m;c++){
+        var bg='#fff';
+        if(grid[r][c]===0) bg='#64748b';
+        else if(set[r+','+c]) bg='#dbeafe';
+        if(r===p.tx&&c===p.ty) bg='#ea580c';
+        if(r===p.sx&&c===p.sy) bg='#16a34a';
+        if(cur&&cur[0]===r&&cur[1]===c) bg='#fef3c7';
+        html+='<span style="display:inline-block;width:20px;height:20px;margin:1px;border:1px solid #cbd5e1;background:'+bg+';vertical-align:top"></span>';
+      }
+      html+='</div>';
+    }
+    board.innerHTML=html;
+    var line='已弹出 '+st.step+' 格，还剩 '+Math.max(0, res.popped.length-st.step)+' 格';
+    if(cur){
+      var man=Math.abs(p.tx-cur[0])+Math.abs(p.ty-cur[1]);
+      line += '；当前弹的是 ('+cur[0]+', '+cur[1]+')，它到终点的曼哈顿距离是 '+man;
+      if(st.useH) line += '，入堆时键 = g + '+man;
+    }
+    note.textContent=line;
+    ansEl.textContent = (st.step>=res.popped.length)
+      ? ('答案：'+(res.ans<0?'走不到':'需要 '+res.ans+' 步')+'，共弹出 '+res.popped.length+' 格')
+      : '';
+    document.getElementById('asPrev').disabled=(st.step===0);
+    document.getElementById('asNext').disabled=(st.step>=res.popped.length);
+  }
+  sel.addEventListener('change', build);
+  selAlgo.addEventListener('change', build);
+  document.getElementById('asPrev').addEventListener('click', function(){ if(st.step>0){ st.step--; render(); } });
+  document.getElementById('asNext').addEventListener('click', function(){ if(st.step<st.res.popped.length){ st.step++; render(); } });
+  document.getElementById('asReset').addEventListener('click', function(){ st.step=0; render(); });
+  build();
+})();
+})();</script>
+</body>
+</html>

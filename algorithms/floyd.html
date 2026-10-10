@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Floyd 算法：跳板必须放在最外层</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.viz-controls select { margin-right: 8px; }
+table.mtx { border-collapse: collapse; font-family: ui-monospace,Menlo,Consolas,monospace; font-size: 13px; margin: 6px 0; }
+table.mtx td { border: 1px solid #cbd5e1; width: 42px; height: 26px; text-align: center; background: #fff; }
+table.mtx td.chg { background: #ffedd5; font-weight: 600; }
+table.mtx td.diag { background: #f6f7f9; color: #64748b; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>Floyd 算法：跳板必须放在最外层</h1>
+      <p class="intro">求图上任意两点之间的最短距离，Floyd 只要三重循环。时间 O(n³)、空间 O(n²)，n 是点数。它不挑图的形状，有向无向都行，边权可以是负的，唯一的前提是没有负环。</p>
+
+      <h2 id="formula">零、核心式子</h2>
+      <p>distance[i][j] 记 i 到 j 的最短距离。i 到 j 的最短路只有两种可能：不经过 k，或者先走到 k、再从 k 走到 j。于是可以把 k 拿来当一次「跳板」试一试。</p>
+      <figure class="fig" id="figFormula"></figure>
+      <p>把每个点都当一次跳板，任意两点之间的最短距离就都出来了。代码短到不需要任何辅助结构。</p>
+          <pre class="code"><span class="cm">// Floyd：枚举每一个跳板，看能不能把 i 到 j 的距离压短</span>
+    <span class="cm">// 跳板必须放在最外层，这是整个算法唯一容易写错的地方</span>
+    <span class="kw">void</span> <span class="fn">floyd</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; distance, <span class="kw">int</span> n) {
+        <span class="kw">for</span> (<span class="kw">int</span> bridge = 0; bridge &lt; n; bridge++) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+                <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; n; j++) {
+                    <span class="cm">// i 先走到跳板，再从跳板走到 j</span>
+                    <span class="kw">if</span> (distance[i][bridge] != INT_MAX &amp;&amp; distance[bridge][j] != INT_MAX
+                        &amp;&amp; distance[i][j] &gt; distance[i][bridge] + distance[bridge][j]) {
+                        distance[i][j] = distance[i][bridge] + distance[bridge][j];
+                    }
+                }
+            }
+        }
+    }</pre>
+
+      <h2 id="order">一、跳板必须放在最外层</h2>
+      <figure class="fig" id="figOrder"></figure>
+      <p>三重循环写成 i、j、k 的顺序也能跑，唯独跳板不能落到最内层。跳板在最内层时，一对 (i, j) 只在处理它自己的那几步里顺手试了一遍所有跳板，而这时候其他格子还没被这批跳板更新过，两段中转接不上。</p>
+      <p>换个说法：正确版是「先固定一个跳板，把整张表按它更新一遍，再换下一个跳板」；错版是「先固定一对 (i, j)，挨个试跳板，再换下一对」，后者永远只能接一段中转。</p>
+      <p>实测（本机 clang -O2，6000 组随机小图，每组 2 到 8 个点、随机正权或 DAG 上的负权）：跳板最内版有 3608 个格子比正确答案大；正确版是 0 个。</p>
+      <p>上面那张 4 点图的情况：1 到 0 的最短路是 1 到 3、3 到 2、2 到 0，两段中转，值 11。跳板最内版给不出这个数，留在无穷大。</p>
+
+      <h2 id="neg">二、负权可以，负环不行</h2>
+      <figure class="fig" id="figNeg"></figure>
+      <p>负权边不影响正确性：只要没有负环，最短路一定存在，式子的更新会停下来。</p>
+      <p>有负环的时候 Floyd 既不报错也不收敛，环上那些点的距离每跑一遍就更小一截。拿两点负环 0 到 1 权 1、1 到 0 权 -3 举例，圈上权值和是 -2。跑第 1 遍后 d[0][0] 变成 -2，第 2 遍 -14，第 3 遍 -98，一直在往下掉。</p>
+      <p>所以 Floyd 只负责「有负权边时求最短路」这一件事。真要知道图里有没有负环，得另想办法：用 Bellman-Ford 多跑一轮看还松不松弛，或者观察 Floyd 的距离表是不是还在变小。</p>
+
+      <h2 id="impl">三、复杂度与几个实现细节</h2>
+      <figure class="fig" id="figTime"></figure>
+      <p>实测（本机 clang -O2，随机稠密矩阵）：n = 200 用 7.5ms，400 用 62ms，800 用 455ms，1000 用 860ms。n 翻一倍，时间约 8 倍，正好是 n³。</p>
+      <p>初始化有两件事。一是 distance[i][i] 设成 0，其余先设成无穷大，再把题目给的边写进去。漏掉对角线那个 0，「原地不动」就变成无穷大，所有经过自己的中转都失效。二是无穷大的加法要拦一下：用 INT_MAX 表示无穷大时，两个无穷大相加会溢出成负数，所以先把 distance[i][k] 和 distance[k][j] 都不是无穷大判掉再相加。</p>
+      <p>洛谷 P2910 是最直接的应用：给 n 个岛屿两两之间的危险指数，再给一条必须依次经过的岛屿序列，求最小的总危险指数。先跑一遍 Floyd 拿到任意两点之间的最小危险，再把序列上相邻两点的答案累加。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// floyd 写在别处，这里先声明一下</span>
+    <span class="kw">void</span> <span class="fn">floyd</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; distance, <span class="kw">int</span> n);
+
+    <span class="cm">// 洛谷 P2910：给定 n 个岛两两之间的危险指数，和一条必须依次经过的岛屿序列</span>
+    <span class="cm">// 先用 Floyd 求出任意两点之间的最小危险指数，再把序列上相邻两点的答案累加</span>
+    <span class="kw">int</span> <span class="fn">solve</span>(<span class="kw">int</span> n, <span class="kw">int</span> m, vector&lt;<span class="kw">int</span>&gt;&amp; path, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; danger) {
+        floyd(danger, n);
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; m; i++) {
+            ans += danger[path[i - 1]][path[i]];
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>题目还提醒了一句：u 到 v 和 v 到 u 的危险指数不一定相等，图是有向的，写边的时候别按无向图处理。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示 · 逐个放跳板：每放一个，整张表被更新一遍</p>
+        <div class="viz-controls">
+          <select id="flPreset">
+            <option>P2910 三点矩阵</option>
+            <option>四点图：1 到 0 要两段中转</option>
+          </select>
+        </div>
+        <div id="flBoard"></div>
+        <p class="viz-note" id="flNote"></p>
+        <p class="viz-answer" id="flAns"></p>
+        <div class="viz-controls">
+          <button id="flPrev">上一步</button>
+          <button id="flNext">下一步</button>
+          <button id="flReset">重置</button>
+        </div>
+      </div>
+      <p>三点矩阵那个预设跑到最后一帧，把序列 1、2、1、3 上相邻两点的距离加起来就是 3 + 3 + 1，正好是样例答案 7。</p>
+
+      <h2 id="sum">总结</h2>
+      <p>Floyd 就一个式子：distance[i][j] 用 distance[i][k] + distance[k][j] 去压。跳板 k 必须放在最外层，这是唯一容易写错的地方，写反了只能接一段中转。</p>
+      <p>它支持负权边、不支持负环。有负环时距离会一路变小，需要用 Bellman-Ford 那套去判。n 到 1000 时 O(n³) 已经接近一秒，点数再大就得换算法。</p>
+      <p>P2910 那类题目是它的典型用法：先算出任意两点的最短距离，再按给定的访问顺序把答案累加起来。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P2910" target="_blank">[USACO08OPEN] Clear And Present Danger S</a></td><td><a href="https://www.luogu.com.cn/problem/P2910" target="_blank">luogu.com.cn</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解065【必备】A星、Floyd、Bellman-Ford与SPFA</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+var INF=1e9;
+function infStr(v){ return v>=INF ? '∞' : String(v); }
+
+// ===== 图 1：核心式子 =====
+(function(){
+  var W=720, H=250, body='';
+  body += txt(W/2, 22, 'i 到 j 的最短路：不经过跳板 k，或者先到 k 再从 k 到 j', {fs:12});
+  var P={i:[130,140], k:[360,70], j:[600,140]};
+  body += '<line x1="'+P.i[0]+'" y1="'+P.i[1]+'" x2="'+P.j[0]+'" y2="'+P.j[1]+'" stroke="#9aa0a6" stroke-width="2"/>';
+  body += txt(365, 152, 'distance[i][j]', {fs:11, fill:'#64748b'});
+  body += '<line x1="'+P.i[0]+'" y1="'+P.i[1]+'" x2="'+P.k[0]+'" y2="'+P.k[1]+'" stroke="#2563eb" stroke-width="2.5"/>';
+  body += '<line x1="'+P.k[0]+'" y1="'+P.k[1]+'" x2="'+P.j[0]+'" y2="'+P.j[1]+'" stroke="#2563eb" stroke-width="2.5"/>';
+  body += txt(232, 92, 'distance[i][k]', {fs:11, fill:'#2563eb'});
+  body += txt(492, 92, 'distance[k][j]', {fs:11, fill:'#2563eb'});
+  [['i','i'],['k','k'],['j','j']].forEach(function(it){
+    var p=P[it[0]];
+    body += '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="20" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+    body += txt(p[0], p[1]+5, it[1], {fs:14});
+  });
+  body += '<rect x="140" y="196" width="440" height="34" rx="6" fill="#eef4ff" stroke="#2563eb"/>';
+  body += txt(360, 218, 'distance[i][j] = min(distance[i][j], distance[i][k] + distance[k][j])', {fs:12, fill:'#1e3a8a'});
+  document.getElementById('figFormula').innerHTML = svg(W, H, body) +
+    '<figcaption>两种走法取小的那个。k 每换一个，就是给这张表多放一个可以中转的点。</figcaption>';
+})();
+
+// ===== 图 2：跳板顺序的对照 =====
+(function(){
+  var W=720, H=384, body='';
+  body += txt(W/2, 22, '同一个 4 点图：跳板在最外 vs 在最内', {fs:13});
+  var P={0:[60,110], 1:[200,60], 2:[200,160], 3:[330,110]};
+  var E=[[0,1,9],[0,2,1],[0,3,3],[1,3,2],[2,0,1],[2,1,2],[3,2,8]];
+  body += txt(195, 42, '所有边（有向）', {fs:11, fill:'#64748b'});
+  for(var e=0;e<E.length;e++){
+    var a=P[E[e][0]], b=P[E[e][1]];
+    var dx=b[0]-a[0], dy=b[1]-a[1], L=Math.sqrt(dx*dx+dy*dy);
+    var ux=dx/L, uy=dy/L;
+    var x1=a[0]+ux*18, y1=a[1]+uy*18, x2=b[0]-ux*20, y2=b[1]-uy*20;
+    body += '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#ar)"/>';
+    body += txt((x1+x2)/2+ (dy>0?-8:8), (y1+y2)/2+(dx>0?2:-8), String(E[e][2]), {fs:10, fill:'#2563eb'});
+  }
+  body += '<defs><marker id="ar" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#94a3b8"/></marker></defs>';
+  Object.keys(P).forEach(function(k){
+    var p=P[k];
+    body += '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="16" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+    body += txt(p[0], p[1]+5, k, {fs:13});
+  });
+  // 两个结果矩阵
+  function mtx(ox, oy, vals, title, note){
+    var b = txt(ox+75, oy, title, {fs:12});
+    for(var r=0;r<4;r++)
+      for(var c=0;c<4;c++){
+        var x=ox+c*38, y=oy+10+r*28;
+        var isHl = (r===1&&c===0);
+        b += '<rect x="'+x+'" y="'+y+'" width="38" height="28" fill="'+((r===c)?'#f6f7f9':(isHl?'#ffedd5':'#ffffff'))+'" stroke="#cbd5e1"/>';
+        b += txt(x+19, y+19, vals[r][c], {fs:11, fill:(r===c?'#64748b':(isHl?'#c2410c':'#1f2937'))});
+      }
+    b += txt(ox+75, oy+10+4*28+18, note, {fs:11, fill:'#c2410c'});
+    return b;
+  }
+  body += mtx(420, 60, [
+    ['0','3','1','3'],
+    ['11','0','10','2'],
+    ['1','2','0','4'],
+    ['9','10','8','0']], '跳板最外（正确）', '第 2 行第 1 列算出了 11');
+  body += mtx(420, 210, [
+    ['0','3','1','3'],
+    ['∞','0','10','2'],
+    ['1','2','0','4'],
+    ['9','10','8','0']], '跳板最内（错）', '同一个格子还是无穷大');
+  document.getElementById('figOrder').innerHTML = svg(W, H, body) +
+    '<figcaption>1 到 0 要先经 3 再经 2，两段中转。跳板在最内层时这对 (i, j) 试跳板时别的格子还没更新，这个 11 就出不来。</figcaption>';
+})();
+
+// ===== 图 3：负环 =====
+(function(){
+  var W=720, H=250, body='';
+  body += txt(W/2, 22, '两点负环：0 到 1 权 1、1 到 0 权 -3，圈上权值和 -2', {fs:12});
+  var a=[200,90], b=[380,90];
+  body += '<line x1="'+(a[0]+22)+'" y1="'+(a[1]-6)+'" x2="'+(b[0]-22)+'" y2="'+(b[1]-6)+'" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar2)"/>';
+  body += '<line x1="'+(b[0]-22)+'" y1="'+(b[1]+6)+'" x2="'+(a[0]+22)+'" y2="'+(a[1]+6)+'" stroke="#ea580c" stroke-width="2" marker-end="url(#ar3)"/>';
+  body += '<defs><marker id="ar2" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#94a3b8"/></marker><marker id="ar3" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#ea580c"/></marker></defs>';
+  body += txt(290, 72, '权 1', {fs:11, fill:'#64748b'});
+  body += txt(290, 118, '权 -3', {fs:11, fill:'#ea580c'});
+  body += '<circle cx="'+a[0]+'" cy="'+a[1]+'" r="22" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+  body += '<circle cx="'+b[0]+'" cy="'+b[1]+'" r="22" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+  body += txt(a[0], a[1]+5, '0', {fs:13});
+  body += txt(b[0], b[1]+5, '1', {fs:13});
+  var rows=[['跑第 1 遍','d[0][0] = -2','d[1][1] = -4'],['跑第 2 遍','d[0][0] = -14','d[1][1] = -28'],['跑第 3 遍','d[0][0] = -98','d[1][1] = -196']];
+  for(var i=0;i<rows.length;i++){
+    var y=160+i*28;
+    body += '<rect x="140" y="'+(y-16)+'" width="440" height="24" rx="4" fill="#fff7ed" stroke="#fdba74"/>';
+    body += txt(170, y, rows[i][0], {fs:11, fill:'#7c2d12'});
+    body += txt(330, y, rows[i][1], {fs:11, fill:'#7c2d12'});
+    body += txt(500, y, rows[i][2], {fs:11, fill:'#7c2d12'});
+  }
+  document.getElementById('figNeg').innerHTML = svg(W, H, body) +
+    '<figcaption>每跑一遍，环上两个点的自距离都更小一截。距离表永远等不到「这一遍没有再变小」，Floyd 就停不下来。</figcaption>';
+})();
+
+// ===== 图 4：复杂度 =====
+(function(){
+  var W=720, H=260, body='';
+  body += txt(W/2, 22, 'Floyd 实测耗时（随机稠密矩阵，clang -O2）', {fs:12});
+  var data=[['n = 200',7.5,'#2563eb'],['n = 400',62.0,'#2563eb'],['n = 800',454.5,'#ea580c'],['n = 1000',860.1,'#ea580c']];
+  var maxv=860.1, x0=170, y0=56, rowH=46, barW=390;
+  for(var i=0;i<data.length;i++){
+    var y=y0+i*rowH;
+    var w=Math.max(4, Math.round(data[i][1]/maxv*barW));
+    body += txt(x0-12, y+19, data[i][0], {fs:12, an:'end'});
+    body += '<rect x="'+x0+'" y="'+y+'" width="'+barW+'" height="24" rx="4" fill="#f6f7f9" stroke="#e6e8eb"/>';
+    body += '<rect x="'+x0+'" y="'+y+'" width="'+w+'" height="24" rx="4" fill="'+data[i][2]+'"/>';
+    body += txt(x0+w+8, y+17, data[i][1]+' ms', {fs:11, an:'start', fill:'#334155'});
+  }
+  body += txt(W/2, H-24, 'n 从 400 翻到 800，时间从 62ms 涨到 455ms，约 7.3 倍', {fs:11, fill:'#334155'});
+  document.getElementById('figTime').innerHTML = svg(W, H, body) +
+    '<figcaption>n 每翻一倍、时间约涨八倍，这就是 n³ 的样子。</figcaption>';
+})();
+
+// ===== 演示：逐个放跳板 =====
+(function(){
+  var presets={
+    'P2910 三点矩阵': {
+      d:[[0,5,1],[5,0,2],[1,2,0]],
+      path:[0,1,0,2]
+    },
+    '四点图：1 到 0 要两段中转': {
+      d:[[0,9,1,3],[INF,0,INF,2],[1,2,0,INF],[INF,INF,8,0]],
+      path:null
+    }
+  };
+  var board=document.getElementById('flBoard');
+  var note=document.getElementById('flNote');
+  var ansEl=document.getElementById('flAns');
+  var sel=document.getElementById('flPreset');
+  var st={};
+
+  function snapshots(d0, n){
+    var d=d0.map(function(r){ return r.slice(); });
+    var snaps=[{k:-1, cells:d.map(function(r){ return r.slice(); }), changed:[]}];
+    for(var k=0;k<n;k++){
+      var changed=[];
+      for(var i=0;i<n;i++)
+        for(var j=0;j<n;j++)
+          if(d[i][k]<INF && d[k][j]<INF && d[i][j]>d[i][k]+d[k][j]){
+            d[i][j]=d[i][k]+d[k][j];
+            changed.push([i,j,d[i][j]]);
+          }
+      snaps.push({k:k, cells:d.map(function(r){ return r.slice(); }), changed:changed});
+    }
+    return snaps;
+  }
+  function build(){
+    var p=presets[sel.value];
+    st.p=p;
+    st.n=p.d.length;
+    st.snaps=snapshots(p.d, st.n);
+    st.step=0;
+    render();
+  }
+  function render(){
+    var s=st.snaps[st.step], n=st.n;
+    var chg={};
+    for(var i=0;i<s.changed.length;i++) chg[s.changed[i][0]+','+s.changed[i][1]]=true;
+    var html='<table class="mtx">';
+    for(var r=0;r<n;r++){
+      html+='<tr>';
+      for(var c=0;c<n;c++){
+        var cls=(r===c)?'diag':(chg[r+','+c]?'chg':'');
+        html+='<td class="'+cls+'">'+infStr(s.cells[r][c])+'</td>';
+      }
+      html+='</tr>';
+    }
+    html+='</table>';
+    board.innerHTML=html;
+    var line = (s.k<0) ? '还没放跳板，这是初始矩阵（对角线 0，无边的地方是无穷大）'
+                       : ('刚把节点 '+s.k+' 当跳板放进去，更新了 '+s.changed.length+' 个格子');
+    if(s.k>=0 && s.changed.length){
+      var parts=[];
+      for(var i=0;i<s.changed.length;i++) parts.push('d['+s.changed[i][0]+']['+s.changed[i][1]+']='+s.changed[i][2]);
+      line += '：'+parts.join('、');
+    }
+    note.textContent=line;
+    if(st.step>=st.snaps.length-1){
+      var tail='';
+      if(st.p.path){
+        var sum=0;
+        for(var i=1;i<st.p.path.length;i++) sum+=s.cells[st.p.path[i-1]][st.p.path[i]];
+        tail='；按序列 1 2 1 3 累加 = '+sum;
+      } else {
+        tail='；d[1][0] = '+infStr(s.cells[1][0])+'，它就是 1 到 0 的最短距离';
+      }
+      ansEl.textContent='全部跳板放完'+tail;
+    } else {
+      ansEl.textContent='';
+    }
+    document.getElementById('flPrev').disabled=(st.step===0);
+    document.getElementById('flNext').disabled=(st.step>=st.snaps.length-1);
+  }
+  sel.addEventListener('change', build);
+  document.getElementById('flPrev').addEventListener('click', function(){ if(st.step>0){ st.step--; render(); } });
+  document.getElementById('flNext').addEventListener('click', function(){ if(st.step<st.snaps.length-1){ st.step++; render(); } });
+  document.getElementById('flReset').addEventListener('click', function(){ st.step=0; render(); });
+  build();
+})();
+})();</script>
+</body>
+</html>

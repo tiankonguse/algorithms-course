@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>01 背包：二维表与空间压缩</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); min-height: 22px; }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); min-height: 22px; }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.kv { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; color: var(--text-dim); margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>01 背包：二维表与空间压缩</h1>
+      <p class="intro">容量 t 的背包，n 件货物，每件有花费 cost[i] 和价值 val[i]，每件最多拿一次，问不超过容量时能拿到的最大价值。这个问题的转移方程只有一行，压缩之后只剩一层循环，而压缩时循环方向写反，答案是 40 而不是 15，编译期一句话都不会说。</p>
+
+      <h2>零、每件货物只有两种可能</h2>
+      <p>枚举所有拿法要 2<sup>n</sup> 次，n = 30 就过十亿了。换个问法：只在前 i 件里挑，花费不超过 j，最大价值是多少。记成 <code>dp[i][j]</code>。</p>
+      <p>填 <code>dp[i][j]</code> 时，第 i 件货物只有两个下场。不拿它，那答案跟前 i − 1 件一样，是 <code>dp[i-1][j]</code>；拿它，得先在前 i − 1 件里腾出 cost[i] 的空间，是 <code>dp[i-1][j-cost[i]] + val[i]</code>。两种取大的那个。</p>
+      <p class="kv">dp[i][j] = max(dp[i-1][j], dp[i-1][j-cost[i]] + val[i])</p>
+      <p>这里有个细节值得停一下：一旦把限制写成「只在前 i 件里挑」加「花费不超过 j」，这个 max 就是完整的，没有第三种情况。因为第 i 件确实只有拿与不拿两种，而拿了之后剩下的子问题（前 i − 1 件、容量 j − cost[i]）和原问题是同一个形式。</p>
+      <figure class="fig" id="figTwo"></figure>
+      <p>答案是 <code>dp[n][t]</code>。表里 j 那一维是「不超过」，所以 <code>dp[i][j]</code> 随 j 单调不减，这一条后面判断自己写得对不对时用得上。</p>
+    <pre class="code"><span class="cm">// dp[i][j]：只在前 i 件里挑，花费不超过 j 时的最大价值</span>
+    <span class="cm">// 第 i 件（花费 cost[i]、价值 val[i]）：要 或 不要</span>
+    <span class="kw">int</span> <span class="fn">knapsack2d</span>(vector&lt;<span class="kw">int</span>&gt;&amp; cost, vector&lt;<span class="kw">int</span>&gt;&amp; val, <span class="kw">int</span> t) {
+        <span class="kw">int</span> n = cost.size();
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">dp</span>(n + 1, vector&lt;<span class="kw">int</span>&gt;(t + 1, 0));
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt;= t; j++) {
+                dp[i][j] = dp[i - 1][j];                       <span class="cm">// 不要第 i 件</span>
+                <span class="kw">if</span> (j - cost[i - 1] &gt;= 0) {
+                    dp[i][j] = max(dp[i][j],                   <span class="cm">// 要第 i 件</span>
+                                   dp[i - 1][j - cost[i - 1]] + val[i - 1]);
+                }
+            }
+        }
+        <span class="kw">return</span> dp[n][t];
+    }</pre>
+      <p>注意下标：货物在代码里存成 0 基准的 <code>cost[i-1]</code>，i 从 1 走到 n，第 0 行整行是 0，表示「一件都没有时价值是 0」。</p>
+
+      <h2>一、空间压缩：j 必须从大到小</h2>
+      <p>看转移方程里 <code>dp[i]</code> 这一行只依赖 <code>dp[i-1]</code> 那一行，i − 2 及更早的行用完就再也没人看了。于是可以只留一维数组，让 <code>dp[j]</code> 表示「当前处理过的货物里，花费不超过 j 的最大价值」。</p>
+      <p>关键是刷新顺序。<code>dp[j]</code> 要用到的 <code>dp[j-cost[i]]</code> 必须是<strong>上一轮的值</strong>，也就是还没考虑第 i 件时的样子。j 从大到小走，<code>j-cost[i]</code> 一定比 j 小，它还没被本轮碰过，读到的是旧值。反过来从小到大走，<code>j-cost[i]</code> 已经在本轮被写过了，读到的其实是「已经拿过一次第 i 件」的结果，再往上加 val[i]，等于把同一件货物拿了两次。</p>
+      <figure class="fig" id="figCompress"></figure>
+      <p>上面的例子只有两件货物：cost = [3, 2]，val = [5, 10]，t = 8。倒序那行最后停在 15，也就是两件都拿（花费 5）；正序那行停在 40，是把 cost = 2 的那一件拿了四次。真实世界里没有四次可拿，40 这个数纯属循环方向给的。</p>
+    <pre class="code"><span class="cm">// 空间压缩：只剩一维 dp[j]，j 必须从大到小刷</span>
+    <span class="cm">// 小下标先动，dp[j - cost[i]] 就会被本轮写脏，同一件被拿第二次</span>
+    <span class="kw">int</span> <span class="fn">knapsack1d</span>(vector&lt;<span class="kw">int</span>&gt;&amp; cost, vector&lt;<span class="kw">int</span>&gt;&amp; val, <span class="kw">int</span> t) {
+        <span class="kw">int</span> n = cost.size();
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(t + 1, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = t; j &gt;= cost[i]; j--) {
+                dp[j] = max(dp[j], dp[j - cost[i]] + val[i]);
+            }
+        }
+        <span class="kw">return</span> dp[t];
+    }</pre>
+      <p>循环的下界直接写 <code>j &gt;= cost[i]</code> 就行，比 cost[i] 小的 j 根本放不下这一件，值不变，可以整个跳过。二维版本里那个 <code>if (j - cost[i-1] &gt;= 0)</code> 判的是同一件事。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示一：填表台（二维表 / 压缩倒序 / 压缩正序）</p>
+        <div id="v1svg"></div>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>数据
+            <select id="v1case">
+              <option value="0">cost=[3,4,5] val=[5,6,10] t=10</option>
+              <option value="1">cost=[3,2] val=[5,10] t=8</option>
+              <option value="2">cost=[12,10,12,14] val=[9,28,5,25] t=20</option>
+            </select>
+          </label>
+          <label>写法
+            <select id="v1mode">
+              <option value="2">二维表</option>
+              <option value="1">压缩（j 从大到小）</option>
+              <option value="0">压缩（j 从小到大，错版）</option>
+            </select>
+          </label>
+          <button id="v1prev">上一步</button>
+          <button id="v1next">下一步</button>
+          <button id="v1last">到末尾</button>
+          <button id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <h2>二、两种写反的方式，以及它们的代价</h2>
+      <p>循环方向写反是第一种。实测两万组随机样本（n 在 1 到 6，t 在 1 到 30），正序版本有 68.89% 的样本答案和正解不同，平均虚高 3.70 倍。放大容量更离谱：t = 1000 时正解 132，正序版本算出 10000。</p>
+      <p>错版答案只会偏大，不会偏小。它算的是「每件货物能拿无限次」的最优解（那是另一道题，叫完全背包），这个解的集合包含所有合法拿法，所以最大值不可能更小。想自查的话，扫一遍最终的 dp 数组看它是否单调不减，是个便宜的办法。</p>
+      <p>第二种是把初始化写错。上面那套写法回答的是「<strong>不超过</strong> t 的最大价值」，dp 全填 0，含义是「什么都没拿时价值 0」，所有容量都合法。如果题面问的是「<strong>恰好</strong>花光 t 时的最大价值」，0 初始化就全错了：它会拿不满的容量当成合法答案报出来。实测两万组，0 初始化版有 79.78% 回答得跟真答案不一样。</p>
+      <p>具体到一个例子：cost = [3, 4]，val = [5, 6]，t = 5。恰好装满只有一种拿法（拿 cost = 3 的那件），答案是 5；0 初始化版报 6，那是「不超过 5」的答案。要答「恰好」，得把 dp 初值设成一个极小的负数，只留 <code>dp[0] = 0</code>，转移时先判断来源格子是不是可达。</p>
+      <figure class="fig" id="figBug"></figure>
+      <p>题面怎么问就怎么初始化，这一步没有通用答案。01 背包的模板题（比如采药）问的是「不超过」，所以 0 初始化是对的。</p>
+
+      <h2>三、夏季特惠：把约束换算成容量</h2>
+      <p>换一道看起来完全不像背包的题。预算 X 元，n 个游戏都在打折，第 i 个原价 a<sub>i</sub>、现价 b<sub>i</sub>、买了能获得快乐值 w<sub>i</sub>。允许最终总花费超过预算，只要「获得的总优惠金额不低于超出预算的总金额」就不算吃亏。问不吃亏的前提下快乐值最大能到多少。</p>
+      <p>先把「不吃亏」写成一个不等式。买了集合 S，总花费是 Σb，超出预算的部分是 Σb − X（没超就算 0），总优惠是 Σ(a − b)。要求：</p>
+      <p class="kv">Σ(a<sub>i</sub> − b<sub>i</sub>) ≥ Σb<sub>i</sub> − X　　⟺　　Σ(a<sub>i</sub> − 2b<sub>i</sub>) ≥ −X</p>
+      <p>右边是 −X，跟 S 无关，可以整体搬到左边。记 <code>well[i] = a[i] - 2*b[i]</code>，约束变成 Σwell ≥ −X。</p>
+      <p>接下来是这一步题眼。well ≥ 0 的商品，买了只会让左边更大，约束永远不会被它破坏，它是白送的快乐值，直接买，同时把预算加上 well（相当于这件商品把预算变大了）。真正需要挑的是 well &lt; 0 的商品：买它要花掉 −well 点「预算额度」，换来 w<sub>i</sub> 的快乐值。这就是一件货物的两个属性。</p>
+      <figure class="fig" id="figDiscount"></figure>
+      <p>于是剩下的部分是标准 01 背包：容量是扩过之后的 X，货物是那些 well &lt; 0 的商品，花费是 −well，价值是 w<sub>i</sub>。最后别忘了把必买那批的快乐值加回去。</p>
+    <pre class="code"><span class="cm">// 第 i 件：原价 a[i]、现价 b[i]、快乐值 w[i]</span>
+    <span class="cm">// 买了它，总花费多 b[i]，总优惠多 a[i] - b[i]</span>
+    <span class="cm">// 「不觉得吃亏」要求：总优惠 &gt;= 超出预算的部分</span>
+    <span class="cm">//   总优惠 - 总花费 &gt;= -X</span>
+    <span class="cm">//   Σ(a[i] - 2*b[i]) &gt;= -X      记 well[i] = a[i] - 2*b[i]</span>
+    <span class="cm">// well &gt;= 0 的商品：买了只会让左边更大，白送的快乐值，必买，且预算 += well</span>
+    <span class="cm">// well &lt;  0 的商品：才是真正要挑的货物，花费 = -well，价值 = w[i]</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">buyGames</span>(vector&lt;<span class="kw">int</span>&gt;&amp; a, vector&lt;<span class="kw">int</span>&gt;&amp; b, vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt;&amp; w, <span class="kw">int</span> x) {
+        <span class="kw">int</span> n = a.size();
+        vector&lt;<span class="kw">int</span>&gt; cost;
+        vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt; val;
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">int</span> well = a[i] - b[i] - b[i];
+            <span class="kw">if</span> (well &gt;= 0) {
+                x += well;          <span class="cm">// 这件商品相当于把预算变大了</span>
+                ans += w[i];
+            } <span class="kw">else</span> {
+                cost.push_back(-well);
+                val.push_back(w[i]);
+            }
+        }
+        vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt; <span class="fn">dp</span>(x + 1, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; (<span class="kw">int</span>)cost.size(); i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = x; j &gt;= cost[i]; j--) {
+                dp[j] = max(dp[j], dp[j - cost[i]] + val[i]);
+            }
+        }
+        <span class="kw">return</span> ans + dp[x];
+    }</pre>
+      <p>实测 n = 500、X = 100000 的随机数据：330 件（66.0%）是必买商品，真正进背包的只有 170 件，预算从 100000 涨到 190699，耗时 15.835 毫秒。如果把「必买」这批直接扔掉不买，会少掉 159826909 点快乐值。<code>x += well</code> 这一行是约束推出来的，删掉它答案就错了。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示二：夏季特惠的拆分台</p>
+        <div id="v2svg"></div>
+        <p class="viz-note" id="v2note"></p>
+        <p class="viz-answer" id="v2ans"></p>
+        <div class="viz-controls">
+          <label>数据
+            <select id="v2case">
+              <option value="0">预算 20，5 件商品</option>
+              <option value="1">预算 12，4 件商品</option>
+            </select>
+          </label>
+          <button id="v2prev">上一步</button>
+          <button id="v2next">下一步</button>
+          <button id="v2last">到末尾</button>
+          <button id="v2reset">重置</button>
+        </div>
+      </div>
+
+      <h2>四、复杂度分析</h2>
+      <table class="complexity">
+        <thead><tr><th>做法</th><th>时间</th><th>额外空间</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>枚举子集</td><td>O(2<sup>n</sup>)</td><td>O(1)</td><td>n = 30 就过十亿次，只适合做对拍的参考</td></tr>
+          <tr><td>二维表</td><td>O(n · t)</td><td>O(n · t)</td><td>(n+1)(t+1) 个 int，n = 2000、t = 20000 时 152.7 MB</td></tr>
+          <tr><td>空间压缩</td><td>O(n · t)</td><td>O(t)</td><td>只留 t+1 个 int，同上规模 0.1 MB，实测 21.029 毫秒</td></tr>
+        </tbody>
+      </table>
+      <p>时间那一栏两种写法一样，都是 n 趟 × 每趟最多 t 格。差别全在空间：n = 2000、t = 20000 时二维表 66.047 毫秒、152.7 MB，压缩版 21.029 毫秒、0.1 MB。压缩版更快的另一个原因是它跳过了 <code>j &lt; cost[i]</code> 那一段，二维版每一格都要走一遍 <code>dp[i-1][j]</code> 赋值。</p>
+      <p>n = 5000、t = 100000 的规模，二维表需要 1907.7 MB，本机根本开不出来；压缩版 242.592 毫秒跑完。所以空间压缩在这道题里决定了能不能提交：二维表压根开不出来。</p>
+      <p>夏季特惠那题的复杂度跟上面同一套：O(n · X')，X' 是扩完之后的总预算，额外空间 O(X')。</p>
+
+      <h2>五、总结</h2>
+      <p>01 背包的骨架就三句话：定义「前 i 件、容量 j」，转移时把第 i 件拆成拿与不拿，压缩之后 j 一定倒着走。</p>
+      <p>几个容易写错的点：</p>
+      <p>1）压缩版的 j 必须从 t 降到 cost[i]。写反了算的是「每件能拿无限次」，答案只会偏大，实测两万组随机样本里 68.89% 现形。</p>
+      <p>2）dp 初值按题面来。「不超过 t」全填 0；「恰好花光 t」要用极小负数初始化并只留 <code>dp[0] = 0</code>。用错初始化，两万组里 79.78% 答错。</p>
+      <p>3）二维表那行的 <code>dp[i][j] = dp[i-1][j]</code> 不能省，它对应「不拿」这种可能，只写 max 里那一项等于强制每件都拿。</p>
+      <p>4）遇到约束不像容量的题（像夏季特惠），先把不等式整理成「Σ某项 ≤ 常数」的形状，再去找哪一项是花费、哪一项是价值。</p>
+      <p>后面几页把这套表拿去处理「凑出某个和」的计数问题、带附件依赖的货物，以及一类背包做不了、得换成堆的问题。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>采药</td><td><a href="https://www.luogu.com.cn/problem/P1048" target="_blank">P1048</a></td></tr>
+          <tr><td>LeetCode</td><td>夏季特惠</td><td><a href="https://leetcode.cn/problems/tJau2o/" target="_blank">tJau2o</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解073【必备】背包dp-01背包、有依赖的背包</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            green: '#2e7d32', greenBg: '#e8f5e9', gray: '#9aa0a6', bg: '#f6f7f9',
+            border: '#e6e8eb', text: '#1e293b', dim: '#6b7280' };
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      (o.mono ? ' font-family="ui-monospace, Menlo, monospace"' : '') + '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx == null ? 4 : o.rx) +
+      '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.border) + '"' + (o.sw ? ' stroke-width="' + o.sw + '"' : '') + '/>';
+  }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+  function cell(x, y, w, h, v, o) {
+    o = o || {};
+    var s = rect(x, y, w, h, { fill: o.fill || '#fff', stroke: o.stroke || C.border, sw: o.sw });
+    s += txt(x + w / 2, y + h / 2 + 4, String(v), { size: o.size || 12, mono: true, fill: o.tc || C.text, weight: o.weight });
+    return s;
+  }
+  function bar(x, y, w, h, v, max, color, label, valtxt) {
+    var s = rect(x, y, w, h, { fill: C.bg });
+    var bw = Math.max(2, w * v / max);
+    s += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="3" fill="' + color + '"/>';
+    s += txt(x - 6, y + h - 4, label, { size: 11, fill: C.dim, anchor: 'end', mono: true });
+    s += txt(x + w + 6, y + h - 4, valtxt, { size: 11, anchor: 'start', mono: true, fill: C.dim });
+    return s;
+  }
+
+  // ---------- 图 1：二维 dp 表与两个来源 ----------
+  function figTwo() {
+    var cost = [3, 4, 5], val = [5, 6, 10], t = 10;
+    var dp = [
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      [0, 0, 0, 5, 5, 5, 5, 5, 5, 5, 5],
+      [0, 0, 0, 5, 6, 6, 6, 11, 11, 11, 11],
+      [0, 0, 0, 5, 6, 10, 10, 11, 15, 16, 16]
+    ];
+    var cw = 52, ch = 28, x0 = 56, y0 = 44;
+    var s = txt(340, 20, 'cost = [3,4,5]  val = [5,6,10]  t = 10 的二维 dp 表', { size: 13, weight: '600' });
+    var i, j;
+    for (j = 0; j <= t; j++) s += txt(x0 + j * cw + cw / 2 - 3, y0 - 6, 'j=' + j, { size: 10, fill: C.dim });
+    for (i = 0; i <= 3; i++) {
+      for (j = 0; j <= t; j++) {
+        var hi = (i === 2 && j === 7);
+        var src = (i === 1 && (j === 7 || j === 4));
+        s += cell(x0 + j * cw, y0 + i * ch, cw - 5, ch - 5, dp[i][j], {
+          fill: hi ? C.blueBg : (src ? C.orangeBg : '#fff'),
+          stroke: hi ? C.blue : (src ? C.orange : C.border),
+          weight: (hi || src) ? '600' : null
+        });
+      }
+      s += txt(x0 - 8, y0 + i * ch + 17, 'i=' + i, { size: 11, fill: C.dim, anchor: 'end', mono: true });
+    }
+    var by = y0 + 3 * ch + 12;
+    var ax1 = x0 + 4 * cw + (cw - 5) / 2, ay1 = y0 + 1 * ch + ch - 5;
+    var ax2 = x0 + 7 * cw + (cw - 5) / 2, ay2 = y0 + 1 * ch + ch - 5;
+    var bx = x0 + 7 * cw + (cw - 5) / 2, byy = y0 + 2 * ch;
+    s += '<path d="M ' + ax1 + ' ' + (ay1 + 2) + ' C ' + ax1 + ' ' + (ay1 + 26) + ' ' + (bx - 12) + ' ' + (byy - 16) +
+      ' ' + (bx - 6) + ' ' + (byy - 3) + '" fill="none" stroke="' + C.orange + '" stroke-width="1.6"/>';
+    s += '<path d="M ' + ax2 + ' ' + (ay2 + 2) + ' L ' + (bx + 6) + ' ' + (byy - 3) + '" fill="none" stroke="' + C.blue +
+      '" stroke-width="1.6"/>';
+    s += txt(340, by + 10, 'dp[2][7] = max(dp[1][7], dp[1][7-4] + 6) = max(5, 11) = 11', { size: 12, mono: true });
+    s += txt(340, by + 30, '橙箭头是「拿第 2 件」，蓝箭头是「不拿」；每一行只依赖上一行', { size: 11, fill: C.dim });
+    wrap('figTwo', by + 48, s,
+      '填 dp[i][j] 时只有两个来源：正上方（不拿第 i 件）和左上方 cost[i] 格（拿第 i 件）');
+  }
+
+  // ---------- 图 2：倒序 vs 正序 ----------
+  function figCompress() {
+    var t = 8;
+    var rows = [
+      { tag: '倒序（正确）', r1: [0, 0, 0, 5, 5, 5, 5, 5, 5], r2: [0, 0, 10, 10, 10, 15, 15, 15, 15], color: C.blue, bg: C.blueBg },
+      { tag: '正序（错版）', r1: [0, 0, 0, 5, 5, 5, 10, 10, 10], r2: [0, 0, 10, 10, 20, 20, 30, 30, 40], color: C.orange, bg: C.orangeBg }
+    ];
+    var cw = 64, ch = 30, x0 = 96;
+    var s = txt(340, 20, 'cost = [3,2]  val = [5,10]  t = 8：两种循环方向，两轮之后的 dp 数组', { size: 13, weight: '600' });
+    var k, j, y = 40;
+    for (k = 0; k < 2; k++) {
+      s += txt(x0 - 8, y + 17, rows[k].tag, { size: 12, anchor: 'end', weight: '600', fill: rows[k].color });
+      s += txt(x0 - 8, y + 17 + ch + 4, '第 1 件后', { size: 10, anchor: 'end', fill: C.dim });
+      var a = rows[k].r1;
+      for (j = 0; j <= t; j++) s += cell(x0 + j * cw, y, cw - 6, ch - 6, a[j], { fill: '#fff' });
+      s += txt(x0 - 8, y + 17 + ch + 4 + ch, '第 2 件后', { size: 10, anchor: 'end', fill: C.dim });
+      var b = rows[k].r2;
+      for (j = 0; j <= t; j++) {
+        s += cell(x0 + j * cw, y + ch + 4, cw - 6, ch - 6, b[j], {
+          fill: j === t ? rows[k].bg : '#fff', stroke: j === t ? rows[k].color : C.border, weight: j === t ? '600' : null
+        });
+      }
+      y += 2 * ch + 26;
+    }
+    s += txt(340, y + 4, '容量越大价值只会越多，两条数组都单调不减，光看形状挑不出毛病', { size: 11, fill: C.dim });
+    s += txt(340, y + 24, '但正序那行最后停在 40，两件货物总共才 15 的价值，40 只能来自「同一件拿了四次」', { size: 12, weight: '600', fill: C.orange });
+    wrap('figCompress', y + 44, s,
+      'j 从大到小走，dp[j-cost] 读的是上一轮的旧值；从小到大走，读到的已经是本轮写过的「拿过一次」');
+  }
+
+  // ---------- 图 3：两种写反的代价 ----------
+  function figBug() {
+    var s = txt(340, 20, '两万组随机样本里，两种写法的出错比例（C++ 实测）', { size: 13, weight: '600' });
+    s += bar(150, 44, 380, 26, 68.89, 100, C.orange, '正序', '68.89%');
+    s += bar(150, 84, 380, 26, 79.78, 100, C.blue, '0 初始化答「恰好」', '79.78%');
+    s += txt(340, 138, '正序：答案只会偏大，平均虚高 3.70 倍（它算的是每件能拿无限次的最优解）', { size: 11, fill: C.dim });
+    s += txt(340, 158, '0 初始化：把「没装满」的容量当成合法答案报出来', { size: 11, fill: C.dim });
+    var y = 186;
+    s += rect(40, y, 600, 96, { fill: C.bg });
+    s += txt(56, y + 22, '两个能一眼看出问题的例子', { size: 12, weight: '600', anchor: 'start' });
+    s += txt(56, y + 46, 'cost = [3,2]  val = [5,10]  t = 8      正解 15（两件都拿）    正序版 40',
+      { size: 11, anchor: 'start', mono: true });
+    s += txt(56, y + 68, 'cost = [3,4]  val = [5,6]  t = 5      恰好装满 5          0 初始化版 6',
+      { size: 11, anchor: 'start', mono: true });
+    s += txt(56, y + 88, 't = 1000 时同一批随机货物：正解 132，正序版 10000', { size: 11, anchor: 'start', mono: true, fill: C.orange });
+    wrap('figBug', y + 116, s,
+      '循环方向写反和初始化写错都不会报错，只会给一个更大的数；两者都靠小数据对拍才抓得住');
+  }
+
+  // ---------- 图 4：夏季特惠的 well 拆分 ----------
+  function figDiscount() {
+    var items = [
+      { a: 10, b: 3, w: 5, well: 4 },
+      { a: 10, b: 8, w: 7, well: -6 },
+      { a: 20, b: 12, w: 9, well: -4 },
+      { a: 30, b: 20, w: 12, well: -10 },
+      { a: 8, b: 5, w: 3, well: -2 }
+    ];
+    var s = txt(340, 20, 'well = a − 2b 决定一件商品是「白送」还是「要花额度」', { size: 13, weight: '600' });
+    var i, y = 40;
+    for (i = 0; i < items.length; i++) {
+      var it = items[i];
+      var pos = it.well >= 0;
+      s += rect(40, y, 600, 34, { fill: pos ? C.greenBg : C.orangeBg, stroke: pos ? C.green : C.orange });
+      s += txt(56, y + 22, '原价 ' + it.a + '　现价 ' + it.b + '　快乐 ' + it.w, { size: 12, anchor: 'start', mono: true });
+      s += txt(250, y + 22, 'well = ' + it.a + ' − 2×' + it.b + ' = ' + it.well, { size: 12, anchor: 'start', mono: true });
+      s += txt(480, y + 22, pos ? '必买，预算 += ' + it.well : '进背包，花费 ' + (-it.well), { size: 12, anchor: 'start', weight: '600', fill: pos ? C.green : C.orange });
+      y += 40;
+    }
+    s += txt(340, y + 12, '预算 20 → 必买 1 件后变成 24；背包里 4 件货物，花费 [6,4,10,2]，价值 [7,9,12,3]', { size: 11, fill: C.dim });
+    s += txt(340, y + 34, '背包算出 31，加回必买那件的 5，总快乐值 36', { size: 12, weight: '600', fill: C.blue });
+    wrap('figDiscount', y + 54, s,
+      '约束整理成 Σwell ≥ −X 之后，well ≥ 0 的商品不再占用额度，剩下的就是标准 01 背包');
+  }
+
+  figTwo(); figCompress(); figBug(); figDiscount();
+
+  // ================= 演示一：填表台 =================
+  var PRESETS = [
+    { cost: [3, 4, 5], val: [5, 6, 10], t: 10 },
+    { cost: [3, 2], val: [5, 10], t: 8 },
+    { cost: [12, 10, 12, 14], val: [9, 28, 5, 25], t: 20 }
+  ];
+  function buildSteps(p, mode) {
+    var n = p.cost.length, t = p.t, steps = [], i, j;
+    if (mode === 2) {
+      var dp = [], row = [];
+      for (j = 0; j <= t; j++) row.push(0);
+      dp.push(row.slice());
+      for (i = 0; i < n; i++) {
+        var cur = dp[dp.length - 1].slice();
+        for (j = 0; j <= t; j++) {
+          var nv = cur[j];
+          var from = -1;
+          if (j - p.cost[i] >= 0 && dp[dp.length - 1][j - p.cost[i]] + p.val[i] > nv) {
+            nv = dp[dp.length - 1][j - p.cost[i]] + p.val[i];
+            from = j - p.cost[i];
+          }
+          cur[j] = nv;
+          steps.push({
+            i: i + 1, j: j, one: cur.slice(), prev: dp[dp.length - 1].slice(), from: from,
+            v: nv, done: false, mode: mode
+          });
+        }
+        dp.push(cur);
+      }
+      steps.push({ i: n, j: t, one: dp[dp.length - 1].slice(), prev: dp[dp.length - 2].slice(), from: -1,
+        v: dp[dp.length - 1][t], done: true, mode: mode });
+    } else {
+      var one = [];
+      for (j = 0; j <= t; j++) one.push(0);
+      for (i = 0; i < n; i++) {
+        var seq = [];
+        if (mode === 1) { for (j = t; j >= p.cost[i]; j--) seq.push(j); }
+        else { for (j = p.cost[i]; j <= t; j++) seq.push(j); }
+        for (var q = 0; q < seq.length; q++) {
+          j = seq[q];
+          var old = one[j];
+          var cand = one[j - p.cost[i]] + p.val[i];
+          var nv = cand > old ? cand : old;
+          one[j] = nv;
+          steps.push({
+            i: i + 1, j: j, one: one.slice(), prev: null, from: j - p.cost[i],
+            v: nv, changed: nv !== old, done: false, mode: mode
+          });
+        }
+      }
+      steps.push({ i: n, j: t, one: one.slice(), prev: null, from: -1, v: one[t], done: true, mode: mode });
+    }
+    return steps;
+  }
+  var v1 = { steps: [], step: 0, p: null, mode: 2 };
+  function v1Build() {
+    var ci = parseInt(document.getElementById('v1case').value, 10);
+    v1.mode = parseInt(document.getElementById('v1mode').value, 10);
+    v1.p = PRESETS[ci];
+    v1.steps = buildSteps(v1.p, v1.mode);
+    v1.step = 0;
+    v1Render();
+  }
+  function v1Render() {
+    var st = v1.steps[v1.step], p = v1.p, t = p.t;
+    var cw = Math.floor(600 / (t + 1));
+    if (cw > 60) cw = 60;
+    var x0 = 40, y0 = 78;
+    var s = txt(340, 20, (v1.mode === 2 ? '二维表' : (v1.mode === 1 ? '压缩，j 从大到小' : '压缩，j 从小到大（错版）')) +
+      '　cost = [' + p.cost.join(',') + ']　val = [' + p.val.join(',') + ']　t = ' + t, { size: 12, weight: '600' });
+    s += txt(340, 42, st.done ? '填完了' : ('正在填第 ' + st.i + ' 件（cost ' + p.cost[st.i - 1] + '，val ' + p.val[st.i - 1] + '）的 j = ' + st.j),
+      { size: 12, fill: C.dim });
+    var j;
+    for (j = 0; j <= t; j++) s += txt(x0 + j * cw + cw / 2, y0 - 8, j, { size: 10, fill: C.dim, mono: true });
+    if (st.prev) {
+      s += txt(x0 - 8, y0 + 4 + 14, 'i=' + (st.i - 1), { size: 10, fill: C.dim, anchor: 'end', mono: true });
+      for (j = 0; j <= t; j++) {
+        s += cell(x0 + j * cw, y0, cw - 4, 26, st.prev[j], {
+          fill: (j === st.j || j === st.from) ? C.orangeBg : C.bg,
+          stroke: (j === st.j || j === st.from) ? C.orange : C.border, size: 11
+        });
+      }
+    }
+    var yr = st.prev ? y0 + 34 : y0;
+    s += txt(x0 - 8, yr + 18, st.done ? 'dp' : ('i=' + st.i), { size: 10, fill: C.dim, anchor: 'end', mono: true });
+    for (j = 0; j <= t; j++) {
+      var isCur = !st.done && j === st.j;
+      var isFrom = !st.done && j === st.from && st.from >= 0;
+      s += cell(x0 + j * cw, yr, cw - 4, 26, st.one[j], {
+        fill: isCur ? C.blueBg : (isFrom ? C.orangeBg : '#fff'),
+        stroke: isCur ? C.blue : (isFrom ? C.orange : C.border),
+        weight: (isCur || isFrom) ? '600' : null, size: 11
+      });
+    }
+    var ny = yr + 40;
+    if (!st.done) {
+      var note = 'dp[' + st.j + '] = max(' + (st.prev ? st.prev[st.j] : st.one[st.j] - (st.changed ? p.val[st.i - 1] : 0)) +
+        ', dp[' + (st.j - p.cost[st.i - 1]) + '] + ' + p.val[st.i - 1] + ') = ' + st.v;
+      s += txt(340, ny, note, { size: 12, mono: true });
+      s += txt(340, ny + 20, st.changed ? '换了（来源更优）' : '没换（不拿这一件更优）',
+        { size: 11, fill: st.changed ? C.blue : C.dim });
+      ny += 34;
+    } else {
+      s += txt(340, ny, '答案 dp[' + t + '] = ' + st.v, { size: 13, weight: '600', fill: C.blue });
+      ny += 20;
+    }
+    var host = document.getElementById('v1svg');
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + (ny + 20) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    document.getElementById('v1note').textContent = st.done
+      ? '第 ' + v1.step + ' / ' + (v1.steps.length - 1) + ' 步：填表结束。'
+      : '第 ' + v1.step + ' / ' + (v1.steps.length - 1) + ' 步：蓝格是当前 j，橙格是它要读的 j − cost。';
+    var ansEl = document.getElementById('v1ans');
+    if (st.done) {
+      var truth = v1.mode === 0 ? null : null;
+      ansEl.textContent = '答案 ' + st.v + (v1.mode === 0 ? '（正序错版，正确答案是 ' + buildSteps(v1.p, 1)[buildSteps(v1.p, 1).length - 1].v + '）' : '');
+    } else {
+      ansEl.textContent = '';
+    }
+    document.getElementById('v1next').disabled = v1.step >= v1.steps.length - 1;
+    document.getElementById('v1prev').disabled = v1.step <= 0;
+  }
+
+  // ================= 演示二：夏季特惠 =================
+  var CASES = [
+    { x: 20, a: [10, 10, 20, 30, 8], b: [3, 8, 12, 20, 5], w: [5, 7, 9, 12, 3] },
+    { x: 12, a: [6, 15, 9, 20], b: [2, 10, 5, 12], w: [4, 8, 6, 10] }
+  ];
+  function buildCase(c) {
+    var steps = [], i, j;
+    var x = c.x, ans = 0;
+    var cost = [], val = [], mark = [];
+    for (i = 0; i < c.a.length; i++) {
+      var well = c.a[i] - 2 * c.b[i];
+      if (well >= 0) { x += well; ans += c.w[i]; mark.push(1); }
+      else { cost.push(-well); val.push(c.w[i]); mark.push(0); }
+      steps.push({ kind: 'split', idx: i, well: well, x: x, ans: ans, mark: mark.slice(),
+        cost: cost.slice(), val: val.slice() });
+    }
+    var tt = x;
+    var dp = [];
+    for (j = 0; j <= tt; j++) dp.push(0);
+    for (i = 0; i < cost.length; i++) {
+      for (j = tt; j >= cost[i]; j--) {
+        var old = dp[j], cand = dp[j - cost[i]] + val[i];
+        dp[j] = cand > old ? cand : old;
+        steps.push({ kind: 'bag', idx: i, j: j, dp: dp.slice(), changed: dp[j] !== old,
+          mark: mark.slice(), cost: cost.slice(), val: val.slice(), x: tt });
+      }
+    }
+    steps.push({ kind: 'done', dp: dp.slice(), ans: ans, base: ans, mark: mark.slice(),
+      cost: cost.slice(), val: val.slice(), x: tt });
+    return steps;
+  }
+  var v2 = { steps: [], step: 0, c: null };
+  function v2Build() {
+    var ci = parseInt(document.getElementById('v2case').value, 10);
+    v2.c = CASES[ci];
+    v2.steps = buildCase(v2.c);
+    v2.step = 0;
+    v2Render();
+  }
+  function v2Render() {
+    var st = v2.steps[v2.step], c = v2.c;
+    var s = txt(340, 20, '预算 X = ' + c.x + '，' + c.a.length + ' 件商品', { size: 12, weight: '600' });
+    var i, y = 40;
+    for (i = 0; i < c.a.length; i++) {
+      var done = st.mark.length > i;
+      var m = done ? st.mark[i] : -1;
+      var isCur = st.kind === 'split' && st.idx === i;
+      s += rect(30, y, 620, 30, {
+        fill: m === 1 ? C.greenBg : (m === 0 ? C.orangeBg : '#fff'),
+        stroke: isCur ? C.blue : (m === 1 ? C.green : (m === 0 ? C.orange : C.border)),
+        sw: isCur ? 2.4 : 1
+      });
+      s += txt(44, y + 20, '原价 ' + c.a[i] + '　现价 ' + c.b[i] + '　快乐 ' + c.w[i], { size: 11, anchor: 'start', mono: true });
+      if (done) {
+        var well = c.a[i] - 2 * c.b[i];
+        s += txt(280, y + 20, 'well = ' + c.a[i] + ' − 2×' + c.b[i] + ' = ' + well, { size: 11, anchor: 'start', mono: true });
+        s += txt(500, y + 20, m === 1 ? '必买，预算 += ' + well : '进背包，花费 ' + (-well),
+          { size: 11, anchor: 'start', weight: '600', fill: m === 1 ? C.green : C.orange });
+      }
+      y += 34;
+    }
+    s += txt(340, y + 4, '当前预算 ' + st.x + '　必买带来的快乐值 ' + st.ans, { size: 12, mono: true, fill: C.dim });
+    y += 26;
+    if (st.kind === 'done' || st.kind === 'bag') {
+      var t = st.x;
+      var cw = Math.floor(600 / (t + 1));
+      if (cw > 46) cw = 46;
+      var x0 = 40;
+      s += txt(340, y + 12, '背包数组（容量 0 到 ' + t + '）', { size: 11, weight: '600' });
+      for (var j = 0; j <= t; j++) {
+        var isC = st.kind === 'bag' && j === st.j;
+        var isF = st.kind === 'bag' && j === st.j - st.cost[st.idx];
+        s += cell(x0 + j * cw, y + 22, cw - 3, 24, st.dp[j], {
+          fill: isC ? C.blueBg : (isF ? C.orangeBg : '#fff'),
+          stroke: isC ? C.blue : (isF ? C.orange : C.border), size: 10
+        });
+      }
+      y += 56;
+      if (st.kind === 'bag') {
+        s += txt(340, y, '第 ' + (st.idx + 1) + ' 件货物：花费 ' + st.cost[st.idx] + '，价值 ' + st.val[st.idx],
+          { size: 11, fill: C.dim });
+        y += 20;
+      }
+    }
+    var host = document.getElementById('v2svg');
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + (y + 30) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    var note = '';
+    if (st.kind === 'split') {
+      note = '第 ' + v2.step + ' / ' + (v2.steps.length - 1) + ' 步：算第 ' + (st.idx + 1) + ' 件的 well = ' + st.well +
+        '，' + (st.well >= 0 ? '必买' : '进背包') + '。';
+    } else if (st.kind === 'bag') {
+      note = '第 ' + v2.step + ' / ' + (v2.steps.length - 1) + ' 步：填 dp[' + st.j + ']，' + (st.changed ? '换了' : '没换') + '。';
+    } else {
+      note = '第 ' + v2.step + ' / ' + (v2.steps.length - 1) + ' 步：结束。';
+    }
+    document.getElementById('v2note').textContent = note;
+    document.getElementById('v2ans').textContent = st.kind === 'done'
+      ? '总快乐值 = 必买 ' + st.base + ' + 背包 ' + st.dp[st.x] + ' = ' + (st.base + st.dp[st.x])
+      : '';
+    document.getElementById('v2next').disabled = v2.step >= v2.steps.length - 1;
+    document.getElementById('v2prev').disabled = v2.step <= 0;
+  }
+
+  document.getElementById('v1case').addEventListener('change', v1Build);
+  document.getElementById('v1mode').addEventListener('change', v1Build);
+  document.getElementById('v1prev').addEventListener('click', function () { if (v1.step > 0) { v1.step--; v1Render(); } });
+  document.getElementById('v1next').addEventListener('click', function () { if (v1.step < v1.steps.length - 1) { v1.step++; v1Render(); } });
+  document.getElementById('v1last').addEventListener('click', function () { v1.step = v1.steps.length - 1; v1Render(); });
+  document.getElementById('v1reset').addEventListener('click', function () { v1.step = 0; v1Render(); });
+  document.getElementById('v2case').addEventListener('change', v2Build);
+  document.getElementById('v2prev').addEventListener('click', function () { if (v2.step > 0) { v2.step--; v2Render(); } });
+  document.getElementById('v2next').addEventListener('click', function () { if (v2.step < v2.steps.length - 1) { v2.step++; v2Render(); } });
+  document.getElementById('v2last').addEventListener('click', function () { v2.step = v2.steps.length - 1; v2Render(); });
+  document.getElementById('v2reset').addEventListener('click', function () { v2.step = 0; v2Render(); });
+  v1Build();
+  v2Build();
+})();
+</script>
+</body>
+</html>

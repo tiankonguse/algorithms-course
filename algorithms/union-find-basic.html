@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>并查集：合并与查找的均摊 O(1)</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.uf-nodes { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.uf-node { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border: 1px solid #e6e8eb; background: #fff; font-size: 13px; border-radius: 4px; }
+.uf-node.root { background: #dbeafe; border-color: #2563eb; }
+.uf-node.touched { background: #ffedd5; border-color: #ea580c; }
+.fa-row { font-size: 13px; margin: 6px 0; color: #334155; }
+.fa-row b { color: #1d4ed8; }
+.seat-row { display: flex; gap: 4px; margin: 8px 0; align-items: center; }
+.seat { width: 56px; height: 34px; border: 1px solid #cbd5e1; background: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
+.seat.joined { background: #dbeafe; border-color: #2563eb; }
+.seat.hi { background: #fbbf24; border-color: #d97706; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>并查集：合并与查找的均摊 O(1)</h1>
+      <p class="intro">要维护「元素分属哪些集合」，支持合并两个集合、查询两个元素是否同集合。并查集用一棵树存一个集合，两个优化把单次操作压到反阿克曼级别，实践里就是 O(1)。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>一开始每个元素都在自己的集合里，需要支持三类操作：find(i) 找 i 所在集合的代表元素，isSameSet(a, b) 判两个元素是否同集合，union(a, b) 把两个集合整个合并。</p>
+      <p>朴素写法是每个集合记成员列表，union 时把一边的全部元素搬进另一边。最坏 O(n)，n 到 10⁶、m 个操作就是 10¹² 次搬运，跑不完。问题在于集合身份是「名单」，没有结构可复用。</p>
+
+      <h2 id="tree">一、父亲数组：每个集合一棵树</h2>
+      <figure class="fig" id="figTree"></figure>
+      <p>每个集合存成一棵树，father[i] 指向父节点，根节点指向自己，根就是集合的代表元素。find(i) 沿 father 链一路走到根；isSameSet 就是两个 find 的根相同；union 把一棵树的根挂到另一棵树的根下面。</p>
+      <p>关键动作只有两个：find 的路径压缩（扁平化）和 union 的按大小合并（小挂大）。这两件事都发生在 find 里，或者说为 find 服务。</p>
+
+      <h2 id="flat">二、扁平化：查一次就把路压平</h2>
+      <figure class="fig" id="figFlat"></figure>
+      <p>find(i) 沿着链往上走时，把经过的每个节点直接挂到根下面。下次再查这些节点，一步就到根。实现有递归和非递归两种：递归版两行代码，回溯时自然压平；非递归版先把路径收进数组再回写，避免递归深度。</p>
+      <p>扁平化是必做的优化。没有它，一串 union 能把树挂成深度 n 的长链，find 一次走 n 步；有了它，树越查越平，任何一次 find 的花销都被摊到它压平的那些节点上。</p>
+
+      <h2 id="small">三、小挂大：树高有上限</h2>
+      <figure class="fig" id="figSmall"></figure>
+      <p>union 时把 size 小的树挂到 size 大的树下面。size 只记录在根上，合并时根把自己的 size 累加进新根。做了小挂大，树高 ≤ log₂ n，即使没有扁平化也不怕长链；扁平化 + 小挂大一起用，摊下来接近常数。</p>
+      <p>小挂大是可以省的优化（洛谷 P3367 的递归版就没写），省了也不慢太多，但 n = 10⁶ 的模版题建议留着。实测：1e6 个元素串行 union 成长链，随机 find 十万次平均只跳 1 步，扁平化在第一次查询就把链拍扁了。</p>
+
+      <h2 id="code">四、两个模版</h2>
+      <p>牛客模版：非递归扁平化 + 小挂大，n 上限 10⁶。</p>
+<pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 数组实现：father[i] 指向父节点，sz[i] 只在树根有效</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 1000001;
+    <span class="kw">int</span> father[MAXN], sz[MAXN], stk[MAXN];
+    <span class="kw">int</span> n;
+
+    <span class="kw">void</span> <span class="fn">build</span>() {                        <span class="cm">// 每个元素单独成集</span>
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt;= n; i++) {
+            father[i] = i;
+            sz[i] = 1;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {                     <span class="cm">// 非递归扁平化：先沿链收集，再整体压平</span>
+        <span class="kw">int</span> top = 0;
+        <span class="kw">while</span> (i != father[i]) {
+            stk[top++] = i;
+            i = father[i];
+        }
+        <span class="kw">while</span> (top &gt; 0) {
+            father[stk[--top]] = i;
+        }
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">bool</span> <span class="fn">isSameSet</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">return</span> find(x) == find(y);
+    }
+
+    <span class="kw">void</span> <span class="fn">unionSet</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {         <span class="cm">// 小挂大：size 小的树挂到大的下面</span>
+        <span class="kw">int</span> fx = find(x), fy = find(y);
+        <span class="kw">if</span> (fx != fy) {
+            <span class="kw">if</span> (sz[fx] &gt;= sz[fy]) {
+                sz[fx] += sz[fy];
+                father[fy] = fx;
+            } <span class="kw">else</span> {
+                sz[fy] += sz[fx];
+                father[fx] = fy;
+            }
+        }
+    }</pre>
+      <p>洛谷模版：递归扁平化、省略小挂大，n 上限 2×10⁵。查询输出 Y/N，合并不输出。</p>
+<pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 递归实现路径压缩，省略小挂大（洛谷 P3367 的写法）</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">int</span> father[MAXN];
+    <span class="kw">int</span> n;
+
+    <span class="kw">void</span> <span class="fn">build</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt;= n; i++) father[i] = i;
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (i != father[i]) {
+            father[i] = find(father[i]); <span class="cm">// 一路递归到底，回溯时把路径压平</span>
+        }
+        <span class="kw">return</span> father[i];
+    }
+
+    <span class="kw">bool</span> <span class="fn">isSameSet</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">return</span> find(x) == find(y);
+    }
+
+    <span class="kw">void</span> <span class="fn">unionSet</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        father[find(x)] = find(y);
+    }</pre>
+      <div class="viz">
+        <p class="viz-title">演示 1 · 合并过程逐帧：father 数组与集合树同步更新</p>
+        <div class="uf-nodes" id="ufNodes"></div>
+        <p class="fa-row" id="ufFa"></p>
+        <p class="viz-note" id="ufNote"></p>
+        <p class="viz-answer" id="ufAns"></p>
+        <div class="viz-controls">
+          <button id="ufPrev">上一步</button>
+          <button id="ufNext">下一步</button>
+          <button id="ufReset">重置</button>
+        </div>
+      </div>
+      <div class="viz">
+        <p class="viz-title">演示 2 · 扁平化逐帧：find(4) 把整条链压平</p>
+        <div class="uf-nodes" id="flNodes"></div>
+        <p class="fa-row" id="flFa"></p>
+        <p class="viz-note" id="flNote"></p>
+        <div class="viz-controls">
+          <button id="flPrev">上一步</button>
+          <button id="flNext">下一步</button>
+          <button id="flReset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="comp">五、复杂度</h2>
+      <table class="complexity">
+        <tr><th>指标</th><th>值</th></tr>
+        <tr><td>单次操作均摊</td><td>O(α(n))，反阿克曼函数</td></tr>
+        <tr><td>额外空间</td><td>O(n)（father 数组 + size/栈）</td></tr>
+      </table>
+      <p>α(n) 慢到什么程度：n = 10⁸⁰（宇宙原子数量级）时 α(n) 也不超过 6。实测 n = m = 10⁶ 的混合操作（50 万合并 + 50 万查询）只要 21.62ms，写题时直接当 O(1) 用。</p>
+
+      <h2 id="sum">六、总结</h2>
+      <p>并查集 = father 数组 + 两件事：find 一路压平（必做），union 小挂大（推荐）。单次操作均摊 O(α(n))，α(n) 在 n 到 10⁸⁰ 时也不超过 6，实践按 O(1)。</p>
+      <p>模版本身不值钱，值钱的是「维护集合数 sets」这个顺手动作，下一页的情侣牵手和相似字符串组全靠它出答案。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>牛客</td><td>并查集（模版）</td><td><a href="https://www.nowcoder.com/practice/e7ed657974934a30b2010046536a5372" target="_blank">nowcoder.com/practice/e7ed657974934a30b2010046536a5372</a></td></tr>
+        <tr><td>洛谷</td><td>【模板】并查集</td><td><a href="https://www.luogu.com.cn/problem/P3367" target="_blank">luogu.com.cn/problem/P3367</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解056【必备】并查集-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function rect(x,y,w,h,fill,stroke){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+(fill||'#fff')+'" stroke="'+(stroke||'#cbd5e1')+'"/>'; }
+
+// ===== 图 1：两棵树合并 =====
+(function(){
+  var W = 720, H = 250;
+  var body = '';
+  body += txt(W/2, 22, '每个集合一棵树，根是代表元素；union(0, 3) 把整棵树挂过去', {fs:13});
+  // 树 A：根 0，子 1、2
+  body += txt(140, 90, '0', {fs:16, fill:'#1d4ed8'});
+  body += '<circle cx="140" cy="82" r="22" fill="#dbeafe" stroke="#2563eb"/>';
+  body += txt(70, 170, '1', {fs:14});
+  body += '<circle cx="70" cy="162" r="18" fill="#fff" stroke="#cbd5e1"/>';
+  body += txt(210, 170, '2', {fs:14});
+  body += '<circle cx="210" cy="162" r="18" fill="#fff" stroke="#cbd5e1"/>';
+  body += '<line x1="140" y1="92" x2="75" y2="152" stroke="#94a3b8"/><line x1="140" y1="92" x2="205" y2="152" stroke="#94a3b8"/>';
+  // 树 B：根 3，子 4
+  body += txt(500, 90, '3', {fs:16, fill:'#1d4ed8'});
+  body += '<circle cx="500" cy="82" r="22" fill="#dbeafe" stroke="#2563eb"/>';
+  body += txt(570, 170, '4', {fs:14});
+  body += '<circle cx="570" cy="162" r="18" fill="#fff" stroke="#cbd5e1"/>';
+  body += '<line x1="508" y1="92" x2="565" y2="152" stroke="#94a3b8"/>';
+  body += '<line x1="240" y1="100" x2="470" y2="100" stroke="#ea580c" stroke-dasharray="6,4"/>';
+  body += txt(355, 88, 'union(0,3)', {fs:12, fill:'#9a3412'});
+  body += txt(W/2, 225, 'father = [0, 0, 0, 3, 3]，根 0、根 3 各自代表一个集合', {fs:12, fill:'#475569'});
+  document.getElementById('figTree').innerHTML = svg(W, H, body) + '<figcaption>小挂大：3 的集合只有 2 个元素（3、4），挂到 0 的集合（0、1、2）下面。</figcaption>';
+})();
+
+// ===== 图 2：扁平化 =====
+(function(){
+  var W = 720, H = 230;
+  var body = '';
+  body += txt(W/2, 22, 'find(4)：沿链走到根，把整条路直接挂到根下', {fs:13});
+  var y0 = 150;
+  body += '<line x1="60" y1="'+y0+'" x2="660" y2="'+y0+'" stroke="#94a3b8"/>';
+  var labels = ['0', '1', '2', '3', '4'];
+  var before = [0, 0, 1, 2, 3];   // 4→3→2→1→0 的链
+  labels.forEach(function(v, i){
+    var x = 60 + i * 150;
+    body += rect(x, y0 - 26, 40, 40, '#fff', '#cbd5e1');
+    body += txt(x + 20, y0 - 2, v, {fs:14});
+    if (i < 4) body += '<line x1="'+(x+40)+'" y1="'+y0+'" x2="'+(x+90)+'" y2="'+y0+'" stroke="#94a3b8" marker-end="url(#arr)"/>';
+  });
+  body += '<defs><marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"/></marker></defs>';
+  body += txt(W/2, 200, '压平后：4、3、2、1 全部直接指向 0，下次 find 一步到位', {fs:12, fill:'#334155'});
+  document.getElementById('figFlat').innerHTML = svg(W, H, body) + '<figcaption>扁平化把查询过的路径永久压短，这是并查集均摊 O(1) 的来源。</figcaption>';
+})();
+
+// ===== 图 3：小挂大 =====
+(function(){
+  var W = 720, H = 250;
+  var body = '';
+  body += txt(W/2, 22, '同样的 union 顺序：小挂大把树高压到 log n，大挂小会退成长链', {fs:13});
+  // 左：小挂大
+  body += txt(180, 50, '小挂大', {fs:14, fill:'#1d4ed8'});
+  body += txt(120, 105, '0', {fs:14});
+  body += '<circle cx="120" cy="97" r="18" fill="#dbeafe" stroke="#2563eb"/>';
+  body += txt(200, 105, '1', {fs:14});
+  body += '<circle cx="200" cy="97" r="18" fill="#fff" stroke="#cbd5e1"/>';
+  body += txt(280, 105, '2', {fs:14});
+  body += '<circle cx="280" cy="97" r="18" fill="#fff" stroke="#cbd5e1"/>';
+  body += txt(160, 175, '3', {fs:14});
+  body += '<circle cx="160" cy="167" r="18" fill="#fff" stroke="#cbd5e1"/>';
+  body += '<line x1="120" y1="107" x2="195" y2="97" stroke="#94a3b8"/><line x1="120" y1="107" x2="275" y2="97" stroke="#94a3b8"/>';
+  body += '<line x1="128" y1="107" x2="155" y2="157" stroke="#94a3b8"/>';
+  body += txt(100, 215, '高 2', {fs:11, fill:'#64748b'});
+  // 右：大挂小
+  body += txt(560, 50, '大挂小（退化）', {fs:14, fill:'#9a3412'});
+  var yy = 100;
+  ['0','1','2','3'].forEach(function(v, i){
+    body += rect(440 + i * 70, yy, 36, 36, '#fff', '#cbd5e1');
+    body += txt(458 + i * 70, yy + 22, v, {fs:13});
+    if (i < 3) body += '<line x1="'+(476+i*70)+'" y1="'+(yy+36)+'" x2="'+(486+i*70)+'" y2="'+yy+'" stroke="#94a3b8"/>';
+  });
+  body += txt(540, 185, '高 4，find(3) 要跳 3 步', {fs:11, fill:'#64748b'});
+  body += txt(W/2, 232, '小挂大后树高 ≤ log₂n，配合扁平化查一次就压平', {fs:12, fill:'#334155'});
+  document.getElementById('figSmall').innerHTML = svg(W, H, body) + '<figcaption>同样四次 union，挂的方向不同，树高差一倍。</figcaption>';
+})();
+
+// ===== 演示 1：合并过程逐帧 =====
+(function(){
+  var n = 6;
+  var ops = [
+    {t:'build：6 个元素各自成集，father[i]=i，sets=6', u:null},
+    {t:'union(1, 2)：1、2 合并，1 挂到 2 下（size 相同随便挂）', u:[1,2]},
+    {t:'union(3, 4)：3、4 合并', u:[3,4]},
+    {t:'union(5, 6)：5、6 合并', u:[5,6]},
+    {t:'union(2, 5)：集合 {1,2}（size 2）挂到 {5,6}（size 2）下面，sets 剩 3', u:[2,5]},
+    {t:'查询 isSameSet(1, 6)：1→2→5→5，6→5，同根 5，Yes', q:[1,6]}
+  ];
+  var step = 0;
+  function sim(k){
+    var father = [];
+    for (var i = 0; i <= n; i++) father[i] = i;
+    var sz = []; for (var i = 0; i <= n; i++) sz[i] = 1;
+    var sets = n;
+    for (var t = 0; t <= k; t++) {
+      var op = ops[t].u;
+      if (op) {
+        var x = op[0], y = op[1];
+        var fx = x, fy = y;
+        while (fx != father[fx]) fx = father[fx];
+        while (fy != father[fy]) fy = father[fy];
+        if (fx != fy) {
+          if (sz[fx] >= sz[fy]) { sz[fx] += sz[fy]; father[fy] = fx; }
+          else { sz[fy] += sz[fx]; father[fx] = fy; }
+          sets--;
+        }
+      }
+    }
+    return {father: father, sets: sets};
+  }
+  function draw(){
+    var st = sim(step);
+    var html = '';
+    for (var i = 1; i <= n; i++) {
+      var cls = 'uf-node';
+      if (st.father[i] === i) cls += ' root';
+      html += '<span class="'+cls+'">'+i+'</span>';
+    }
+    document.getElementById('ufNodes').innerHTML = html;
+    var fa = '';
+    for (var i = 1; i <= n; i++) fa += 'father['+i+']=<b>'+st.father[i]+'</b>　';
+    document.getElementById('ufFa').innerHTML = fa;
+    document.getElementById('ufNote').textContent = ops[step].t;
+    document.getElementById('ufAns').textContent = '集合数 sets = ' + st.sets;
+  }
+  document.getElementById('ufNext').addEventListener('click', function(){ if (step < ops.length - 1) step++; draw(); });
+  document.getElementById('ufPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('ufReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+
+// ===== 演示 2：扁平化逐帧 =====
+(function(){
+  // 初始 father = [0,0,1,2,3]，链 4→3→2→1→0
+  var frames = [
+    {t:'初始：father = [0, 0, 1, 2, 3]，4 的链是 4→3→2→1→0', father:[0,0,1,2,3], touched:[]},
+    {t:'find(4)：沿链收集 4、3、2、1（它们都还不是根的孩子）', father:[0,0,1,2,3], touched:[4,3,2,1]},
+    {t:'到根 0，开始压平：father[1] = 0', father:[0,0,1,2,3], touched:[]},
+    {t:'father[2] = 0、father[3] = 0', father:[0,0,0,0,3], touched:[]},
+    {t:'father[4] = 0，整条链压平：4、3、2、1 全部直接指 0', father:[0,0,0,0,0], touched:[4]}
+  ];
+  var step = 0;
+  function draw(){
+    var f = frames[Math.min(step, frames.length - 1)];
+    var html = '';
+    for (var i = 0; i < 5; i++) {
+      var cls = 'uf-node';
+      if (f.father[i] === i) cls += ' root';
+      else if (f.touched.indexOf(i) >= 0) cls += ' touched';
+      html += '<span class="'+cls+'">'+i+'</span>';
+    }
+    document.getElementById('flNodes').innerHTML = html;
+    var fa = '';
+    for (var i = 0; i < 5; i++) fa += 'father['+i+']=<b>'+f.father[i]+'</b>　';
+    document.getElementById('flFa').innerHTML = fa;
+    document.getElementById('flNote').textContent = f.t;
+  }
+  document.getElementById('flNext').addEventListener('click', function(){ if (step < frames.length - 1) step++; draw(); });
+  document.getElementById('flPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('flReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+})();
+</script>
+</body>
+</html>

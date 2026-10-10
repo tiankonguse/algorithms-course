@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>最长递增子序列：ends 数组与二分</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); min-height: 22px; }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); min-height: 22px; }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+.kv { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; color: var(--text-dim); margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>最长递增子序列：ends 数组与二分</h1>
+      <p class="intro">给一个数组，找出一个子序列（下标递增即可，不要求连续），让它的值严格递增，问最长能有多长。n = 100000 时，最朴素的动态规划要跑 9634 毫秒，换个记法之后同一个答案是 1.614 毫秒。两个做法算的是同一个东西，差别只在「中间记录下来什么」。</p>
+
+      <h2>零、朴素做法与它的代价</h2>
+      <p>最直接的思路是给 dp 加一个限制：<code>dp[i]</code> 表示子序列<strong>一定以 nums[i] 做结尾</strong>时，最长能有多长。</p>
+      <p>加上这个限制之后，转移就是把前面所有比它小的位置扫一遍：</p>
+      <p class="kv">dp[i] = 1 + max{ dp[j] }　其中 j &lt; i 且 nums[j] &lt; nums[i]</p>
+      <figure class="fig" id="figDp"></figure>
+      <p>答案是整张 dp 表的最大值，不是 <code>dp[n-1]</code>。最长那条的结尾可以停在任何位置。</p>
+    <pre class="code"><span class="cm">// 朴素做法：dp[i] 表示「一定以 nums[i] 结尾」的最长递增子序列长度</span>
+    <span class="cm">// 时间复杂度 O(n^2)</span>
+    <span class="kw">int</span> <span class="fn">lengthOfLIS</span>(<span class="kw">int</span>* nums, <span class="kw">int</span> n) {
+        <span class="kw">int</span> dp[100005];
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            dp[i] = 1;
+            <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; i; j++) {
+                <span class="kw">if</span> (nums[j] &lt; nums[i]) {
+                    dp[i] = max(dp[i], dp[j] + 1);
+                }
+            }
+            ans = max(ans, dp[i]);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>代价全在那个内层循环上：每个 i 都要回头看 i 个 j，总比较次数是 n (n − 1) / 2。实测（g++ -O2）n = 10000 时 108.5 毫秒，n = 30000 时 835.9 毫秒，n = 100000 时 9634 毫秒。n 翻三倍，时间翻十倍，这就是 O(n²)。</p>
+      <p>慢在哪？可以发现，dp[i] 只关心「前面各种长度的递增子序列，结尾最小是多少」这一件事，可代码却把每个 j 都重新问了一遍。把这些答案单独记下来，就能二分。</p>
+
+      <h2>一、ends 数组：按长度记最小结尾</h2>
+      <p>换个记录方式。<code>ends[i]</code> 记的是：<strong>长度为 i + 1 的递增子序列，它的结尾最小能小到多少</strong>。</p>
+      <p>这个定义有两个立刻能用的性质。第一，ends 数组本身严格递增：长度更长的子序列，结尾不可能比长度更短的那个还小，否则把长序列砍掉尾上多出来的元素，就得到一个更短的序列且结尾更小，矛盾。第二，<code>ends[len-1]</code> 越小越好，因为它后面还能接的数更多。</p>
+      <figure class="fig" id="figEnds"></figure>
+      <p>扫描到新数 num 时只做一件事：在 ends 里找第一个 <code>&gt;= num</code> 的位置。找到了，就把它顶掉，因为同样长度下 num 是更小的结尾；找不到，说明 num 比所有结尾都大，长度可以加一，把 num 接到末尾。</p>
+      <p class="kv">len = ends 的有效区长度，答案就是 len</p>
+
+      <h2>二、二分找那个位置</h2>
+      <p>ends 严格递增，找「第一个 &gt;= num 的位置」是标准二分，找不到返回 -1。</p>
+    <pre class="code"><span class="cm">// ends[0..len-1] 严格升序，找 &gt;= num 的最左位置，不存在返回 -1</span>
+    <span class="kw">int</span> <span class="fn">bs1</span>(<span class="kw">int</span>* ends, <span class="kw">int</span> len, <span class="kw">int</span> num) {
+        <span class="kw">int</span> l = 0, r = len - 1, m, ans = -1;
+        <span class="kw">while</span> (l &lt;= r) {
+            m = (l + r) / 2;
+            <span class="kw">if</span> (ends[m] &gt;= num) {
+                ans = m;
+                r = m - 1;
+            } <span class="kw">else</span> {
+                l = m + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <figure class="fig" id="figBs"></figure>
+      <p>每次扫描一个 num 只花 log₂(len) 次比较。实测总比较次数：n = 1000 时 5.18 n，n = 100000 时 8.60 n，n = 1000000 时 10.29 n。注意它跟 log₂n 不是一个数，因为二分的范围是 ends 的有效长度 len，不是 n。</p>
+    <pre class="code"><span class="cm">// 最优解：ends[i] 记录「长度为 i+1 的递增子序列」的最小结尾</span>
+    <span class="cm">// 时间复杂度 O(n * logn)</span>
+    <span class="kw">int</span> <span class="fn">lengthOfLIS</span>(<span class="kw">int</span>* nums, <span class="kw">int</span> n) {
+        <span class="kw">int</span> ends[100005];
+        <span class="kw">int</span> len = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, find; i &lt; n; i++) {
+            find = bs1(ends, len, nums[i]);
+            <span class="kw">if</span> (find == -1) {
+                ends[len++] = nums[i];   <span class="cm">// 比所有结尾都大，长度 +1</span>
+            } <span class="kw">else</span> {
+                ends[find] = nums[i];    <span class="cm">// 顶掉第一个 &gt;= 它的结尾</span>
+            }
+        }
+        <span class="kw">return</span> len;
+    }</pre>
+      <p>数组长度随 n 增长得比 log n 慢得多。随机排列的 LIS 长度大约是 2√n，实测 n = 1000000 时是 1995，理论值 2000。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示一：ends 数组逐帧推进</p>
+        <div id="v1svg"></div>
+        <p class="viz-note" id="v1note"></p>
+        <p class="viz-answer" id="v1ans"></p>
+        <div class="viz-controls">
+          <label>数组
+            <select id="v1case">
+              <option value="0">LC 例一 [10,9,2,5,3,7,101,18]</option>
+              <option value="1">LC 例二 [0,1,0,3,2,3]</option>
+              <option value="2">全相等 [7,7,7,7,7,7,7]</option>
+              <option value="3">有重复 [2,2,2,1,3]</option>
+            </select>
+          </label>
+          <label>二分
+            <select id="v1mode">
+              <option value="1">严格递增（>= 最左）</option>
+              <option value="0">不下降（> 最左）</option>
+            </select>
+          </label>
+          <button id="v1prev">上一步</button>
+          <button id="v1next">下一步</button>
+          <button id="v1last">到末尾</button>
+          <button id="v1reset">重置</button>
+        </div>
+      </div>
+
+      <h2>三、严格递增与不下降只差一个等号</h2>
+      <p>把题面换成「最长不下降子序列」，也就是允许相等，整套东西一行都不用改，只把二分里的比较符号从 <code>&gt;=</code> 换成 <code>&gt;</code>。</p>
+    <pre class="code"><span class="cm">// ends[0..len-1] 不降序，找 &gt; num 的最左位置，不存在返回 -1</span>
+    <span class="kw">int</span> <span class="fn">bs2</span>(<span class="kw">int</span>* ends, <span class="kw">int</span> len, <span class="kw">int</span> num) {
+        <span class="kw">int</span> l = 0, r = len - 1, m, ans = -1;
+        <span class="kw">while</span> (l &lt;= r) {
+            m = (l + r) / 2;
+            <span class="kw">if</span> (ends[m] &gt; num) {
+                ans = m;
+                r = m - 1;
+            } <span class="kw">else</span> {
+                l = m + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>道理很直接：用 <code>&gt;=</code> 时，等于 num 的结尾会被顶掉，相等的两个数凑不到一条序列里，得到的就是严格递增；用 <code>&gt;</code> 时，相等的结尾留着，num 顶掉的是第一个比它大的，相等的两个数就能挨着放。</p>
+    <pre class="code"><span class="cm">// 最长不下降子序列：只把 bs1 换成 bs2，其余一行不动</span>
+    <span class="kw">int</span> <span class="fn">lengthOfLNDS</span>(<span class="kw">int</span>* nums, <span class="kw">int</span> n) {
+        <span class="kw">int</span> ends[100005];
+        <span class="kw">int</span> len = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, find; i &lt; n; i++) {
+            find = bs2(ends, len, nums[i]);
+            <span class="kw">if</span> (find == -1) {
+                ends[len++] = nums[i];
+            } <span class="kw">else</span> {
+                ends[find] = nums[i];
+            }
+        }
+        <span class="kw">return</span> len;
+    }</pre>
+      <p>这个等号是本题最容易写反的地方，而且写反了不一定能被测出来。实测两万个随机样本（n 在 1 到 20，值域 V 可变）：V = 3 时两个写法答案不同的比例 86.78%，V = 5 时 80.01%，V = 10 时 63.81%，V = 50 时 20.30%，V = 1000 时只有 1.10%，V = 10⁶ 时 0%。</p>
+      <figure class="fig" id="figTwo"></figure>
+      <p>也就是说，样本里重复值越多，这个 bug 越容易现形；数据值域一大，两个写法几乎总给出同一个答案，交上去也能过，等到有人造一组重复值就挂了。所以别靠测，把符号和题面对着看一遍。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示二：值域越大，写反等号越难被测出来</p>
+        <div id="v2svg"></div>
+        <p class="viz-note" id="v2note"></p>
+        <div class="viz-controls">
+          <label>值域 V
+            <select id="v2v">
+              <option value="3">V = 3</option>
+              <option value="5">V = 5</option>
+              <option value="10" selected>V = 10</option>
+              <option value="50">V = 50</option>
+              <option value="1000">V = 1000</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <h2>四、ends 里存的那串数，通常不是一条真的子序列</h2>
+      <p>这里有个细节，很多人学完就顺手当结论用错了：ends 数组<strong>只有长度是对的</strong>，把它从头到尾读出来，往往并不是原数组的一个子序列。</p>
+      <figure class="fig" id="figNotSub"></figure>
+      <p>反例小到三个数就够。数组 <code>[2, 3, 1]</code>，ends 最后停在 <code>[1, 3]</code>：1 在下标 2，3 在下标 1，顺序是反的，原数组里根本不存在「先 1 后 3」这个子序列。长度 2 是对的（最长的确是 2），内容却是拼出来的。</p>
+      <p>原因是 ends 的各个位置来自不同时刻的更新，它们之间没有「同一次扫描里被一起选中」这层关系。题目只要长度，那就够用；真要把那条子序列打印出来，得另外记前驱。</p>
+
+      <h2>五、复杂度分析</h2>
+      <table class="complexity">
+        <thead><tr><th>做法</th><th>时间</th><th>额外空间</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>朴素 dp</td><td>O(n²)</td><td>O(n)</td><td>dp 表 n 个 int，每个 i 扫一遍 j &lt; i</td></tr>
+          <tr><td>ends + 二分</td><td>O(n log n)</td><td>O(n)</td><td>ends 数组最多 n 格，每格一次二分 log₂(len)</td></tr>
+        </tbody>
+      </table>
+      <p>空间那栏是 O(n) 而不是 O(log n)：ends 的有效长度是答案，最坏情况（整个数组严格递增）它就是 n，所以得按 n 开。push 进 vector 也一样，容量按 n 给。</p>
+      <p>时间那栏严格说是 O(n log L)，L 是答案长度，不过 L ≤ n，写成 O(n log n) 没毛病。实测 n = 10⁶ 的总比较次数 10.29 n，比 log₂n = 19.9 小不少，因为二分的范围一直是 len。</p>
+
+      <h2>六、总结</h2>
+      <p>这题的全部技巧就一句话：把「以谁结尾」换成「长度是多少、结尾最小是多少」。换完之后，答案变成 ends 的长度，维护变成一次二分。</p>
+      <p>几个要记住的点：</p>
+      <p>1）严格递增用 <code>&gt;=</code> 的二分，不下降用 <code>&gt;</code> 的二分，其余代码完全一样。写反了在小值域数据上一测就现形，在大值域数据上测不出来。</p>
+      <p>2）ends 数组只有长度可信，内容拼不成一条子序列，别拿它当答案输出。</p>
+      <p>3）ends 的有效长度就是答案，不用另外记 ans。</p>
+      <p>后面几页拿这套手法去处理二维信封、数对链和带修改的版本，核心都是「先排好序，再把问题压成一维的最长递增子序列」。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>LeetCode</td><td>最长递增子序列</td><td><a href="https://leetcode.cn/problems/longest-increasing-subsequence/" target="_blank">longest-increasing-subsequence</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解072【必备】最长递增子序列问题与扩展</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var VW = 680;
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            green: '#2e7d32', greenBg: '#e8f5e9', gray: '#9aa0a6', bg: '#f6f7f9',
+            border: '#e6e8eb', text: '#1e293b', dim: '#6b7280' };
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      (o.mono ? ' font-family="ui-monospace, Menlo, monospace"' : '') + '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx == null ? 4 : o.rx) +
+      '" fill="' + (o.fill || '#fff') + '" stroke="' + (o.stroke || C.border) + '"' + (o.sw ? ' stroke-width="' + o.sw + '"' : '') + '/>';
+  }
+  function wrap(id, h, inner, cap) {
+    var host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img">' + inner +
+      '</svg><figcaption>' + cap + '</figcaption>';
+  }
+  function cell(x, y, w, h, v, o) {
+    o = o || {};
+    var s = rect(x, y, w, h, { fill: o.fill || '#fff', stroke: o.stroke || C.border, sw: o.sw });
+    s += txt(x + w / 2, y + h / 2 + 4, String(v), { size: o.size || 12, mono: true, fill: o.tc || C.text, weight: o.weight });
+    return s;
+  }
+  function bar(x, y, w, h, v, max, color, label, valtxt) {
+    var s = rect(x, y, w, h, { fill: C.bg });
+    var bw = Math.max(2, w * v / max);
+    s += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="3" fill="' + color + '"/>';
+    s += txt(x - 6, y + h - 4, label, { size: 11, fill: C.dim, anchor: 'end', mono: true });
+    s += txt(x + w + 6, y + h - 4, valtxt, { size: 11, anchor: 'start', mono: true, fill: C.dim });
+    return s;
+  }
+
+  // ---------- 图 1：dp 表 + 耗时对照 ----------
+  function figDp() {
+    var a = [10, 9, 2, 5, 3, 7, 101, 18];
+    var dp = [1, 1, 1, 2, 2, 3, 4, 4];
+    var s = txt(340, 20, 'nums = [10, 9, 2, 5, 3, 7, 101, 18] 的 dp 表', { size: 13, weight: '600' });
+    var cw = 66, x0 = 60, y0 = 42;
+    var i;
+    for (i = 0; i < 8; i++) {
+      var x = x0 + i * cw;
+      s += cell(x, y0, cw - 6, 30, a[i], { fill: C.bg });
+      s += txt(x + (cw - 6) / 2, y0 + 46, 'i=' + i, { size: 10, fill: C.dim });
+      s += cell(x, y0 + 56, cw - 6, 30, dp[i], { fill: dp[i] === 4 ? C.blueBg : '#fff', stroke: dp[i] === 4 ? C.blue : C.border });
+    }
+    s += txt(x0 - 8, y0 + 21, 'nums', { size: 11, fill: C.dim, anchor: 'end' });
+    s += txt(x0 - 8, y0 + 77, 'dp', { size: 11, fill: C.dim, anchor: 'end' });
+    s += txt(340, y0 + 106, 'dp[i] = 1 + max{ dp[j] }，j < i 且 nums[j] < nums[i]；答案是全表最大值 4', { size: 11, fill: C.dim });
+
+    var yy = y0 + 132;
+    s += txt(340, yy, '同一个数组，两种做法的耗时（毫秒，对数刻度）', { size: 12, weight: '600' });
+    var rows = [
+      { n: 'n = 10000', slow: 108.5, fast: 0.176 },
+      { n: 'n = 30000', slow: 835.9, fast: 0.440 },
+      { n: 'n = 100000', slow: 9634.0, fast: 1.614 }
+    ];
+    var maxv = 9634;
+    for (i = 0; i < 3; i++) {
+      var by = yy + 18 + i * 44;
+      s += txt(96, by + 16, rows[i].n, { size: 11, anchor: 'end', mono: true });
+      s += rect(110, by, 420, 16, { fill: C.bg });
+      var w1 = Math.max(2, 420 * Math.log10(rows[i].slow + 1) / Math.log10(maxv + 1));
+      s += '<rect x="110" y="' + by + '" width="' + w1 + '" height="16" rx="3" fill="' + C.orange + '"/>';
+      s += txt(110 + w1 + 8, by + 13, rows[i].slow + ' ms', { size: 11, anchor: 'start', mono: true, fill: C.orange });
+      s += rect(110, by + 20, 420, 12, { fill: C.bg });
+      var w2 = Math.max(2, 420 * Math.log10(rows[i].fast + 1) / Math.log10(maxv + 1));
+      s += '<rect x="110" y="' + (by + 20) + '" width="' + w2 + '" height="12" rx="3" fill="' + C.blue + '"/>';
+      s += txt(110 + w2 + 8, by + 30, rows[i].fast + ' ms', { size: 11, anchor: 'start', mono: true, fill: C.blue });
+    }
+    s += txt(140, yy + 18 + 3 * 44 + 22, '橙：朴素 dp　蓝：ends + 二分', { size: 11, fill: C.dim, anchor: 'start' });
+    wrap('figDp', yy + 18 + 3 * 44 + 40, s,
+      'dp 表里每个格子都要回头扫一遍前面所有位置；换成 ends 之后同样的数据从 9634 毫秒降到 1.614 毫秒');
+  }
+
+  // ---------- 图 2：ends 的演化 ----------
+  function figEnds() {
+    var a = [10, 9, 2, 5, 3, 7, 101, 18];
+    var states = [[10], [9], [2], [2, 5], [2, 3], [2, 3, 7], [2, 3, 7, 101], [2, 3, 7, 18]];
+    var s = txt(340, 20, 'ends[i] = 长度为 i+1 的递增子序列的最小结尾', { size: 13, weight: '600' });
+    var cw = 76, x0 = 32, y0 = 44;
+    var i, j;
+    for (i = 0; i < 8; i++) {
+      var x = x0 + i * cw;
+      s += txt(x + 32, y0 + 12, String(a[i]), { size: 13, mono: true, weight: '600', fill: C.orange });
+      s += txt(x + 32, y0 + 28, 'i=' + i, { size: 10, fill: C.dim });
+      for (j = 0; j < states[i].length; j++) {
+        var y = y0 + 40 + j * 30;
+        var fresh = (i === 0) || (j >= states[i - 1].length) || (states[i][j] !== states[i - 1][j]);
+        s += rect(x + 2, y, 60, 26, { fill: fresh ? C.orangeBg : '#fff', stroke: fresh ? C.orange : C.border });
+        s += txt(x + 32, y + 18, String(states[i][j]), { size: 12, mono: true, fill: fresh ? C.orange : C.text });
+      }
+    }
+    var yb = y0 + 40 + 4 * 30 + 16;
+    s += txt(340, yb, '橙底是这一轮被改到的格子：要么新增一格（长度 +1），要么顶掉第一个 >= num 的结尾', { size: 11, fill: C.dim });
+    s += txt(340, yb + 20, '最后 ends = [2, 3, 7, 18]，有效长度 4，就是答案', { size: 12, weight: '600', fill: C.blue });
+    wrap('figEnds', yb + 40, s, '扫描 [10, 9, 2, 5, 3, 7, 101, 18] 时 ends 的每一轮变化，橙底格是被这一轮改动的');
+  }
+
+  // ---------- 图 3：一次二分的三轮 ----------
+  function figBs() {
+    var ends = [1, 3, 5, 7, 9, 11, 13];
+    var frames = [
+      { l: 0, r: 6, m: 3, ok: false, note: 'l=0, r=6, m=3：ends[3]=7 >= 8 不成立，往右走' },
+      { l: 4, r: 6, m: 5, ok: true, note: 'l=4, r=6, m=5：ends[5]=11 >= 8 成立，记 ans=5，往左走' },
+      { l: 4, r: 4, m: 4, ok: true, note: 'l=4, r=4, m=4：ends[4]=9 >= 8 成立，记 ans=4，往左走' }
+    ];
+    var s = txt(340, 18, 'num = 8 打进 ends = [1, 3, 5, 7, 9, 11, 13]', { size: 13, weight: '600' });
+    var cw = 76, x0 = 104;
+    var i, j;
+    for (i = 0; i < 3; i++) {
+      var f = frames[i];
+      var y = 42 + i * 96;
+      s += txt(30, y + 16, '第 ' + (i + 1) + ' 轮', { size: 11, fill: C.dim, anchor: 'start' });
+      for (j = 0; j < 7; j++) {
+        var x = x0 + j * cw;
+        var fill = '#fff', stroke = C.border;
+        if (j === f.m) { fill = C.blueBg; stroke = C.blue; }
+        if (j === f.l && j === f.r) { fill = C.orangeBg; stroke = C.orange; }
+        s += rect(x, y, 66, 28, { fill: fill, stroke: stroke, sw: (j === f.m ? 2 : 1) });
+        s += txt(x + 33, y + 19, String(ends[j]), { size: 12, mono: true });
+      }
+      s += txt(x0 + f.m * cw + 33, y - 4, 'm=' + f.m, { size: 11, fill: C.blue, weight: '600' });
+      s += txt(x0, y + 52, f.note, { size: 10.5, fill: C.dim, anchor: 'start' });
+    }
+    var yb = 42 + 3 * 96 + 14;
+    s += txt(340, yb + 4, 'l = 4 > r = 3，结束，返回 ans = 4：ends[4] 被 8 顶掉，变成 [1, 3, 5, 7, 8, 11, 13]', { size: 12, fill: C.text });
+    s += txt(340, yb + 24, '蓝格是这一轮看的 m，橙格是区间收缩后的 l 与 r', { size: 11, fill: C.dim });
+    wrap('figBs', yb + 42, s, '一次二分三轮就定位到下标 4：二分的范围是 ends 的有效长度，不是 n');
+  }
+
+  // ---------- 图 4：两种二分对照 + 错误率 ----------
+  function figTwo() {
+    var a = [2, 2, 2, 1, 3];
+    var strict = [[2], [2], [2], [1], [1, 3]];
+    var nondec = [[2], [2, 2], [2, 2, 2], [1, 2, 2], [1, 2, 2, 3]];
+    var s = txt(340, 18, '同一个数组 [2, 2, 2, 1, 3]，两个二分给出两个答案', { size: 13, weight: '600' });
+    var rows = [
+      { name: 'bs1（>= 最左）', st: strict, ans: 2, col: C.blue, bg: C.blueBg, tag: '严格递增' },
+      { name: 'bs2（> 最左）', st: nondec, ans: 4, col: C.orange, bg: C.orangeBg, tag: '不下降' }
+    ];
+    var i, j;
+    for (i = 0; i < 2; i++) {
+      var y = 38 + i * 104;
+      s += txt(24, y + 16, rows[i].name, { size: 11, anchor: 'start', mono: true, fill: rows[i].col });
+      s += txt(150, y + 16, rows[i].tag, { size: 11, anchor: 'start', fill: C.dim });
+      for (j = 0; j < 5; j++) {
+        var x = 232 + j * 88;
+        s += txt(x + 32, y + 2, 'num=' + a[j], { size: 10, fill: C.dim });
+        var st = rows[i].st[j];
+        for (var t = 0; t < st.length; t++) {
+          s += rect(x + 2, y + 8 + t * 22, 60, 20, { fill: rows[i].bg, stroke: rows[i].col });
+          s += txt(x + 32, y + 23 + t * 22, String(st[t]), { size: 11, mono: true });
+        }
+      }
+      s += txt(24, y + 92, 'len = ' + rows[i].ans, { size: 13, anchor: 'start', weight: '600', fill: rows[i].col });
+    }
+    var yb = 38 + 2 * 104 + 6;
+    s += txt(340, yb + 4, '写反等号时答案不同的样本占比（每组两万个随机样本）', { size: 12, weight: '600' });
+    var vs = [
+      { v: 'V=3', p: 86.78 }, { v: 'V=5', p: 80.01 }, { v: 'V=10', p: 63.81 },
+      { v: 'V=50', p: 20.30 }, { v: 'V=1000', p: 1.10 }
+    ];
+    for (i = 0; i < 5; i++) {
+      var by = yb + 18 + i * 26;
+      s += bar(150, by, 400, 16, vs[i].p, 100, C.orange, vs[i].v, vs[i].p + '%');
+    }
+    wrap('figTwo', yb + 18 + 5 * 26 + 12, s, '上面是同一个数组在两种二分下的 ends 演化，下面是值域变化时写反等号的现形概率');
+  }
+
+  // ---------- 图 5：ends 不是真子序列 ----------
+  function figNotSub() {
+    var a = [2, 3, 1];
+    var s = txt(340, 18, '数组 [2, 3, 1]：ends = [1, 3]，长度对，内容拼不起来', { size: 13, weight: '600' });
+    var x0 = 60, cw = 90;
+    var i;
+    for (i = 0; i < 3; i++) {
+      var x = x0 + i * cw;
+      s += rect(x, 44, 74, 34, { fill: C.bg, stroke: C.border });
+      s += txt(x + 37, 67, String(a[i]), { size: 15, mono: true, weight: '600' });
+      s += txt(x + 37, 92, '下标 ' + i, { size: 10, fill: C.dim });
+    }
+    s += txt(340, 128, 'ends = [1, 3]', { size: 13, mono: true, fill: C.orange });
+    s += rect(200, 144, 74, 30, { fill: C.orangeBg, stroke: C.orange });
+    s += txt(237, 165, '1', { size: 13, mono: true, fill: C.orange });
+    s += rect(280, 144, 74, 30, { fill: C.orangeBg, stroke: C.orange });
+    s += txt(317, 165, '3', { size: 13, mono: true, fill: C.orange });
+    s += txt(370, 165, '？', { size: 16, weight: '600', fill: C.gray });
+    s += txt(430, 150, '1 在下标 2', { size: 11, fill: C.dim, anchor: 'start' });
+    s += txt(430, 168, '3 在下标 1，在它前面', { size: 11, fill: C.dim, anchor: 'start' });
+    s += txt(340, 200, '原数组里不存在「先取 1 再取 3」这个子序列，ends 的两个位置来自不同轮次的更新', { size: 11, fill: C.dim });
+    s += rect(90, 218, 500, 34, { fill: C.bg, stroke: C.border });
+    s += txt(340, 240, '随机 n=8、值域 5 的两万组里，ends 恰好是真子序列的只有 77.41%', { size: 12, mono: true });
+    wrap('figNotSub', 268, s, 'ends 的长度永远可信，内容不一定能按原数组的顺序读出来');
+  }
+
+  figDp(); figEnds(); figBs(); figTwo(); figNotSub();
+
+  // ================= 演示 1：ends 逐帧推进 =================
+  var PRESETS = [
+    { a: [10, 9, 2, 5, 3, 7, 101, 18], name: 'LC 例一 [10,9,2,5,3,7,101,18]' },
+    { a: [0, 1, 0, 3, 2, 3], name: 'LC 例二 [0,1,0,3,2,3]' },
+    { a: [7, 7, 7, 7, 7, 7, 7], name: '全相等 [7,7,7,7,7,7,7]' },
+    { a: [2, 2, 2, 1, 3], name: '有重复 [2,2,2,1,3]' }
+  ];
+
+  function bsPos(ends, len, num, strict) {
+    var l = 0, r = len - 1, m, ans = -1, cmp = 0;
+    while (l <= r) {
+      cmp++;
+      m = Math.floor((l + r) / 2);
+      if (strict ? (ends[m] >= num) : (ends[m] > num)) { ans = m; r = m - 1; }
+      else l = m + 1;
+    }
+    return { pos: ans, cmp: cmp };
+  }
+
+  function buildSteps(a, strict) {
+    var ends = [], len = 0, steps = [], totalCmp = 0;
+    steps.push({ i: -1, num: null, ends: [], pos: null, cmp: 0, total: 0, len: 0,
+      note: '初始状态，ends 是空的，len = 0。按「下一步」开始扫描。' });
+    for (var i = 0; i < a.length; i++) {
+      var res = bsPos(ends, len, a[i], strict);
+      totalCmp += res.cmp;
+      var before = ends.slice(0, len);
+      var pos = res.pos;
+      if (pos === -1) {
+        ends[len] = a[i]; len++;
+        steps.push({ i: i, num: a[i], ends: ends.slice(0, len), before: before, pos: -1,
+          cmp: res.cmp, total: totalCmp, len: len, grow: true,
+          note: '第 ' + (i + 1) + ' / ' + a.length + ' 步：num = ' + a[i] + '，ends 里没有' +
+                (strict ? ' >= ' : ' > ') + a[i] + ' 的结尾，长度 +1，接到末尾。' });
+      } else {
+        ends[pos] = a[i];
+        steps.push({ i: i, num: a[i], ends: ends.slice(0, len), before: before, pos: pos,
+          cmp: res.cmp, total: totalCmp, len: len, grow: false,
+          note: '第 ' + (i + 1) + ' / ' + a.length + ' 步：num = ' + a[i] + '，二分定位到下标 ' + pos +
+                '，顶掉原来的 ' + before[pos] + '。' });
+      }
+    }
+    steps.push({ i: a.length, num: null, ends: ends.slice(0, len), pos: null, cmp: 0,
+      total: totalCmp, len: len, done: true,
+      note: '扫完了。' + (strict ? '最长严格递增' : '最长不下降') + '子序列长度 = ' + len +
+            '，二分比较一共 ' + totalCmp + ' 次。' });
+    return steps;
+  }
+
+  var v1 = { step: 0, data: null };
+
+  function v1Render() {
+    var st = v1.data.steps[Math.min(v1.step, v1.data.steps.length - 1)];
+    var a = v1.data.a, strict = v1.data.strict;
+    var n = a.length;
+    var s = '';
+    var i;
+    var cw = Math.min(74, Math.floor(600 / n));
+    var x0 = 32;
+    s += txt(340, 16, '原数组（灰底是还没扫到的）', { size: 11, fill: C.dim });
+    for (i = 0; i < n; i++) {
+      var x = x0 + i * cw;
+      var cur = (st.i === i);
+      s += rect(x, 26, cw - 8, 30, { fill: cur ? C.orangeBg : (st.i > i ? C.blueBg : C.bg),
+        stroke: cur ? C.orange : (st.i > i ? C.blue : C.border) });
+      s += txt(x + (cw - 8) / 2, 47, String(a[i]), { size: 13, mono: true, weight: cur ? '600' : undefined });
+    }
+    var y0 = 82;
+    s += txt(340, y0, 'ends 有效区（橙底是本轮改到的格子）', { size: 11, fill: C.dim });
+    var len = st.len;
+    if (len === 0) {
+      s += txt(340, y0 + 40, '（空）', { size: 13, fill: C.gray, mono: true });
+    } else {
+      for (i = 0; i < len; i++) {
+        var ex = 60 + i * 74;
+        var fresh = (st.pos === i) || (st.grow && i === len - 1);
+        s += rect(ex, y0 + 14, 62, 32, { fill: fresh ? C.orangeBg : '#fff', stroke: fresh ? C.orange : C.border, sw: fresh ? 2 : 1 });
+        s += txt(ex + 31, y0 + 36, String(st.ends[i]), { size: 13, mono: true, fill: fresh ? C.orange : C.text });
+        s += txt(ex + 31, y0 + 56, '长度 ' + (i + 1), { size: 10, fill: C.dim });
+      }
+    }
+    var yb = y0 + 74;
+    s += txt(60, yb, 'len = ' + st.len, { size: 13, mono: true, anchor: 'start', weight: '600', fill: C.blue });
+    s += txt(230, yb, '本轮比较 ' + st.cmp + ' 次', { size: 12, mono: true, anchor: 'start', fill: C.dim });
+    s += txt(400, yb, '累计比较 ' + st.total + ' 次', { size: 12, mono: true, anchor: 'start', fill: C.dim });
+    s += txt(620, yb, strict ? '二分：>= 最左' : '二分：> 最左', { size: 12, anchor: 'end', fill: strict ? C.blue : C.orange });
+    var host = document.getElementById('v1svg');
+    host.innerHTML = '<svg viewBox="0 0 680 ' + (yb + 20) + '" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    document.getElementById('v1note').textContent = st.note;
+    document.getElementById('v1ans').textContent = (v1.step >= v1.data.steps.length - 1)
+      ? '答案 = ' + st.len : '';
+    document.getElementById('v1prev').disabled = (v1.step === 0);
+    document.getElementById('v1next').disabled = (v1.step >= v1.data.steps.length - 1);
+  }
+
+  function v1Build() {
+    var ci = parseInt(document.getElementById('v1case').value, 10);
+    var strict = document.getElementById('v1mode').value === '1';
+    v1.data = { a: PRESETS[ci].a.slice(), strict: strict, steps: buildSteps(PRESETS[ci].a, strict) };
+    v1.step = 0;
+    v1Render();
+  }
+
+  // ================= 演示 2：值域 V 与写反等号的现形率 =================
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function lisLen(a, strict) {
+    var ends = [], len = 0;
+    for (var i = 0; i < a.length; i++) {
+      var r = bsPos(ends, len, a[i], strict);
+      if (r.pos === -1) { ends[len] = a[i]; len++; } else ends[r.pos] = a[i];
+    }
+    return len;
+  }
+  function v2Run() {
+    var V = parseInt(document.getElementById('v2v').value, 10);
+    var rnd = mulberry32(20261009);
+    var tot = 2000, diff = 0, maxdiff = 0;
+    for (var t = 0; t < tot; t++) {
+      var n = 1 + Math.floor(rnd() * 20);
+      var a = [];
+      for (var i = 0; i < n; i++) a.push(1 + Math.floor(rnd() * V));
+      var A = lisLen(a, true), B = lisLen(a, false);
+      if (A !== B) diff++;
+      if (B - A > maxdiff) maxdiff = B - A;
+    }
+    var pct = Math.round(diff * 1000 / tot) / 10;
+    var s = txt(340, 18, '值域 V = ' + V + '，跑 ' + tot + ' 组随机样本（n 在 1 到 20）', { size: 13, weight: '600' });
+    s += bar(170, 44, 380, 26, pct, 100, C.orange, '不同', pct + '%');
+    s += txt(340, 100, '两万个样本里（C++ 实测）V = ' + V + ' 时是 ' +
+      ({ 3: '86.78', 5: '80.01', 10: '63.81', 50: '20.30', 1000: '1.10' })[String(V)] + '%',
+      { size: 12, fill: C.dim });
+    s += txt(340, 128, '不下降答案比严格递增最多大 ' + maxdiff + '（相等值越多，差得越多）', { size: 12, fill: C.dim });
+    s += txt(340, 158, 'V 越大，重复值越少见，写反等号越难被测出来', { size: 12, fill: C.text });
+    var host = document.getElementById('v2svg');
+    host.innerHTML = '<svg viewBox="0 0 680 180" xmlns="http://www.w3.org/2000/svg" role="img">' + s + '</svg>';
+    document.getElementById('v2note').textContent = '当前 V = ' + V + '：' + diff + ' / ' + tot + ' 组样本两个二分答案不同（' + pct + '%）。';
+  }
+
+  document.getElementById('v1case').addEventListener('change', v1Build);
+  document.getElementById('v1mode').addEventListener('change', v1Build);
+  document.getElementById('v1prev').addEventListener('click', function () { if (v1.step > 0) { v1.step--; v1Render(); } });
+  document.getElementById('v1next').addEventListener('click', function () { if (v1.step < v1.data.steps.length - 1) { v1.step++; v1Render(); } });
+  document.getElementById('v1last').addEventListener('click', function () { v1.step = v1.data.steps.length - 1; v1Render(); });
+  document.getElementById('v1reset').addEventListener('click', function () { v1.step = 0; v1Render(); });
+  document.getElementById('v2v').addEventListener('change', v2Run);
+  v1Build();
+  v2Run();
+})();
+</script>
+</body>
+</html>

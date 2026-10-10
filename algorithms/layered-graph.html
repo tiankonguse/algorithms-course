@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分层图最短路：状态当点</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.sarr { font-family: ui-monospace,Menlo,Consolas,monospace; font-size: 12px; margin: 5px 0; }
+.scell { display: inline-block; min-width: 34px; padding: 3px 7px; border: 1px solid #cbd5e1; border-radius: 5px; margin-right: 5px; background: #fff; text-align: center; }
+.scell.cur { outline: 2px solid #ea580c; }
+.scell.done { background: #dcfce7; border-color: #16a34a; }
+.scell.blue { background: #dbeafe; border-color: #2563eb; }
+.slab { display: inline-block; width: 90px; font-size: 12px; color: #64748b; }
+.kcell { display: inline-block; min-width: 30px; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 5px; margin-right: 4px; background: #fff; text-align: center; font-size: 12px; }
+.kcell.wall { background: #334155; color: #fff; border-color: #334155; }
+.kcell.key { background: #fef9c3; border-color: #ca8a04; }
+.kcell.lock { background: #fee2e2; border-color: #dc2626; }
+.kcell.start { background: #dcfce7; border-color: #16a34a; }
+.kcell.cur { outline: 2px solid #ea580c; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>分层图最短路：状态当点</h1>
+      <p class="intro">不把实际位置看成图上的点，而是把「实际位置 + 状态」的组合看成点。位置没变、状态变了，也是另一个点。状态是什么、怎么转移、代价怎么算，每道题自己设计，BFS 或 Dijkstra 的过程不变。</p>
+
+      <h2 id="state">零、扩点：位置加状态才是点</h2>
+      <figure class="fig" id="figState"></figure>
+      <p>上一页的 Dijkstra 在「位置图」上跑。分层图的第一步是扩点：一个实际位置带着 k 个可能状态，拆成 k+1 个点（位置, 状态）。转移是「改位置或改状态的动作」，边权是动作的代价。BFS 或 Dijkstra 照常跑，复杂度按点数和边数算：点数 = 位置数 × 状态数。</p>
+      <p>三题的状态各不相同：钥匙题状态是「收集了哪些钥匙」（位图），电动车题是「剩余电量」，飞行路线是「已经免费了几次」。扩点方式每题都不同，这正是分层图的全部设计空间。</p>
+
+      <h2 id="keys">一、钥匙题：钥匙集合当状态</h2>
+      <figure class="fig" id="figKeys"></figure>
+      <p>获取所有钥匙的最短路径（LC864）：网格里小写字母是钥匙、大写字母是对应锁，没有钥匙过不去锁，问拿到所有钥匙最少走几步。k ≤ 6，钥匙集合正好一个 int 的 6 个位。</p>
+      <p>状态是 (行, 列, 掩码)：掩码记录已经捡到的钥匙。走进一个格子的动作是 O(1) 的状态转移：越界或墙跳过；是锁且掩码没有对应位，跳过；是钥匙就或上对应位；掩码满即完成。边权全是 1，用 BFS 逐层跑，visited 是三维的 (行, 列, 掩码)。</p>
+      <div class="viz">
+        <p class="viz-title">演示 · 3×3 网格，钥匙 a、b，逐层 BFS，捡起最后一把钥匙即返回</p>
+        <div id="kyGrid"></div>
+        <p class="viz-note" id="kyNote"></p>
+        <p class="viz-answer" id="kyAns"></p>
+        <div class="viz-controls">
+          <button id="kyPrev">上一步</button>
+          <button id="kyNext">下一步</button>
+          <button id="kyReset">重置</button>
+        </div>
+      </div>
+      <p>同一格 (0,0) 带掩码 00 和掩码 01 是两个不同状态，都要进队列：先空手出来，再带钥匙回来。这就是「位置 + 状态才是点」的直接体现。实测 30×30、k = 6 随机网格 0.94ms，状态数 900 × 64 = 5.76 万。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 获取所有钥匙的最短路径（LC864）：状态 = (行, 列, 钥匙掩码)，BFS 逐层</span>
+    <span class="kw">int</span> <span class="fn">shortestPathAllKeys</span>(vector&lt;<span class="kw">string</span>&gt;&amp; grid) {
+        <span class="kw">int</span> n = grid.size(), m = grid[0].size();
+        <span class="kw">int</span> key = 0, sx = -1, sy = -1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; m; j++) {
+                <span class="kw">if</span> (grid[i][j] == '@') {
+                    sx = i;
+                    sy = j;
+                }
+                <span class="kw">if</span> (grid[i][j] &gt;= 'a' &amp;&amp; grid[i][j] &lt;= 'f') {
+                    key |= 1 &lt;&lt; (grid[i][j] - 'a');
+                }
+            }
+        }
+        vector&lt;vector&lt;vector&lt;<span class="kw">bool</span>&gt;&gt;&gt; <span class="fn">visited</span>(
+            n, vector&lt;vector&lt;<span class="kw">bool</span>&gt;&gt;(m, vector&lt;<span class="kw">bool</span>&gt;(1 &lt;&lt; 6, <span class="kw">false</span>)));
+        deque&lt;tuple&lt;<span class="kw">int</span>, <span class="kw">int</span>, <span class="kw">int</span>&gt;&gt; q;
+        q.push_back({sx, sy, 0});
+        visited[sx][sy][0] = <span class="kw">true</span>;
+        <span class="kw">int</span> level = 1;
+        <span class="kw">int</span> move[5] = {-1, 0, 1, 0, -1};
+        <span class="kw">while</span> (!q.empty()) {
+            <span class="kw">int</span> size = q.size();
+            <span class="kw">for</span> (<span class="kw">int</span> k = 0; k &lt; size; k++) {
+                auto [x, y, s] = q.front();
+                q.pop_front();
+                <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 4; i++) {
+                    <span class="kw">int</span> nx = x + move[i], ny = y + move[i + 1];
+                    <span class="kw">int</span> ns = s;
+                    <span class="kw">if</span> (nx &lt; 0 || nx == n || ny &lt; 0 || ny == m || grid[nx][ny] == '#') {
+                        <span class="kw">continue</span>;
+                    }
+                    <span class="kw">if</span> (grid[nx][ny] &gt;= 'A' &amp;&amp; grid[nx][ny] &lt;= 'F' &amp;&amp;
+                        ((ns &amp; (1 &lt;&lt; (grid[nx][ny] - 'A'))) == 0)) {
+                        <span class="kw">continue</span>;
+                    }
+                    <span class="kw">if</span> (grid[nx][ny] &gt;= 'a' &amp;&amp; grid[nx][ny] &lt;= 'f') {
+                        ns |= 1 &lt;&lt; (grid[nx][ny] - 'a');
+                    }
+                    <span class="kw">if</span> (ns == key) {
+                        <span class="kw">return</span> level;
+                    }
+                    <span class="kw">if</span> (!visited[nx][ny][ns]) {
+                        visited[nx][ny][ns] = <span class="kw">true</span>;
+                        q.push_back({nx, ny, ns});
+                    }
+                }
+            }
+            level++;
+        }
+        <span class="kw">return</span> -1;
+    }</pre>
+
+      <h2 id="electric">二、电动车：电量当状态</h2>
+      <figure class="fig" id="figElectric"></figure>
+      <p>电动车游城市（LCP 35）：从 start 到 end，电量上限 cnt，每走 1 距离耗 1 电、花 1 时间，每个城市可以充电，charge[i] 是充 1 电花的单位时间，求最少时间。状态是 (城市, 电量)。</p>
+      <p>两类转移：原地充一格电，代价 charge[cur]，电量 +1；不充电走一条边，代价边权 w，电量 -w。都是非负代价，Dijkstra 按时间组织堆。cnt ≤ 100、n ≤ 100，状态数最多一万，直接开二维 distance 数组。</p>
+      <p>官方样例验证：样例 1 输出 43（1 充 3 电到 3，3 充 5 电到 0，充电 35 + 行驶 8），样例 2 输出 38，本页实现均吻合。实测 n = 100、cnt = 100、约 1500 条边 0.085ms。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 电动车游城市（LCP 35）：状态 = (城市, 电量)，边 = 充一格电 / 不充电走一条边</span>
+    <span class="kw">int</span> <span class="fn">electricCarPlan</span>(vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; paths, <span class="kw">int</span> cnt, <span class="kw">int</span> start, <span class="kw">int</span> end,
+                        vector&lt;<span class="kw">int</span>&gt;&amp; charge) {
+        <span class="kw">int</span> n = charge.size();
+        vector&lt;vector&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;&gt; <span class="fn">graph</span>(n);
+        <span class="kw">for</span> (auto&amp; p : paths) {
+            graph[p[0]].push_back({p[1], p[2]});
+            graph[p[1]].push_back({p[0], p[2]});
+        }
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">distance</span>(n, vector&lt;<span class="kw">int</span>&gt;(cnt + 1, INT_MAX));
+        distance[start][0] = 0;
+        vector&lt;vector&lt;<span class="kw">bool</span>&gt;&gt; <span class="fn">visited</span>(n, vector&lt;<span class="kw">bool</span>&gt;(cnt + 1, <span class="kw">false</span>));
+        priority_queue&lt;tuple&lt;<span class="kw">int</span>, <span class="kw">int</span>, <span class="kw">int</span>&gt;,
+                       vector&lt;tuple&lt;<span class="kw">int</span>, <span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;,
+                       greater&lt;tuple&lt;<span class="kw">int</span>, <span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;&gt; heap;
+        heap.push({0, start, 0});
+        <span class="kw">while</span> (!heap.empty()) {
+            auto [cost, cur, power] = heap.top();
+            heap.pop();
+            <span class="kw">if</span> (visited[cur][power]) {
+                <span class="kw">continue</span>;
+            }
+            <span class="kw">if</span> (cur == end) {
+                <span class="kw">return</span> cost;
+            }
+            visited[cur][power] = <span class="kw">true</span>;
+            <span class="kw">if</span> (power &lt; cnt) {
+                <span class="kw">if</span> (!visited[cur][power + 1] &amp;&amp;
+                    cost + charge[cur] &lt; distance[cur][power + 1]) {
+                    distance[cur][power + 1] = cost + charge[cur];
+                    heap.push({cost + charge[cur], cur, power + 1});
+                }
+            }
+            <span class="kw">for</span> (auto [nextCity, w] : graph[cur]) {
+                <span class="kw">int</span> restPower = power - w;
+                <span class="kw">int</span> nextCost = cost + w;
+                <span class="kw">if</span> (restPower &gt;= 0 &amp;&amp; !visited[nextCity][restPower] &amp;&amp;
+                    nextCost &lt; distance[nextCity][restPower]) {
+                    distance[nextCity][restPower] = nextCost;
+                    heap.push({nextCost, nextCity, restPower});
+                }
+            }
+        }
+        <span class="kw">return</span> -1;
+    }</pre>
+
+      <h2 id="flight">三、飞行路线：免费次数当层</h2>
+      <figure class="fig" id="figFlight"></figure>
+      <p>飞行路线（洛谷 P4568）：最多 k 条航线免费，问最少花费。状态是 (城市, 已用免费次数)，免费次数就是层：第 use 层表示「已经免费用了 use 次」。</p>
+      <p>转移两条：用免费，边权按 0 算，use + 1；不用免费，边权照付，use 不变。答案在终点任意一层里取最小。层数 k + 1，点数 (k + 1) × n；手写堆版本把二维状态压成一维堆下标，注释里说清楚了为什么不用反向索引堆：一个 (城市, 次数) 组合才是一个堆元素，反向索引堆要按组合维护 where，不如普通堆直接。</p>
+      <div class="viz">
+        <p class="viz-title">演示 · 4 点图，k = 2：免费边 0 权跨层，付费边同层照付</p>
+        <div id="flGrid"></div>
+        <p class="viz-note" id="flNote"></p>
+        <p class="viz-answer" id="flAns"></p>
+        <div class="viz-controls">
+          <button id="flPrev">上一步</button>
+          <button id="flNext">下一步</button>
+          <button id="flReset">重置</button>
+        </div>
+      </div>
+      <p>实测：n = 10^4、m = 5×10^4、k = 10 的随机图 4.6ms；同图 k = 0（退化成普通 Dijkstra）0.11ms。分层的代价是状态数乘 k + 1 倍，收益是免费次数买到的更短路：链 1000 条边每条 10、加一条 0→999 直连 900，k = 0 走直连花 900，k = 1 免费掉直连花 0。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="cm">// 飞行路线（洛谷 P4568）：分层图最短路，状态 = (城市, 已用免费次数)</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 10001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXK = 11;
+
+    <span class="kw">int</span> head[MAXN], nxt[MAXM], to[MAXM], weight[MAXM], cnt;
+    <span class="kw">int</span> distanceArr[MAXN][MAXK];
+    <span class="kw">bool</span> visited[MAXN][MAXK];
+    <span class="cm">// 手写普通堆，静态结构（二维点压成堆下标，反向索引堆不好写）</span>
+    <span class="kw">int</span> heapArr[MAXM * MAXK][3];
+    <span class="kw">int</span> heapSize;
+    <span class="kw">int</span> n, m, k, s, t;
+
+    <span class="kw">void</span> <span class="fn">build</span>() {
+        cnt = 1;
+        heapSize = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            head[i] = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt;= k; j++) {
+                distanceArr[i][j] = INT_MAX;
+                visited[i][j] = <span class="kw">false</span>;
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+        nxt[cnt] = head[u];
+        to[cnt] = v;
+        weight[cnt] = w;
+        head[u] = cnt++;
+    }
+
+    <span class="kw">void</span> <span class="fn">push</span>(<span class="kw">int</span> u, <span class="kw">int</span> use, <span class="kw">int</span> c) {
+        heapArr[heapSize][0] = u;
+        heapArr[heapSize][1] = use;
+        heapArr[heapSize][2] = c;
+        <span class="kw">int</span> i = heapSize++;
+        <span class="kw">while</span> (heapArr[i][2] &lt; heapArr[(i - 1) / 2][2]) {
+            swap(heapArr[i], heapArr[(i - 1) / 2]);
+            i = (i - 1) / 2;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">pop</span>(<span class="kw">int</span>&amp; u, <span class="kw">int</span>&amp; use, <span class="kw">int</span>&amp; cost) {
+        u = heapArr[0][0];
+        use = heapArr[0][1];
+        cost = heapArr[0][2];
+        swap(heapArr[0], heapArr[--heapSize]);
+        <span class="kw">int</span> i = 0, l = 1;
+        <span class="kw">while</span> (l &lt; heapSize) {
+            <span class="kw">int</span> best = l + 1 &lt; heapSize &amp;&amp; heapArr[l + 1][2] &lt; heapArr[l][2] ? l + 1 : l;
+            best = heapArr[best][2] &lt; heapArr[i][2] ? best : i;
+            <span class="kw">if</span> (best == i) {
+                <span class="kw">break</span>;
+            }
+            swap(heapArr[best], heapArr[i]);
+            i = best;
+            l = i * 2 + 1;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">dijkstra</span>() {
+        distanceArr[s][0] = 0;
+        push(s, 0, 0);
+        <span class="kw">while</span> (heapSize &gt; 0) {
+            <span class="kw">int</span> u, use, cost;
+            pop(u, use, cost);
+            <span class="kw">if</span> (visited[u][use]) {
+                <span class="kw">continue</span>;
+            }
+            visited[u][use] = <span class="kw">true</span>;
+            <span class="kw">if</span> (u == t) {
+                <span class="kw">return</span> cost;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> ei = head[u]; ei &gt; 0; ei = nxt[ei]) {
+                <span class="kw">int</span> v = to[ei], w = weight[ei];
+                <span class="kw">if</span> (use &lt; k &amp;&amp; distanceArr[v][use + 1] &gt; distanceArr[u][use]) {
+                    <span class="cm">// 使用免费：边权当作 0，已用次数 +1</span>
+                    distanceArr[v][use + 1] = distanceArr[u][use];
+                    push(v, use + 1, distanceArr[v][use + 1]);
+                }
+                <span class="kw">if</span> (distanceArr[v][use] &gt; distanceArr[u][use] + w) {
+                    <span class="cm">// 不用免费：照常付钱</span>
+                    distanceArr[v][use] = distanceArr[u][use] + w;
+                    push(v, use, distanceArr[v][use]);
+                }
+            }
+        }
+        <span class="kw">return</span> -1;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; k &gt;&gt; s &gt;&gt; t;
+        build();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, a, b, c; i &lt; m; i++) {
+            cin &gt;&gt; a &gt;&gt; b &gt;&gt; c;
+            addEdge(a, b, c);
+            addEdge(b, a, c);
+        }
+        cout &lt;&lt; dijkstra() &lt;&lt; endl;
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2 id="sum">总结</h2>
+      <p>分层图 = 扩点：位置不变、状态变，也是新点。三题三个状态维度：钥匙掩码、剩余电量、免费次数；转移动作分别是一次移动、充一格电、免一条边。BFS 或 Dijkstra 的骨架一字不改，改的只是状态定义和转移代价。状态数就是位置数乘状态数，n 和 k 的上限决定能不能开下这张表。</p>
+      <p>这一页三题的状态位数分别是 6、100、11，都在「一张二维表装得下」的范围；状态维度再大（比如 2^30 个状态），就得换思路了。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/shortest-path-to-get-all-keys/" target="_blank">获取所有钥匙的最短路径</a></td><td><a href="https://leetcode.cn/problems/shortest-path-to-get-all-keys/" target="_blank">leetcode.cn</a></td></tr>
+        <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/DFPeFJ/" target="_blank">电动车游城市</a></td><td><a href="https://leetcode.cn/problems/DFPeFJ/" target="_blank">leetcode.cn</a></td></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P4568" target="_blank">飞行路线</a></td><td><a href="https://www.luogu.com.cn/problem/P4568" target="_blank">luogu.com.cn</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解064【必备】Dijkstra算法、分层图最短路</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+
+// ===== 图 1：扩点示意 =====
+(function(){
+  var W = 720, H = 280;
+  var body = '';
+  body += txt(W/2, 22, '一个实际位置带 3 个状态，拆成 3 个点；状态转移连边', {fs:13});
+  for (var s = 0; s < 3; s++) {
+    var x = 140 + s * 200, y = 110;
+    body += '<circle cx="'+x+'" cy="'+y+'" r="24" fill="#fff" stroke="#2563eb" stroke-width="2"/>';
+    body += txt(x, y - 2, '状态' + s, {fs:12});
+    body += txt(x, y - 40, '(位置, 状态' + s + ')', {fs:11, fill:'#64748b'});
+    if (s < 2) {
+      body += '<line x1="'+(x+24)+'" y1="'+y+'" x2="'+(x+176)+'" y2="'+y+'" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4 3"/>';
+      body += txt(x + 100, y - 10, '改变状态', {fs:11, fill:'#16a34a'});
+    }
+    body += '<line x1="'+x+'" y1="'+(y+24)+'" x2="'+x+'" y2="'+(y+90)+'" stroke="#94a3b8" stroke-width="1.5"/>';
+    body += txt(x, y + 104, '移动到别的实际位置', {fs:10, fill:'#64748b'});
+  }
+  body += txt(W/2, H - 14, '点的数量 = 位置数 × 状态数；BFS / Dijkstra 的过程完全不变', {fs:12, fill:'#334155'});
+  document.getElementById('figState').innerHTML = svg(W, H, body) + '<figcaption>扩点不是新算法，是把状态塞进点的定义里，让老算法直接复用。</figcaption>';
+})();
+
+// ===== 图 2：钥匙网格 =====
+(function(){
+  var W = 720, H = 280;
+  var body = '';
+  body += txt(W/2, 22, '3×3 网格：@ 起点，a/b 钥匙，A 锁，# 墙，掩码两位', {fs:13});
+  var g = [['@','a','.'],['.','#','.'],['b','A','.']];
+  var cx0 = 240, cy0 = 55, cw = 62, ch = 56, gap = 6;
+  for (var i = 0; i < 3; i++) {
+    for (var j = 0; j < 3; j++) {
+      var x = cx0 + j * (cw + gap), y = cy0 + i * (ch + gap);
+      body += '<rect x="'+x+'" y="'+y+'" width="'+cw+'" height="'+ch+'" fill="#fff" stroke="#cbd5e1" rx="4"/>';
+      body += txt(x + cw/2, y + ch/2 + 4, g[i][j], {fs:16});
+    }
+  }
+  var path = [[0,0],[0,1],[0,0],[1,0],[2,0]];
+  for (var k = 0; k < path.length; k++) {
+    var x = cx0 + path[k][1] * (cw + gap) + cw/2, y = cy0 + path[k][0] * (ch + gap) + ch/2;
+    body += '<circle cx="'+x+'" cy="'+y+'" r="14" fill="none" stroke="#ea580c" stroke-width="2" stroke-dasharray="3 2"/>';
+    body += txt(x, y - 22, '第' + (k+1) + '步', {fs:10, fill:'#ea580c'});
+  }
+  body += txt(W/2, cy0 + 3 * (ch + gap) + 18, '@(00) → a(01) → 回 @(01) → 下 → b(11)：第 4 步捡起最后一把钥匙，掩码满即返回', {fs:12, fill:'#334155'});
+  document.getElementById('figKeys').innerHTML = svg(W, H, body) + '<figcaption>掩码从 00 到 01 再到 11，同一格 (0,0) 以不同掩码出现两次，是两个状态。</figcaption>';
+})();
+
+// ===== 图 3：电动车分层 =====
+(function(){
+  var W = 720, H = 280;
+  var body = '';
+  body += txt(W/2, 22, '电动车：状态 (城市, 电量)，原地充一格 + 沿边耗电移动，两条转移', {fs:13});
+  var pos = {A:[150,120], B:[360,120], C:[570,120]};
+  body += '<circle cx="'+pos.A[0]+'" cy="'+pos.A[1]+'" r="22" fill="#fff" stroke="#94a3b8" stroke-width="2"/>';
+  body += txt(pos.A[0], pos.A[1] - 2, 'A', {fs:14});
+  body += '<circle cx="'+pos.B[0]+'" cy="'+pos.B[1]+'" r="22" fill="#fff" stroke="#94a3b8" stroke-width="2"/>';
+  body += txt(pos.B[0], pos.B[1] - 2, 'B', {fs:14});
+  body += '<circle cx="'+pos.C[0]+'" cy="'+pos.C[1]+'" r="22" fill="#fff" stroke="#94a3b8" stroke-width="2"/>';
+  body += txt(pos.C[0], pos.C[1] - 2, 'C', {fs:14});
+  body += '<line x1="'+(pos.A[0]+22)+'" y1="'+pos.A[1]+'" x2="'+(pos.B[0]-22)+'" y2="'+pos.B[1]+'" stroke="#2563eb" stroke-width="1.5"/>';
+  body += txt((pos.A[0]+pos.B[0])/2, pos.A[1] - 10, '走边：-w 电，+w 时间', {fs:11, fill:'#2563eb'});
+  body += '<line x1="'+(pos.B[0]+22)+'" y1="'+pos.B[1]+'" x2="'+(pos.C[0]-22)+'" y2="'+pos.C[1]+'" stroke="#2563eb" stroke-width="1.5"/>';
+  body += txt((pos.B[0]+pos.C[0])/2, pos.B[1] - 10, '走边：-w 电，+w 时间', {fs:11, fill:'#2563eb'});
+  body += txt(pos.A[0], pos.A[1] - 52, '充一格：+1 电，+charge[A] 时间', {fs:11, fill:'#16a34a'});
+  body += txt(pos.A[0], pos.A[1] - 36, '（self 环）', {fs:10, fill:'#64748b'});
+  body += txt(W/2, H - 14, '电量从 0 到 cnt，每个 (城市, 电量) 一个点；答案 = 终点任意电量层的最小值', {fs:12, fill:'#334155'});
+  document.getElementById('figElectric').innerHTML = svg(W, H, body) + '<figcaption>充一格电是原地自环，沿边走是跨城边，两类转移的代价都是时间。</figcaption>';
+})();
+
+// ===== 图 4：飞行分层 =====
+(function(){
+  var W = 720, H = 300;
+  var body = '';
+  body += txt(W/2, 22, 'k = 2：三层同图，免费边从第 use 层跳到第 use+1 层（边权 0）', {fs:13});
+  var pos = {0:[120,70], 1:[260,70], 2:[400,70], 3:[540,70]};
+  var nodes = [];
+  for (var layer = 0; layer < 3; layer++) {
+    var y = 100 + layer * 70;
+    for (var u = 0; u < 4; u++) {
+      var x = pos[u][0], w = pos[u][1];
+      var nx = x, ny = y;
+      nodes.push([nx, ny, u, layer]);
+      body += '<circle cx="'+nx+'" cy="'+ny+'" r="17" fill="#fff" stroke="#94a3b8" stroke-width="1.5"/>';
+      body += txt(nx, ny - 2, 'v' + u, {fs:10});
+    }
+    body += txt(W/2 - 220, y, '第 ' + layer + ' 层（已免 ' + layer + ' 次）', {fs:11, fill:'#64748b', an:'start'});
+    for (var u = 0; u < 3; u++) {
+      body += '<line x1="'+(pos[u][0]+17)+'" y1="'+y+'" x2="'+(pos[u+1][0]-17)+'" y2="'+y+'" stroke="#2563eb" stroke-width="1.2"/>';
+      body += txt((pos[u][0]+pos[u+1][0])/2, y - 6, String(5), {fs:9, fill:'#2563eb'});
+    }
+  }
+  for (var u = 0; u < 4; u++) {
+    for (var layer = 0; layer < 2; layer++) {
+      var y0 = 100 + layer * 70, y1 = 100 + (layer + 1) * 70;
+      body += '<line x1="'+pos[u][0]+'" y1="'+(y0+17)+'" x2="'+pos[u][0]+'" y2="'+(y1-17)+'" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4 3"/>';
+    }
+  }
+  body += txt(W/2, 100 + 3 * 70 - 16, '虚线 = 免费边（边权 0）；实线 = 付费边（边权照付）', {fs:12, fill:'#334155'});
+  document.getElementById('figFlight').innerHTML = svg(W, H, body) + '<figcaption>免费次数用完就上不了更高层：use = k 的状态没有免费出边。</figcaption>';
+})();
+
+// ===== 演示 1：钥匙逐层 =====
+(function(){
+  var g = [['@','a','.'],['.','#','.'],['b','A','.']];
+  var n = 3, m = 3;
+  var frames = [
+    {mask:'00', note:'起点 (0,0)，掩码 00，BFS 第 0 层。目标是掩码 11（a、b 都要）。'},
+    {mask:'01', note:'第 1 层：向右到 (0,1) 捡起 a → 掩码 01；向下到 (1,0) 空手掩码 00，都入队。'},
+    {mask:'01', note:'第 2 层：从 (0,1) 带着 a 回到 (0,0)（新状态 (0,0,01)）；(1,0) 向上回 (0,0,00) 已访问。'},
+    {mask:'01', note:'第 3 层：从 (0,0,01) 向下到 (1,0,01)。'},
+    {mask:'11', note:'第 4 层：从 (1,0,01) 向下到 (2,0) 捡起 b → 掩码 11 = key，返回 4。'}
+  ];
+  var step = 0;
+  function draw(){
+    var f = frames[Math.min(step, frames.length - 1)];
+    var html = '<div class="sarr"><span class="slab">网格</span>';
+    for (var i = 0; i < n; i++) {
+      for (var j = 0; j < m; j++) {
+        var c = g[i][j];
+        var cls = 'kcell';
+        if (c === '#') cls += ' wall';
+        else if (c === '@') cls += ' start';
+        else if (c >= 'a' && c <= 'f') cls += ' key';
+        else if (c >= 'A' && c <= 'F') cls += ' lock';
+        html += '<span class="'+cls+'">'+c+'</span>';
+      }
+      html += '<br>';
+    }
+    html += '</div><div class="sarr"><span class="slab">掩码</span><span class="scell cur">'+f.mask+'</span><span class="slab" style="width:auto;margin-left:8px;">目标 11</span></div>';
+    document.getElementById('kyGrid').innerHTML = html;
+    document.getElementById('kyNote').textContent = f.note;
+    document.getElementById('kyAns').textContent = '第 ' + step + '/' + (frames.length - 1) + ' 层';
+  }
+  document.getElementById('kyNext').addEventListener('click', function(){ if (step < frames.length - 1) step++; draw(); });
+  document.getElementById('kyPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('kyReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+
+// ===== 演示 2：飞行分层 =====
+(function(){
+  var frames = [
+    {note:'初始：状态 (0, 0)，d = 0 入堆。k = 2，目标是到达终点城市 3（任意免费次数层）。'},
+    {note:'弹出 (0,0)：免费边 0→1、0→2 → (1,1) d=0、(2,1) d=0；付费边 → (1,0) d=5、(2,0) d=15。'},
+    {note:'弹出 (1,1) d=0（免费用过 1 次）：免费 1→2 → (2,2) d=0；付费 1→2 → (2,1) d=5（不更新已有的 0）。'},
+    {note:'弹出 (2,1) d=0：免费 2→3 → (3,2) d=0，终点城市第 2 层弹出 → 返回 0。'}
+  ];
+  var step = 0;
+  function draw(){
+    var f = frames[Math.min(step, frames.length - 1)];
+    var html = '<div class="sarr"><span class="slab">图</span>';
+    html += '<span class="scell">0-1:5</span><span class="scell">1-2:5</span><span class="scell">2-3:5</span><span class="scell blue">0-2:15</span>';
+    html += '</div><div class="sarr"><span class="slab">状态</span>';
+    var states = [['(0,0)','d=0'],['(1,1)','d=0'],['(2,1)','d=0'],['(3,2)','d=0']];
+    for (var i = 0; i <= step && i < states.length; i++) {
+      html += '<span class="scell' + (i === step ? ' cur' : ' done') + '">' + states[i][0] + ' ' + states[i][1] + '</span>';
+    }
+    html += '</div>';
+    document.getElementById('flGrid').innerHTML = html;
+    document.getElementById('flNote').textContent = f.note;
+    document.getElementById('flAns').textContent = 'k=2 答案 0（免费 0→2 与 2→3）；k=1 答案 5；k=0 答案 15';
+  }
+  document.getElementById('flNext').addEventListener('click', function(){ if (step < frames.length - 1) step++; draw(); });
+  document.getElementById('flPrev').addEventListener('click', function(){ if (step > 0) step--; draw(); });
+  document.getElementById('flReset').addEventListener('click', function(){ step = 0; draw(); });
+  draw();
+})();
+})();
+</script>
+</body>
+</html>
