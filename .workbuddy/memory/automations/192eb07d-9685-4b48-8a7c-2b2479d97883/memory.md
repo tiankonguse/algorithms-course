@@ -71,3 +71,12 @@
   - 自检：verify_pages PASS（figs/svg 6/6、nav 177、toc 9、viz 2、code 4、pager「位运算的常见技巧 | 离散化」）、verify_home PASS（177 卡片）、json 176 → 177 六字段全齐、AI 味与杂字扫描干净。
   - 收口：prompt.md（032 已完成、下一课 033）、memory 日志 2026-10-06.md。
 - 无遗留问题。
+
+## 2026-10-11 00:09
+- 任务：转换下一课 → prompt.md「下一课 085（数位dp-下）」，抢锁成功，主循环直做。
+- 执行：产出 3 页并入已有「数位 dp」组（追加在 digit-dp-mask 之后）：digit-dp-windy / digit-dp-palindrome / digit-count-in-range。
+  - 7 份 Java 手改 C++（低号课无「C++ 塞注释」版），4 种子 × 3000~4000 组对拍全绿；全部正文数字在 /tmp/cpp085 实测（实填格数、裸递归调用、四种错法抓取率、引理穷举、cnt 的 off-by-one、性能）。
+  - 15 张 SVG + 6 个演示；自写 /tmp/br085.js 把 6 演示全部 select 组合逐帧点到末帧，62 项断言与 C++ 逐项一致。
+  - 自检：三页 probe085 PASS、verify_home 319 卡片 PASS、杂字/AI 味扫描 CLEAN（5 处破折号、2 处修辞否定已改）。json 316 → 319（六字段全齐），锁已释放。
+- 环境备忘：verify_pages.js 在本环境对任何页仍全 0（同 071/083 的怪癖），用自写 CDP 脚本等价覆盖；新增 /tmp/ovl085.js 做 svg 文字两两重叠/出界几何检查，替代逐张看图，效果不错。node 路径是 `~/.workbuddy/binaries/node/versions/22.22.2-6/bin/node`。
+- 无遗留问题。下一课 086。

@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>最小的必要团队：顺着决策顺序把方案读出来</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.tbl { display: inline-grid; gap: 2px; margin: 6px 0; }
+.tc { width: 22px; height: 24px; line-height: 24px; text-align: center; font-size: 12px; border-radius: 3px;
+      background: var(--bg); border: 1px solid var(--border); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.tc.hd { background: transparent; border: none; font-weight: 600; color: var(--text); width: auto; padding: 0 6px; }
+.tc.big { width: 30px; }
+.tc.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.tc.cur { background: #fde68a; border-color: #d97706; color: #92400e; font-weight: 700; }
+.tc.set { background: #ffedd5; border-color: var(--partial); color: #9a3412; }
+.tc.bad { background: var(--bg); border-color: var(--border); color: #b0b6bd; }
+.ph { display: flex; gap: 5px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+.pcell { min-width: 34px; height: 28px; line-height: 28px; text-align: center; border-radius: 4px; font-size: 13px;
+         background: var(--bg); border: 1px solid var(--border); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.pcell.pick { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.pcell.cur { background: #fde68a; border-color: #d97706; color: #92400e; font-weight: 700; }
+.pcell.skip { color: #b0b6bd; }
+.bits { display: inline-grid; gap: 2px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>最小的必要团队：顺着决策顺序把方案读出来</h1>
+      <p class="intro">从 dp 表读出方案有两种走法。这一题的状态里本来就带着「当前考虑第几个人」，所以还原可以顺着决策的顺序正着走一遍，每到一个 i 就问一次「当初选没选它」。</p>
+
+      <h2>零、问题</h2>
+      <p>一份需求的技能清单 <code>req_skills</code>，一份备选人员名单 <code>people</code>，<code>people[i]</code> 是第 i 号人掌握的技能列表。要挑出规模最小的团队，让清单上每项技能都至少有一名成员掌握。返回人员编号，顺序任意，题目保证答案存在。</p>
+      <p>只问最小规模的话，一个整数就够了。现在要把具体是哪几个人也交出来。</p>
+
+      <h2>一、先把技能压成位</h2>
+      <p>清单里的技能依次编号 0 到 n-1，每个人掌握的技能压成一个 n 位整数 <code>arr[i]</code>，第 k 位是 1 就表示他掌握第 k 项技能。清单里没有的技能直接忽略，它不影响任何判断。</p>
+      <figure class="fig" id="figBits"></figure>
+      <p>这样「团队掌握了哪些技能」就是若干个 <code>arr</code> 按位或，凑齐全部技能等价于或出来的结果等于 <code>(1 &lt;&lt; n) - 1</code>。n 卡在 20 以内的时候这套表示很好用。</p>
+
+      <h2>二、状态与转移</h2>
+      <p>状态是 <code>(i, s)</code>：现在考虑第 i 号人，已经覆盖的技能集合是 s。<code>f(i, s)</code> 返回「从 i 号人往后挑，把 s 之外还缺的补齐，最少要几个人」。</p>
+      <p>两个边界：s 已经等于全集，返回 0；人用完了（i == m）技能还没齐，这条路无效，返回一个很大的数。转移就是「不要 i 号人」和「要 i 号人」取小。</p>
+      <pre class="code">    <pre class="code"><span class="cm">// arr[i] : 第 i 号人掌握必要技能的状况，用位表示</span>
+    <span class="cm">// f(i, s) : 用 i.... 这些人把 s 之外还没凑齐的技能补齐，至少要几个人</span>
+    <span class="kw">int</span> <span class="fn">f</span>(<span class="kw">int</span> i, <span class="kw">int</span> s) {
+        <span class="kw">if</span> (s == (1 &lt;&lt; n) - 1) <span class="kw">return</span> 0;               <span class="cm">// 技能齐了</span>
+        <span class="kw">if</span> (i == m) <span class="kw">return</span> INT_MAX;                    <span class="cm">// 人没了技能还没齐，这条路无效</span>
+        <span class="kw">if</span> (dp[i][s] != -1) <span class="kw">return</span> dp[i][s];
+        <span class="kw">int</span> p1 = f(i + 1, s);                          <span class="cm">// 可能性 1 : 不要 i 号人</span>
+        <span class="kw">int</span> p2 = INT_MAX;                              <span class="cm">// 可能性 2 : 要 i 号人</span>
+        <span class="kw">int</span> next2 = f(i + 1, s | arr[i]);
+        <span class="kw">if</span> (next2 != INT_MAX) {                        <span class="cm">// 后续有效才 +1，否则会溢出</span>
+            p2 = 1 + next2;
+        }
+        dp[i][s] = min(p1, p2);
+        <span class="kw">return</span> dp[i][s];
+    }</pre></pre>
+      <p>那个 <code>next2 != INT_MAX</code> 的判断不能省。省掉之后 <code>1 + INT_MAX</code> 会溢出成负数，看上去像「选这个人特别划算」，min 一下就把无效方案当成最优解了。</p>
+      <figure class="fig" id="figTrans"></figure>
+
+      <h2>三、还原：再顺着 i 走一遍</h2>
+      <p>表填完之后，<code>dp[i][s]</code> 存的就是 <code>f(i, s)</code>。从 <code>i = 0, s = 0</code> 出发正着走：如果 <code>dp[i][s]</code> 跟 <code>dp[i+1][s]</code> 不一样，说明「不要 i」这条路给不出最优值，当初的决策必然是选了 i 号人。</p>
+      <pre class="code">    <pre class="code"><span class="cm">// 顺着 i 从小到大再走一遍：dp[i][s] 比 dp[i+1][s] 小，说明当初选了 i 号人</span>
+    <span class="kw">int</span> size = f(0, 0);
+    vector&lt;<span class="kw">int</span>&gt; <span class="fn">ans</span>(size);
+    <span class="kw">for</span> (<span class="kw">int</span> j = 0, i = 0, s = 0; s != (1 &lt;&lt; n) - 1; i++) {
+        <span class="kw">if</span> (i == m - 1 || dp[i][s] != dp[i + 1][s]) {  <span class="cm">// i 是最后一人时必须选，否则 dp[i+1] 越界</span>
+            ans[j++] = i;
+            s |= arr[i];
+        }
+    }</pre></pre>
+      <p>选了之后要把 <code>arr[i]</code> 或进 s，否则下一轮问的还是同一个状态，循环原地打转。走完 m 个位置，答案里正好是 size 个人。</p>
+      <figure class="fig" id="figBack"></figure>
+
+      <h2>四、i 走到最后一个人时</h2>
+      <p>循环里那个 <code>i == m - 1</code> 是必须的。表只有 m 行（下标 0 到 m-1），i 等于 m-1 时 <code>dp[i+1]</code> 就越界了。语义上也说得通：i 已经是最后一个人而 s 还没凑齐，题目保证答案存在，那这个人必须选。</p>
+      <p>如果不想写这个特判，可以把表开成 m+1 行，让第 m 行整行留着哨兵值不填。这时 <code>dp[m][s]</code> 是 -1，跟任何真实答案都不等，比较自然成立。</p>
+      <p>随机样本实测：76.86% 的还原过程会真正用到这个分支，也就是最后一个人确实被选进了团队。这个分支属于常态。</p>
+
+      <h2>五、演示</h2>
+      <p>第一个演示按记忆化搜索的实际顺序点亮填过的格子。表是 (m+1) 行 × 2<sup>n</sup> 列，格子里的数是「从这一格出发还差几个人」，<code>INF</code> 表示这条路走不通。</p>
+      <div class="viz" id="vizMemo">
+        <p class="viz-title">记忆化：哪些格子真的被算过</p>
+        <div id="memoBody"></div>
+        <p class="viz-note" id="memoNote"></p>
+        <p class="viz-answer" id="memoAns"></p>
+        <div class="viz-controls">
+          <button id="memoNext">下一步</button>
+          <button id="memoAuto">自动播放</button>
+          <button id="memoReset">重置</button>
+          <label>数据 <select id="memoSel">
+            <option value="0">4 技能 6 人：选 0、1</option>
+            <option value="1">4 技能 6 人：选到最后一人</option>
+            <option value="2">4 技能 6 人：还是选最后两人</option>
+            <option value="3">3 技能 6 人：第 0 号人全会</option>
+            <option value="4">5 技能 7 人：第 6 号人全会</option>
+          </select></label>
+        </div>
+      </div>
+      <p>第二个演示是还原本身。每行给出当前 i、已覆盖的 s、<code>dp[i][s]</code>、<code>dp[i+1][s]</code>，以及由此得出的决策。</p>
+      <div class="viz" id="vizPick">
+        <p class="viz-title">还原：dp[i][s] 跟 dp[i+1][s] 不一样就选</p>
+        <div id="pickBody"></div>
+        <p class="viz-note" id="pickNote"></p>
+        <p class="viz-answer" id="pickAns"></p>
+        <div class="viz-controls">
+          <button id="pickNext">下一步</button>
+          <button id="pickAuto">自动播放</button>
+          <button id="pickReset">重置</button>
+          <label>数据 <select id="pickSel">
+            <option value="0">4 技能 6 人：选 0、1</option>
+            <option value="1">4 技能 6 人：选到最后一人</option>
+            <option value="2">4 技能 6 人：还是选最后两人</option>
+            <option value="3">3 技能 6 人：第 0 号人全会</option>
+            <option value="4">5 技能 7 人：第 6 号人全会</option>
+          </select></label>
+        </div>
+      </div>
+
+      <h2>六、写错的地方</h2>
+      <table class="complexity">
+        <tr><th>位置</th><th>写法</th><th>与正确解不一致的比例</th></tr>
+        <tr><td>还原</td><td>选了之后不写 <code>s |= arr[i]</code></td><td>100.00%</td></tr>
+        <tr><td>记忆化</td><td>哨兵用 0 而不是 -1</td><td>100.00%</td></tr>
+        <tr><td>还原</td><td>取人判据写成 <code>dp[i][s] == dp[i+1][s]</code></td><td>86.12%</td></tr>
+      </table>
+      <p>第一条是死循环级别的错：s 不变，循环条件永远不成立，i 一路加到 m 之后要么越界要么退出，答案里塞进一堆不该有的人。</p>
+      <p>第二条要留意：<code>f</code> 的返回值最小是 1（s 不等于全集时至少要一个人），0 只在「已经凑齐」这个边界出现，而那个边界是在写表之前就返回的，根本不会写进 dp。所以 0 看着像是个安全的哨兵，实际上初始全 0 会让每个状态都被当成「算过了，答案是 0」，一路返回 0。</p>
+      <p>第三条有 13.88% 蒙对，因为在那些样本里每次判据的结论恰好跟正确写法一致。</p>
+      <figure class="fig" id="figBug2"></figure>
+
+      <h2>七、表有多大</h2>
+      <p>状态数是 (m+1)·2<sup>n</sup>，但实际会算到的格子远少于这个数：很多 (i, s) 组合根本不会被递归走到。</p>
+      <figure class="fig" id="figScale"></figure>
+      <p>实测：n = 10、m = 30 时实填 15,504 / 31,744 格（48.84%）；n = 12、m = 40 时 33,230 / 167,936（19.79%）；n = 16、m = 60 时 713,798 / 3,997,696（17.86%），按 int 算整张表是 15.25 MB，耗时 19.34 ms。</p>
+      <p>人越多、每个人会的技能越少，能走到的状态就越稀疏。这也说明记忆化比「先把整张表递推填满」划算，后者不管用不用得上都得把 2<sup>n</sup> 全扫一遍。</p>
+
+      <h2>八、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>阶段</th><th>时间</th><th>空间</th></tr>
+        <tr><td>记忆化填表</td><td>O(m·2<sup>n</sup>)</td><td>O(m·2<sup>n</sup>)</td></tr>
+        <tr><td>还原方案</td><td>O(m)</td><td>O(答案人数)</td></tr>
+      </table>
+      <p>每个状态只做两次递归加一次 min，是 O(1)，状态数上界 (m+1)·2<sup>n</sup>，所以填表是 O(m·2<sup>n</sup>)。空间同量级，这是这题的主要开销。</p>
+      <p>还原只走 m 步，每步 O(1)，比填表小两个数量级。n = 16、m = 60 那边填表要 19.34 ms，还原走 60 步的量测不出来。</p>
+
+      <h2>九、总结</h2>
+      <p>凡是状态里带「当前考虑第几个」的 dp，都可以从起点正着走还原：走到一个位置，用「最优值有没有在这一步变小」判断当初的选择。省掉的是倒推时找前驱的那一步。</p>
+      <p>两个容易翻车的点：判据比较的是 <code>dp[i][s]</code> 和 <code>dp[i+1][s]</code>，别忘了后者在 i 是最后一个时会越界；还有哨兵值必须选一个「答案里不可能出现」的数。</p>
+      <p>还有一种更难的情况：最优值算出来了，方案本身还带着「字典序最小」之类的附加要求，那时候光靠 dp 表就不够了。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>最小的必要团队</td><td><a href="https://leetcode.cn/problems/smallest-sufficient-team/" target="_blank">1125. Smallest Sufficient Team</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解086【必备】动态规划中得到具体决策方案的技巧</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function rect(x, y, w, h, fill, stroke, rx) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx == null ? 4 : rx) +
+      '" fill="' + fill + '" stroke="' + (stroke || 'none') + '"/>';
+  }
+  function line(x1, y1, x2, y2, stroke, w, dash) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke +
+      '" stroke-width="' + (w || 1) + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
+  }
+  function arrow(x1, y1, x2, y2, stroke) {
+    var dx = x2 - x1, dy = y2 - y1, len = Math.sqrt(dx * dx + dy * dy) || 1;
+    var ux = dx / len, uy = dy / len, h = 7;
+    return line(x1, y1, x2 - ux * 2, y2 - uy * 2, stroke, 1.5) +
+      '<polygon points="' + x2 + ',' + y2 + ' ' + (x2 - ux * h - uy * 4) + ',' + (y2 - uy * h + ux * 4) + ' ' +
+      (x2 - ux * h + uy * 4) + ',' + (y2 - uy * h - ux * 4) + '" fill="' + stroke + '"/>';
+  }
+  function put(id, inner) { var el = document.getElementById(id); if (el) el.innerHTML = inner; }
+  function svgWrap(h, body) { return '<svg viewBox="0 0 680 ' + h + '" role="img">' + body + '</svg>'; }
+
+  var INF = 1000000000;
+  var CASES = [
+    { n: 4, arr: [3, 12, 1, 2, 4, 8], names: ['ab', 'cd', 'a', 'b', 'c', 'd'] },
+    { n: 4, arr: [3, 6, 12, 1, 8, 7], names: ['ab', 'bc', 'cd', 'a', 'd', 'abc'] },
+    { n: 4, arr: [5, 10, 3, 12, 9, 6], names: ['ac', 'bd', 'ab', 'cd', 'ad', 'bc'] },
+    { n: 3, arr: [7, 1, 2, 4, 3, 5], names: ['abc', 'a', 'b', 'c', 'ab', 'ac'] },
+    { n: 5, arr: [1, 2, 4, 8, 16, 3, 31], names: ['a', 'b', 'c', 'd', 'e', 'ab', 'abcde'] }
+  ];
+
+  // 建表：返回 dp 与填表顺序
+  function buildTeam(c) {
+    var n = c.n, m = c.arr.length, full = (1 << n) - 1;
+    var dp = [], order = [];
+    for (var i = 0; i <= m; i++) { dp.push([]); for (var s = 0; s <= full; s++) dp[i].push(-1); }
+    function f(i, s) {
+      if (s === full) return 0;
+      if (i === m) return INF;
+      if (dp[i][s] !== -1) return dp[i][s];
+      var p1 = f(i + 1, s);
+      var p2 = INF, next2 = f(i + 1, s | c.arr[i]);
+      if (next2 !== INF) p2 = 1 + next2;
+      dp[i][s] = Math.min(p1, p2);
+      order.push({ i: i, s: s, v: dp[i][s], p1: p1, p2: p2 });
+      return dp[i][s];
+    }
+    var size = f(0, 0);
+    return { dp: dp, order: order, size: size, n: n, m: m, full: full };
+  }
+  function restore(c, b) {
+    var steps = [], s = 0, ans = [];
+    for (var i = 0; s !== b.full && i < b.m; i++) {
+      var last = (i === b.m - 1);
+      var a = b.dp[i][s], bb = b.dp[i + 1][s];
+      var take = last || (a !== bb);
+      steps.push({ i: i, s: s, a: a, b: bb, take: take, last: last, ans: ans.slice() });
+      if (take) { ans.push(i); s |= c.arr[i]; }
+    }
+    return { steps: steps, ans: ans };
+  }
+  function bitStr(v, n) {
+    var r = '';
+    for (var k = n - 1; k >= 0; k--) r += ((v >> k) & 1) ? '1' : '0';
+    return r;
+  }
+
+  // ---------- 图 1：技能压成位 ----------
+  (function () {
+    var g = '';
+    g += txt(340, 20, '技能编号与人员掩码（列从左到右是位 0 到位 3）', { size: 13, fill: C.text, weight: '600' });
+    var skills = ['a', 'b', 'c', 'd'], x0 = 232, cw = 62, y0 = 46;
+    g += txt(60, y0 + 2, '技能', { size: 12, fill: C.dim, anchor: 'start' });
+    for (var k = 0; k < 4; k++) {
+      g += rect(x0 + k * cw, y0 - 16, 54, 26, C.blueBg, C.blue);
+      g += txt(x0 + k * cw + 27, y0 + 2, skills[k] + ' → 位' + k, { size: 11, fill: C.blue });
+    }
+    var people = [['0', 'ab', '1 1 0 0'], ['1', 'bc', '0 1 1 0'], ['2', 'cd', '0 0 1 1'], ['3', 'd', '0 0 0 1']];
+    g += txt(60, y0 + 44, '人员', { size: 12, fill: C.dim, anchor: 'start' });
+    for (var p = 0; p < 4; p++) {
+      var y = y0 + 40 + p * 30;
+      g += txt(x0 - 14, y + 19, 'people[' + people[p][0] + '] = ' + people[p][1], { size: 11.5, fill: C.text, anchor: 'end' });
+      var bits = people[p][2].split(' ');
+      for (var k2 = 0; k2 < 4; k2++) {
+        var on = bits[k2] === '1';
+        g += rect(x0 + k2 * cw, y + 2, 54, 24, on ? C.orangeBg : C.bg, on ? C.orange : C.border);
+        g += txt(x0 + k2 * cw + 27, y + 19, bits[k2], { size: 12, fill: on ? '#9a3412' : C.gray, weight: on ? '700' : '400' });
+      }
+    }
+    g += txt(340, y0 + 40 + 4 * 30 + 26, 'people[0] 会 a、b，所以位 0、位 1 是 1，arr[0] = 0011', { size: 11.5, fill: C.dim });
+    put('figBits', svgWrap(y0 + 40 + 4 * 30 + 46, g) + '<figcaption>每一行是一个人的 arr[i]。团队掌握了哪些技能，就是把选中的几行按位或起来。</figcaption>');
+  })();
+
+  // ---------- 图 2：两条转移与无效值 ----------
+  (function () {
+    var g = '';
+    g += txt(340, 20, 'f(i, s) 的两个出口与两种可能性', { size: 13, fill: C.text, weight: '600' });
+    g += rect(250, 40, 180, 44, C.blueBg, C.blue);
+    g += txt(340, 60, 'f(i, s)', { size: 14, fill: C.blue, weight: '600' });
+    g += txt(340, 76, 'i = 3，s = 0110，还缺 a、d', { size: 11, fill: C.dim });
+    g += rect(30, 128, 190, 50, C.bg, C.border);
+    g += txt(125, 148, '可能性 1：不要 i 号人', { size: 11.5, fill: C.text, weight: '600' });
+    g += txt(125, 166, 'f(i+1, s) = 2', { size: 11.5, fill: C.dim });
+    g += rect(460, 128, 190, 50, C.orangeBg, C.orange);
+    g += txt(555, 148, '可能性 2：要 i 号人', { size: 11.5, fill: C.text, weight: '600' });
+    g += txt(555, 166, '1 + f(i+1, s|arr[i]) = 2', { size: 11.5, fill: C.dim });
+    g += arrow(300, 84, 160, 128, C.gray);
+    g += arrow(380, 84, 540, 128, C.gray);
+    g += rect(230, 210, 220, 40, C.bg, C.border);
+    g += txt(340, 228, 'min(2, 2) = 2', { size: 13, fill: C.text, weight: '600' });
+    g += arrow(125, 178, 300, 210, C.gray);
+    g += arrow(555, 178, 380, 210, C.gray);
+    g += rect(30, 272, 250, 44, C.bg, C.border);
+    g += txt(155, 291, 's == 全集 → 0（不用人）', { size: 11.5, fill: C.text });
+    g += txt(155, 307, 'i == m 且没齐 → INT_MAX（这条路无效）', { size: 11.5, fill: C.dim });
+    g += rect(300, 272, 350, 44, C.bg, C.border);
+    g += txt(475, 291, 'INT_MAX + 1 会溢出成负数', { size: 11.5, fill: C.partial || '#b45309' });
+    g += txt(475, 307, '所以 p2 要先判断后续有效再 +1', { size: 11.5, fill: C.dim });
+    put('figTrans', svgWrap(338, g) + '<figcaption>两个出口挡在写表之前，所以 dp 里不会出现 0 这个答案，哨兵用 -1 才安全。</figcaption>');
+  })();
+
+  // ---------- 图 3：还原判据 ----------
+  (function () {
+    var c = CASES[1], b = buildTeam(c), r = restore(c, b);
+    var g = txt(340, 20, '还原：4 技能 6 人（ab bc cd a d abc），dp[0][0] = ' + b.size, { size: 13, fill: C.text, weight: '600' });
+    var cols = ['i', 's（已覆盖）', 'dp[i][s]', 'dp[i+1][s]', '决策'];
+    var xs = [40, 140, 290, 400, 525], y = 44;
+    for (var k2 = 0; k2 < 5; k2++) g += txt(xs[k2], y, cols[k2], { size: 11.5, fill: C.dim, anchor: 'start', weight: '600' });
+    for (var t = 0; t < r.steps.length; t++) {
+      var s = r.steps[t], yy = y + 26 + t * 30;
+      var on = s.take;
+      g += txt(xs[0], yy, String(s.i), { size: 12, fill: C.text, anchor: 'start' });
+      g += txt(xs[1], yy, bitStr(s.s, c.n), { size: 12, fill: C.text, anchor: 'start' });
+      g += txt(xs[2], yy, s.a >= INF ? '∞' : String(s.a), { size: 12, fill: C.text, anchor: 'start' });
+      g += txt(xs[3], yy, (s.i + 1 > b.m - 1 ? '（越界，走特判）' : (s.b >= INF ? '∞' : String(s.b))), { size: 12, fill: C.text, anchor: 'start' });
+      g += txt(xs[4], yy, s.take ? ('选 ' + s.i + '（' + c.names[s.i] + '）') : '不选', { size: 12, fill: on ? C.orange : C.dim, anchor: 'start', weight: on ? '700' : '400' });
+    }
+    var bottom = y + 26 + r.steps.length * 30;
+    g += txt(340, bottom + 16, '答案：' + r.ans.join(' '), { size: 12.5, fill: C.orange, weight: '600' });
+    put('figBack', svgWrap(bottom + 42, g) + '<figcaption>前面几行两个值相等，说明不要这个人也能达到最优；到 i = 5 时 dp[i+1] 已经越界，走的是 i == m-1 特判。</figcaption>');
+  })();
+
+  // ---------- 图 4：错法 ----------
+  (function () {
+    var data = [['不选后不并 s', 100], ['哨兵用 0', 100], ['判据取反', 86.12]];
+    var x0 = 150, y0 = 46, w = 380, h = 140, g = '';
+    g += txt(340, 20, '三种写法与正确解不一致的比例（随机约 3500 组）', { size: 13, fill: C.text, weight: '600' });
+    g += line(x0, y0, x0, y0 + h, C.border, 1);
+    g += line(x0, y0 + h, x0 + w, y0 + h, C.border, 1);
+    for (var t = 0; t <= 4; t++) {
+      var v = t * 25, y = y0 + h - h * v / 100;
+      g += line(x0 - 4, y, x0 + w, y, C.border, 1);
+      g += txt(x0 - 10, y + 4, v + '%', { size: 10.5, fill: C.dim, anchor: 'end' });
+    }
+    var bw = 76, gap = (w - 3 * bw) / 4;
+    for (var i = 0; i < 3; i++) {
+      var bx = x0 + gap + i * (bw + gap);
+      var bh = h * data[i][1] / 100;
+      g += rect(bx, y0 + h - bh, bw, bh, data[i][1] === 100 ? C.orangeBg : C.blueBg, data[i][1] === 100 ? C.orange : C.blue);
+      g += txt(bx + bw / 2, y0 + h - bh - 6, data[i][1] + '%', { size: 11, fill: C.text, weight: '600' });
+      g += txt(bx + bw / 2, y0 + h + 16, data[i][0], { size: 10.5, fill: C.dim });
+    }
+    put('figBug2', svgWrap(y0 + h + 40, g) + '<figcaption>前两条是必错，第三条靠数据蒙对的概率还有一成多。</figcaption>');
+  })();
+
+  // ---------- 图 5：表的规模 ----------
+  (function () {
+    var data = [['n=10 m=30', 15504, 31744], ['n=12 m=40', 33230, 167936], ['n=16 m=60', 713798, 3997696]];
+    var g = '';
+    g += txt(340, 20, '实填格数与全表规模', { size: 13, fill: C.text, weight: '600' });
+    var x0 = 92, y0 = 46, w = 500, h = 150;
+    function lg(v) { return Math.log(v) / Math.LN10; }
+    var lo = 4, hi = 7;
+    function yy(v) { return y0 + h - h * (lg(v) - lo) / (hi - lo); }
+    g += line(x0, y0, x0, y0 + h, C.border, 1);
+    g += line(x0, y0 + h, x0 + w, y0 + h, C.border, 1);
+    var sup = ['', '', '', '', '⁴', '⁵', '⁶', '⁷'];
+    for (var e = lo; e <= hi; e++) {
+      g += line(x0 - 4, yy(Math.pow(10, e)), x0 + w, yy(Math.pow(10, e)), C.border, 1);
+      g += txt(x0 - 10, yy(Math.pow(10, e)) + 4, '10' + sup[e], { size: 10.5, fill: C.dim, anchor: 'end' });
+    }
+    var bw = 56;
+    for (var i = 0; i < 3; i++) {
+      var gx = x0 + 50 + i * 160;
+      var h1 = y0 + h - yy(data[i][1]), h2 = y0 + h - yy(data[i][2]);
+      g += rect(gx, yy(data[i][2]), bw, h2, C.bg, C.border);
+      g += rect(gx + bw + 6, yy(data[i][1]), bw, h1, C.orangeBg, C.orange);
+      g += txt(gx + bw + 6 + bw / 2, yy(data[i][1]) - 7, String(data[i][1]), { size: 10, fill: C.orange, weight: '600' });
+      g += txt(gx + bw / 2, yy(data[i][2]) - 7, String(data[i][2]), { size: 10, fill: C.dim });
+      g += txt(gx + bw + 3, y0 + h + 16, data[i][0], { size: 10.5, fill: C.dim });
+      g += txt(gx + bw + 3, y0 + h + 32, (100.0 * data[i][1] / data[i][2]).toFixed(2) + '%', { size: 10.5, fill: C.orange });
+    }
+    g += txt(340, y0 + h + 54, 'n = 16、m = 60 时整张表按 int 算 15.25 MB，耗时 19.34 ms', { size: 11.5, fill: C.dim });
+    put('figScale', svgWrap(y0 + h + 74, g) + '<figcaption>灰柱是全表规模，橙柱是记忆化真正算过的格子。人越多、技能越分散，比例越低。</figcaption>');
+  })();
+
+  // ============ 演示 1：记忆化填表 ============
+  function memoHTML(b, upto) {
+    var h = '<div class="tbl" style="grid-template-columns:auto repeat(' + (b.full + 1) + ',22px)">';
+    h += '<div class="tc hd"></div>';
+    for (var s = 0; s <= b.full; s++) h += '<div class="tc hd" style="font-size:9px">' + s + '</div>';
+    for (var i = 0; i <= b.m; i++) {
+      h += '<div class="tc hd">i=' + i + '</div>';
+      for (var s2 = 0; s2 <= b.full; s2++) {
+        var v = b.dp[i][s2], cls = 'tc';
+        var isCur = (upto >= 0 && b.order[upto] && b.order[upto].i === i && b.order[upto].s === s2);
+        if (isCur) cls += ' cur';
+        else if (v !== -1) cls += ' on';
+        h += '<div class="' + cls + '">' + (v === -1 ? '·' : (v >= INF ? '∞' : v)) + '</div>';
+      }
+    }
+    return h + '</div>';
+  }
+  (function () {
+    var body = document.getElementById('memoBody'), note = document.getElementById('memoNote'),
+      ansEl = document.getElementById('memoAns'), nxt = document.getElementById('memoNext'),
+      auto = document.getElementById('memoAuto'), rst = document.getElementById('memoReset'),
+      sel = document.getElementById('memoSel');
+    var st = null, timer = null;
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      st = { c: CASES[+sel.value], step: -1 };
+      st.b = buildTeam(st.c);
+      draw();
+    }
+    function draw() {
+      if (st.step < 0) {
+        body.innerHTML = memoHTML(st.b, -1);
+        note.innerHTML = '表是 ' + (st.b.m + 1) + ' 行 × ' + (st.b.full + 1) + ' 列，共 ' + ((st.b.m + 1) * (st.b.full + 1)) +
+          ' 格。点「下一步」按递归顺序点亮。';
+        ansEl.textContent = '';
+        nxt.disabled = false;
+        return;
+      }
+      var o = st.b.order[st.step];
+      body.innerHTML = memoHTML(st.b, st.step);
+      note.innerHTML = '第 ' + (st.step + 1) + ' 个算完的状态：f(' + o.i + ', ' + o.s + ')，s = ' + bitStr(o.s, st.c.n) +
+        ' → 不选 ' + o.i + ' 号人得 ' + (o.p1 >= INF ? '∞' : o.p1) + '，选他得 ' + (o.p2 >= INF ? '∞' : o.p2) +
+        '，取 ' + (o.v >= INF ? '∞' : o.v);
+      if (st.step === st.b.order.length - 1) {
+        ansEl.textContent = '填完：dp[0][0] = ' + st.b.size + '，实填 ' + st.b.order.length + ' / ' + ((st.b.m + 1) * (st.b.full + 1)) + ' 格';
+      } else ansEl.textContent = '';
+      nxt.disabled = (st.step >= st.b.order.length - 1);
+      if (nxt.disabled && timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+    }
+    nxt.addEventListener('click', function () { if (st.step < st.b.order.length - 1) { st.step++; draw(); } });
+    auto.addEventListener('click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step < st.b.order.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 220);
+    });
+    rst.addEventListener('click', reset);
+    sel.addEventListener('change', reset);
+    reset();
+  })();
+
+  // ============ 演示 2：还原 ============
+  (function () {
+    var body = document.getElementById('pickBody'), note = document.getElementById('pickNote'),
+      ansEl = document.getElementById('pickAns'), nxt = document.getElementById('pickNext'),
+      auto = document.getElementById('pickAuto'), rst = document.getElementById('pickReset'),
+      sel = document.getElementById('pickSel');
+    var st = null, timer = null;
+    function peopleHTML(c, picks, cur, s) {
+      var h = '<div class="ph">';
+      for (var i = 0; i < c.arr.length; i++) {
+        var cls = 'pcell';
+        if (picks.indexOf(i) >= 0) cls += ' pick';
+        else if (i === cur) cls += ' cur';
+        else if (i < cur) cls += ' skip';
+        h += '<span class="' + cls + '" title="' + bitStr(c.arr[i], c.n) + '">' + i + '</span>';
+      }
+      h += '</div><div class="ph">';
+      for (var i2 = 0; i2 < c.arr.length; i2++) {
+        h += '<span class="pcell" style="min-width:34px;font-size:11px;border:none;background:transparent">' + esc(c.names[i2]) + '</span>';
+      }
+      h += '</div>';
+      h += '<div class="ph" style="font-size:13px;color:var(--text-dim)">已覆盖 s = ' + bitStr(s, c.n) + '</div>';
+      return h;
+    }
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      st = { c: CASES[+sel.value], step: -1 };
+      st.b = buildTeam(st.c);
+      st.r = restore(st.c, st.b);
+      draw();
+    }
+    function draw() {
+      if (st.step < 0) {
+        body.innerHTML = peopleHTML(st.c, [], -1, 0);
+        note.innerHTML = 'dp[0][0] = ' + st.b.size + '，要找 ' + st.b.size + ' 个人。点「下一步」从 i = 0 开始问。';
+        ansEl.textContent = '';
+        nxt.disabled = false;
+        return;
+      }
+      var s = st.r.steps[st.step];
+      body.innerHTML = peopleHTML(st.c, s.ans, s.i, s.s);
+      var right = (s.i + 1 > st.b.m - 1) ? '（表只有 ' + st.b.m + ' 行，走 i == m-1 特判）' : String(s.b);
+      note.innerHTML = 'i = ' + s.i + '：dp[' + s.i + '][' + s.s + '] = ' + s.a + '，dp[' + (s.i + 1) + '][' + s.s + '] = ' + right +
+        ' → ' + (s.take ? ('两者不同，选 ' + s.i + ' 号人（' + esc(st.c.names[s.i]) + '）') : '两者相同，不选');
+      if (st.step === st.r.steps.length - 1) {
+        ansEl.textContent = '答案：' + st.r.ans.join(' ') + '（共 ' + st.r.ans.length + ' 人）';
+      } else ansEl.textContent = '';
+      nxt.disabled = (st.step >= st.r.steps.length - 1);
+      if (nxt.disabled && timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+    }
+    nxt.addEventListener('click', function () { if (st.step < st.r.steps.length - 1) { st.step++; draw(); } });
+    auto.addEventListener('click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step < st.r.steps.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 700);
+    });
+    rst.addEventListener('click', reset);
+    sel.addEventListener('change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

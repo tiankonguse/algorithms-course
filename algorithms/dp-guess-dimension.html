@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>贿赂怪兽：状态装钱还是装能力</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.mtab { display: inline-grid; gap: 3px; margin: 8px 0 2px; }
+.mcell { width: 38px; height: 30px; line-height: 30px; text-align: center; font-size: 13px; border-radius: 4px;
+         background: var(--bg); border: 1px solid var(--border); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.mcell.head { background: transparent; border-color: transparent; font-weight: 600; color: var(--text); }
+.mcell.cur { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.mcell.src { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.mcell.ans { background: #dcfce7; border-color: #16a34a; color: #14532d; font-weight: 600; }
+.mrow { display: flex; gap: 3px; margin-bottom: 3px; }
+.mlabel { width: 54px; font-size: 12px; color: var(--text-dim); line-height: 30px; }
+.bar { height: 22px; border-radius: 4px; background: #dbeafe; border: 1px solid #2563eb; }
+.bar.over { background: #ffedd5; border-color: #ea580c; }
+.barwrap { position: relative; height: 30px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; }
+.barlbl { font-size: 12px; color: var(--text-dim); margin: 2px 0 10px; }
+.scale { font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>贿赂怪兽：状态装钱还是装能力</h1>
+      <p class="intro">同一套转移写两遍：一遍让 dp 的两个下标是「怪兽编号 + 钱」，另一遍是「怪兽编号 + 能力」。代码几乎一样，可表能不能开出来，差着好几个数量级。选哪一维，看两个和谁小。</p>
+
+      <h2>零、一只怪兽，两个选择</h2>
+      <p>从 1 号怪兽走到 n 号。你的能力一开始是 0，当前能力小于第 i 只怪兽的能力 <code>a[i]</code>，就必须花 <code>b[i]</code> 的钱贿赂它；当前能力大于等于 <code>a[i]</code>，可以直接走过去，能力不变。</p>
+      <p>能走过去的时候也可以照样贿赂，花的钱照样掏，但它会加入你，<code>a[i]</code> 直接累加到能力上。</p>
+      <p>问通过所有怪兽最少花多少钱。</p>
+      <p>先看一个小例子。<code>a = [2, 10, 3]</code>，<code>b = [1, 4, 2]</code>。三只怪兽都不贿赂，能力一直是 0，第一只就打不过，所以必须掏钱。</p>
+      <figure class="fig" id="fig-problem">
+        <figcaption>图 1　三只怪兽、两种选择。第一只打不动只能贿赂，后面的打动了就有两条路</figcaption>
+      </figure>
+      <p>这里有个细节：能走过去而不贿赂，能力不会涨。所以「现在能力够」不等于「以后一直够」，后面还可能碰到更大的怪兽。</p>
+
+      <h2>一、先想「钱」这一维</h2>
+      <p>最自然的想法是把「花了多少钱」当状态。设 <code>dp[i][j]</code> 是：花的钱不超过 <code>j</code>，通过前 <code>i</code> 只怪兽能达到的最大能力。</p>
+      <p>为什么记「最大能力」？因为能力只有好处没有坏处：同样的钱能到 100 的能力，就比只到 50 强，以后需要的贿赂只会更少。所以每个钱数下只需要保留最大的那一个能力。</p>
+      <p>转移两条，二选一取大：</p>
+      <p>1）不贿赂。<code>dp[i-1][j] &gt;= a[i]</code> 才走得过去，能力不变。</p>
+      <p>2）贿赂。<code>dp[i-1][j - b[i]]</code> 有解，能力变成 <code>dp[i-1][j - b[i]] + a[i]</code>。</p>
+      <p>走不通的格子记成一个不可能的数，最后从前往后扫 <code>dp[n][*]</code>，第一个说得通的钱数就是答案。</p>
+          <pre class="code"><span class="cm">// dp[i][j] : 花的钱不超过 j，通过前 i 只怪兽，能达到的最大能力</span>
+    <span class="cm">// 达不到就记成一个不可能的数</span>
+    <span class="kw">const</span> <span class="kw">long</span> <span class="kw">long</span> MINF = LLONG_MIN / 4;
+
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt;= sumB; j++) {
+            dp[i][j] = MINF;
+            <span class="kw">if</span> (dp[i - 1][j] &gt;= a[i]) {                  <span class="cm">// 能力够，直接走过去</span>
+                dp[i][j] = dp[i - 1][j];
+            }
+            <span class="kw">if</span> (j - b[i] &gt;= 0 &amp;&amp; dp[i - 1][j - b[i]] != MINF) {   <span class="cm">// 贿赂它，能力累加</span>
+                dp[i][j] = max(dp[i][j], dp[i - 1][j - b[i]] + a[i]);
+            }
+        }
+    }
+    <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt;= sumB; j++) {
+        <span class="kw">if</span> (dp[n][j] != MINF) { <span class="kw">return</span> j; }              <span class="cm">// 第一个说得通的钱数就是答案</span>
+    }</pre>
+      <p>第一行 <code>dp[0][j]</code> 全是 0：0 只怪兽都通过了，能力还是 0。这个初值不少写，写成「不可能」会让所有格子都传不下去。</p>
+
+      <h2>二、压缩成一维，j 必须从大到小</h2>
+      <p>第 i 行只用到第 i-1 行，一维就够。但要记住 <code>dp[j]</code> 在更新前代表「上一只怪兽结束时、钱不超过 j」。</p>
+      <p><code>j</code> 从 <code>sumB</code> 往 0 走，读到的 <code>dp[j - b[i]]</code> 还没被本轮改过，是上一只怪兽的值。反过来从小到大走，读到的就是本轮刚写进去的，同一只怪兽会被反复贿赂，答案直接偏小。</p>
+      <figure class="fig" id="fig-zip">
+        <figcaption>图 2　同一行数组，j 倒序读到的还是旧值；正序读到的是本轮刚写的，同一只怪兽被贿赂了两次</figcaption>
+      </figure>
+          <pre class="code"><span class="cm">// 只留一行：j 从大到小走，用到的 dp[j - b[i]] 还是上一只怪兽留下的</span>
+    vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt; <span class="fn">dp</span>(sumB + 1, 0);
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        <span class="kw">for</span> (<span class="kw">int</span> j = sumB; j &gt;= 0; j--) {
+            <span class="kw">long</span> <span class="kw">long</span> cur = MINF;
+            <span class="kw">if</span> (dp[j] &gt;= a[i]) {
+                cur = dp[j];
+            }
+            <span class="kw">if</span> (j - b[i] &gt;= 0 &amp;&amp; dp[j - b[i]] != MINF) {
+                cur = max(cur, dp[j - b[i]] + a[i]);
+            }
+            dp[j] = cur;
+        }
+    }</pre>
+      <p>实测这个错法抓得干干净净：两万组随机数据里，正序版本和正确版本答案不同的比例是 100.00%。</p>
+
+      <h2>三、换一维：把「能力」当状态</h2>
+      <p>现在换个问题问自己：如果钱的范围大得离谱，钱这一维开不出来呢？那就把状态换成能力。</p>
+      <p>设 <code>dp[j]</code> 是：能力正好是 <code>j</code>，并且已经能通过前面所有怪兽，最少要花多少钱。这次每个能力保留的是「花得最少」的那一个。</p>
+      <p>转移同样两条，取小：</p>
+      <p>1）不贿赂。<code>j &gt;= a[i]</code> 时可以直接过，钱不变。</p>
+      <p>2）贿赂。能力从 <code>j - a[i]</code> 涨上来，代价是 <code>b[i]</code>。</p>
+          <pre class="code"><span class="cm">// 换一维：dp[j] 是「能力正好是 j 时，至少得花多少钱」</span>
+    vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt; <span class="fn">dp</span>(sumA + 1, INF);
+    dp[0] = 0;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        <span class="kw">for</span> (<span class="kw">int</span> j = sumA; j &gt;= 0; j--) {
+            <span class="kw">long</span> <span class="kw">long</span> cur = INF;
+            <span class="kw">if</span> (j &gt;= a[i] &amp;&amp; dp[j] != INF) {              <span class="cm">// 打得动就可以不花这笔钱</span>
+                cur = dp[j];
+            }
+            <span class="kw">if</span> (j - a[i] &gt;= 0 &amp;&amp; dp[j - a[i]] != INF) {   <span class="cm">// 打不动必须贿赂，能力涨 a[i]</span>
+                cur = min(cur, dp[j - a[i]] + b[i]);
+            }
+            dp[j] = cur;
+        }
+    }</pre>
+      <p>这次初值是 <code>dp[0] = 0</code>（0 只怪兽、能力 0、花钱 0），其余是无穷大。收尾也不一样：一边从前往后扫，找第一个有解的钱数；另一边在 <code>dp[*]</code> 里取最小值。</p>
+      <figure class="fig" id="fig-two-dim">
+        <figcaption>图 3　两套定义对照。左边下标是钱、格子里装能力、取最大；右边下标是能力、格子里装钱、取最小</figcaption>
+      </figure>
+
+      <h2>四、选哪一维：看哪个和更小</h2>
+      <p>两套代码开销只跟「状态那个下标的取值范围」有关：钱做状态是 <code>sumB + 1</code> 格，能力做状态是 <code>sumA + 1</code> 格，其中 <code>sumA</code> 是所有 <code>a[i]</code> 的和、<code>sumB</code> 是所有 <code>b[i]</code> 的和。</p>
+      <p>题目只说 <code>a[i]</code> 的范围很大、<code>b[i]</code> 的范围不大，那就该往钱做状态这条路上想。反过来一样。要盯的是两个「和」有多大，单个数的范围说明不了什么。</p>
+      <p>拿两组数据量一下，n 都是 1000：</p>
+      <p>数据甲，<code>a[i]</code> 取 10<sup>8</sup> 到 10<sup>9</sup>、<code>b[i]</code> 取 1 到 100。这时 <code>sumB = 49309</code>，钱做状态的表 49310 格、0.38 MB，跑完 57.7 ms；而 <code>sumA = 548971251697</code>，能力做状态的表要 5.5×10<sup>11</sup> 格，约 4090 GB，根本开不出来。</p>
+      <p>数据乙把两个范围对调。这时 <code>sumA = 49008</code>，能力做状态 0.37 MB、25.6 ms 就出结果；钱做状态的表要 3.9×10<sup>11</sup> 格。</p>
+      <figure class="fig" id="fig-scale">
+        <figcaption>图 4　同一道题、两组数据，两种状态维度的表规模（对数刻度）。选错那一维，差的是「能不能开出来」</figcaption>
+      </figure>
+      <p>顺带说一句内存。二维版在 n=300、<code>sumB=15898</code> 时表占 36.5 MB、7.7 ms；压缩成一行只有 0.12 MB、3.0 ms。这已经不只是常数倍的差距：n 一大就是能不能开出来的区别。</p>
+
+      <h2>五、演示：两种状态定义，逐格填表</h2>
+      <p>下面这张表把「钱做状态」和「能力做状态」的填表过程逐格走一遍。橙色是当前格，蓝色是它的来源。前两组的两个状态维度规模相当，第三组故意让能力明显更大，看两种定义的表格子数差多少。</p>
+      <div class="viz" id="viz-fill">
+        <p class="viz-title">两种状态定义，逐格填表</p>
+        <div class="viz-controls">
+          <label>数据 <select class="vc-case"></select></label>
+          <label>状态维度 <select class="vc-mode">
+            <option value="money">钱做状态（装最大能力）</option>
+            <option value="ability">能力做状态（装最少钱）</option>
+          </select></label>
+          <button class="vc-next">下一步</button>
+          <button class="vc-auto">自动播放</button>
+          <button class="vc-reset">重置</button>
+        </div>
+        <div class="vc-body"></div>
+        <p class="viz-note vc-note"></p>
+        <p class="viz-answer vc-answer"></p>
+      </div>
+
+      <h2>六、演示：数据范围一给，表就知道能不能开</h2>
+      <p>把 n 和两个值域的上限调一调，两种状态维度的表规模立刻出来。这里按最坏情况估：<code>sumA</code> 不超过 <code>n × a 上限</code>，<code>sumB</code> 不超过 <code>n × b 上限</code>。橙色的那条已经越过常规内存能承受的位置。</p>
+      <div class="viz" id="viz-scale">
+        <p class="viz-title">两种状态维度的表规模</p>
+        <div class="viz-controls">
+          <label>n <select class="vs-n">
+            <option>1000</option><option>10000</option><option>100000</option><option selected>1000000</option>
+          </select></label>
+          <label>a 上限 <select class="vs-a">
+            <option value="10">10</option><option value="10000">10⁴</option><option value="1000000000" selected>10⁹</option>
+          </select></label>
+          <label>b 上限 <select class="vs-b">
+            <option value="10" selected>10</option><option value="10000">10⁴</option><option value="1000000000">10⁹</option>
+          </select></label>
+        </div>
+        <div class="vs-body"></div>
+        <p class="viz-answer vs-answer"></p>
+      </div>
+
+      <h2>七、写错的地方</h2>
+      <p>1）压缩版 <code>j</code> 正序遍历，同一只怪兽被反复贿赂。抓取率 100.00%，两万组里一组都躲不掉。</p>
+      <p>2）「能力够就一律不贿赂」。这个看着像贪心，其实不成立：多花一笔钱换来的能力，可能省掉后面更大的一笔。两万组随机数据里抓出 8.64%。它抓得少不代表它对，只说明随机小数据里很少出现「现在够、以后不够」的弯子。</p>
+      <p>3）把 <code>dp</code> 里的值声明成 32 位。数据甲里 dp 存的是能力，能累加到 5.5×10<sup>11</sup>，是 int 上限的 255.6 倍；数据乙里 dp 存的是钱，能累加到 5.2×10<sup>11</sup>，241.6 倍。</p>
+      <p>4）第一行初值写错。钱做状态时 <code>dp[0][j]</code> 全是 0，能力做状态时只有 <code>dp[0][0]</code> 是 0。写成同一个不可能值，整张表都传不下去。</p>
+      <p>四个实现与暴力对拍过 6000 组随机数据（n 不超过 9，三种值域配比），0 处不一致。</p>
+
+      <h2>八、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>状态维度</th><th>状态数</th><th>单次转移</th><th>时间</th><th>空间</th></tr>
+        <tr><td>钱（装最大能力）</td><td>(n+1)×(sumB+1)</td><td>O(1)</td><td>O(n·sumB)</td><td>O(n·sumB)，压缩后 O(sumB)</td></tr>
+        <tr><td>能力（装最少钱）</td><td>(n+1)×(sumA+1)</td><td>O(1)</td><td>O(n·sumA)</td><td>O(n·sumA)，压缩后 O(sumA)</td></tr>
+      </table>
+      <p>空间上压缩版把一维砍掉，时间上一维枚举的次数没变，所以实际能跑多大只由「选中的那个和」决定。上面两组数据里能用的那一维都在 5 万格上下，用不了的那一维都在 10<sup>11</sup> 格量级。</p>
+
+      <h2>九、总结</h2>
+      <p>要带走的是三件事。第一，状态维度不唯一：同一道题可以装钱也可以装能力，装哪个由两个和的大小决定。第二，两种定义下「值」的量级也跟着换：装钱时格子里是能力，装能力时格子里是钱，两边都可能到 10<sup>11</sup> 量级，要用 64 位。第三，压缩成一维以后，枚举顺序由「转移用的是不是本轮的格子」决定，这里必须倒序。</p>
+      <p>后面两道题会遇到另一种情况：整个 dp 表格都摆不下，只能换一个完全不同的做法。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>牛客</td><td><a href="https://www.nowcoder.com/practice/736e12861f9746ab8ae064d4aae2d5a9" target="_blank">贿赂怪兽</a></td><td>nowcoder.com</td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解087【必备】动态规划中根据数据量猜解法的技巧</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var NS = 'http://www.w3.org/2000/svg';
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function el(tag, attrs, text) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) { n.setAttribute(k, attrs[k]); }
+    if (text !== undefined && text !== null) { n.textContent = text; }
+    return n;
+  }
+  function svgRoot(id, h) {
+    var box = document.getElementById(id);
+    var s = el('svg', { viewBox: '0 0 680 ' + h, width: '100%', role: 'img' });
+    s.style.maxWidth = '680px';
+    s.style.display = 'block';
+    box.appendChild(s);
+    return s;
+  }
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', blueSoft: '#eef4ff', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', soft: '#f6f7f9', border: '#e6e8eb', text: '#1f2937', dim: '#6b7280', green: '#16a34a' };
+
+  // ---------- 图 1 两种选择 ----------
+  (function () {
+    var s = svgRoot('fig-problem', 210);
+    var a = [2, 10, 3], b = [1, 4, 2];
+    var x0 = 40, w = 180, y = 70, bh = 46;
+    for (var i = 0; i < 3; i++) {
+      var x = x0 + i * (w + 20);
+      s.appendChild(el('text', { x: x + w / 2, y: y - 26, 'text-anchor': 'middle', 'font-size': 13, fill: C.text },
+        '怪兽 ' + (i + 1) + '　能力 ' + a[i] + '　钱 ' + b[i]));
+      s.appendChild(el('rect', { x: x, y: y, width: w, height: bh, rx: 6, fill: C.blueSoft, stroke: C.blue }));
+      s.appendChild(el('text', { x: x + w / 2, y: y + 29, 'text-anchor': 'middle', 'font-size': 13, fill: C.text },
+        i === 0 ? '打不动，必须贿赂' : '打得动，可以走过'));
+    }
+    s.appendChild(el('text', { x: x0 + w / 2, y: 40, 'text-anchor': 'middle', 'font-size': 12, fill: C.dim }, '能力 0 起手'));
+    // 箭头
+    for (var j = 0; j < 2; j++) {
+      var xf = x0 + j * (w + 20) + w, xt = x0 + (j + 1) * (w + 20);
+      s.appendChild(el('line', { x1: xf + 4, y1: y + bh / 2, x2: xt - 4, y2: y + bh / 2, stroke: C.gray, 'stroke-width': 1.5 }));
+      s.appendChild(el('polygon', { points: (xt - 4) + ',' + (y + bh / 2) + ' ' + (xt - 11) + ',' + (y + bh / 2 - 4) + ' ' + (xt - 11) + ',' + (y + bh / 2 + 4), fill: C.gray }));
+    }
+    s.appendChild(el('text', { x: 40, y: 160, 'font-size': 12.5, fill: C.dim }, '贿赂拿到 1 只：能力变成 2，花了 1'));
+    s.appendChild(el('text', { x: 40, y: 180, 'font-size': 12.5, fill: C.orange }, '不贿赂也行：这只的钱省了，但能力停在原处，第三只 3 还是打不动'));
+  })();
+
+  // ---------- 图 2 j 倒序 ----------
+  (function () {
+    var s = svgRoot('fig-zip', 250);
+    var top = 40, h = 34, w = 46;
+    function row(y, arr, mark, title, color, bg) {
+      s.appendChild(el('text', { x: 30, y: y - 8, 'font-size': 12.5, fill: C.dim }, title));
+      for (var i = 0; i < arr.length; i++) {
+        var x = 200 + i * (w + 6);
+        var isMark = mark.indexOf(i) >= 0;
+        s.appendChild(el('rect', { x: x, y: y, width: w, height: h, rx: 4,
+          fill: isMark ? bg : C.soft, stroke: isMark ? color : C.border }));
+        s.appendChild(el('text', { x: x + w / 2, y: y + 22, 'text-anchor': 'middle', 'font-size': 12.5,
+          fill: isMark ? color : C.dim, 'font-weight': isMark ? 600 : 400 }, arr[i]));
+      }
+    }
+    row(top, ['0', '3', '3', '7', '7', '7'], [], '更新前的 dp', C.blue, C.blueBg);
+    row(top + 74, ['0', '3', '3', '7', '7', '7'], [3], '倒序：读 dp[j-b[i]]，还是旧值', C.blue, C.blueBg);
+    row(top + 148, ['0', '3', '6', '10', '13', '13'], [3, 4, 5], '正序：刚写过的格子被再读一次', C.orange, C.orangeBg);
+    s.appendChild(el('text', { x: 30, y: top + 108, 'font-size': 12.5, fill: C.blue }, 'j 从 5 往 0'));
+    s.appendChild(el('text', { x: 30, y: top + 182, 'font-size': 12.5, fill: C.orange }, 'j 从 0 往 5'));
+    s.appendChild(el('text', { x: 30, y: 232, 'font-size': 12, fill: C.dim }, '例：b[i] = 1，某个格子只该被这只怪兽加一次 a[i]，正序里会被加两三次'));
+  })();
+
+  // ---------- 图 3 两套定义 ----------
+  (function () {
+    var s = svgRoot('fig-two-dim', 260);
+    // 左：钱做状态
+    s.appendChild(el('text', { x: 40, y: 30, 'font-size': 13, fill: C.blue, 'font-weight': 600 }, '下标 = 怪兽编号 + 钱'));
+    for (var j = 0; j < 4; j++) {
+      s.appendChild(el('text', { x: 56 + j * 46, y: 56, 'text-anchor': 'middle', 'font-size': 12, fill: C.dim }, 'j=' + j));
+    }
+    for (var i = 0; i < 3; i++) {
+      s.appendChild(el('text', { x: 20, y: 88 + i * 34, 'font-size': 12, fill: C.dim }, 'i=' + i));
+      for (var k = 0; k < 4; k++) {
+        s.appendChild(el('rect', { x: 38 + k * 46, y: 72 + i * 34, width: 40, height: 26, rx: 4, fill: C.blueSoft, stroke: C.blue }));
+        s.appendChild(el('text', { x: 58 + k * 46, y: 90 + i * 34, 'text-anchor': 'middle', 'font-size': 12, fill: '#1e3a8a' }, '能力'));
+      }
+    }
+    s.appendChild(el('text', { x: 20, y: 196, 'font-size': 12.5, fill: C.dim }, '钱越少越好 → 格子里取「最大能力」'));
+    s.appendChild(el('text', { x: 20, y: 216, 'font-size': 12.5, fill: C.blue }, '表宽 = sumB + 1'));
+    // 右：能力做状态
+    s.appendChild(el('text', { x: 400, y: 30, 'font-size': 13, fill: C.orange, 'font-weight': 600 }, '下标 = 怪兽编号 + 能力'));
+    for (var j2 = 0; j2 < 4; j2++) {
+      s.appendChild(el('text', { x: 416 + j2 * 46, y: 56, 'text-anchor': 'middle', 'font-size': 12, fill: C.dim }, 'j=' + j2));
+    }
+    for (var i2 = 0; i2 < 3; i2++) {
+      s.appendChild(el('text', { x: 380, y: 88 + i2 * 34, 'font-size': 12, fill: C.dim }, 'i=' + i2));
+      for (var k2 = 0; k2 < 4; k2++) {
+        s.appendChild(el('rect', { x: 398 + k2 * 46, y: 72 + i2 * 34, width: 40, height: 26, rx: 4, fill: C.orangeBg, stroke: C.orange }));
+        s.appendChild(el('text', { x: 418 + k2 * 46, y: 90 + i2 * 34, 'text-anchor': 'middle', 'font-size': 12, fill: '#9a3412' }, '钱数'));
+      }
+    }
+    s.appendChild(el('text', { x: 380, y: 196, 'font-size': 12.5, fill: C.dim }, '能力越高越好 → 格子里取「最少钱」'));
+    s.appendChild(el('text', { x: 380, y: 216, 'font-size': 12.5, fill: C.orange }, '表宽 = sumA + 1'));
+  })();
+
+  // ---------- 图 4 表规模 ----------
+  (function () {
+    var s = svgRoot('fig-scale', 268);
+    var data = [
+      { name: '数据甲　钱做状态', v: 49310, ok: true },
+      { name: '数据甲　能力做状态', v: 5.5e11, ok: false },
+      { name: '数据乙　钱做状态', v: 5.2e11, ok: false },
+      { name: '数据乙　能力做状态', v: 49009, ok: true }
+    ];
+    var x0 = 165, x1 = 640, y = 46, gap = 40, bh = 22;
+    function px(v) { return x0 + (x1 - x0) * (Math.log10(v) / 12); }
+    for (var d = 0; d <= 12; d += 3) {
+      var x = px(Math.pow(10, d));
+      s.appendChild(el('line', { x1: x, y1: y - 14, x2: x, y2: y + 4 * gap - 2, stroke: C.border }));
+      s.appendChild(el('text', { x: x, y: y + 4 * gap + 14, 'text-anchor': 'middle', 'font-size': 11.5, fill: C.dim }, '10^' + d));
+    }
+    var limit = px(2.7e8);
+    s.appendChild(el('line', { x1: limit, y1: y - 20, x2: limit, y2: y + 4 * gap - 2, stroke: C.orange, 'stroke-dasharray': '4 3' }));
+    s.appendChild(el('text', { x: limit, y: y - 26, 'text-anchor': 'middle', 'font-size': 11.5, fill: C.orange }, '内存红线'));
+    for (var i = 0; i < data.length; i++) {
+      var yy = y + i * gap;
+      s.appendChild(el('text', { x: 12, y: yy + 16, 'font-size': 12.5, fill: C.text }, data[i].name));
+      var xw = px(data[i].v) - x0;
+      s.appendChild(el('rect', { x: x0, y: yy, width: Math.max(xw, 2), height: bh, rx: 4,
+        fill: data[i].ok ? C.blueBg : C.orangeBg, stroke: data[i].ok ? C.blue : C.orange }));
+      s.appendChild(el('text', { x: Math.min(px(data[i].v) + 8, 560), y: yy + 16, 'font-size': 12, fill: data[i].ok ? C.blue : C.orange },
+        data[i].ok ? '能开' : '开不出来'));
+    }
+    s.appendChild(el('text', { x: 12, y: y + 4 * gap + 40, 'font-size': 12, fill: C.dim }, '横轴是格子数（对数），一个格子 8 字节；超过 10^8 量级基本只能想想'));
+  })();
+
+  // ---------- 演示 A：逐格填表 ----------
+  (function () {
+    var CASES = [
+      { a: [0, 2, 10, 3], b: [0, 1, 4, 2], name: 'a=[2,10,3] b=[1,4,2]' },
+      { a: [0, 1, 5, 2, 6], b: [0, 3, 1, 4, 2], name: 'a=[1,5,2,6] b=[3,1,4,2]' },
+      { a: [0, 4, 4, 4], b: [0, 2, 2, 2], name: 'a=[4,4,4] b=[2,2,2]' }
+    ];
+    var NEG = -1e15, INF = 1e15;
+    var root = document.getElementById('viz-fill');
+    var selCase = root.querySelector('.vc-case'), selMode = root.querySelector('.vc-mode');
+    var body = root.querySelector('.vc-body'), note = root.querySelector('.vc-note'), ans = root.querySelector('.vc-answer');
+    var next = root.querySelector('.vc-next'), auto = root.querySelector('.vc-auto'), rst = root.querySelector('.vc-reset');
+    var timer = null, st = null;
+    CASES.forEach(function (c, i) {
+      var o = document.createElement('option'); o.value = i; o.textContent = c.name; selCase.appendChild(o);
+    });
+
+    function buildMoney(c) {
+      var n = c.a.length - 1, sumB = 0;
+      for (var i = 1; i <= n; i++) { sumB += c.b[i]; }
+      var dp = [], steps = [];
+      for (var i = 0; i <= n; i++) { dp.push(new Array(sumB + 1).fill(0)); }
+      for (var i2 = 1; i2 <= n; i2++) {
+        for (var j = 0; j <= sumB; j++) {
+          var val = NEG, srcs = [], branch = '两条都不通';
+          if (dp[i2 - 1][j] >= c.a[i2]) { val = dp[i2 - 1][j]; srcs = [[i2 - 1, j]]; branch = '不贿赂，能力不变'; }
+          if (j - c.b[i2] >= 0 && dp[i2 - 1][j - c.b[i2]] !== NEG) {
+            var cand = dp[i2 - 1][j - c.b[i2]] + c.a[i2];
+            if (cand > val) { val = cand; srcs = [[i2 - 1, j - c.b[i2]]]; branch = '贿赂，能力 +' + c.a[i2]; }
+            else if (cand === val) { srcs.push([i2 - 1, j - c.b[i2]]); branch += ' / 贿赂，一样大'; }
+          }
+          dp[i2][j] = val;
+          steps.push({ i: i2, j: j, val: val, srcs: srcs, branch: branch, snap: dp.map(function (r) { return r.slice(); }) });
+        }
+      }
+      var best = -1;
+      for (var j2 = 0; j2 <= sumB; j2++) { if (dp[n][j2] !== NEG) { best = j2; break; } }
+      return { steps: steps, cols: sumB, n: n, answer: best, ansCell: best >= 0 ? [n, best] : null,
+               headRow: 'j = 花的钱上限', cellKind: 'val' };
+    }
+
+    function buildAbility(c) {
+      var n = c.a.length - 1, sumA = 0;
+      for (var i = 1; i <= n; i++) { sumA += c.a[i]; }
+      var dp = [], steps = [];
+      for (var i = 0; i <= n; i++) { dp.push(new Array(sumA + 1).fill(INF)); }
+      dp[0][0] = 0;
+      for (var i2 = 1; i2 <= n; i2++) {
+        for (var j = 0; j <= sumA; j++) {
+          var val = INF, srcs = [], branch = '两条都不通';
+          if (j >= c.a[i2] && dp[i2 - 1][j] !== INF) { val = dp[i2 - 1][j]; srcs = [[i2 - 1, j]]; branch = '不贿赂，钱不变'; }
+          if (j - c.a[i2] >= 0 && dp[i2 - 1][j - c.a[i2]] !== INF) {
+            var cand = dp[i2 - 1][j - c.a[i2]] + c.b[i2];
+            if (cand < val) { val = cand; srcs = [[i2 - 1, j - c.a[i2]]]; branch = '贿赂，花 ' + c.b[i2]; }
+            else if (cand === val) { srcs.push([i2 - 1, j - c.a[i2]]); branch += ' / 贿赂，一样多'; }
+          }
+          dp[i2][j] = val;
+          steps.push({ i: i2, j: j, val: val, srcs: srcs, branch: branch, snap: dp.map(function (r) { return r.slice(); }) });
+        }
+      }
+      var best = INF;
+      for (var j2 = 0; j2 <= sumA; j2++) { if (dp[n][j2] < best) { best = dp[n][j2]; } }
+      var at = -1;
+      for (var j3 = 0; j3 <= sumA; j3++) { if (dp[n][j3] === best) { at = j3; break; } }
+      return { steps: steps, cols: sumA, n: n, answer: best === INF ? -1 : best, ansCell: at >= 0 && best !== INF ? [n, at] : null,
+               headRow: 'j = 能力正好等于', cellKind: 'cost' };
+    }
+
+    function fmt(v, mode) {
+      if (mode === 'money') { return v === NEG ? '·' : String(v); }
+      return v === INF ? '∞' : String(v);
+    }
+
+    function draw() {
+      var c = CASES[+selCase.value], mode = selMode.value;
+      var r = mode === 'money' ? buildMoney(c) : buildAbility(c);
+      st.r = r;
+      var cur = st.step >= 0 ? r.steps[st.step] : null;
+      var snap = cur ? cur.snap : null;
+      var h = '<div class="mrow"><span class="mlabel"></span>';
+      for (var j = 0; j <= r.cols; j++) { h += '<span class="mcell head">' + j + '</span>'; }
+      h += '</div>';
+      for (var i = 0; i <= r.n; i++) {
+        h += '<div class="mrow"><span class="mlabel">i=' + i + '</span>';
+        for (var j2 = 0; j2 <= r.cols; j2++) {
+          var cls = 'mcell';
+          if (cur && cur.i === i && cur.j === j2) { cls += ' cur'; }
+          else if (cur && cur.srcs.some(function (s) { return s[0] === i && s[1] === j2; })) { cls += ' src'; }
+          else if (st.step >= r.steps.length - 1 && r.ansCell && r.ansCell[0] === i && r.ansCell[1] === j2) { cls += ' ans'; }
+          var v = snap ? snap[i][j2] : (mode === 'money' ? 0 : (i === 0 && j2 === 0 ? 0 : INF));
+          h += '<span class="' + cls + '">' + fmt(v, mode) + '</span>';
+        }
+        h += '</div>';
+      }
+      body.innerHTML = h;
+      next.disabled = st.step >= r.steps.length - 1;
+      note.textContent = cur
+        ? ('第 ' + cur.i + ' 只怪兽、' + r.headRow + ' ' + cur.j + '：' + cur.branch)
+        : '还没开始。点「下一步」逐格填，蓝色格子是当前格的两个来源。';
+      if (st.step >= r.steps.length - 1) {
+        ans.textContent = mode === 'money'
+          ? ('填完 ' + r.steps.length + ' 格，答案是 ' + r.answer + '（钱不超过 ' + r.answer + ' 就能通过全部怪兽）')
+          : ('填完 ' + r.steps.length + ' 格，答案是 ' + r.answer + '（最少花这么多钱）');
+      } else {
+        ans.textContent = '';
+      }
+    }
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      st = { step: -1 };
+      next.disabled = false;
+      draw();
+    }
+    next.addEventListener('click', function () { if (st.step < st.r.steps.length - 1) { st.step++; draw(); } });
+    auto.addEventListener('click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step < st.r.steps.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 260);
+    });
+    rst.addEventListener('click', reset);
+    selCase.addEventListener('change', reset);
+    selMode.addEventListener('change', reset);
+    reset();
+  })();
+
+  // ---------- 演示 B：表规模 ----------
+  (function () {
+    var root = document.getElementById('viz-scale');
+    var sn = root.querySelector('.vs-n'), sa = root.querySelector('.vs-a'), sb = root.querySelector('.vs-b');
+    var body = root.querySelector('.vs-body'), ans = root.querySelector('.vs-answer');
+    function px(v) { return 12 + (100 - 12) * (Math.log10(Math.max(v, 1)) / 12); }
+    function fmtNum(v) {
+      if (v >= 1e12) { return (v / 1e12).toFixed(1) + ' 万亿格'; }
+      if (v >= 1e8) { return (v / 1e8).toFixed(1) + ' 亿格'; }
+      if (v >= 1e4) { return (v >= 1e7 ? (v / 1e4).toFixed(0) : (v / 1e4).toFixed(1)) + ' 万格'; }
+      return v.toLocaleString('en-US') + ' 格';
+    }
+    function sizeText(v) {
+      var bytes = v * 8;
+      if (bytes >= 1.125899906842624e15) { return (bytes / 1.125899906842624e15).toFixed(1) + ' PB'; }
+      if (bytes >= 1099511627776) { return (bytes / 1099511627776).toFixed(1) + ' TB'; }
+      if (bytes >= 1073741824) { return (bytes / 1073741824).toFixed(1) + ' GB'; }
+      if (bytes >= 1048576) { return (bytes / 1048576).toFixed(1) + ' MB'; }
+      return Math.round(bytes / 1024) + ' KB';
+    }
+    var LIMIT = 2.7e8;
+    function draw() {
+      var n = +sn.value, ca = +sa.value, cb = +sb.value;
+      var sumA = n * ca, sumB = n * cb;
+      var rows = [
+        { name: '钱做状态（表宽 sumB+1）', v: sumB + 1 },
+        { name: '能力做状态（表宽 sumA+1）', v: sumA + 1 }
+      ];
+      var h = '';
+      for (var i = 0; i < rows.length; i++) {
+        var w = Math.max(px(rows[i].v) - 12, 1), over = rows[i].v > LIMIT;
+        h += '<div class="barlbl">' + rows[i].name + '：' + fmtNum(rows[i].v) + '，约 ' + sizeText(rows[i].v) + (over ? '（放不下）' : '（放得下）') + '</div>';
+        h += '<div class="barwrap"><div class="bar' + (over ? ' over' : '') + '" style="width:' + w + '%"></div></div>';
+      }
+      h += '<div class="scale"><span>1</span><span>10³</span><span>10⁶</span><span>10⁹</span><span>10¹²</span></div>';
+      body.innerHTML = h;
+      var both = (sumA + 1 > LIMIT ? 0 : 1) + (sumB + 1 > LIMIT ? 0 : 1);
+      if (both === 0) { ans.textContent = '两个都放不下：得回头问出题人，有没有第三种状态；现实里一般至少有一个能开。'; }
+      else {
+        var pick = (sumA + 1) <= (sumB + 1) ? '能力' : '钱';
+        ans.textContent = '选' + pick + '做状态：' + (pick === '钱' ? sumB + 1 : sumA + 1).toLocaleString('en-US') + ' 格，' + sizeText(pick === '钱' ? sumB + 1 : sumA + 1) + '。';
+      }
+    }
+    sn.addEventListener('change', draw); sa.addEventListener('change', draw); sb.addEventListener('change', draw);
+    draw();
+  })();
+})();
+</script>
+</body>
+</html>

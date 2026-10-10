@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>从 1 到 n 里挑 k 个数：连 dp 都摆不下的构造</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.pgrid { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.pcell { width: 40px; height: 32px; line-height: 32px; text-align: center; font-size: 13px; border-radius: 4px;
+         background: var(--bg); border: 1px solid var(--border); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.pcell.pick { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; font-weight: 600; }
+.pcell.now { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.sums { display: flex; gap: 22px; flex-wrap: wrap; font-size: 13.5px; margin-top: 8px; color: var(--text-dim); }
+.sums b { color: var(--text); }
+.track { position: relative; height: 26px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; margin: 10px 0 4px; }
+.tseg { position: absolute; top: 0; bottom: 0; background: #dbeafe; border-left: 1px solid #2563eb; border-right: 1px solid #2563eb; }
+.tmark { position: absolute; top: -6px; bottom: -6px; width: 2px; background: #ea580c; }
+.tlab { position: absolute; top: 30px; font-size: 11.5px; color: #ea580c; transform: translateX(-50%); }
+.taxis { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-dim); margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>从 1 到 n 里挑 k 个数：连 dp 都摆不下的构造</h1>
+      <p class="intro">1 到 n 里挑 k 个数组成 A，剩下的组成 B，要求两堆的和相差不超过 1。这题长得像背包，数据量一报就装不下了：n 到 10<sup>6</sup>，状态空间是 1.25×10<sup>14</sup> 个。剩下的只有一条路，把答案直接算出来。</p>
+
+      <h2>零、题目</h2>
+      <p>给两个正整数 n 和 k，1 到 n 每个数都能用。从里面挑 k 个数放进集合 A，剩下的进集合 B。</p>
+      <p>希望 A 的和与 B 的和相差不超过 1。能做到就返回 A 挑的那 k 个数（任何一种方案都算对），做不到返回空数组。</p>
+      <p>n 最大 10<sup>6</sup>，k 从 1 到 n。所有数字的和是 <code>total = n(n+1)/2</code>，n = 10<sup>6</sup> 时是 500000500000。</p>
+      <p>先说结论：最后写出来的代码里，一行 dp 都没有。</p>
+
+      <h2>一、先算 01 背包的账</h2>
+      <p>最像的做法是背包：<code>dp[i][j]</code> 表示前 i 个数里选若干个凑出和 j 行不行，再补一维记「选了几个」。目标是总量的一半。</p>
+      <p>把数字代进去：k 这一维 5×10<sup>5</sup>，和的这一维 2.5×10<sup>11</sup>，乘起来 1.25×10<sup>14</sup> 个状态。就算每个状态只占一个 bit，也要十几 TB。</p>
+      <p>这是「数据量猜解法」里最干脆的一类：不用优化状态，不用滚动数组，这个思路整个放弃。</p>
+      <figure class="fig" id="fig-bag">
+        <figcaption>图 1　背包的状态空间：k 维 5×10<sup>5</sup>，和的维度 2.5×10<sup>11</sup>，两维一乘就是 1.25×10<sup>14</sup> 个格子</figcaption>
+      </figure>
+
+      <h2>二、可达的和是一整段连续区间</h2>
+      <p>换个角度想。从 1 到 n 里挑 k 个数，和最小是挑最小的 k 个：<code>minK = 1 + 2 + ... + k = k(k+1)/2</code>。</p>
+      <p>和最大是挑最大的 k 个：<code>(n-k+1) + ... + n = minK + k(n-k)</code>。两个极端之间差 <code>k(n-k)</code>。</p>
+      <p>关键观察：这两个极端之间的每一个整数都能凑出来。把当前选中的 k 个数写成递增的 <code>x[1] &lt; x[2] &lt; ... &lt; x[k]</code>，每次找最靠右的那个还有空位的数把它加 1，和就稳定地加 1，一直到全部顶到最大值为止。</p>
+      <p>所以「哪些和可达」这个问题根本不用 dp 算：可达的和恰好是 <code>[minK, minK + k(n-k)]</code> 里所有整数。n 从 2 枚举到 40、k 全枚举，用恰好 k 个数的背包逐格验证过，这一段里没有断点。</p>
+      <p>题目要两堆差不超过 1，也就是 A 的和只能是 <code>floor(total/2)</code> 或 <code>total/2 + 1</code>（total 为奇数时两个都试，为偶数时只有一个）。落在这个区间里就有解，落外面就返回空数组。</p>
+      <figure class="fig" id="fig-range">
+        <figcaption>图 2　A 的和可达范围是一条连续线段 [minK, minK+k(n-k)]；目标点落在里面才有解</figcaption>
+      </figure>
+      <p>顺带解释一个看起来多余的写法：代码里先试 <code>total/2</code>，失败了才试 <code>total/2 + 1</code>。因为可达和是连续的，这两个相邻的数要么都在区间里、要么都不在，唯一会分开的就是恰好卡在边界上的那一小撮 (n,k)。</p>
+      <p>实测这个「只试 floor」的写法，在 n 不超过 60 的全部 1829 组 (n,k) 里只错 1 组，0.05%。</p>
+
+      <h2>三、怎么把和抬上去</h2>
+      <p>区间的事解决了，接下来要真的造出这个集合。起点取最小的 k 个：<code>1, 2, ..., k</code>，和是 <code>minK</code>。还差</p>
+      <p><code>need = target - minK</code>。</p>
+      <p>注意 <code>need</code> 不超过 <code>k(n-k)</code>。把它拆成两部分：</p>
+      <p>1）末尾若干个「顶到最大」。把最后 rs 个数换成整个数组里最大的 rs 个数，即 <code>n-rs+1, ..., n</code>，和一次增加 <code>rs × (n-k)</code>。先按 <code>rs = need / (n-k)</code> 取整数部分。</p>
+      <p>2）剩下的零头 <code>rem = need % (n-k)</code>。把中间那个还空着的数往上抬 rem，就是 <code>mid = (k - rs) + rem</code>。</p>
+      <p>抬完仍然严格递增：下面的左段最大是 <code>k-rs-1</code>，中间的 <code>mid</code> 至少是 <code>k-rs</code>，上面右段的起点是 <code>n-rs+1</code>，而 <code>mid &lt; n-rs+1</code> 是成立的。</p>
+      <figure class="fig" id="fig-build">
+        <figcaption>图 3　构造分三段：开头原样保留、中间抬 rem、末尾顶到最大</figcaption>
+      </figure>
+      <p>于是 A 就是 <code>{1..ls} ∪ {mid} ∪ {n-rs+1..n}</code>，其中 <code>ls = k - rs - 1</code>（rem 为 0 时没有中间那个数，ls = k - rs）。整个过程 O(k)。</p>
+
+      <h2>四、代码</h2>
+      <p>入口负责试两个目标值：</p>
+          <pre class="code"><span class="cm">// 所有数字的和是 total，两堆相差不超过 1，说明 A 的和只能是 total/2 或 total/2+1</span>
+    <span class="kw">long</span> <span class="kw">long</span> total = (n + 1) * n / 2;
+    vector&lt;<span class="kw">int</span>&gt; ans = generate(total / 2, n, k);
+    <span class="kw">if</span> (ans.empty() &amp;&amp; (total &amp; 1) == 1) {
+        ans = generate(total / 2 + 1, n, k);
+    }</pre>
+      <p>构造部分就是上面那三段。两个地方要留心：判断必须写在除法之前（<code>k == n</code> 时 <code>n-k</code> 是 0）；总量要用 64 位算。</p>
+          <pre class="code"><span class="cm">// 从 1~n 里挑 k 个凑出 want，凑不出就返回空数组</span>
+    vector&lt;<span class="kw">int</span>&gt; <span class="fn">generate</span>(<span class="kw">long</span> <span class="kw">long</span> want, <span class="kw">long</span> <span class="kw">long</span> n, <span class="kw">long</span> <span class="kw">long</span> k) {
+        <span class="kw">long</span> <span class="kw">long</span> minK = (k + 1) * k / 2;                 <span class="cm">// 最小的 k 个：1+2+...+k</span>
+        <span class="kw">long</span> <span class="kw">long</span> range = n - k;
+        <span class="kw">if</span> (want &lt; minK || want &gt; minK + range * k) {
+            <span class="kw">return</span> {};                                    <span class="cm">// 这一段里没有任何一个和凑得出来</span>
+        }
+        <span class="kw">if</span> (range == 0) {                                 <span class="cm">// k == n，只有 1~n 这一种挑法</span>
+            vector&lt;<span class="kw">int</span>&gt; <span class="fn">all</span>(k);
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; k; i++) { all[i] = i + 1; }
+            <span class="kw">return</span> all;
+        }
+        <span class="kw">long</span> <span class="kw">long</span> need = want - minK;                     <span class="cm">// 比「最小的 k 个」还要多出多少</span>
+        <span class="kw">int</span> rs = need / range;                            <span class="cm">// 末尾有几个被顶到最大</span>
+        <span class="kw">int</span> rem = need % range;
+        <span class="kw">int</span> mid = (k - rs) + rem;                         <span class="cm">// 中间单独贡献的那一个</span>
+        <span class="kw">int</span> ls = k - rs - (rem == 0 ? 0 : 1);             <span class="cm">// 开头原样保留的个数</span>
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">ans</span>(k);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; ls; i++) { ans[i] = i + 1; }
+        <span class="kw">if</span> (rem != 0) { ans[ls] = mid; }
+        <span class="kw">for</span> (<span class="kw">int</span> i = k - 1, j = 0; j &lt; rs; i--, j++) { ans[i] = n - j; }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2>五、演示：把 k 个数拼出来</h2>
+      <p>下面按构造的顺序把 A 选出来：先放左段，再放中间那一个，最后把末尾那几个顶到最大。每选一个数，A 的和就变一次。最后一组数据是无解的，看它怎么被区间挡住。</p>
+      <div class="viz" id="viz-pick">
+        <p class="viz-title">逐个数拼出集合 A</p>
+        <div class="viz-controls">
+          <label>数据 <select class="vp-case"></select></label>
+          <button class="vp-next">下一步</button>
+          <button class="vp-auto">自动播放</button>
+          <button class="vp-reset">重置</button>
+        </div>
+        <div class="vp-body"></div>
+        <p class="viz-note vp-note"></p>
+        <p class="viz-answer vp-answer"></p>
+      </div>
+
+      <h2>六、演示：k 落在哪里才有解</h2>
+      <p>k 太小时，k 个数的和怎么选都够不到一半；k 太大时，怎么选都远超一半。中间那一段才有解。换几个 n 看看这条可行带有多宽。</p>
+      <div class="viz" id="viz-range">
+        <p class="viz-title">可达区间与目标点</p>
+        <div class="viz-controls">
+          <label>n <select class="vr-n">
+            <option value="20">20</option>
+            <option value="100">100</option>
+            <option value="1000">1000</option>
+            <option value="100000">10⁵</option>
+            <option value="1000000" selected>10⁶</option>
+          </select></label>
+          <label>k 取 n 的 <select class="vr-r">
+            <option value="0.1">10%</option>
+            <option value="0.25">25%</option>
+            <option value="0.3">30%</option>
+            <option value="0.5" selected>50%</option>
+            <option value="0.7">70%</option>
+            <option value="0.75">75%</option>
+            <option value="0.9">90%</option>
+          </select></label>
+        </div>
+        <div class="vr-body"></div>
+        <p class="viz-answer vr-answer"></p>
+      </div>
+
+      <h2>七、写错的地方</h2>
+      <p>1）从大到小贪心：能塞就塞，塞不满 k 个就当无解。这个做法在 n 不超过 60 的全部 1829 组 (n,k) 里错 65.50%。反例很好找：<code>n = 6, k = 3</code> 时它先拿 6 再拿 5，和已经到 11，第三个再也塞不进去，于是判无解；而 <code>{1,3,6}</code> 的和是 10，另一堆 11，相差正好 1，是有解的。</p>
+      <p>2）总量用 32 位算。<code>(n+1) * n / 2</code> 在 n = 10<sup>6</sup> 时会先溢出再除二，得到 -363189984，正确答案是 500000500000。后面按这个负数去算 need，越界是轻的。</p>
+      <p>3）范围判断写在除法之后。<code>k == n</code> 时 <code>n-k</code> 是 0，先除就崩。判断挪到前面，这一支直接返回空数组，除零那一行根本走不到。</p>
+      <p>4）不做范围判断直接构造。这类写法的抓取率看着只有 0.05%，因为通过检查的那些答案是对的；它真正的问题是剩下的情况会越界写数组，判题直接崩掉。</p>
+      <p>结构校验：n 从 2 到 400、k 全枚举共 80199 组，有解的 33112 组全部满足「恰好 k 个数、互不相同、都在 1 到 n 之内、和正好是目标值」。小范围另有暴力枚举 104 组对照过。</p>
+
+      <h2>八、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>空间</th><th>能不能过</th></tr>
+        <tr><td>恰好 k 个数的 01 背包</td><td>O(n·k·total)</td><td>O(k·total)</td><td>1.25×10<sup>14</sup> 个状态，不行</td></tr>
+        <tr><td>记忆化搜索凑和</td><td>O(n·k·total)</td><td>O(n·k·total)</td><td>同上，不行</td></tr>
+        <tr><td>区间判断 + 直接构造</td><td>O(k)</td><td>O(k)</td><td>n = 10<sup>6</sup> 实测 0.1 ms 以内</td></tr>
+      </table>
+      <p>构造本身只跟 k 有关，n = 10<sup>6</sup>、k = 5×10<sup>5</sup> 时实测 0.085 ms，A 的和 250000250000，与 B 的差是 0。</p>
+
+      <h2>九、总结</h2>
+      <p>这道题最值得记的是停下来的位置。写 dp 之前先把状态数算出来，看到 10<sup>14</sup> 就该整条路放弃，别去想怎么把第二维压小。换成「可达的和是一段连续区间」之后，问题从「凑数」变成了「制造一个数」，O(k) 解决。</p>
+      <p>三页走到这里，同一条思路出现了三次：先把想法的表格子数算出来，再决定用哪一维做状态、换不换做法、或者干脆不写 dp。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>真实大厂笔试</td><td>选择 k 个数字使得两集合累加和相差不超过 1</td><td>无公开链接，用对数器验证</td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解087【必备】动态规划中根据数据量猜解法的技巧</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs, text) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) { n.setAttribute(k, attrs[k]); }
+    if (text !== undefined && text !== null) { n.textContent = text; }
+    return n;
+  }
+  function svgRoot(id, h) {
+    var box = document.getElementById(id);
+    var s = el('svg', { viewBox: '0 0 680 ' + h, width: '100%', role: 'img' });
+    s.style.maxWidth = '680px';
+    s.style.display = 'block';
+    box.appendChild(s);
+    return s;
+  }
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', blueSoft: '#eef4ff', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', soft: '#f6f7f9', border: '#e6e8eb', text: '#1f2937', dim: '#6b7280', green: '#16a34a' };
+
+  // ---------- 图 1 背包状态空间 ----------
+  (function () {
+    var s = svgRoot('fig-bag', 210);
+    s.appendChild(el('text', { x: 30, y: 34, 'font-size': 13, fill: C.text }, '恰好 k 个数的背包'));
+    var rows = [['k 这一维', '5×10⁵'], ['和的这一维', '2.5×10¹¹'], ['两维相乘', '1.25×10¹⁴ 个状态']];
+    for (var i = 0; i < rows.length; i++) {
+      var y = 52 + i * 42;
+      var last = i === rows.length - 1;
+      s.appendChild(el('rect', { x: 24, y: y, width: 620, height: 34, rx: 5,
+        fill: last ? C.orangeBg : C.soft, stroke: last ? C.orange : C.border }));
+      s.appendChild(el('text', { x: 44, y: y + 22, 'font-size': 13, fill: last ? C.orange : C.text }, rows[i][0]));
+      s.appendChild(el('text', { x: 300, y: y + 22, 'font-size': 13, fill: last ? C.orange : C.dim }, rows[i][1]));
+    }
+    s.appendChild(el('text', { x: 24, y: 196, 'font-size': 12, fill: C.dim }, '一个状态一个 bit 也要十几 TB，这条思路整个放弃'));
+  })();
+
+  // ---------- 图 2 可达区间 ----------
+  (function () {
+    var s = svgRoot('fig-range', 190);
+    var x0 = 60, x1 = 640, y = 88;
+    s.appendChild(el('line', { x1: x0, y1: y, x2: x1, y2: y, stroke: C.gray }));
+    s.appendChild(el('rect', { x: x0 + 90, y: y - 12, width: 330, height: 24, rx: 4, fill: C.blueBg, stroke: C.blue }));
+    s.appendChild(el('text', { x: x0 + 255, y: y + 5, 'text-anchor': 'middle', 'font-size': 12.5, fill: '#1e3a8a' }, 'A 的和可达的一整段'));
+    s.appendChild(el('text', { x: x0 + 90, y: y + 36, 'text-anchor': 'middle', 'font-size': 12, fill: C.dim }, 'minK'));
+    s.appendChild(el('text', { x: x0 + 420, y: y + 36, 'text-anchor': 'middle', 'font-size': 12, fill: C.dim }, 'minK + k(n-k)'));
+    var tx = x0 + 300;
+    s.appendChild(el('line', { x1: tx, y1: y - 26, x2: tx, y2: y + 22, stroke: C.orange, 'stroke-width': 2 }));
+    s.appendChild(el('text', { x: tx, y: y - 34, 'text-anchor': 'middle', 'font-size': 12.5, fill: C.orange }, 'total/2'));
+    s.appendChild(el('text', { x: x0, y: y + 74, 'font-size': 12.5, fill: C.green }, '目标点落在线段里 → 有解，落在线段外 → 返回空数组'));
+    s.appendChild(el('text', { x: x0, y: y + 96, 'font-size': 12.5, fill: C.dim }, 'k 太小够不到一半，k 太大又远超一半，中间一段才有解'));
+  })();
+
+  // ---------- 图 3 三段构造 ----------
+  (function () {
+    var s = svgRoot('fig-build', 220);
+    var n = 12, k = 7, ls = 4, mid = 6, rs = 2;
+    var w = 42, gap = 5, x0 = 60, y = 60;
+    s.appendChild(el('text', { x: 24, y: 34, 'font-size': 12.5, fill: C.dim }, '1 到 12 里挑 7 个，目标是凑出 39'));
+    for (var v = 1; v <= n; v++) {
+      var x = x0 + (v - 1) * (w + gap);
+      var pick = (v <= ls) || (v === mid && ls < mid) || (v > n - rs);
+      var kind = (v <= ls) ? '左段' : (v === mid ? '中间' : (v > n - rs ? '右段' : ''));
+      s.appendChild(el('rect', { x: x, y: y, width: w, height: 32, rx: 4,
+        fill: pick ? C.blueBg : C.soft, stroke: pick ? C.blue : C.border }));
+      s.appendChild(el('text', { x: x + w / 2, y: y + 21, 'text-anchor': 'middle', 'font-size': 13,
+        fill: pick ? '#1e3a8a' : C.gray, 'font-weight': pick ? 600 : 400 }, v));
+      if (kind) {
+        s.appendChild(el('text', { x: x + w / 2, y: y - 8, 'text-anchor': 'middle', 'font-size': 11, fill: C.orange }, kind));
+      }
+    }
+    s.appendChild(el('text', { x: 24, y: 130, 'font-size': 12.5, fill: C.dim }, 'need = 39 - 28 = 11，n - k = 5 → rs = 2，rem = 1'));
+    s.appendChild(el('text', { x: 24, y: 154, 'font-size': 12.5, fill: C.blue }, '左段 {1,2,3,4} 原样保留，中间抬成 6，末尾 {11,12} 顶到最大'));
+    s.appendChild(el('text', { x: 24, y: 178, 'font-size': 12.5, fill: C.green }, '1+2+3+4+6+11+12 = 39，B 的和 39，差 0'));
+    s.appendChild(el('text', { x: 24, y: 202, 'font-size': 12, fill: C.dim }, '每顶高一个末尾的数，和就增加 n - k；零头靠中间那一个补'));
+  })();
+
+  // ---------- 演示 A：构造 ----------
+  (function () {
+    var CASES = [{ n: 10, k: 3 }, { n: 10, k: 5 }, { n: 12, k: 7 }, { n: 20, k: 10 }, { n: 10, k: 1 }];
+    var root = document.getElementById('viz-pick');
+    var sel = root.querySelector('.vp-case'), body = root.querySelector('.vp-body');
+    var note = root.querySelector('.vp-note'), ans = root.querySelector('.vp-answer');
+    var next = root.querySelector('.vp-next'), auto = root.querySelector('.vp-auto'), rst = root.querySelector('.vp-reset');
+    var timer = null, st = null;
+    CASES.forEach(function (c, i) {
+      var o = document.createElement('option'); o.value = i;
+      o.textContent = 'n=' + c.n + ' k=' + c.k; sel.appendChild(o);
+    });
+
+    function build(c) {
+      var n = c.n, k = c.k;
+      var total = (n + 1) * n / 2;
+      var minK = (k + 1) * k / 2;
+      var range = n - k;
+      var maxK = minK + range * k;
+      var candidates = (total % 2 === 1) ? [Math.floor(total / 2), Math.floor(total / 2) + 1] : [Math.floor(total / 2)];
+      var target = -1;
+      for (var t = 0; t < candidates.length; t++) {
+        if (candidates[t] >= minK && candidates[t] <= maxK) { target = candidates[t]; break; }
+      }
+      var steps = [];
+      var selSet = {}, sum = 0;
+      function mark(v, note) {
+        selSet[v] = true; sum += v;
+        steps.push({ set: Object.assign({}, selSet), now: v, note: note, sum: sum, done: false });
+      }
+      steps.push({ set: {}, now: -1, done: false,
+        note: 'total = ' + total + '，A 的和只能是 ' + candidates.join(' 或 ') + '；minK = ' + minK + '，maxK = ' + maxK });
+      if (target < 0) {
+        steps.push({ set: {}, now: -1, done: true,
+          note: '目标点 ' + candidates.join('/') + ' 落在 [' + minK + ', ' + maxK + '] 外面，这组数据无解' });
+        return { steps: steps, n: n, k: k, total: total, ok: false, answer: -1, target: -1 };
+      }
+      var need = target - minK;
+      var rs = Math.floor(need / range), rem = need % range;
+      var mid = (k - rs) + rem;
+      var ls = k - rs - (rem === 0 ? 0 : 1);
+      steps[0].note = 'total = ' + total + '，目标 ' + target + '；minK = ' + minK + '，maxK = ' + maxK + '，need = ' + need + '，n-k = ' + range;
+      for (var i = 1; i <= ls; i++) { mark(i, '左段：' + i + ' 原样保留'); }
+      if (rem !== 0) { mark(mid, '中间那一个：mid = (k - rs) + rem = ' + mid + '，把零头 ' + rem + ' 补上'); }
+      for (var j = 0; j < rs; j++) { mark(n - j, '右段：末尾第 ' + (j + 1) + ' 个顶到最大'); }
+      steps.push({ set: Object.assign({}, selSet), now: -1, sum: sum, done: true,
+        note: '构造完：A 的和 ' + sum + '，B 的和 ' + (total - sum) + '，相差 ' + Math.abs(sum - (total - sum)) });
+      return { steps: steps, n: n, k: k, total: total, ok: true, answer: sum, target: target };
+    }
+
+    function draw() {
+      var c = CASES[+sel.value];
+      if (!st.r) { st.r = build(c); }
+      var r = st.r;
+      var cur = st.step >= 0 ? r.steps[st.step] : null;
+      var set = cur ? cur.set : {};
+      var h = '<div class="pgrid">';
+      for (var v = 1; v <= r.n; v++) {
+        var cls = 'pcell';
+        if (cur && cur.now === v) { cls += ' now'; }
+        else if (set[v]) { cls += ' pick'; }
+        h += '<span class="' + cls + '">' + v + '</span>';
+      }
+      h += '</div>';
+      var s = cur ? cur.sum : 0;
+      h += '<div class="sums"><span>A 的和 <b>' + s + '</b></span><span>B 的和 <b>' + (r.total - s) + '</b></span>' +
+           '<span>相差 <b>' + Math.abs(s - (r.total - s)) + '</b></span>' +
+           '<span>目标 <b>' + (r.ok ? r.target : '无解') + '</b></span></div>';
+      body.innerHTML = h;
+      note.textContent = cur ? cur.note : '点「下一步」看 A 是怎么一个个凑出来的。';
+      next.disabled = st.step >= r.steps.length - 1;
+      if (st.step >= r.steps.length - 1) {
+        ans.textContent = r.ok ? ('答案：' + r.answer + '（挑出 ' + r.k + ' 个数，两堆相差 ' + Math.abs(s - (r.total - s)) + '）') : '答案：空数组（这组数据无解）';
+      } else { ans.textContent = ''; }
+    }
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      st = { step: -1, r: null };
+      next.disabled = false;
+      draw();
+    }
+    next.addEventListener('click', function () { if (st.step < st.r.steps.length - 1) { st.step++; draw(); } });
+    auto.addEventListener('click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step < st.r.steps.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 420);
+    });
+    rst.addEventListener('click', reset);
+    sel.addEventListener('change', reset);
+    reset();
+  })();
+
+  // ---------- 演示 B：可行带 ----------
+  (function () {
+    var root = document.getElementById('viz-range');
+    var sn = root.querySelector('.vr-n'), sr = root.querySelector('.vr-r');
+    var body = root.querySelector('.vr-body'), ans = root.querySelector('.vr-answer');
+    function fmt(v) { return v.toLocaleString('en-US'); }
+    function draw() {
+      var n = +sn.value;
+      var k = Math.max(1, Math.round(n * parseFloat(sr.value)));
+      var total = (n + 1) * n / 2;
+      var minK = (k + 1) * k / 2;
+      var range = n - k;
+      var maxK = minK + range * k;
+      var cands = (total % 2 === 1) ? [Math.floor(total / 2), Math.floor(total / 2) + 1] : [Math.floor(total / 2)];
+      var ok = cands.some(function (v) { return v >= minK && v <= maxK; });
+      var lo = 100 * minK / total, hi = 100 * maxK / total;
+      var mx = 100 * cands[0] / total;
+      var h = '<div class="track">' +
+        '<div class="tseg" style="left:' + Math.max(lo, 0).toFixed(3) + '%;width:' + Math.max(hi - lo, 0.2).toFixed(3) + '%"></div>' +
+        '<div class="tmark" style="left:' + mx.toFixed(3) + '%"></div>' +
+        '<div class="tlab" style="left:' + mx.toFixed(3) + '%">目标 ' + fmt(cands[0]) + '</div>' +
+        '</div>';
+      h += '<div class="taxis"><span>和 = 0</span><span>可达段 ' + fmt(minK) + ' ~ ' + fmt(maxK) + '</span><span>和 = ' + fmt(total) + '</span></div>';
+      body.innerHTML = h;
+      ans.textContent = ok
+        ? ('n = ' + fmt(n) + '，k = ' + fmt(k) + '：目标在可达段里，有解。')
+        : ('n = ' + fmt(n) + '，k = ' + fmt(k) + '：目标 ' + fmt(cands[0]) + ' 落在 [' + fmt(minK) + ', ' + fmt(maxK) + '] 外面，无解。');
+    }
+    sn.addEventListener('change', draw);
+    sr.addEventListener('change', draw);
+    draw();
+  })();
+})();
+</script>
+</body>
+</html>
