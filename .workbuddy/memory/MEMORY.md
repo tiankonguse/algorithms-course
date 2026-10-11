@@ -36,7 +36,8 @@
 - json 里 `file` 写 `algorithms/xxx.html`；侧栏高亮比 basename。**顺序 = 首页卡片 = 侧栏 = 上下篇翻页**。
 - 本地预览用 `./run.sh`（端口 8080）；`file://` 直开会因 fetch 被 CORS 拦。
 
-## 从 algorithm-journey 转课的流水线（技能 `~/.workbuddy/skills/course-site-page`）
+## 从 algorithm-journey 转课的流水线（技能 `.agent/skills/course-site-page`）
+- **技能随仓库放在 `.agent/skills/course-site-page/`**（2026-10-11，另存一份 `~/.workbuddy/skills/`）；脚本/文档里凡用户目录路径一律写 `~/`（多机运行，项目相对 home 位置固定），脚本内默认用 `(process.env.SITE_DIR || '~/project/github/AIProject/algorithms-course').replace(/^~(?=\/|$)/, os.homedir())` 展开；node 用 `~/.workbuddy/binaries/node/versions/$(cat .../current)/bin/node`。**不要写 `/Users/<用户名>/...` 绝对路径。**
 - 技能内含 gen_code.py / apply_placeholders.py / verify_pages.js / verify_viz_steps.js / verify_home.js / shot_element.js / check_branch.js。**进度表在 `prompt.md`**：2026-10-03 起**从小到大转（001 → 207）**；已完成 159~207 共 49 课（倒序阶段产物，不回炉），下一课 001，导学类记「跳过」。
 - 材料：`ppt/算法讲解0NN【难度】标题.pptx` + `src/classNNN/Code0X_*.java`。PPT 文本：zipfile + ElementTree 遍历 `ppt/slides/slideN.xml` 的 `p:sp`，拼 `a:t`。
 - **低号课（001~）只有一份 Java**：文件名是题目名（`class004/SelectBubbleInsert.java`），没有 `Code0X_` 前缀，也没有「C++ 塞注释」的第二份，有的课目录是空的（008）。页面统一 C++，得自己从 Java 改写再编译对拍。
