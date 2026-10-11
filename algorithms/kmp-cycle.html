@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>循环节与反复删除</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.card { min-width: 30px; padding: 5px 7px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.bad { background: #fee2e2; border-color: #dc2626; color: #991b1b; font-weight: 600; }
+.card.dim { opacity: .38; }
+.card.empty { background: transparent; border-style: dashed; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+.rowline { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; flex-wrap: wrap; }
+.rowline .k { color: var(--text-dim); min-width: 92px; font-size: 13px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>循环节与反复删除</h1>
+      <p class="intro">一个串由某个块反复拼成，最短的块有多长；一个串里每看见一次模式串就删掉，删到删不动还剩什么。前一个问题只看串自己，后一个问题边扫边删，落点却是同一张表：next 数组。把它算出来，之后每一步都只是查表退位。</p>
+
+      <h2>零、最短循环节</h2>
+      <p>题目给一个字符串 s，它一定由某个循环节不断自我复制拼成，至少重复 2 次，最后一段可能不完整，问这个循环节最短能有多短。</p>
+      <p>朴素做法是从块长 L = 1 开始试，检查 s[i] 与 s[i % L] 对每个 i 是否都相等，第一个通过的 L 就是答案。n = 10<sup>6</sup> 时最坏要比较 n<sup>2</sup> 次，跑不完。</p>
+      <p>next 数组的最后一项 nxt[n] 是整串「最长的真前缀等于真后缀」的长度，也就是串首与串尾最长能重叠多少。拿它减一下就是答案：L = n − nxt[n]。</p>
+      <p>拿 "abcabcab" 试。n = 8，最长的重叠是前 5 个字符 "abcab" 与后 5 个字符 "abcab" 相同，nxt[8] = 5，答案 8 − 5 = 3，循环节就是 "abc"。</p>
+      <figure class="fig" id="fig-cycle">
+        <figcaption>图 1　"abcabcab" 的首尾各 5 个字符完全重合，n = 8 减掉 5 落到 3，正好是 "abc" 的长度</figcaption>
+      </figure>
+      <p>为什么减出来的这个 L 一定对？两个方向各说一句。</p>
+      <p>1）L = n − nxt[n] 是合法块长。设 k = nxt[n]，串首 k 个字符与串尾 k 个字符相同，也就是 s[i] = s[i + (n − k)] = s[i + L] 对所有 0 ≤ i &lt; k 都成立。这条等式说的正是：把 s 按 L 切开首尾相接，接缝处的字符对得上，整串就是 s[0..L−1] 不断重复的前缀。</p>
+      <p>2）比 L 更短的块不存在。设 L′ 是某个合法块长，同样有 s[i] = s[i + L′]，于是前 n − L′ 个字符与后 n − L′ 个字符相同，nxt[n] 至少是 n − L′。把它代回去就得到 L′ ≥ n − nxt[n]。</p>
+      <p>两个方向一夹，答案只能等于 n − nxt[n]。</p>
+    <pre class="code"><span class="cm">// s 下标从 0 起：nxt[i] 是 s[0..i-1] 里最长的「真前缀等于真后缀」长度</span>
+    <span class="kw">void</span> <span class="fn">nextArray</span>(<span class="kw">const</span> <span class="kw">string</span>&amp; s, <span class="kw">int</span> n, vector&lt;<span class="kw">int</span>&gt;&amp; nxt) {
+        nxt.assign(n + 1, 0);
+        nxt[0] = -1;
+        nxt[1] = 0;
+        <span class="kw">int</span> i = 2, cn = 0;
+        <span class="kw">while</span> (i &lt;= n) {
+            <span class="kw">if</span> (s[i - 1] == s[cn]) {
+                nxt[i++] = ++cn;
+            } <span class="kw">else</span> <span class="kw">if</span> (cn &gt; 0) {
+                cn = nxt[cn];
+            } <span class="kw">else</span> {
+                nxt[i++] = 0;
+            }
+        }
+    }</pre>
+      <p>last 一项算出来，整题就剩一次减法。</p>
+    <pre class="code"><span class="cm">// 整串的最长前后缀长度 nxt[n] 一旦拿到，答案就是 n - nxt[n]</span>
+    <span class="kw">int</span> <span class="fn">minCycleLen</span>(<span class="kw">const</span> <span class="kw">string</span>&amp; s, <span class="kw">int</span> n) {
+        vector&lt;<span class="kw">int</span>&gt; nxt;
+        nextArray(s, n, nxt);
+        <span class="kw">return</span> n - nxt[n];
+    }</pre>
+      <p>n = 10<sup>6</sup> 的串跑一遍 next 数组在 1 毫秒上下：每 7 个字符一个块的周期串 0.7 毫秒，随机 0/1 串 4.7 毫秒。回退那一行看着像隐患，实际几乎不触发，"aaab" 循环 10<sup>6</sup> 个字符只退了 2 次。</p>
+      <div class="viz" id="viz-cycle">
+        <p class="viz-title">逐格求 next，再减出答案</p>
+        <p class="viz-note">每点一步填一格 nxt，右边的标注是这一步在比哪两个字符。切到两个错误版本，看答案在哪一步开始偏。</p>
+        <div id="cyc-board"></div>
+        <p class="viz-note" id="cyc-note"></p>
+        <p class="viz-answer" id="cyc-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="cyc-str"></select></label>
+          <label>版本 <select id="cyc-ver"></select></label>
+          <button id="cyc-next" type="button">下一步</button>
+          <button id="cyc-reset" type="button">重置</button>
+        </div>
+      </div>
+      <p>写的时候有两处容易错。</p>
+      <p>一，减法用的是 nxt[n]，不是 nxt[n−1]。nxt[n] 让长度 n 的前缀与长度 n 的后缀去重叠，nxt[n−1] 只重叠到长度 n−1，答案会偏大。随机周期串上这个错法有 99.12% 与正解不同。</p>
+      <p>二，cn = nxt[cn] 那一行不能省。省掉之后 next 数组记的不再是最长重叠，只是某一次能对上的长度，平时看不出问题（随机数据抓取率 2.75%），因为多数位置根本不需要回退，需要的时候就是真错。</p>
+      <figure class="fig" id="fig-cycle-bad">
+        <figcaption>图 2　两个错法在 "abcabcab" 与 "aa" 上的取值：nxt[n−1] 让答案偏大，"aa" 上更是直接翻倍</figcaption>
+      </figure>
+
+      <h2>一、反复删除</h2>
+      <p>给定 s1 和 s2，只要 s1 里出现 s2 就删掉最左的这一次出现，删完剩下的字符重新拼接，再看有没有，如此反复，输出最后剩下的字符串。</p>
+      <p>朴素做法是一遍遍地查再删。看起来每次删除都在让串变短，开销却全在搬字符上：n = 10<sup>6</sup> 的周期串删 2 个字符的模式，实测 3552 毫秒。</p>
+      <p>难点在于删除会让后面的字符和前面接上，接缝处可能拼出一个新的 s2。删一次之后要重新检查的位置不止被删掉的那一段，前后都要看。</p>
+      <p>要维护的状态只有一个：当前已经匹配上 s2 的前几个字符。扫 s1 时准备一个栈，每读一个字符 x：</p>
+      <p>1）它与 s2[y] 相等，就把 (x 的下标, y) 压栈，x 与 y 各自加一；</p>
+      <p>2）y 已经是 0 还对不上，说明这个字符连 s2 的首字符都不是，压一个 (x 的下标, −1) 进栈，x 加一；</p>
+      <p>3）其余情况沿 next 把 y 退一格再比，这个字符先不入栈。</p>
+      <p>y 涨到 m 时，栈顶刚压进去的 m 个字符正好拼出 s2，把它们一起弹掉，栈长度减 m。</p>
+      <figure class="fig" id="fig-stack">
+        <figcaption>图 3　s1 = "bbaa" 删 "ba"：栈里同时存字符和它当时的匹配位置，弹出后 y 取新栈顶的记录加一</figcaption>
+      </figure>
+      <p>弹出之后那个 y 从哪来？不能归零。栈顶现在记着前一个保留下来的字符当时匹配到 s2 的第几个位置，新的 y 就是它加一。回到图 3 的例子里，第一次弹出后栈顶是 s1[0] = 'b'，它的匹配位置是 0，于是 y 变成 1；下一个字符 'a' 正好对上 s2[1]，又拼出一个 "ba"。y 归零就拿不到这第二次匹配，最后会留下一个 "ba"，而正确答案是空串。</p>
+      <p>入栈时把「首字符都对不上」记成 −1 是同一件事的另一面：弹出后加一正好回到 0，表示从头开始比。三种写错方式在随机数据上的抓取率分别是 6.16%、6.03%、6.79%，数字都不高，可一旦发作就是把该删的漏掉了。</p>
+    <pre class="code"><span class="cm">// 边匹配边入栈；删掉一次匹配的同时，把匹配位置接回栈顶记录的那一个</span>
+    <span class="kw">string</span> deleteLoop(<span class="kw">const</span> <span class="kw">string</span>&amp; s1, <span class="kw">const</span> <span class="kw">string</span>&amp; s2) {
+        <span class="kw">int</span> n = s1.size(), m = s2.size();
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">nxt</span>(m + 1, 0);
+        nxt[0] = -1;
+        <span class="kw">if</span> (m &gt; 1) nxt[1] = 0;
+        <span class="kw">int</span> i = 2, cn = 0;
+        <span class="kw">while</span> (i &lt; m) {
+            <span class="kw">if</span> (s2[i - 1] == s2[cn]) nxt[i++] = ++cn;
+            <span class="kw">else</span> <span class="kw">if</span> (cn &gt; 0) cn = nxt[cn];
+            <span class="kw">else</span> nxt[i++] = 0;
+        }
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">keep1</span>(n), keep2(n);
+        <span class="kw">int</span> size = 0, x = 0, y = 0;
+        <span class="kw">while</span> (x &lt; n) {
+            <span class="kw">if</span> (s1[x] == s2[y]) {
+                keep1[size] = x;
+                keep2[size] = y;
+                size++;
+                x++;
+                y++;
+            } <span class="kw">else</span> <span class="kw">if</span> (y == 0) {
+                keep1[size] = x;
+                keep2[size] = -1;
+                size++;
+                x++;
+            } <span class="kw">else</span> {
+                y = nxt[y];
+            }
+            <span class="kw">if</span> (y == m) {
+                size -= m;
+                y = size &gt; 0 ? keep2[size - 1] + 1 : 0;
+            }
+        }
+        <span class="kw">string</span> res;
+        <span class="kw">for</span> (<span class="kw">int</span> k = 0; k &lt; size; k++) res += s1[keep1[k]];
+        <span class="kw">return</span> res;
+    }</pre>
+      <div class="viz" id="viz-stack">
+        <p class="viz-title">逐字符走一遍栈</p>
+        <p class="viz-note">每点一步读一个字符，栈格子里的小字是这一格记下的匹配位置。切到错误版本，看最后剩下什么。</p>
+        <div id="stk-board"></div>
+        <p class="viz-note" id="stk-note"></p>
+        <p class="viz-answer" id="stk-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="stk-case"></select></label>
+          <label>版本 <select id="stk-ver"></select></label>
+          <button id="stk-next" type="button">下一步</button>
+          <button id="stk-reset" type="button">重置</button>
+        </div>
+      </div>
+      <figure class="fig" id="fig-perf1">
+        <figcaption>图 4　同一份 10<sup>6</sup> 字符的输入：栈加 next 是 2.14 毫秒，反复查再删是 3552 毫秒，纵轴取对数</figcaption>
+      </figure>
+
+      <h2>二、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>最短循环节，枚举块长</td><td>每个 L 扫一遍整串</td><td>O(n<sup>2</sup>)</td><td>O(1)</td></tr>
+        <tr><td>最短循环节，next 数组</td><td>一遍求 next 后做一次减法</td><td>O(n)</td><td>O(n)</td></tr>
+        <tr><td>反复删除，反复查再删</td><td>每次删除都要搬动后面的字符</td><td>O(n<sup>2</sup> / m) 量级</td><td>O(n)</td></tr>
+        <tr><td>反复删除，栈加 next</td><td>每个字符压栈一次、弹出一次</td><td>O(n + m)</td><td>O(n + m)</td></tr>
+      </table>
+      <p class="breakdown">求 next 的循环看着像两层，内层那次回退每次至少把 cn 减小 1，而 cn 一共只涨 n 次，所以整趟的回退总次数不超过 n。栈做法里每个字符恰好压栈一次、最多弹出一次，总操作数是 2n 量级。空间上两张 int 表跟着 n 走，n = 10<sup>6</sup> 时各 4 MB。</p>
+
+      <h2>总结</h2>
+      <p>最短循环节的答案就是 n − nxt[n]，两个方向都能推出来：nxt[n] 保证按这个长度切开能首尾相接，而任何合法块长都会让 nxt[n] 至少到 n − L′。算的时候盯住 nxt[n] 这一项，别用 nxt[n−1]。</p>
+      <p>反复删除要把删除之后的影响接住。栈里同时存字符下标与它当时的匹配位置，弹出 m 个之后 y 取新栈顶记录加一；把首字符失配记成 −1，弹出后加一正好回到 0。</p>
+      <p>两题时间都是 O(n + m)，空间 O(n + m)。朴素做法在 n = 10<sup>6</sup> 上分别是平方级和 3552 毫秒，换掉之后一次遍历就够。</p>
+      <p>把 next 当成一个转移函数之后，匹配这件事还能被塞进树上的路径与数位 dp 的状态里，代码骨架不用换。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>最短循环节（P4391）</td><td><a href="https://www.luogu.com.cn/problem/P4391" target="_blank">P4391 最短循环节</a></td></tr>
+        <tr><td>洛谷</td><td>不停删除（P4824）</td><td><a href="https://www.luogu.com.cn/problem/P4824" target="_blank">P4824 不停删除之后剩下的字符串</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解101【扩展】 KMP算法相关题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>KMP 算法</td><td><a href="https://oi-wiki.org/string/kmp/" target="_blank">oi-wiki.org/string/kmp</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:7, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+  function arrow(x1, y, x2) {
+    var g = el('g', {});
+    g.appendChild(el('line', {x1:x1, y1:y, x2:x2, y2:y, stroke:GREY, 'stroke-width':1.4}));
+    var d = x2 > x1 ? 1 : -1;
+    g.appendChild(el('polygon', {points:(x2)+','+y+' '+(x2-7*d)+','+(y-4)+' '+(x2-7*d)+','+(y+4), fill:GREY}));
+    return g;
+  }
+
+  // ===== 图 1：首尾重叠 =====
+  (function(){
+    var host = document.getElementById('fig-cycle');
+    if (!host) return;
+    var W = 660, H = 232;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var s = 'abcabcab', x0 = 44, cw = 62, ch = 32;
+    svg.appendChild(txt(16, 18, 's = "abcabcab"，n = 8', {'font-size':12.5, fill:'#1f2328'}));
+    // 第一行：前缀
+    for (var i = 0; i < 8; i++) {
+      var hit = i < 5;
+      svg.appendChild(box(x0 + i * cw, 32, cw - 6, ch, hit ? FILL_B : '#ffffff', hit ? BLUE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 32 + 21, s[i], {'text-anchor':'middle', 'font-size':15,
+        'font-weight': hit ? 700 : 400, fill: hit ? '#1e3a8a' : '#374151'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 32 + ch + 13, String(i), {'text-anchor':'middle', 'font-size':10, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(16, 92, '前缀 s[0..4]', {'font-size':11.5, fill:BLUE}));
+    // 第二行：后缀
+    svg.appendChild(txt(16, 128, '后缀 s[3..7]', {'font-size':11.5, fill:ORANGE}));
+    for (var i = 0; i < 8; i++) {
+      var hit = i >= 3;
+      svg.appendChild(box(x0 + i * cw, 106, cw - 6, ch, hit ? FILL_O : '#ffffff', hit ? ORANGE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 106 + 21, s[i], {'text-anchor':'middle', 'font-size':15,
+        'font-weight': hit ? 700 : 400, fill: hit ? '#9a3412' : '#374151'}));
+    }
+    svg.appendChild(el('line', {x1:x0 + 3 * cw - 3, y1:70, x2:x0 + 3 * cw - 3, y2:104, stroke:ORANGE, 'stroke-width':1.5, 'stroke-dasharray':'4 3'}));
+    svg.appendChild(txt(455, 60, '重叠 5 个字符', {'font-size':12, fill:'#1f2328'}));
+    svg.appendChild(txt(455, 80, 'nxt[8] = 5', {'font-size':13, 'font-weight':700, fill:'#1f2328'}));
+    // 答案
+    svg.appendChild(box(24, 158, 190, 38, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(40, 182, 'L = 8 − 5 = 3', {'font-size':15, 'font-weight':700, fill:'#1f2328'}));
+    svg.appendChild(arrow(224, 177, 262));
+    for (var i = 0; i < 3; i++) {
+      svg.appendChild(box(272 + i * 46, 158, 40, 38, FILL_B, BLUE));
+      svg.appendChild(txt(272 + i * 46 + 20, 182, s[i], {'text-anchor':'middle', 'font-size':15, 'font-weight':700, fill:'#1e3a8a'}));
+    }
+    svg.appendChild(txt(420, 182, '循环节 "abc"，重复 2.67 次', {'font-size':12, fill:'#374151'}));
+    svg.appendChild(txt(16, 220, '最后一段只有 "ab" 两个字符，题目允许不完整，nxt 也不受影响。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：两个错法 =====
+  (function(){
+    var host = document.getElementById('fig-cycle-bad');
+    if (!host) return;
+    var W = 660, H = 172;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '两个错法在两个输入上的取值', {'font-size':12.5, fill:'#1f2328'}));
+    var head = ['s', 'nxt[n]', 'n − nxt[n]', 'nxt[n−1]', 'n − nxt[n−1]'];
+    var xs = [24, 172, 262, 388, 478];
+    var ws = [140, 84, 118, 84, 152];
+    for (var c = 0; c < head.length; c++) {
+      svg.appendChild(txt(xs[c] + 6, 42, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    }
+    var rows = [
+      ['"abcabcab"', '5', '3  对', '4', '4  错'],
+      ['"aa"', '1', '1  对', '0', '2  错']
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 50 + r * 42;
+      for (var c = 0; c < rows[r].length; c++) {
+        var bad = (c === 4);
+        svg.appendChild(box(xs[c], y, ws[c], 34, bad ? FILL_R : (c === 2 ? FILL_B : '#ffffff'), bad ? RED : (c === 2 ? BLUE : '#e6e8eb')));
+        svg.appendChild(txt(xs[c] + 8, y + 22, rows[r][c], {'font-size':12.5, fill: bad ? '#991b1b' : (c === 2 ? '#1e3a8a' : '#374151'), 'font-weight': (c === 2 || bad) ? 600 : 400}));
+      }
+    }
+    svg.appendChild(txt(16, 150, 'nxt[n−1] 少算了最后那个字符带来的重叠，"aa" 上把重叠算成 0，答案直接翻倍。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：栈的四步 =====
+  (function(){
+    var host = document.getElementById('fig-stack');
+    if (!host) return;
+    var W = 660, H = 292;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 's1 = "bbaa"，s2 = "ba"，nxt = [−1, 0]', {'font-size':12.5, fill:'#1f2328'}));
+    var rows = [
+      ['读到第 3 个字符 a：栈顶 a 记 y = 1，y 涨到 2 = m', ['b@0', 'b@0', 'a@1'], '弹出 2 个'],
+      ['弹出后栈顶是 s1[0] = b，它的记录是 0，y 接回 0 + 1 = 1', ['b@0'], 'y = 1'],
+      ['读到第 4 个字符 a，与 s2[1] 相等，压栈后 y 又涨到 2', ['b@0', 'a@1'], '弹出 2 个'],
+      ['栈空了，剩下的串是空串', [], '结束']
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 32 + r * 60;
+      svg.appendChild(txt(16, y + 26, rows[r][0], {'font-size':12, fill:'#374151'}));
+      for (var c = 0; c < rows[r][1].length; c++) {
+        svg.appendChild(box(400 + c * 50, y, 44, 34, FILL_B, BLUE));
+        svg.appendChild(txt(422 + c * 50, y + 21, rows[r][1][c], {'text-anchor':'middle', 'font-size':12, fill:'#1e3a8a'}));
+      }
+      if (!rows[r][1].length) {
+        svg.appendChild(txt(400, y + 21, '（空）', {'font-size':12, fill:'#9aa0a6'}));
+      }
+      svg.appendChild(txt(566, y + 21, rows[r][2], {'font-size':12, fill: r === 3 ? '#1f2328' : ORANGE, 'font-weight':600}));
+    }
+    svg.appendChild(txt(16, 274, '第 2 步是全部关键：y 接回栈顶记录加一，第 4 个字符才认得出又一个 "ba"。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：性能（对数轴） =====
+  (function(){
+    var host = document.getElementById('fig-perf1');
+    if (!host) return;
+    var W = 660, H = 208;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'n = 10^6，模式长 2，纵轴取对数（毫秒）', {'font-size':12.5, fill:'#1f2328'}));
+    var baseY = 156, topY = 40, x0 = 88, bw = 108;
+    // 轴与刻度
+    svg.appendChild(el('line', {x1:x0 - 12, y1:baseY, x2:620, y2:baseY, stroke:'#c9ced4', 'stroke-width':1.2}));
+    var ticks = [1, 10, 100, 1000, 10000];
+    for (var t = 0; t < ticks.length; t++) {
+      var lg = Math.log(ticks[t]) / Math.LN10;
+      var yy = baseY - lg / 4 * (baseY - topY);
+      svg.appendChild(el('line', {x1:x0 - 12, y1:yy, x2:620, y2:yy, stroke:'#eef0f2', 'stroke-width':1}));
+      svg.appendChild(txt(x0 - 18, yy + 4, String(ticks[t]), {'text-anchor':'end', 'font-size':10.5, fill:'#9aa0a6'}));
+    }
+    var bars = [
+      ['栈 + next', 2.14, BLUE, FILL_B, '2.14 ms'],
+      ['反复查再删', 3552, ORANGE, FILL_O, '3552 ms']
+    ];
+    for (var i = 0; i < bars.length; i++) {
+      var lg = Math.log(bars[i][1]) / Math.LN10;
+      var h = lg / 4 * (baseY - topY);
+      var x = x0 + 60 + i * 200;
+      svg.appendChild(box(x, baseY - h, bw, h, bars[i][3], bars[i][2]));
+      svg.appendChild(txt(x + bw / 2, baseY - h - 8, bars[i][4], {'text-anchor':'middle', 'font-size':12.5, 'font-weight':700, fill: bars[i][2]}));
+      svg.appendChild(txt(x + bw / 2, baseY + 18, bars[i][0], {'text-anchor':'middle', 'font-size':12, fill:'#374151'}));
+    }
+    svg.appendChild(txt(16, 196, '差 1660 倍：柱子的高度差只有 3 个数量级，看着不悬殊，实际时间一个在两毫秒一个在三点五秒。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示 1：逐格求 next =====
+  (function(){
+    var CASES = ['aa', 'abcabcab', 'babaababaa', 'ababab', 'aabaabaab'];
+    var VERS = [{k:'ok', n:'正确'}, {k:'last', n:'用 nxt[n-1]'}, {k:'noback', n:'失配不回退'}];
+    var selS = document.getElementById('cyc-str');
+    var selV = document.getElementById('cyc-ver');
+    var board = document.getElementById('cyc-board');
+    var note = document.getElementById('cyc-note');
+    var ansEl = document.getElementById('cyc-answer');
+    var btnN = document.getElementById('cyc-next');
+    var btnR = document.getElementById('cyc-reset');
+    if (!selS || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = '"' + CASES[i] + '"'; selS.appendChild(o);
+    }
+    for (var i = 0; i < VERS.length; i++) {
+      var o = document.createElement('option'); o.value = VERS[i].k; o.textContent = VERS[i].n; selV.appendChild(o);
+    }
+    var st = {caseIdx:0, ver:'ok', step:0, frames:null, nxt:null, n:0, s:''};
+
+    function compute(s, ver) {
+      var n = s.length;
+      var nxt = new Array(n + 2).fill(null);
+      nxt[0] = -1; nxt[1] = 0;
+      var limit = (ver === 'last') ? n - 1 : n;
+      var frames = [];
+      var i = 2, cn = 0;
+      frames.push({i:i, cn:cn, nxt:nxt.slice(), note:'先把 nxt[0] 置 −1、nxt[1] 置 0，其余格子等算'});
+      var guard = 0;
+      while (i <= limit && guard++ < 400) {
+        var ci = i - 1;
+        if (s[ci] === s[cn]) {
+          var val = cn + 1;
+          nxt[i] = val; i = i + 1; cn = val;
+          frames.push({i:i, cn:cn, nxt:nxt.slice(), note:'s[' + ci + '] 与 s[' + (val - 1) + '] 相等，nxt[' + (i - 1) + '] = ' + val});
+        } else if (ver !== 'noback' && cn > 0) {
+          var from = cn; cn = nxt[cn];
+          frames.push({i:i, cn:cn, nxt:nxt.slice(), note:'s[' + ci + '] 与 s[' + from + '] 不等，cn 退到 nxt[' + from + '] = ' + cn});
+        } else {
+          nxt[i] = 0; i = i + 1;
+          frames.push({i:i, cn:cn, nxt:nxt.slice(), note:'s[' + ci + '] 与 s[' + cn + '] 不等且 cn = 0，nxt[' + (i - 1) + '] = 0'});
+        }
+      }
+      return {nxt:nxt, frames:frames};
+    }
+    function answerOf(res, n, ver) {
+      if (ver === 'last') return n - res.nxt[n - 1];
+      return n - res.nxt[n];
+    }
+    function cards(host, values, cur, cls) {
+      host.innerHTML = '';
+      var wrap = document.createElement('div');
+      wrap.className = 'cards';
+      for (var i = 0; i < values.length; i++) {
+        var d = document.createElement('div');
+        d.className = 'card' + (values[i] === null ? ' empty' : '') + (i === cur ? ' pick' : '');
+        d.innerHTML = (values[i] === null ? '·' : String(values[i])) + '<span class="idx">' + i + '</span>';
+        wrap.appendChild(d);
+      }
+      host.appendChild(wrap);
+    }
+    function render() {
+      var s = st.s, n = st.n;
+      var f = st.frames[st.step];
+      board.innerHTML = '';
+      var chars = document.createElement('div');
+      chars.className = 'cards';
+      for (var i = 0; i < n; i++) {
+        var d = document.createElement('div');
+        d.className = 'card';
+        d.innerHTML = s[i] + '<span class="idx">' + i + '</span>';
+        chars.appendChild(d);
+      }
+      board.appendChild(chars);
+      var l1 = document.createElement('p'); l1.className = 'cap'; l1.textContent = 'nxt 数组（下标 0 到 n）';
+      board.appendChild(l1);
+      var nx = document.createElement('div');
+      board.appendChild(nx);
+      cards(nx, f.nxt.slice(0, n + 1), f.i, null);
+      var l2 = document.createElement('p'); l2.className = 'cap';
+      l2.textContent = 'i = ' + f.i + '，cn = ' + f.cn;
+      board.appendChild(l2);
+      note.textContent = f.note;
+      var last = st.step === st.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        var a = answerOf({nxt:st.nxt}, n, st.ver);
+        ansEl.textContent = '答案 n − nxt[n] = ' + n + ' − ' + (st.ver === 'last' ? st.nxt[n - 1] : st.nxt[n]) +
+          ' = ' + a + '（版本：' + (st.ver === 'last' ? '用 nxt[n-1]' : (st.ver === 'noback' ? '失配不回退' : '正确')) + '）';
+      } else {
+        ansEl.textContent = '';
+      }
+    }
+    function rebuild() {
+      st.s = CASES[st.caseIdx];
+      st.n = st.s.length;
+      var r = compute(st.s, st.ver);
+      st.nxt = r.nxt; st.frames = r.frames; st.step = 0;
+      render();
+    }
+    selS.addEventListener('change', function(){ st.caseIdx = Number(selS.value); rebuild(); });
+    selV.addEventListener('change', function(){ st.ver = selV.value; rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+
+  // ===== 演示 2：栈 =====
+  (function(){
+    var CASES = [
+      {s1:'bbaa', s2:'ba'}, {s1:'baaa', s2:'aa'}, {s1:'aabab', s2:'ab'},
+      {s1:'abcabc', s2:'abc'}, {s1:'aabbaa', s2:'ab'}, {s1:'abccba', s2:'cb'}
+    ];
+    var VERS = [{k:'ok', n:'正确'}, {k:'reset', n:'弹出后 y 归零'}, {k:'noplus', n:'接回忘了 +1'}];
+    var sel = document.getElementById('stk-case');
+    var selV = document.getElementById('stk-ver');
+    var board = document.getElementById('stk-board');
+    var note = document.getElementById('stk-note');
+    var ansEl = document.getElementById('stk-answer');
+    var btnN = document.getElementById('stk-next');
+    var btnR = document.getElementById('stk-reset');
+    if (!sel || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option'); o.value = String(i);
+      o.textContent = '"' + CASES[i].s1 + '" 删 "' + CASES[i].s2 + '"'; sel.appendChild(o);
+    }
+    for (var i = 0; i < VERS.length; i++) {
+      var o = document.createElement('option'); o.value = VERS[i].k; o.textContent = VERS[i].n; selV.appendChild(o);
+    }
+    var st = {idx:0, ver:'ok', step:0, frames:null, res:'', s1:'', s2:'', nxt:null};
+
+    function state(s1, s2, ver) {
+      var n = s1.length, m = s2.length;
+      var nxt = new Array(m + 2).fill(0);
+      nxt[0] = -1;
+      if (m > 1) nxt[1] = 0;
+      var i = 2, cn = 0, guard0 = 0;
+      while (i < m && guard0++ < 200) {
+        if (s2[i - 1] === s2[cn]) { cn = cn + 1; nxt[i] = cn; i = i + 1; }
+        else if (cn > 0) { cn = nxt[cn]; }
+        else { nxt[i] = 0; i = i + 1; }
+      }
+      var keep = [], k2 = [];
+      var size = 0, x = 0, y = 0, frames = [], guard = 0;
+      while (x < n && guard++ < 300) {
+        var act;
+        if (s1[x] === s2[y]) {
+          keep[size] = x; k2[size] = y; size++; act = {t:'push', x:x, y:y};
+          x = x + 1; y = y + 1;
+        } else if (y === 0) {
+          keep[size] = x; k2[size] = -1; size++; act = {t:'fail', x:x};
+          x = x + 1;
+        } else {
+          var from = y; y = nxt[y]; act = {t:'back', x:x, from:from, to:y};
+        }
+        if (y === m) {
+          size = size - m;
+          var top = size > 0 ? k2[size - 1] : -1;
+          if (ver === 'reset') y = 0;
+          else if (ver === 'noplus') y = size > 0 ? top : 0;
+          else y = size > 0 ? top + 1 : 0;
+          act.pop = (ver === 'reset') ? 'y = 0' : (size > 0 ? ('y = ' + top + ' + 1 = ' + y) : 'y = 0');
+        }
+        var kk = [];
+        for (var q = 0; q < size; q++) kk.push({ch:s1[keep[q]], pos:k2[q]});
+        frames.push({act:act, x:x, y:y, size:size, stack:kk});
+      }
+      var res = '';
+      for (var q = 0; q < size; q++) res += s1[keep[q]];
+      return {frames:frames, res:res, nxt:nxt};
+    }
+    function render() {
+      var f = st.frames[st.step];
+      board.innerHTML = '';
+      var l1 = document.createElement('p'); l1.className = 'cap';
+      l1.textContent = 's1 = "' + st.s1 + '"，s2 = "' + st.s2 + '"，nxt = [' + st.nxt.slice(0, st.s2.length + 1).join(', ') + ']';
+      board.appendChild(l1);
+      var chars = document.createElement('div'); chars.className = 'cards';
+      for (var i = 0; i < st.s1.length; i++) {
+        var d = document.createElement('div');
+        d.className = 'card' + (i === f.act.x - 1 ? ' pick' : (i < f.act.x ? '' : ' dim'));
+        d.innerHTML = st.s1[i] + '<span class="idx">' + i + '</span>';
+        chars.appendChild(d);
+      }
+      board.appendChild(chars);
+      var l2 = document.createElement('p'); l2.className = 'cap'; l2.textContent = '栈（小字是这一格记下的匹配位置）';
+      board.appendChild(l2);
+      var stk = document.createElement('div'); stk.className = 'cards';
+      for (var i = 0; i < f.stack.length; i++) {
+        var d = document.createElement('div'); d.className = 'card ok';
+        d.innerHTML = f.stack[i].ch + '<span class="idx">y=' + f.stack[i].pos + '</span>';
+        stk.appendChild(d);
+      }
+      if (!f.stack.length) {
+        var d0 = document.createElement('div'); d0.className = 'card empty'; d0.textContent = '（空）';
+        stk.appendChild(d0);
+      }
+      board.appendChild(stk);
+      var l3 = document.createElement('p'); l3.className = 'cap';
+      l3.textContent = '当前 y = ' + f.y + '，栈里有 ' + f.size + ' 个字符';
+      board.appendChild(l3);
+      var t = f.act;
+      if (t.t === 'push') note.textContent = '读 s1[' + t.x + '] = "' + st.s1[t.x] + '"，与 s2[' + t.y + '] 相等：压栈（记 y = ' + t.y + '），x 与 y 都加一' + (t.pop ? '，y 涨到 ' + st.s2.length + '，弹出 ' + st.s2.length + ' 个并 ' + t.pop : '');
+      else if (t.t === 'fail') note.textContent = '读 s1[' + t.x + '] = "' + st.s1[t.x] + '"，与 s2[0] 也不等：压栈并记 −1，x 加一';
+      else note.textContent = '读 s1[' + t.x + '] = "' + st.s1[t.x] + '"，与 s2[' + t.from + '] 不等：y 沿 nxt 退到 ' + t.to + '，这个字符先不入栈' + (t.pop ? '，y 涨到 ' + st.s2.length + '，弹出并 ' + t.pop : '');
+      var last = st.step === st.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        ansEl.textContent = '剩下的串 = "' + st.res + '"（版本：' + (st.ver === 'reset' ? '弹出后 y 归零' : (st.ver === 'noplus' ? '接回忘了 +1' : '正确')) + '）';
+      } else ansEl.textContent = '';
+    }
+    function rebuild() {
+      st.s1 = CASES[st.idx].s1; st.s2 = CASES[st.idx].s2;
+      var r = state(st.s1, st.s2, st.ver);
+      st.frames = r.frames; st.res = r.res; st.nxt = r.nxt; st.step = 0;
+      render();
+    }
+    sel.addEventListener('change', function(){ st.idx = Number(sel.value); rebuild(); });
+    selV.addEventListener('change', function(){ st.ver = selV.value; rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>

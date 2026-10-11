@@ -1,5 +1,14 @@
 # 自动化运行记录：转换下一课
 
+## 2026-10-12 00:55
+- 任务：转换下一课 → prompt.md「下一课 099（逆元和除法同余、容斥原理）」，抢锁成功，主循环直做。
+- 执行：产出 3 页并**新开「逆元与容斥」组**（插在「快速幂与矩阵快速幂」之后、「序列与区间」之前）：`mod-inverse` / `inclusion-exclusion-table` / `inclusion-exclusion-formula`。
+  - 六题 Java 手改 C++（低号课无「C++ 塞注释」版），/tmp/cpp099 四种子随机对拍全绿；全部正文数字实测（求逆元 133ns、线性递推 4.361ms 对 299.5ms、漏强转错误率随 p、阶乘表跨过 mod 整表作废、gcd 题 3.637ms、硬币查询 66ns、播放列表 l=1e9 仍 0.0055ms）。
+  - 13 张 SVG + 6 个演示；/tmp/br099.js 把 46 组 select 组合逐帧点到末帧，答案与 C++ / 手算 / 内置 DP 逐项一致。
+  - 自检：三页自写 probe099 PASS（figs/svg 5/5、4/4、4/4，pager 链正确），verify_home 361 卡片 PASS，杂字/AI 味扫描 CLEAN（清掉 4 处破折号、4 处修辞否定）。json 358 → 361（六字段全齐），锁已释放。
+- 环境备忘：verify_pages.js 在本环境对任何页仍全 0（同 071/083/085），继续用自写 CDP 脚本覆盖；node 路径 `~/.workbuddy/binaries/node/versions/22.22.2-6/bin/node`。新增两条通用教训已写进 MEMORY.md（演示模运算必须用 BigInt；逐帧探针要用 selectedIndex 设下拉）。
+- 无遗留问题。下一课 100。
+
 ## 2026-10-10 00:00
 - 任务：转换下一课 → prompt.md「下一课 073（背包dp-01背包、有依赖的背包）」，抢锁成功，主循环直做。
 - 执行：产出 4 页并入「入门」组（lis-ext 之后、graph-build 之前）：knapsack-01 / knapsack-subset / knapsack-dependent / knapsack-topk。

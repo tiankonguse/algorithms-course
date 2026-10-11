@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>next 当转移函数：树上的路径与数位 dp</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.card { min-width: 30px; padding: 5px 7px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.done { background: #dcfce7; border-color: #16a34a; color: #14532d; font-weight: 600; }
+.card.bad { background: #fee2e2; border-color: #dc2626; color: #991b1b; font-weight: 600; }
+.card.dim { opacity: .38; }
+.card.empty { background: transparent; border-style: dashed; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+.tblwrap { overflow-x: auto; }
+table.mini { border-collapse: collapse; font-size: 12.5px; margin: 6px 0 2px; }
+table.mini th, table.mini td { border: 1px solid var(--border); padding: 3px 8px; text-align: center; font-variant-numeric: tabular-nums; }
+table.mini th { background: var(--bg-soft); color: var(--text-dim); font-weight: 500; }
+table.mini td.hit { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>next 当转移函数：树上的路径与数位 dp</h1>
+      <p class="intro">next 数组最直接的用途是让主串指针不回头：主串指着一格，模式串退到某格，接着比。换两个场景。一棵树的向下路径要和一条链表对上，一个长度为 n 的字符串要落在字典序区间里且不含某个模式串。前者的匹配状态沿树分叉，后者要缩进 dp 的一维。next 在这两处的用法一致：它变成一个函数，给一个字符和当前状态，返回新状态。</p>
+
+      <h2>零、二叉树中的链表</h2>
+      <p>题目给一棵二叉树和一个单链表，问树里有没有一条一直向下的路径，路径上的值依次等于整条链表。</p>
+      <p>笨办法是把每个节点都当起点，从它往下逐层和链表比，比不过就换下一个起点。这种写法在随机形状的树上够用：2×10<sup>5</sup> 个节点的随机树、19 个节点的链表恰好存在时，逐起点只有 27 次字符比较，而带着 next 状态走完树反而比了 7800 次。</p>
+      <p>把树换成一条 2×10<sup>4</sup> 节点的链、链表换成 2000 个节点且永远配不上，比例就翻过来了：逐起点要 3800 万次比较、300 毫秒，带 next 的写法 38001 次、0.18 毫秒。两者的差别在于，「配到哪里」这件事有没有被带到下一个节点。</p>
+      <figure class="fig" id="fig-tree1">
+        <figcaption>图 1　一号节点的左子树里 1 → 2 → 3 正好是链表，右子树里的 3 也有两个儿子但接不上第三个</figcaption>
+      </figure>
+      <p>做法是把「已经匹配上链表的前 i 个」当成状态，沿树往下传。到了某个节点，先拿父亲给的 i 做修正：只要当前值不等于 list[i] 就沿 next 退，退到能接上或者退到 −1 为止。修正完的 i 加一，交给两个孩子。</p>
+      <p>这里有个和字符串匹配不一样的地方：每个分支各带一份 i。字符串匹配只有一个指针，因为在同一个位置上失配之后就再也不会回到那个位置；树上左右两条路都要试，谁也不能把对方的 i 改掉。递归的参数天然做到了这件事。</p>
+      <figure class="fig" id="fig-treestate">
+        <figcaption>图 2　同一个 i 同时交给两个孩子，两个孩子各自往下修正，互不干扰</figcaption>
+      </figure>
+      <p>链表建 next 表要单独说一句：m = 1 时表里只有 nxt[0] = −1 这一项，没有 nxt[1]。照着 m ≥ 2 的写法去写 nxt[1] = 0 会越界。</p>
+    <pre class="code"><span class="cm">// 链表的 next 表建在数组上；链表只有 1 个节点时表里只有 nxt[0] = -1 这一项</span>
+    vector&lt;<span class="kw">int</span>&gt; <span class="fn">listNext</span>(<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; s, <span class="kw">int</span> m) {
+        <span class="kw">if</span> (m == 1) <span class="kw">return</span> vector&lt;<span class="kw">int</span>&gt;{-1};
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">nxt</span>(m, 0);
+        nxt[0] = -1;
+        nxt[1] = 0;
+        <span class="kw">int</span> i = 2, cn = 0;
+        <span class="kw">while</span> (i &lt; m) {
+            <span class="kw">if</span> (s[i - 1] == s[cn]) nxt[i++] = ++cn;
+            <span class="kw">else</span> <span class="kw">if</span> (cn &gt; 0) cn = nxt[cn];
+            <span class="kw">else</span> nxt[i++] = 0;
+        }
+        <span class="kw">return</span> nxt;
+    }</pre>
+    <pre class="code"><span class="cm">// cur 是当前节点，i 是父亲传下来的匹配位置；配到 i == m 说明整条链表都串起来了</span>
+    <span class="kw">bool</span> <span class="fn">findInTree</span>(<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; s, <span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; nxt, TreeNode* cur, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == (<span class="kw">int</span>)s.size()) <span class="kw">return</span> <span class="kw">true</span>;
+        <span class="kw">if</span> (!cur) <span class="kw">return</span> <span class="kw">false</span>;
+        <span class="kw">while</span> (i &gt;= 0 &amp;&amp; cur-&gt;val != s[i]) i = nxt[i];
+        <span class="kw">return</span> findInTree(s, nxt, cur-&gt;left, i + 1) || findInTree(s, nxt, cur-&gt;right, i + 1);
+    }
+
+    <span class="kw">bool</span> <span class="fn">isSubPath</span>(<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; list, TreeNode* root) {
+        vector&lt;<span class="kw">int</span>&gt; nxt = listNext(list, list.size());
+        <span class="kw">return</span> findInTree(list, nxt, root, 0);
+    }</pre>
+      <p>i 涨到 m 就返回真，这时不必再管当前节点的孩子存不存在：链表最后一个值是在父亲那一层对上的，路径到此为止已经成立。剩下的失败判定落在「走到空指针」上。</p>
+      <div class="viz" id="viz-tree">
+        <p class="viz-title">状态沿着树往下走</p>
+        <p class="viz-note">每点一步模拟一次递归调用，右边是这个节点拿到 i 之后做的修正。切到另一组数据看空指针那一支。</p>
+        <div id="tree-board"></div>
+        <p class="viz-note" id="tree-note"></p>
+        <p class="viz-answer" id="tree-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="tree-case"></select></label>
+          <button id="tree-next" type="button">下一步</button>
+          <button id="tree-reset" type="button">重置</button>
+        </div>
+      </div>
+      <p>写错的地方集中在最后一步：修正完把 i 交下去时忘了加一。这样每个节点都拿着同一个 i 递归，整条链表只能反复匹配它的第一个字符。随机小树上这个错法有 34.58% 与正解不同。</p>
+      <figure class="fig" id="fig-treeperf">
+        <figcaption>图 3　比较次数对照，纵轴对数：链状树上两种写法差三个数量级，随机浅树上逐起点反而更省</figcaption>
+      </figure>
+
+      <h2>一、找到所有好字符串</h2>
+      <p>题目给两个长度为 n 的字符串 s1、s2 和一个模式串 evil，数出长度 n、字典序落在 [s1, s2] 里且不含 evil 的字符串有多少个，答案对 10<sup>9</sup> + 7 取余。</p>
+      <p>「大于等于 s1 且小于等于 s2」不好直接做，拆成两次「小于等于某个上界」相减：先数 ≤ s2 的，再数 ≤ s1 的，两者相减把 &lt; s1 的部分切掉。这样切完 s1 本身也被减掉了，可它是合法的，得补回来一个。漏掉这个加一的错法在随机小数据上有 80.33% 与正解不同。</p>
+      <p>数「小于等于上界」用数位 dp，状态三个：i 表示填到第几位，j 表示 evil 已经匹配上多长的前缀，free 表示前面填出来的前缀有没有比上界小。free 为 0 时这一位最多只能填到上界那一位，free 为 1 时 26 个字母随便填。</p>
+      <p>j 这一维靠 next 转移。已经匹配上 evil 的前 j 个字符，下一个字符是 pick 时，新的匹配长度不能只看 j + 1，要从 j 沿 next 一路退到 evil[j] 等于 pick 为止，退不动就退回 −1，表示重新从 evil 的头开始比。</p>
+      <figure class="fig" id="fig-jump">
+        <figcaption>图 4　evil = "abab"，当前匹配到前 3 个字符，下一个字符是 'a' 时沿 next 退两次落到 0</figcaption>
+      </figure>
+    <pre class="code"><span class="cm">// 已经匹配上 evil[0..j-1]，下一个字符是 pick，返回新的「已匹配长度减一」</span>
+    <span class="cm">// 沿 nxt 一路退，均摊下来 O(1)</span>
+    <span class="kw">int</span> <span class="fn">jump</span>(<span class="kw">char</span> pick, <span class="kw">const</span> <span class="kw">string</span>&amp; evil, <span class="kw">int</span> j) {
+        <span class="kw">while</span> (j &gt;= 0 &amp;&amp; pick != evil[j]) j = nxt[j];
+        <span class="kw">return</span> j;
+    }</pre>
+      <p>返回值是「匹配位置」而不是「匹配长度」，所以填表时要在它后面加一。忘了加一的错法有 52.62% 与正解不同。</p>
+      <figure class="fig" id="fig-digit">
+        <figcaption>图 5　状态是 (i, j, free) 三元组：i 沿着长度方向推进，j 由 next 决定落到哪一格，free 分成两层</figcaption>
+      </figure>
+    <pre class="code"><span class="cm">// i：填到 s 的第几位；j：evil 已经匹配上的前缀长度；free 为 1 表示前缀已经小于 s</span>
+    <span class="kw">int</span> <span class="fn">f</span>(<span class="kw">const</span> <span class="kw">string</span>&amp; s, <span class="kw">const</span> <span class="kw">string</span>&amp; evil, <span class="kw">int</span> i, <span class="kw">int</span> j, <span class="kw">int</span> freeFlag) {
+        <span class="kw">if</span> (j == m) <span class="kw">return</span> 0;
+        <span class="kw">if</span> (i == n) <span class="kw">return</span> 1;
+        <span class="kw">if</span> (dp[i][j][freeFlag] != -1) <span class="kw">return</span> dp[i][j][freeFlag];
+        <span class="kw">char</span> cur = s[i];
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">if</span> (freeFlag == 0) {
+            <span class="kw">for</span> (<span class="kw">char</span> pick = 'a'; pick &lt; cur; pick++)
+                ans += f(s, evil, i + 1, jump(pick, evil, j) + 1, 1);
+            ans += f(s, evil, i + 1, jump(cur, evil, j) + 1, 0);
+        } <span class="kw">else</span> {
+            <span class="kw">for</span> (<span class="kw">char</span> pick = 'a'; pick &lt;= 'z'; pick++)
+                ans += f(s, evil, i + 1, jump(pick, evil, j) + 1, 1);
+        }
+        ans %= MOD;
+        <span class="kw">return</span> dp[i][j][freeFlag] = ans;
+    }</pre>
+      <p>两次上界求解共用同一张 dp 表，中间要清空：dp 的取值依赖上界 s 本身，换了 s 就得重算。</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">countGood</span>(<span class="kw">int</span> n, <span class="kw">const</span> <span class="kw">string</span>&amp; s1, <span class="kw">const</span> <span class="kw">string</span>&amp; s2, <span class="kw">const</span> <span class="kw">string</span>&amp; evil) {
+        buildNext(evil);
+        clear();
+        <span class="kw">long</span> <span class="kw">long</span> ans = f(s2, evil, 0, 0, 0);
+        clear();
+        ans = (ans - f(s1, evil, 0, 0, 0) + MOD) % MOD;
+        <span class="kw">if</span> (kmp(s1, evil) == -1) ans = (ans + 1) % MOD;
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>实测取 n = 500、m = 50、一个固定的 evil（'a' 到 'e' 循环 10 遍），答案是 28935498，跑 5.86 毫秒，jump 一共比了 745 万次字符。把 jump 换成「每次重新算一遍最长 border」，同样的答案要 15.46 毫秒、3189 万次比较。</p>
+      <div class="viz" id="viz-good">
+        <p class="viz-title">同一张表一格一格填，答案最后合成</p>
+        <p class="viz-note">每点一步填一个 (i, j, free) 格子，说明里写着这一格枚举了哪些字母、各自跳到哪。末帧列出两次上界求解的结果与最终答案。</p>
+        <div id="good-board"></div>
+        <p class="viz-note" id="good-note"></p>
+        <p class="viz-answer" id="good-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="good-case"></select></label>
+          <label>版本 <select id="good-ver"></select></label>
+          <button id="good-next" type="button">下一步</button>
+          <button id="good-reset" type="button">重置</button>
+        </div>
+      </div>
+      <figure class="fig" id="fig-goodperf">
+        <figcaption>图 6　状态转移里 jump 的比较次数：借 next 一路退是 745 万次，每次重算最长 border 是 3189 万次</figcaption>
+      </figure>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>树上的链表，每个节点当起点重比</td><td>每个起点沿路径比到不等为止</td><td>最坏 O(n·m)</td><td>O(h)</td></tr>
+        <tr><td>树上的链表，next 沿路径传状态</td><td>每个节点做一次均摊 O(1) 的修正</td><td>O(n + m)</td><td>O(h + m)</td></tr>
+        <tr><td>好字符串，枚举所有字符串</td><td>26<sup>n</sup> 个串逐个查 evil</td><td>O(26<sup>n</sup> · n)</td><td>O(n)</td></tr>
+        <tr><td>好字符串，数位 dp 加 next 转移</td><td>n·m·2 个状态，每格枚举 26 个字母</td><td>O(n·m·26·退位步数)</td><td>O(n·m)</td></tr>
+      </table>
+      <p class="breakdown">树问题的空间里 h 是树高，链状树上 h 就是 n。好字符串那行的「退位步数」是 jump 内部沿 next 走的平均长度，单次最坏退 m 步；m = 50 时实测平均 5.73 步（745 万次比较摊到 130 万次转移上）。状态数是 n·m·2 = 5 万，转移 130 万次，所以时间实际落在 O(n·m·26) 量级。递归写树时注意栈深度，链状树高到 10<sup>5</sup> 会爆栈，题目规模里 h 只有几千，够用。</p>
+
+      <h2>总结</h2>
+      <p>树上的链表把「已匹配长度」当成随路径传递的状态，父亲算完修正值再交给两个孩子，每个分支各带一份，i 到 m 就是命中。链表长度为 1 时 next 表只有一项，建表要特判。</p>
+      <p>好字符串把匹配状态缩进 dp：i、j、free 三个维度，j 的转移由 jump(pick, j) 给出，返回值记得加一。字典序区间的写法是两次上界相减，再把下界那个串本身补回来。</p>
+      <p>两处写法的代价分别在 O(n + m) 和 O(n·m·26) 量级。链状树加长链表上，逐节点重比要 3800 万次比较，带状态的是 38001 次；n = 500、m = 50 的数位 dp 里，jump 比重新算 border 省掉四分之三的比较。</p>
+      <p>同一个形状再往前推一步就是 AC 自动机：把 jump 的那张 next 表按字母表预展开，多模式串的匹配也能一次扫完。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>二叉树中的链表</td><td><a href="https://leetcode.cn/problems/linked-list-in-binary-tree/" target="_blank">1367 二叉树中的链表</a></td></tr>
+        <tr><td>LeetCode</td><td>找到所有好字符串</td><td><a href="https://leetcode.cn/problems/find-all-good-strings/" target="_blank">1397 找到所有好字符串</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解101【扩展】 KMP算法相关题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>KMP 算法</td><td><a href="https://oi-wiki.org/string/kmp/" target="_blank">oi-wiki.org/string/kmp</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626', GREEN = '#16a34a';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2', FILL_G = '#dcfce7';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:7, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+  function logY(v, baseY, topY, decades) {
+    return baseY - Math.log(v) / Math.LN10 / decades * (baseY - topY);
+  }
+
+  // ===== 图 1：树与链表 =====
+  (function(){
+    var host = document.getElementById('fig-tree1');
+    if (!host) return;
+    var W = 660, H = 252;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'root = [1,2,3,3,null,2,3]，链表 1 → 2 → 3', {'font-size':12.5, fill:'#1f2328'}));
+    var N = [[330,40,'1'],[200,106,'2'],[462,106,'3'],[140,172,'3'],[398,172,'2'],[520,172,'3']];
+    var E = [[0,1,0],[0,2,0],[1,3,1],[2,4,0],[2,5,0]];
+    for (var i = 0; i < E.length; i++) {
+      var a = N[E[i][0]], b = N[E[i][1]], hit = E[i][2];
+      svg.appendChild(el('line', {x1:a[0], y1:a[1]+17, x2:b[0], y2:b[1]-17,
+        stroke: hit ? BLUE : '#c7cad1', 'stroke-width': hit ? 2.2 : 1.4}));
+    }
+    for (var i = 0; i < N.length; i++) {
+      var hit = (i === 0 || i === 1 || i === 3);
+      svg.appendChild(el('circle', {cx:N[i][0], cy:N[i][1], r:17, fill: hit ? FILL_B : '#ffffff', stroke: hit ? BLUE : '#c9ced4', 'stroke-width': hit ? 1.8 : 1.3}));
+      svg.appendChild(txt(N[i][0], N[i][1] + 5, N[i][2], {'text-anchor':'middle', 'font-size':14, 'font-weight':600, fill: hit ? '#1e3a8a' : '#374151'}));
+    }
+    svg.appendChild(txt(16, 206, '链表', {'font-size':12, fill:'#6b7280'}));
+    for (var i = 0; i < 3; i++) {
+      svg.appendChild(box(64 + i * 54, 190, 44, 30, FILL_B, BLUE));
+      svg.appendChild(txt(86 + i * 54, 210, ['1', '2', '3'][i], {'text-anchor':'middle', 'font-size':13, 'font-weight':600, fill:'#1e3a8a'}));
+      if (i < 2) svg.appendChild(txt(112 + i * 54, 210, '→', {'text-anchor':'middle', 'font-size':12, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(250, 210, '蓝色那条 1 → 2 → 3 就是一条一直向下的路径。', {'font-size':12, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 240, '右边那个 3 有两个儿子，往下取到 2 或再取 3 都接不上链表的第三项，所以整棵树只在这一条路上命中。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：状态沿树传播 =====
+  (function(){
+    var host = document.getElementById('fig-treestate');
+    if (!host) return;
+    var W = 660, H = 196;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '链表 = [2, 3]，根节点值是 2 时，两个孩子各自带着 i = 1 往下走', {'font-size':12.5, fill:'#1f2328'}));
+    var root = [330, 58], l = [188, 132], r = [472, 132];
+    svg.appendChild(el('line', {x1:root[0], y1:root[1]+17, x2:l[0], y2:l[1]-17, stroke:'#c7cad1', 'stroke-width':1.4}));
+    svg.appendChild(el('line', {x1:root[0], y1:root[1]+17, x2:r[0], y2:r[1]-17, stroke:'#c7cad1', 'stroke-width':1.4}));
+    svg.appendChild(el('circle', {cx:root[0], cy:root[1], r:18, fill:FILL_B, stroke:BLUE, 'stroke-width':1.8}));
+    svg.appendChild(txt(root[0], root[1] + 5, '2', {'text-anchor':'middle', 'font-size':14, 'font-weight':600, fill:'#1e3a8a'}));
+    svg.appendChild(txt(root[0], root[1] - 30, '拿到 i = 0，比 list[0] = 2 相等', {'text-anchor':'middle', 'font-size':11.5, fill:'#374151'}));
+    svg.appendChild(txt(root[0], root[1] + 40, '交出 i + 1 = 1', {'text-anchor':'middle', 'font-size':11.5, fill:ORANGE, 'font-weight':600}));
+    var kids = [[l, '3', '1', '比 list[1] = 3 相等，i 到 2 命中', GREEN, FILL_G], [r, '5', '1', '比不动，沿 next 退到 −1，重新从 0 起', RED, FILL_R]];
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i];
+      svg.appendChild(el('circle', {cx:k[0][0], cy:k[0][1], r:18, fill:k[5], stroke:k[4], 'stroke-width':1.8}));
+      svg.appendChild(txt(k[0][0], k[0][1] + 5, k[1], {'text-anchor':'middle', 'font-size':14, 'font-weight':600, fill:'#1f2328'}));
+      svg.appendChild(txt(k[0][0], k[0][1] + 40, 'i = ' + k[2], {'text-anchor':'middle', 'font-size':12, 'font-weight':600, fill:k[4]}));
+      svg.appendChild(txt(k[0][0], k[0][1] + 58, k[3], {'text-anchor':'middle', 'font-size':11, fill:'#6b7280'}));
+    }
+    svg.appendChild(txt(16, 182, '同一个 i = 1 同时交给两个孩子，两条路各改各的；把 i 存在外层变量里，左支改了右支就跟着变。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：比较次数 =====
+  (function(){
+    var host = document.getElementById('fig-treeperf');
+    if (!host) return;
+    var W = 660, H = 218;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '字符比较次数，纵轴取对数（1 到 10^8）', {'font-size':12.5, fill:'#1f2328'}));
+    var baseY = 158, topY = 34, x0 = 76;
+    svg.appendChild(el('line', {x1:x0 - 10, y1:baseY, x2:640, y2:baseY, stroke:'#c9ced4', 'stroke-width':1.2}));
+    var ticks = [1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000];
+    for (var t = 0; t < ticks.length; t++) {
+      var yy = logY(ticks[t], baseY, topY, 8);
+      svg.appendChild(el('line', {x1:x0 - 10, y1:yy, x2:640, y2:yy, stroke:'#eef0f2', 'stroke-width':1}));
+      svg.appendChild(txt(x0 - 16, yy + 4, t === 0 ? '1' : '10^' + t, {'text-anchor':'end', 'font-size':10, fill:'#9aa0a6'}));
+    }
+    var groups = [
+      {name:'随机树 n=2e5 / 链表 19', kmp:7800, brute:27, note:'答案就在根附近'},
+      {name:'链 n=1e4 / 链表 1000', kmp:19001, brute:9500500, note:'永不匹配'},
+      {name:'链 n=2e4 / 链表 2000', kmp:38001, brute:38001000, note:'永不匹配'}
+    ];
+    for (var g = 0; g < groups.length; g++) {
+      var gx = x0 + 16 + g * 192;
+      var pair = [[groups[g].kmp, BLUE, FILL_B, '带 next'], [groups[g].brute, ORANGE, FILL_O, '逐起点']];
+      for (var k = 0; k < 2; k++) {
+        var v = pair[k][0], y = logY(v, baseY, topY, 8), h = Math.max(2, baseY - y);
+        var bx = gx + k * 56;
+        svg.appendChild(box(bx, baseY - h, 48, h, pair[k][2], pair[k][1]));
+        svg.appendChild(txt(bx + 24, baseY - h - 5, v >= 1000000 ? (v / 10000) + '万' : String(v), {'text-anchor':'middle', 'font-size':10.5, fill:pair[k][1], 'font-weight':600}));
+      }
+      svg.appendChild(txt(gx + 52, baseY + 16, groups[g].name, {'text-anchor':'middle', 'font-size':10.5, fill:'#374151'}));
+      svg.appendChild(txt(gx + 52, baseY + 30, groups[g].note, {'text-anchor':'middle', 'font-size':10, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(16, 202, '第一组里逐起点只要 27 次比较，比带 next 的 7800 次还少；第二、三组各差 500 倍和 1000 倍。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：jump 的退位 =====
+  (function(){
+    var host = document.getElementById('fig-jump');
+    if (!host) return;
+    var W = 660, H = 188;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'evil = "abab"，next = [−1, 0, 0, 1, 2]，已经匹配上前 3 个字符', {'font-size':12.5, fill:'#1f2328'}));
+    var e = 'abab', cw = 54, x0 = 44;
+    for (var i = 0; i < 4; i++) {
+      var hit = i < 3;
+      svg.appendChild(box(x0 + i * cw, 32, cw - 6, 32, hit ? FILL_B : '#ffffff', hit ? BLUE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 53, e[i], {'text-anchor':'middle', 'font-size':15, 'font-weight':600, fill: hit ? '#1e3a8a' : '#374151'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 76, 'j=' + i, {'text-anchor':'middle', 'font-size':10, fill:'#9aa0a6'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 90, 'next=' + ['-1','0','0','1'][i], {'text-anchor':'middle', 'font-size':10, fill:'#9aa0a6'}));
+    }
+    var steps = ['j = 3：evil[3] = b，pick = a，不等', 'j = next[3] = 1：evil[1] = b，仍不等', 'j = next[1] = 0：evil[0] = a，相等，停'];
+    for (var i = 0; i < steps.length; i++) {
+      svg.appendChild(txt(330, 46 + i * 24, steps[i], {'font-size':11.5, fill: i === 2 ? GREEN : '#374151', 'font-weight': i === 2 ? 600 : 400}));
+    }
+    svg.appendChild(box(250, 132, 380, 34, FILL_G, GREEN));
+    svg.appendChild(txt(266, 154, 'jump 返回 0，匹配长度 = 0 + 1 = 1，新串以 "a" 结尾', {'font-size':12, fill:'#14532d'}));
+    svg.appendChild(txt(16, 182, '退的时候每一步都落在「前缀等于后缀」的位置上，所以退出多少格都是合法的匹配长度。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 5：状态空间 =====
+  (function(){
+    var host = document.getElementById('fig-digit');
+    if (!host) return;
+    var W = 660, H = 226;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'n = 6、m = 3 时的状态网格，每一格是一个 (i, j)；free = 0 与 free = 1 各一层', {'font-size':12.5, fill:'#1f2328'}));
+    var cols = 6, rows = 3, cw = 66, ch = 30, x0 = 92, yA = 40, yB = 122;
+    for (var i = 0; i < cols; i++) svg.appendChild(txt(x0 + i * (cw + 6) + cw / 2, yA - 8, 'i=' + i, {'text-anchor':'middle', 'font-size':10.5, fill:'#9aa0a6'}));
+    for (var lay = 0; lay < 2; lay++) {
+      var y = lay === 0 ? yA : yB;
+      svg.appendChild(txt(x0 - 12, y + 20, lay === 0 ? 'free = 0' : 'free = 1', {'text-anchor':'end', 'font-size':11.5, fill: lay === 0 ? BLUE : ORANGE, 'font-weight':600}));
+      for (var i = 0; i < cols; i++) {
+        for (var j = 0; j < rows; j++) {
+          var yy = y + j * (ch + 4);
+          var hot = (lay === 1 && i === 2 && j === 1);
+          svg.appendChild(box(x0 + i * (cw + 6), yy, cw, ch, hot ? FILL_O : '#ffffff', hot ? ORANGE : '#e6e8eb'));
+          svg.appendChild(txt(x0 + i * (cw + 6) + cw / 2, yy + 20, hot ? 'i=2, j=1' : '', {'text-anchor':'middle', 'font-size':10, fill:'#9a3412'}));
+        }
+      }
+    }
+    svg.appendChild(txt(x0 - 12, yB - 12, 'j', {'text-anchor':'end', 'font-size':11, fill:'#9aa0a6'}));
+    svg.appendChild(txt(16, 206, '橙色那一格只连到 i = 3 那一列：下一格填哪个字母，j 就由 jump 送到哪一列。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 6：jump 的比较次数 =====
+  (function(){
+    var host = document.getElementById('fig-goodperf');
+    if (!host) return;
+    var W = 660, H = 200;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'n = 500、m = 50 的时间与比较次数', {'font-size':12.5, fill:'#1f2328'}));
+    var baseY = 142, topY = 36, x0 = 96, bw = 120;
+    var base = 1000000, decades = 2;
+    svg.appendChild(el('line', {x1:x0 - 10, y1:baseY, x2:600, y2:baseY, stroke:'#c9ced4', 'stroke-width':1.2}));
+    var ticks = [1000000, 10000000, 100000000];
+    for (var t = 0; t < ticks.length; t++) {
+      var yy = logY(ticks[t] / base, baseY, topY, decades);
+      svg.appendChild(el('line', {x1:x0 - 10, y1:yy, x2:600, y2:yy, stroke:'#eef0f2', 'stroke-width':1}));
+      svg.appendChild(txt(x0 - 16, yy + 4, t === 0 ? '10^6' : '10^' + (6 + t), {'text-anchor':'end', 'font-size':10, fill:'#9aa0a6'}));
+    }
+    var bars = [
+      ['借 next 一路退', 745, BLUE, FILL_B, '745 万次', '5.86 ms'],
+      ['每次重算 border', 3189, ORANGE, FILL_O, '3189 万次', '15.46 ms']
+    ];
+    for (var i = 0; i < bars.length; i++) {
+      var h = Math.max(2, baseY - logY(bars[i][1] / 100, baseY, topY, decades));
+      var x = x0 + 60 + i * 220;
+      svg.appendChild(box(x, baseY - h, bw, h, bars[i][3], bars[i][2]));
+      svg.appendChild(txt(x + bw / 2, baseY - h - 20, bars[i][4], {'text-anchor':'middle', 'font-size':11.5, 'font-weight':600, fill:bars[i][2]}));
+      svg.appendChild(txt(x + bw / 2, baseY - h - 6, bars[i][5], {'text-anchor':'middle', 'font-size':11, fill:'#6b7280'}));
+      svg.appendChild(txt(x + bw / 2, baseY + 17, bars[i][0], {'text-anchor':'middle', 'font-size':12, fill:'#374151'}));
+    }
+    svg.appendChild(txt(16, 184, '两者答案都是 28935498。差别在每次转移要退几格：借 next 平均退 5.73 步，重算 border 平均 24.5 步。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示 1：状态沿树走 =====
+  (function(){
+    var TREES = {
+      t1: [1, 2, 3, 3, -1, 2, 3],
+      t2: [1, 2, -1, 3, -1, -1, -1, 4, -1, -1, -1, -1, -1, -1, -1]
+    };
+    var CASES = [
+      {tree:'t1', list:[1, 2, 3], name:'树1 · 链表 1 2 3'},
+      {tree:'t1', list:[1, 3, 2], name:'树1 · 链表 1 3 2'},
+      {tree:'t1', list:[3, 2, 3], name:'树1 · 链表 3 2 3'},
+      {tree:'t1', list:[1, 3, 3], name:'树1 · 链表 1 3 3'},
+      {tree:'t2', list:[1, 2, 3, 4], name:'树2（一条链）· 链表 1 2 3 4'},
+      {tree:'t2', list:[1, 3, 4], name:'树2（一条链）· 链表 1 3 4'},
+      {tree:'t2', list:[3, 4], name:'树2（一条链）· 链表 3 4'}
+    ];
+    var sel = document.getElementById('tree-case');
+    var board = document.getElementById('tree-board');
+    var note = document.getElementById('tree-note');
+    var ansEl = document.getElementById('tree-answer');
+    var btnN = document.getElementById('tree-next');
+    var btnR = document.getElementById('tree-reset');
+    if (!sel || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = CASES[i].name; sel.appendChild(o);
+    }
+    var st = {idx:0, step:0, frames:[], res:false, nxt:[], list:[], tree:[]};
+
+    function build(tree, list) {
+      var m = list.length;
+      var nxt;
+      if (m === 1) nxt = [-1];
+      else {
+        nxt = new Array(m).fill(0); nxt[0] = -1; nxt[1] = 0;
+        var i = 2, cn = 0, g = 0;
+        while (i < m && g++ < 200) {
+          if (list[i - 1] === list[cn]) { cn = cn + 1; nxt[i] = cn; i = i + 1; }
+          else if (cn > 0) cn = nxt[cn];
+          else { nxt[i] = 0; i = i + 1; }
+        }
+      }
+      var frames = [], res = false;
+      function at(k) { return (k < tree.length && tree[k] !== -1) ? tree[k] : null; }
+      function dfs(k, i) {
+        if (res) return;
+        if (i === m) { frames.push({k:k, iIn:i, fix:i, out:i, hit:true, back:0, note:'i 已经到 m：链表最后一个值在上一层就对上了'}); res = true; return; }
+        if (at(k) === null) { frames.push({k:k, iIn:i, fix:i, out:i, dead:true, back:0, note:'空指针，这条分支到此为止'}); return; }
+        var val = tree[k], j = i, back = 0;
+        while (j >= 0 && val !== list[j]) { j = nxt[j]; back++; }
+        frames.push({k:k, iIn:i, fix:j, out:j + 1, back:back,
+          note:'节点 ' + val + '：父亲给的 i = ' + i + '，退 ' + back + ' 次后停在 list[' + j + '] 这一项，往下交出 ' + (j + 1)});
+        dfs(2 * k + 1, j + 1);
+        if (!res) dfs(2 * k + 2, j + 1);
+      }
+      dfs(0, 0);
+      return {frames:frames, res:res, nxt:nxt};
+    }
+    function render() {
+      var f = st.frames[st.step];
+      board.innerHTML = '';
+      var l1 = document.createElement('p'); l1.className = 'cap';
+      l1.textContent = '树的先序访问顺序（橙色是刚处理完的那一步）';
+      board.appendChild(l1);
+      var seq = document.createElement('div'); seq.className = 'cards';
+      var seen = {};
+      for (var q = 0; q <= st.step; q++) seen[st.frames[q].k] = true;
+      for (var k = 0; k < st.tree.length; k++) {
+        var isNode = st.tree[k] !== -1;
+        var d = document.createElement('div');
+        var cls = 'card';
+        if (!isNode) cls += ' empty';
+        else if (st.frames[st.step].k === k) cls += ' pick';
+        else if (seen[k]) cls += ' ok';
+        else cls += ' dim';
+        d.className = cls;
+        d.innerHTML = (isNode ? st.tree[k] : '空') + '<span class="idx">' + k + '</span>';
+        seq.appendChild(d);
+      }
+      board.appendChild(seq);
+      var l2 = document.createElement('p'); l2.className = 'cap';
+      l2.textContent = '链表 = [' + st.list.join(', ') + ']，next = [' + st.nxt.join(', ') + ']';
+      board.appendChild(l2);
+      var row = document.createElement('div'); row.className = 'cards';
+      var dd = [
+        ['拿到的 i', f.iIn, ''],
+        ['修正后停在', f.fix, f.fix >= 0 ? 'ok' : 'bad'],
+        ['往下交', f.out, 'pick']
+      ];
+      for (var q = 0; q < dd.length; q++) {
+        var c = document.createElement('div'); c.className = 'card ' + dd[q][2];
+        c.innerHTML = dd[q][1] + '<span class="idx">' + dd[q][0] + '</span>';
+        row.appendChild(c);
+      }
+      board.appendChild(row);
+      note.textContent = f.note;
+      var last = st.step === st.frames.length - 1;
+      btnN.disabled = last;
+      ansEl.textContent = last ? ('结果：' + (st.res ? '存在这样一条路径' : '不存在这样一条路径')) : '';
+    }
+    function rebuild() {
+      var c = CASES[st.idx];
+      st.tree = TREES[c.tree]; st.list = c.list;
+      var r = build(st.tree, st.list);
+      st.frames = r.frames; st.res = r.res; st.nxt = r.nxt; st.step = 0;
+      render();
+    }
+    sel.addEventListener('change', function(){ st.idx = Number(sel.value); rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+
+  // ===== 演示 2：数位 dp 逐格填表 =====
+  (function(){
+    var PRESETS = [
+      {n:2, s1:'aa', s2:'bb', evil:'ab'},
+      {n:2, s1:'ab', s2:'ba', evil:'a'},
+      {n:2, s1:'az', s2:'za', evil:'z'},
+      {n:2, s1:'bb', s2:'cc', evil:'bc'},
+      {n:1, s1:'a', s2:'z', evil:'aa'}
+    ];
+    var VERS = [{k:'ok', n:'正确'}, {k:'noplusone', n:'jump 忘了 +1'}, {k:'noplusc', n:'漏掉下界补 1'}];
+    var sel = document.getElementById('good-case');
+    var selV = document.getElementById('good-ver');
+    var board = document.getElementById('good-board');
+    var note = document.getElementById('good-note');
+    var ansEl = document.getElementById('good-answer');
+    var btnN = document.getElementById('good-next');
+    var btnR = document.getElementById('good-reset');
+    if (!sel || !board) return;
+    for (var i = 0; i < PRESETS.length; i++) {
+      var p = PRESETS[i];
+      var o = document.createElement('option'); o.value = String(i);
+      o.textContent = 'n=' + p.n + ', [' + p.s1 + ', ' + p.s2 + '], 不含 "' + p.evil + '"';
+      sel.appendChild(o);
+    }
+    for (var i = 0; i < VERS.length; i++) {
+      var o = document.createElement('option'); o.value = VERS[i].k; o.textContent = VERS[i].n; selV.appendChild(o);
+    }
+    var st = {idx:0, ver:'ok', step:0, frames:[], final:null, n:0, evil:'', nxt:[]};
+
+    function jumpOf(evil, nxt, pick, j) {
+      while (j >= 0 && pick !== evil[j]) j = nxt[j];
+      return j;
+    }
+    function kmpPos(s, evil, nxt) {
+      var x = 0, y = 0;
+      while (x < s.length && y < evil.length) {
+        if (s[x] === evil[y]) { x++; y++; }
+        else if (y === 0) x++;
+        else y = nxt[y];
+      }
+      return y === evil.length ? x - y : -1;
+    }
+    function run(preset, ver, record) {
+      var n = preset.n, s1 = preset.s1, s2 = preset.s2, evil = preset.evil, m = evil.length;
+      var nxt = new Array(m + 1).fill(0);
+      nxt[0] = -1;
+      if (m > 1) nxt[1] = 0;
+      var i = 2, cn = 0, g = 0;
+      while (i < m && g++ < 200) {
+        if (evil[i - 1] === evil[cn]) { cn = cn + 1; nxt[i] = cn; i = i + 1; }
+        else if (cn > 0) cn = nxt[cn];
+        else { nxt[i] = 0; i = i + 1; }
+      }
+      var bump = (ver === 'noplusone') ? 0 : 1;
+      function fill(s, rec) {
+        var dp = [];
+        for (var a = 0; a <= n; a++) {
+          var row = [];
+          for (var b = 0; b < m; b++) row.push([0, 0]);
+          dp.push(row);
+        }
+        for (var a = n; a >= 0; a--) {
+          for (var b = m - 1; b >= 0; b--) {
+            for (var f = 1; f >= 0; f--) {
+              if (a === n) {
+                dp[a][b][f] = 1;
+                if (rec) st.frames.push({i:a, j:b, f:f, v:1, letters:0,
+                  note:'i 已经填满 n 位，前缀没配出 evil，这一格算 1 种决策'});
+                continue;
+              }
+              var cur = s.charCodeAt(a) - 97;
+              var hi = (f === 0) ? cur : 25;
+              var sum = 0, letters = 0;
+              for (var c = 0; c <= hi; c++) {
+                var nf = (f === 0 && c === cur) ? 0 : 1;
+                var jj = jumpOf(evil, nxt, String.fromCharCode(97 + c), b) + bump;
+                if (jj < 0) jj = 0;
+                letters++;
+                if (jj < m) sum += dp[a + 1][jj][nf];
+              }
+              dp[a][b][f] = sum;
+              if (rec) st.frames.push({i:a, j:b, f:f, v:sum, letters:letters,
+                note:'填 (i = ' + a + ', j = ' + b + ', free = ' + f + ')：' + (f === 0 ? '这一位最多填到 "' + s[a] + '"，可用 ' + letters + ' 个字母' : '前缀已经小了，26 个字母全可试') + '，各自 jump 之后累加下一列的值，得 ' + sum});
+            }
+          }
+        }
+        return dp[0][0][0];
+      }
+      st.frames = [];
+      var total2 = fill(s2, true);
+      var total1 = fill(s1, false);
+      var ans = total2 - total1;
+      var found = kmpPos(s1, evil, nxt) !== -1;
+      if (ver !== 'noplusc' && !found) ans = ans + 1;
+      return {nxt:nxt, total2:total2, total1:total1, ans:ans, found:found, m:m};
+    }
+    function render() {
+      board.innerHTML = '';
+      var l1 = document.createElement('p'); l1.className = 'cap';
+      l1.textContent = '上界 = "' + (st.cur.s || '') + '"，evil = "' + st.evil + '"，next = [' + st.nxt.join(', ') + ']';
+      board.appendChild(l1);
+      var f = st.frames[st.step];
+      var wrap = document.createElement('div');
+      wrap.className = 'tblwrap';
+      var t = document.createElement('table');
+      t.className = 'mini';
+      var head = '<tr><th>i \\ j</th>';
+      for (var j = 0; j < st.evil.length; j++) head += '<th>j=' + j + '</th>';
+      head += '</tr>';
+      t.innerHTML = head;
+      for (var i = 0; i <= st.n; i++) {
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<th>i=' + i + '</th>';
+        for (var j = 0; j < st.evil.length; j++) {
+          var td = document.createElement('td');
+          td.className = (i === f.i && j === f.j) ? 'hit' : '';
+          var rec = st.grid[i + ',' + j];
+          td.textContent = rec === undefined ? '' : String(rec);
+          tr.appendChild(td);
+        }
+        t.appendChild(tr);
+      }
+      wrap.appendChild(t);
+      board.appendChild(wrap);
+      var l2 = document.createElement('p'); l2.className = 'cap';
+      l2.textContent = '表里是 free = 1 那一层；当前格 free = ' + f.f + (f.f === 1 ? '' : '（free = 0 时可用字母更少）');
+      board.appendChild(l2);
+      note.textContent = f.note;
+      var last = st.step === st.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        var fin = st.final;
+        ansEl.textContent = '≤ "' + st.preset.s2 + '" 有 ' + fin.total2 + ' 个，≤ "' + st.preset.s1 + '" 有 ' + fin.total1 +
+          ' 个' + (st.ver === 'noplusc' ? '' : (fin.found ? '（下界本身含 evil，不用补）' : '，再把下界本身补回 1 个')) +
+          '，答案 ' + fin.ans;
+      } else ansEl.textContent = '';
+    }
+    function rebuild() {
+      var p = PRESETS[st.idx];
+      st.preset = p; st.n = p.n; st.evil = p.evil;
+      st.cur = {}; st.grid = {};
+      var r = run(p, st.ver, true);
+      st.nxt = r.nxt; st.final = r;
+      // 用最后一帧的取值拼一张静态表（free = 1 层）
+      st.grid = {};
+      for (var q = 0; q < st.frames.length; q++) {
+        var fr = st.frames[q];
+        if (fr.f === 1) st.grid[fr.i + ',' + fr.j] = fr.v;
+      }
+      st.cur.s = p.s2;
+      st.step = 0;
+      render();
+    }
+    sel.addEventListener('change', function(){ st.idx = Number(sel.value); rebuild(); });
+    selV.addEventListener('change', function(){ st.ver = selV.value; rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>
