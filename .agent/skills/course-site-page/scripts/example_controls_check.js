@@ -24,9 +24,11 @@ async function cdp(ws) {
   const ver = await (await fetch('http://127.0.0.1:' + PORT + '/json/version')).json();
   const ws = new WebSocket(ver.webSocketDebuggerUrl);
   await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', () => rej(new Error('ws'))); });
-  const { send, events } = await cdp(ws);
-  const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
-  const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+  const { send: rawSend, events } = await cdp(ws);
+  const pg = require('./cdp_page.js')(PORT, { events: events, browserSend: rawSend });
+  const send = pg.send;
+  const tab = await pg.openTab('about:blank');
+  const sessionId = tab.sessionId;
   await send('Log.enable', {}, sessionId);
   await send('Runtime.enable', {}, sessionId);
   await send('Page.enable', {}, sessionId);
@@ -91,7 +93,7 @@ async function cdp(ws) {
   const errs = events.slice(before).filter(m => (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') || m.method === 'Runtime.exceptionThrown');
   if (errs.length) { fails++; console.log('   JS错误', errs.slice(0, 3).map(m => (m.params && m.params.entry ? m.params.entry.text : m.method))); }
   console.log(fails ? '--- FAIL ' + fails : '--- ALL PASS');
-  await send('Target.closeTarget', { targetId });
+  await pg.closeTab(sessionId);
   ws.close();
   process.exit(0);
 })();

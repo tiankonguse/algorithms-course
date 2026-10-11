@@ -30,9 +30,11 @@ async function cdp(ws) {
   const ver = await (await fetch('http://127.0.0.1:' + PORT + '/json/version')).json();
   const ws = new WebSocket(ver.webSocketDebuggerUrl);
   await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', () => rej(new Error('ws'))); });
-  const { send } = await cdp(ws);
-  const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
-  const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+  const { send: rawSend, events } = await cdp(ws);
+  const pg = require('./cdp_page.js')(PORT, { events: events, browserSend: rawSend });
+  const send = pg.send;
+  const tab = await pg.openTab('about:blank');
+  const sessionId = tab.sessionId;
   await send('Runtime.enable', {}, sessionId);
   await send('Page.enable', {}, sessionId);
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1400, deviceScaleFactor: 2, mobile: false }, sessionId);
@@ -59,5 +61,6 @@ async function cdp(ws) {
   const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: b.x, y: b.y, width: b.w, height: b.h, scale: 1 } , captureBeyondViewport: true}, sessionId);
   fs.writeFileSync(out, Buffer.from(shot.data, 'base64'));
   console.log('saved', out, Math.round(b.w) + 'x' + Math.round(b.h));
+  await pg.closeTab(sessionId);
   process.exit(0);
 })();

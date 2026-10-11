@@ -96,7 +96,10 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     ws.addEventListener('open', res);
     ws.addEventListener('error', e => rej(new Error('ws error')));
   });
-  const { send, events } = cdp(ws);
+  const { send: rawSend, events } = cdp(ws);
+  // Chrome 155 起 flatten 会话失效，改用页面级 WS（详见 cdp_page.js 头部注释）
+  const pg = require('./cdp_page.js')(PORT, { events: events, browserSend: rawSend });
+  const send = pg.send;
 
   const files = process.argv.slice(2);
   let fails = 0;
@@ -121,11 +124,10 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
   async function runOne(f) {
     const url = 'file://' + BASE + f;
-    let targetId = null;
+    let sessionId = null;
     try {
-      const t = await send('Target.createTarget', { url: 'about:blank' });
-      targetId = t.targetId;
-      const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+      const tab = await pg.openTab('about:blank');
+      sessionId = tab.sessionId;
       await send('Log.enable', {}, sessionId);
       await send('Runtime.enable', {}, sessionId);
       await send('Page.enable', {}, sessionId);
@@ -159,7 +161,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
       if (errText.length) console.log('   JS错误:', errText.join(' | '));
       return ok ? 0 : 1;
     } finally {
-      if (targetId) { try { await send('Target.closeTarget', { targetId }); } catch (e) { /* ignore */ } }
+      if (sessionId) { try { await pg.closeTab(sessionId); } catch (e) { /* ignore */ } }
     }
   }
 })();

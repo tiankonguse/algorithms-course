@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>矩阵快速幂：把递推写成矩阵乘</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+.card { min-width: 34px; padding: 5px 8px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.dim { opacity: .40; }
+.mgrid { display: inline-grid; gap: 4px; margin: 4px 0; }
+.mcell { min-width: 78px; padding: 5px 8px; text-align: center; border-radius: 6px; font-size: 13px;
+         background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.mcell.acc { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; font-weight: 600; }
+.mcell.cur { background: #ffedd5; border-color: #ea580c; color: #9a3412; }
+.rowline { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; flex-wrap: wrap; }
+.rowline .k { color: var(--text-dim); min-width: 92px; font-size: 13px; }
+.fnote { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>矩阵快速幂：把递推写成矩阵乘</h1>
+      <p class="intro">斐波那契的递推是 f(n) = f(n-1) + f(n-2)，一次一步，n 给到 10<sup>9</sup> 就是十亿次加法。把相邻两项打包成一个向量，递推变成乘一个固定矩阵，而矩阵连乘照样能套快速幂，30 轮就出结果。</p>
+
+      <h2>零、一次一步太慢</h2>
+      <p>O(n) 递推的写法是滚两个变量，每步一次加法加一次取模。实测 10<sup>6</sup> 步 11.05 ms，10<sup>9</sup> 步就是 11 秒，一组数据就把时间吃完了。</p>
+      <p>先说清楚一点：斐波那契和爬楼梯这两道常见题的数据范围都小到矩阵快速幂显不出优势（n 最大 45 和 37），老老实实递推反而更快。这里练的是「递推写成矩阵」这个动作，真正用得上的地方是后面的 k 阶递推和 k 维状态转移。</p>
+      <figure class="fig" id="fig-cost">
+        <figcaption>图 1　同一条递推，滚动变量要 n 次加法，矩阵快速幂只要 log<sub>2</sub> n 轮矩阵相乘（纵轴对数刻度）</figcaption>
+      </figure>
+
+      <h2>一、把递推写成矩阵乘</h2>
+      <p>把相邻两项打包成行向量 v(n) = (f(n), f(n-1))。想让 v(n) 前进到 v(n+1) = (f(n+1), f(n))，只要让 v(n) 右乘一个 2 阶方阵：</p>
+      <p class="breakdown">(f(n+1), f(n)) = (f(n), f(n-1)) × [[1, 1], [1, 0]]</p>
+      <p>展开看一眼就懂了。结果的第一个分量 = 1 × f(n) + 1 × f(n-1)，正好是 f(n+1)；第二个分量 = 1 × f(n) + 0 × f(n-1)，就是把 f(n) 原样挪过去。</p>
+      <figure class="fig" id="fig-matrix">
+        <figcaption>图 2　这个矩阵的两列分工明确：第 0 列是递推式的系数 (1, 1)，第 1 列负责把 f(n) 挪到第二个分量去</figcaption>
+      </figure>
+      <p>把这一句连用 n-1 次，中间的状态互相抵消，剩下</p>
+      <p class="breakdown">(f(n), f(n-1)) = (f(1), f(0)) × M<sup>n-1</sup>，M = [[1, 1], [1, 0]]</p>
+      <p>问题就变成了「求一个固定方阵的 k 次方」，这正是快速幂擅长的事。</p>
+
+      <h2>二、矩阵乘法与单位矩阵</h2>
+      <p>矩阵相乘照定义来：结果的第 i 行第 j 列，等于左矩阵第 i 行和右矩阵第 j 列对应项相乘再求和。k 阶方阵相乘一次要 k<sup>3</sup> 次乘加，2 阶是 8 次，6 阶是 216 次。</p>
+      <p>还有一个角色要补上：单位矩阵。它是对角线为 1、其余为 0 的方阵，任何一个方阵乘上它都不变，A × I = A，所以它就是矩阵世界里的 1。快速幂里 ans 从 1 开始，矩阵版就从单位矩阵开始。</p>
+          <pre class="code">typedef <span class="kw">long</span> <span class="kw">long</span> <span class="kw">ll</span>;
+    <span class="kw">const</span> <span class="kw">int</span> MAXK = 6;
+    <span class="kw">const</span> <span class="kw">ll</span> MOD = 1000000007;
+
+    <span class="kw">struct</span> Mat {
+    	<span class="kw">int</span> r, c;
+    	<span class="kw">ll</span> a[MAXK][MAXK];
+    	Mat(<span class="kw">int</span> r_ = 0, <span class="kw">int</span> c_ = 0) : r(r_), c(c_) {
+    		memset(a, 0, <span class="kw">sizeof</span>(a));
+    	}
+    };
+
+    <span class="cm">// 单位矩阵：对角线是 1、其余是 0，它就是矩阵里的 1</span>
+    Mat identity(<span class="kw">int</span> n) {
+    	Mat ans(n, n);
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+    		ans.a[i][i] = 1;
+    	}
+    	<span class="kw">return</span> ans;
+    }
+
+    <span class="cm">// 矩阵相乘：a 的列数必须等于 b 的行数</span>
+    Mat multiply(<span class="kw">const</span> Mat &amp;x, <span class="kw">const</span> Mat &amp;y) {
+    	Mat ans(x.r, y.c);
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; x.r; i++) {
+    		<span class="kw">for</span> (<span class="kw">int</span> k = 0; k &lt; x.c; k++) {
+    			<span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; y.c; j++) {
+    				ans.a[i][j] = (ans.a[i][j] + x.a[i][k] * y.a[k][j]) % MOD;
+    			}
+    		}
+    	}
+    	<span class="kw">return</span> ans;
+    }</pre>
+
+      <h2>三、矩阵快速幂</h2>
+      <p>代码结构和数的快速幂一模一样，只换了两样东西：把乘法换成矩阵相乘，把起点 1 换成单位矩阵。</p>
+          <pre class="code"><span class="cm">// 矩阵快速幂，要求 m 是方阵</span>
+    Mat matrixPower(Mat m, <span class="kw">long</span> <span class="kw">long</span> p) {
+    	Mat ans = identity(m.r);
+    	<span class="kw">while</span> (p &gt; 0) {
+    		<span class="kw">if</span> (p &amp; 1) {
+    			ans = multiply(ans, m);
+    		}
+    		m = multiply(m, m);
+    		p &gt;&gt;= 1;
+    	}
+    	<span class="kw">return</span> ans;
+    }</pre>
+      <p>指数 p 每右移一位，m 平方一次，轮数是 p 的二进制位数。整个过程的矩阵相乘次数是 O(log p)。</p>
+      <p>乘法的方向不能随手调换。矩阵乘法没有交换律，A × B 和 B × A 一般不是一回事。推导时定的是「行向量在左、矩阵在右」，代码里就一直保持这个顺序，别中途改成矩阵左乘。</p>
+
+      <h2>四、斐波那契与爬楼梯</h2>
+      <p>斐波那契的起点是 v(1) = (f(1), f(0)) = (1, 0)，幂次是 n-1，最后取结果的第一个分量。</p>
+          <pre class="code"><span class="cm">// 斐波那契第 n 项，O(log n)</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">fib</span>(<span class="kw">long</span> <span class="kw">long</span> n) {
+    	<span class="kw">if</span> (n == 0) {
+    		<span class="kw">return</span> 0;
+    	}
+    	<span class="kw">if</span> (n == 1) {
+    		<span class="kw">return</span> 1;
+    	}
+    	Mat start(1, 2);			<span class="cm">// 状态 (f(1), f(0))</span>
+    	start.a[0][0] = 1;
+    	Mat base(2, 2);
+    	base.a[0][0] = 1; base.a[0][1] = 1;
+    	base.a[1][0] = 1; base.a[1][1] = 0;
+    	Mat ans = multiply(start, matrixPower(base, n - 1));
+    	<span class="kw">return</span> ans.a[0][0];
+    }</pre>
+      <p>爬楼梯问的是「一次走 1 级或 2 级，走到第 n 级有多少种走法」，递推式还是 f(n) = f(n-1) + f(n-2)，矩阵可以直接复用。差别只在起点：把「站在地面」算作 1 种走法，v(1) = (f(1), f(0)) = (1, 1)。</p>
+          <pre class="code"><span class="cm">// 爬楼梯：一次 1 级或 2 级，走到第 n 级的方法数</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">climbStairs</span>(<span class="kw">long</span> <span class="kw">long</span> n) {
+    	<span class="kw">if</span> (n == 0) {
+    		<span class="kw">return</span> 1;
+    	}
+    	<span class="kw">if</span> (n == 1) {
+    		<span class="kw">return</span> 1;
+    	}
+    	Mat start(1, 2);			<span class="cm">// 状态 (f(1), f(0))，f(1) = 1、f(0) = 1</span>
+    	start.a[0][0] = 1;
+    	start.a[0][1] = 1;
+    	Mat base(2, 2);			<span class="cm">// 和斐波那契同一个矩阵</span>
+    	base.a[0][0] = 1; base.a[0][1] = 1;
+    	base.a[1][0] = 1; base.a[1][1] = 0;
+    	Mat ans = multiply(start, matrixPower(base, n - 1));
+    	<span class="kw">return</span> ans.a[0][0];
+    }</pre>
+      <p>对一下答案：n = 1 只有 1 种，n = 2 是 2 种（1+1、2），n = 4 是 5 种，跟斐波那契错开一位，就是因为起点从 (1, 0) 变成了 (1, 1)。</p>
+
+      <h2>五、逐轮看一遍</h2>
+      <div class="viz" id="viz-mat">
+        <p class="viz-title">矩阵快速幂逐轮：ans 累积、m 自己平方</p>
+        <p class="viz-note">m 就是递推矩阵的 2<sup>i</sup> 次方，橙框标的是这一轮刚平方出来的 m，蓝框是累积到 ans 里的结果。最后 ans 乘上起点向量就是 (f(n), f(n-1))。</p>
+        <div id="mat-board"></div>
+        <p class="viz-note" id="mat-note"></p>
+        <p class="viz-answer" id="mat-answer"></p>
+        <div class="viz-controls">
+          <label>n <select id="mat-ep"></select></label>
+          <button id="mat-next" type="button">下一步</button>
+          <button id="mat-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>滚动变量递推</td><td>n 次加法加取模</td><td>O(n)</td><td>O(1)</td></tr>
+        <tr><td>矩阵连乘</td><td>n-1 次 k 阶矩阵相乘</td><td>O(n · k<sup>3</sup>)</td><td>O(k<sup>2</sup>)</td></tr>
+        <tr><td>矩阵快速幂</td><td>log n 次矩阵相乘，每次 k<sup>3</sup> 次乘加</td><td>O(k<sup>3</sup> · log n)</td><td>O(k<sup>2</sup>)</td></tr>
+      </table>
+      <p class="breakdown">2 阶时 k<sup>3</sup> = 8，log<sub>2</sub> 10<sup>9</sup> ≈ 30，合起来约 270 次乘加。实测斐波那契第 10<sup>9</sup> 项单次 0.0009 ms（跑 1000 次累计 0.85 ms），同样规模的连乘要 11 秒。省下来的就是那个 n：递推的次数从 n 掉到 log n，代价是每次乘法的常数从 1 涨到 k<sup>3</sup>，只要 n 一大就稳赚。</p>
+
+      <h2>总结</h2>
+      <p>固定系数的线性递推可以打包成矩阵乘：把相邻 k 项排成一个行向量，右乘一个 k 阶方阵，前进一格。</p>
+      <p>方阵的构造有固定套路：第 0 列写递推式的系数，其余列负责把状态往后挪。</p>
+      <p>矩阵相乘满足结合律，所以中间那些状态可以合并，v(n) = v(1) × M<sup>n-1</sup>，而 M<sup>n-1</sup> 用快速幂求。</p>
+      <p>代码把数的快速幂照搬过来，乘号换成矩阵相乘，起点 1 换成单位矩阵。方向别写反，矩阵乘法没有交换律。</p>
+      <p>k 阶递推只是起点。递推关系本身认不出来、或者状态是一堆互相转移的量时，同一个套路还能继续用。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>斐波那契数</td><td><a href="https://leetcode.cn/problems/fibonacci-number/" target="_blank">斐波那契数</a></td></tr>
+        <tr><td>LeetCode</td><td>爬楼梯</td><td><a href="https://leetcode.cn/problems/climbing-stairs/" target="_blank">爬楼梯</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解098【必备】快速幂、矩阵快速幂与两类问题</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5';
+
+  // ===== 图 1：代价对比 =====
+  (function(){
+    var host = document.getElementById('fig-cost');
+    var W = 660, H = 262;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '要跑多少次：横轴是要求的项数 n，纵轴是次数（对数刻度）', {'font-size':12.5, fill:'#1f2328'}));
+    svg.appendChild(el('line', {x1:20, y1:40, x2:50, y2:40, stroke:ORANGE, 'stroke-width':2.4}));
+    svg.appendChild(txt(58, 44, '递推：n 次加法', {'font-size':11.5, fill:'#9a3412'}));
+    svg.appendChild(el('line', {x1:186, y1:40, x2:216, y2:40, stroke:BLUE, 'stroke-width':2.4}));
+    svg.appendChild(txt(224, 44, '矩阵快速幂：log2 n 轮', {'font-size':11.5, fill:'#1e3a8a'}));
+    var base = 206, top = 64, x0 = 74, x1 = 636;
+    var ns = [3, 6, 9, 12];
+    function px(i){ return x0 + i * (x1 - x0) / (ns.length - 1); }
+    function py(lg){ return base - lg / 12 * (base - top); }
+    for (var g = 0; g <= 12; g += 2) {
+      var gy = py(g);
+      svg.appendChild(el('line', {x1:x0, y1:gy, x2:x1, y2:gy, stroke:'#eef0f2', 'stroke-width':1}));
+      svg.appendChild(txt(30, gy + 4, '10^' + g, {'font-size':9.5, fill:'#c9ced4'}));
+    }
+    svg.appendChild(el('line', {x1:x0, y1:base, x2:x1, y2:base, stroke:'#c9ced4', 'stroke-width':1.2}));
+    for (var i = 0; i < ns.length; i++) {
+      svg.appendChild(txt(px(i), base + 16, 'n = 10^' + ns[i], {'text-anchor':'middle', 'font-size':10.5, fill:'#374151'}));
+    }
+    var p1 = [];
+    for (var i = 0; i < ns.length; i++) p1.push(px(i) + ',' + py(ns[i]));
+    svg.appendChild(el('polyline', {points:p1.join(' '), fill:'none', stroke:ORANGE, 'stroke-width':2}));
+    var p2 = [];
+    for (var i = 0; i < ns.length; i++) p2.push(px(i) + ',' + py(Math.log(ns[i] * 3.3219) / Math.LN10));
+    svg.appendChild(el('polyline', {points:p2.join(' '), fill:'none', stroke:BLUE, 'stroke-width':2}));
+    for (var i = 0; i < ns.length; i++) {
+      svg.appendChild(el('circle', {cx:px(i), cy:py(ns[i]), r:4, fill:FILL_O, stroke:ORANGE, 'stroke-width':1.3}));
+      svg.appendChild(el('circle', {cx:px(i), cy:p2[i].split(',')[1], r:4, fill:FILL_B, stroke:BLUE, 'stroke-width':1.3}));
+    }
+    svg.appendChild(txt(16, 236, '实测 10^6 步递推 11.05 ms，推到 10^9 步就是 11 秒；矩阵快速幂求第 10^9 项只要 0.0009 ms。', {'font-size':11.5, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 254, '横轴上的 10^9 那一点就是这两条线的对照：10 亿次加法对 30 轮矩阵相乘。', {'font-size':11.5, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：矩阵的两列 =====
+  (function(){
+    var host = document.getElementById('fig-matrix');
+    var W = 660, H = 274;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'v(n+1) = v(n) × M：M 的第 0 列是系数，第 1 列是把 f(n) 挪一格', {'font-size':12.5, fill:'#1f2328'}));
+    // 左：向量
+    function cell(x, y, w, h, s, fill, stroke, fc, bold) {
+      svg.appendChild(el('rect', {x:x, y:y, width:w, height:h, rx:6, fill:fill, stroke:stroke, 'stroke-width':1.3}));
+      svg.appendChild(txt(x + w / 2, y + h / 2 + 4, s, {'text-anchor':'middle', 'font-size':12, fill:fc, 'font-weight':bold ? 600 : 400}));
+    }
+    var y = 52, cw = 92, ch = 36;
+    cell(16, y, cw, ch, 'f(n)', '#ffffff', GREY, '#374151', false);
+    cell(16 + cw + 5, y, cw, ch, 'f(n-1)', '#ffffff', GREY, '#374151', false);
+    svg.appendChild(txt(16, y - 8, 'v(n)', {'font-size':11, fill:'#6b7280'}));
+    svg.appendChild(txt(16 + cw + 5 + cw + 18, y + 23, '×', {'font-size':16, fill:'#374151'}));
+    var mx = 246, cellw = 78, cellh = 34, gap = 5;
+    svg.appendChild(txt(mx, y - 8, 'M', {'font-size':11, fill:'#6b7280'}));
+    // 矩阵四格
+    var vals = [['1', '1'], ['1', '0']];
+    for (var r = 0; r < 2; r++) {
+      for (var c = 0; c < 2; c++) {
+        var x = mx + c * (cellw + gap), yy = y + r * (cellh + gap);
+        var isCoef = (c === 0);
+        cell(x, yy, cellw, cellh, vals[r][c], isCoef ? FILL_O : FILL_B, isCoef ? ORANGE : BLUE, isCoef ? '#9a3412' : '#1e3a8a', true);
+      }
+    }
+    svg.appendChild(txt(mx, y + 2 * cellh + gap + 18, '橙色是第 0 列（递推系数），蓝色是第 1 列（把 f(n) 挪一格）', {'font-size':11, fill:'#374151'}));
+    svg.appendChild(txt(mx + 2 * (cellw + gap) + 18, y + 23, '=', {'font-size':16, fill:'#374151'}));
+    // 右：结果向量
+    var rx = mx + 2 * (cellw + gap) + 48;
+    cell(rx, y, 96, ch, 'f(n+1)', FILL_O, ORANGE, '#9a3412', true);
+    cell(rx + 96 + 5, y, 96, ch, 'f(n)', FILL_O, ORANGE, '#9a3412', true);
+    svg.appendChild(txt(rx, y - 8, 'v(n+1)', {'font-size':11, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 164, 'f(n+1) = 1 × f(n) + 1 × f(n-1)：这一行的两个 1 就是递推式的两个系数。', {'font-size':12, fill:'#374151'}));
+    svg.appendChild(txt(16, 184, '第二个分量 = 1 × f(n) + 0 × f(n-1)，等于把 f(n) 原样搬到下一格，靠的是第 1 列那个 1。', {'font-size':12, fill:'#374151'}));
+    svg.appendChild(el('line', {x1:16, y1:198, x2:644, y2:198, stroke:'#e6e8eb', 'stroke-width':1}));
+    svg.appendChild(txt(16, 220, 'k 阶递推照这个模式铺：第 0 列写 k 个系数，第 r 列只有第 r-1 行是 1，', {'font-size':11.5, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 238, '意思是「新状态的第 r 个分量 = 旧状态的第 r-1 个分量」，摆出来就是状态整体往后挪一格。', {'font-size':11.5, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 258, '起点取递推式给的那几项，幂次是 n 减去最后一项的下标，差一位答案就全错。', {'font-size':11.5, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示：矩阵快速幂逐轮 =====
+  (function(){
+    var MOD = 1000000007n;
+    var cases = [5, 13, 20, 30];
+    var st = {ep:0, step:1, steps:[], res:''};
+    var board = document.getElementById('mat-board');
+    var note = document.getElementById('mat-note');
+    var ans = document.getElementById('mat-answer');
+    var selEp = document.getElementById('mat-ep');
+    for (var i = 0; i < cases.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = 'n = ' + cases[i];
+      selEp.appendChild(o);
+    }
+
+    function mul(A, B) {
+      var r = A.length, c = B.length, m = B[0].length, C = [], i, j, k;
+      for (i = 0; i < r; i++) {
+        C.push([]);
+        for (j = 0; j < m; j++) {
+          var s = 0n;
+          for (k = 0; k < c; k++) s = (s + A[i][k] * B[k][j]) % MOD;
+          C[i].push(s);
+        }
+      }
+      return C;
+    }
+
+    function build(){
+      var n = cases[st.ep];
+      var start = [[1n, 0n]];              // v(1) = (f(1), f(0))
+      var m = [[1n, 1n], [1n, 0n]];        // 递推矩阵
+      var acc = [[1n, 0n], [0n, 1n]];      // 单位矩阵
+      var p = n - 1, steps = [];
+      var bits = p.toString(2);
+      for (var i = 0; p > 0; i++) {
+        var bit = p % 2;
+        var before = m.map(function(r){ return r.slice(); });
+        if (bit === 1) acc = mul(acc, m);
+        m = mul(m, m);
+        p = Math.floor(p / 2);
+        steps.push({i:i, bit:bit, acc:acc.map(function(r){ return r.slice(); }),
+                    before:before, m:m.map(function(r){ return r.slice(); }), rest:p});
+      }
+      var v = mul(start, acc);
+      st.steps = steps;
+      st.res = 'f(' + n + ') = ' + v[0][0].toString();
+      st.v = v;
+    }
+
+    function grid(M, cls) {
+      var s = '<div class="mgrid" style="grid-template-columns: repeat(' + M[0].length + ', auto)">';
+      for (var i = 0; i < M.length; i++)
+        for (var j = 0; j < M[0].length; j++)
+          s += '<span class="mcell ' + (cls || '') + '">' + M[i][j].toString() + '</span>';
+      return s + '</div>';
+    }
+
+    function render(){
+      var n = cases[st.ep];
+      var s = st.steps[st.step - 1];
+      var html = '<div class="rowline"><span class="k">幂次</span><span class="fnote">n - 1 = ' + (n - 1) +
+                 ' = ' + (n - 1).toString(2) + '（二进制）</span></div>';
+      html += '<div class="rowline"><span class="k">各位</span><div class="cards">';
+      var bits = (n - 1).toString(2);
+      for (var i = 0; i < bits.length; i++) {
+        var pos = i, v = bits[bits.length - 1 - i], cls = 'card';
+        if (pos < s.i) cls += (v === '1' ? ' pick' : ' dim');
+        else if (pos === s.i) cls += ' pick';
+        else cls += ' dim';
+        html += '<span class="' + cls + '">' + v + '<span class="idx">2^' + pos + '</span></span>';
+      }
+      html += '</div></div>';
+      html += '<div class="rowline"><span class="k">这一轮</span><span class="fnote">第 ' + s.i + ' 位是 ' + s.bit +
+              '，' + (s.bit === 1 ? 'ans 乘上 m' : '这一轮的 m 不进 ans') + '，随后 m 自己平方</span></div>';
+      html += '<div class="rowline"><span class="k">ans（累积）</span>' + grid(s.acc, 'acc') + '</div>';
+      html += '<div class="rowline"><span class="k">m 的变化</span>' + grid(s.before, '') + '<span class="fnote">平方后</span>' + grid(s.m, 'cur') + '</div>';
+      board.innerHTML = html;
+      note.textContent = '第 ' + st.step + ' / ' + st.steps.length + ' 轮';
+      if (st.step >= st.steps.length) {
+        ans.textContent = '结论：' + st.res + '，(f(n), f(n-1)) = (' + st.v[0][0].toString() + ', ' + st.v[0][1].toString() + ')';
+      } else {
+        ans.textContent = '';
+      }
+      document.getElementById('mat-next').disabled = st.step >= st.steps.length;
+    }
+
+    function reset(){ build(); st.step = 1; render(); }
+    selEp.addEventListener('change', function(){ st.ep = +selEp.value; reset(); });
+    document.getElementById('mat-next').addEventListener('click', function(){
+      if (st.step < st.steps.length) st.step++;
+      render();
+    });
+    document.getElementById('mat-reset').addEventListener('click', reset);
+    reset();
+  })();
+})();</script>
+</body>
+</html>

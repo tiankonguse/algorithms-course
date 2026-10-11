@@ -48,11 +48,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const ver = await (await fetch('http://127.0.0.1:' + PORT + '/json/version')).json();
   const ws = new WebSocket(ver.webSocketDebuggerUrl);
   await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', () => rej(new Error('ws'))); });
-  const { send, events } = await cdp(ws);
+  const { send: rawSend, events } = await cdp(ws);
+  // Chrome 155 起 flatten 会话失效，改用页面级 WS（详见 cdp_page.js 头部注释）
+  const pg = require('./cdp_page.js')(PORT, { events: events, browserSend: rawSend });
+  const send = pg.send;
   let fails = 0;
 
-  const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
-  const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+  const tab = await pg.openTab('about:blank');
+  const sessionId = tab.sessionId;
   await send('Log.enable', {}, sessionId);
   await send('Runtime.enable', {}, sessionId);
   await send('Page.enable', {}, sessionId);
@@ -86,7 +89,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   }
   console.log('   末三张卡片:', v.titles.slice(-3).join(' / '));
   if (errs.length) { console.log('   JS错误:', errs.slice(0, 3).map(m => m.method).join(',')); }
-  await send('Target.closeTarget', { targetId });
+  await pg.closeTab(sessionId);
   ws.close();
   process.exit(fails ? 1 : 0);
 })();

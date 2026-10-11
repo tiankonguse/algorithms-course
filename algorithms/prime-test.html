@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>质数判断：从试除到 Miller-Rabin</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+.card { min-width: 34px; padding: 5px 8px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.hit { background: #dcfce7; border-color: #15803d; color: #14532d; font-weight: 600; }
+.card.dim { opacity: .40; }
+.rowline { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; flex-wrap: wrap; }
+.rowline .k { color: var(--text-dim); min-width: 92px; font-size: 13px; }
+.fnote { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>质数判断：从试除到 Miller-Rabin</h1>
+      <p class="intro">判断 n 是不是质数，最笨也最稳的办法是从 2 一路试到根号 n。n 在 10<sup>12</sup> 以内它够用，n 到了 10<sup>18</sup>，一次判定就要跑十亿次除法。大数换 Miller-Rabin：拿一串小质数当底去测试，全过就当它是质数。</p>
+
+      <h2>零、为什么试到根号 n 就可以停</h2>
+      <p>假设 n 不是质数，那它能写成 n = a × b，两个因子都大于 1。不妨设 a ≤ b，于是 a × a ≤ a × b = n，也就是 a ≤ 根号 n。只要 n 有真因子，小的那一个一定落根号 n 的左边。</p>
+      <p>反过来也成立：如果 2 到根号 n 之间没有任何数能整除 n，那 n 就不可能有真因子，n 是质数。所以循环只需要跑到 i × i 超过 n 为止。</p>
+      <figure class="fig" id="fig-sqrt">
+        <figcaption>图 1　36 的因子成对出现，每一对里小的那个都落在根号 36 = 6 的左边（6 和自己配对）</figcaption>
+      </figure>
+      <p>循环条件写成 <code>i * i &lt;= n</code>，省掉开方的浮点运算。这里有个坑：i 的类型。int 能装到 2147483647，可 46341 × 46341 就已经是 2147488281 了，超出 int 上限后翻成了 -2147479015，于是 <code>i * i &lt;= n</code> 从这一格起恒为真，循环再也停不下来。实测把 n = 2147483647 交给 int 版的循环，计数一路翻转成了负数。用 long long 就没这事，long long 的平方上界在 3037000499。</p>
+              <pre class="code"><span class="cm">// 判断较小的数字 n 是不是质数，O(根号n)</span>
+    <span class="kw">bool</span> <span class="fn">isPrime</span>(<span class="kw">long</span> <span class="kw">long</span> n) {
+    	<span class="kw">if</span> (n &lt;= 1) {
+    		<span class="kw">return</span> <span class="kw">false</span>;
+    	}
+    	<span class="cm">// 2 ... 根号n</span>
+    	<span class="kw">for</span> (<span class="kw">long</span> <span class="kw">long</span> i = 2; i * i &lt;= n; i++) {
+    		<span class="kw">if</span> (n % i == 0) {
+    			<span class="kw">return</span> <span class="kw">false</span>;
+    		}
+    	}
+    	<span class="kw">return</span> <span class="kw">true</span>;
+    }
+
+    <span class="cm">// 6k±1 优化：大于 3 的质数一定长成 6k-1 或 6k+1，只试这两种，除法次数降到三分之一</span>
+    <span class="kw">bool</span> <span class="fn">isPrime6k</span>(<span class="kw">long</span> <span class="kw">long</span> n) {
+    	<span class="kw">if</span> (n &lt;= 1) <span class="kw">return</span> <span class="kw">false</span>;
+    	<span class="kw">if</span> (n &lt;= 3) <span class="kw">return</span> <span class="kw">true</span>;
+    	<span class="kw">if</span> (n % 2 == 0 || n % 3 == 0) <span class="kw">return</span> <span class="kw">false</span>;
+    	<span class="kw">for</span> (<span class="kw">long</span> <span class="kw">long</span> i = 5; i * i &lt;= n; i += 6) {
+    		<span class="kw">if</span> (n % i == 0 || n % (i + 2) == 0) <span class="kw">return</span> <span class="kw">false</span>;
+    	}
+    	<span class="kw">return</span> <span class="kw">true</span>;
+    }</pre>
+      <p>顺手说一句：i × i 溢出属于有符号整型溢出，是未定义行为，编译器一句话都不说，跑出来的数还能是任何东西。别指望它稳定地「翻负」。</p>
+
+      <h2>一、6k±1：三次除法里只做一次</h2>
+      <p>试除的时候，i 每加一做一次除法，里头绝大多数是白费的。任何整数除以 6，余数只能是 0 到 5：余 0、2、4 的都是偶数，余 3 的是 3 的倍数，这些除了 2 和 3 自己，都不可能是质数。于是大于 3 的质数只能长成 6k-1 或者 6k+1。</p>
+      <p>循环就改成 <code>for (i = 5; i * i &lt;= n; i += 6)</code>，每一轮只试 i 和 i+2 两个数。跑 6 个数才做 2 次除法，除法次数降到三分之一。</p>
+      <figure class="fig" id="fig-mod6">
+        <figcaption>图 2　按除以 6 的余数排成六行：中间四行整行都是合数，只有 6k-1 和 6k+1 两行值得试除（橙色是这一行里的质数，白格是候选但被更小的质数除掉了）</figcaption>
+      </figure>
+      <p>实测的除法次数：n = 1009 时朴素版 30 次、6k±1 版 12 次；n = 10<sup>9</sup>+7 时 31621 次对 10542 次；n = 10<sup>18</sup>+3 时 999999999 次对 333333334 次。倍数稳定在三倍。省下来的是常数，量级一个字没动，卡在 O(根号 n)。</p>
+      <p>想再快还有一招：先拿一张筛好的质数表，只拿表里的质数去试。这张表本身就是下一页质数筛的产出，所以试除真正的定位是「n 不大时的顺手工具」。</p>
+
+      <h2>二、n 到 10<sup>18</sup>，试除就不行了</h2>
+      <p>实测一下上限在哪。取 n = 10<sup>18</sup>+3（质数），朴素版要跑 999999999 次除法，耗时 555.66 ms；6k±1 版 333333334 次，225.96 ms。这还只是一次判定的代价。题目里 t 是几万组，试除就直接出局了。</p>
+      <p>合数常常很早现形，比如 n = 10<sup>18</sup> 是偶数，第一次除法就退出了。真正难缠的是两种：n 本身就是质数，或者 n = p × q 而 p、q 都很大（比如都在 10<sup>9</sup> 附近），这两种都得一路试到根号 n。</p>
+      <figure class="fig" id="fig-scale">
+        <figcaption>图 3　根号 n 随 n 的增长：n 每多两位，要试的次数就乘十（纵轴对数刻度）</figcaption>
+      </figure>
+      <p>本机实测一次 64 位除法约 0.575 纳秒，所以柱子的高度直接换算成毫秒：十亿次约 575 ms。这就是 O(根号 n) 在 long long 范围内的真实手感。</p>
+
+      <h2>三、Miller-Rabin 测试怎么用</h2>
+      <p>Miller-Rabin 是一次一次来的：每挑一个底 a，就对 n 做一轮测试。这一轮要么证明 n 是合数（那整个判定结束，返回合数），要么什么都没证明（换下一个底）。s 轮全都没能证明，就认为 n 是质数。</p>
+      <p>一轮测试的过程：</p>
+      <ol>
+        <li>把 n-1 拆成 u × 2<sup>t</sup>，其中 u 是奇数。比如 n = 561，n-1 = 560 = 35 × 16，于是 u = 35、t = 4。</li>
+        <li>算 v = a<sup>u</sup> mod n。</li>
+        <li>若 v == 1 或者 v == n-1，这个底放行。</li>
+        <li>否则把 v 反复平方，最多 t 次。平方前先记下 prev = v：若平方后得到 1 而 prev 既不是 1 也不是 n-1，判定合数；若平方后得到 n-1，这个底放行。</li>
+        <li>t 次平方做完仍未放行，判定合数。</li>
+      </ol>
+      <p>依据是两条定理。第一条是费马小定理：n 是质数时，任何 1 ≤ a &lt; n 都满足 a<sup>n-1</sup> ≡ 1 (mod n)，所以第 5 步里末了不是 1 就一定是合数。第二条是二次探测定理：n 是奇质数时，x² ≡ 1 (mod n) 的解只有 x ≡ 1 和 x ≡ n-1 两个，所以第 4 步里冒出别的数，n 必然是合数。</p>
+      <figure class="fig" id="fig-mr">
+        <figcaption>图 4　一轮 Miller-Rabin 的三个出口：v 等于 1 或 n-1 直接放行，平方过程里抓到非平凡平方根判合数，跑完 t 次还不是 1 也判合数</figcaption>
+      </figure>
+      <p>为什么光有费马小定理不够？因为存在卡米切尔数：它们是合数，却对所有与它互质的底都满足 a<sup>n-1</sup> ≡ 1。实测 561、1105、1729 这三个数用底 2 做费马测试全部通过，会被直接判成质数，可它们分别是 3×11×17、5×13×17、7×13×19。561 的 558 个底里有 318 个（57.0%）会让费马测试误判，1105 是 69.5%，1729 甚至到 75.0%。二次探测定理这一条把它们全挡住了。</p>
+              <pre class="code">typedef __int128 <span class="kw">ll</span>;
+
+    <span class="cm">// 返回 a 的 b 次方 % mod</span>
+    <span class="kw">ll</span> <span class="fn">qpow</span>(<span class="kw">ll</span> a, <span class="kw">ll</span> b, <span class="kw">ll</span> mod) {
+    	<span class="kw">ll</span> ret = 1;
+    	<span class="kw">while</span> (b) {
+    		<span class="kw">if</span> (b &amp; 1) ret = (ret * a) % mod;
+    		a = (a * a) % mod;
+    		b &gt;&gt;= 1;
+    	}
+    	<span class="kw">return</span> ret % mod;
+    }</pre>
+              <pre class="code">typedef __int128 <span class="kw">ll</span>;
+
+    vector&lt;<span class="kw">ll</span>&gt; p = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37 };
+
+    <span class="cm">// 单次测试：a 这个底能不能证明 n 是合数</span>
+    <span class="kw">bool</span> <span class="fn">witness</span>(<span class="kw">ll</span> a, <span class="kw">ll</span> n) {
+    	<span class="kw">ll</span> u = n - 1;
+    	<span class="kw">int</span> t = 0;
+    	<span class="kw">while</span> ((u &amp; 1) == 0) {
+    		++t;
+    		u &gt;&gt;= 1;
+    	}
+    	<span class="kw">ll</span> x1 = qpow(a, u, n), x2;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= t; i++) {
+    		x2 = qpow(x1, 2, n);
+    		<span class="cm">// 平方得到 1，可平方前的 x1 既不是 1 也不是 n-1，说明 1 有非平凡平方根，n 必然是合数</span>
+    		<span class="kw">if</span> (x2 == 1 &amp;&amp; x1 != 1 &amp;&amp; x1 != n - 1) {
+    			<span class="kw">return</span> <span class="kw">true</span>;
+    		}
+    		x1 = x2;
+    	}
+    	<span class="cm">// 平方 t 次之后不是 1，费马小定理都不成立</span>
+    	<span class="kw">if</span> (x1 != 1) {
+    		<span class="kw">return</span> <span class="kw">true</span>;
+    	}
+    	<span class="kw">return</span> <span class="kw">false</span>;
+    }
+
+    <span class="cm">// Miller-Rabin 测试：n 是不是质数</span>
+    <span class="kw">bool</span> <span class="fn">millerRabin</span>(<span class="kw">ll</span> n) {
+    	<span class="kw">if</span> (n &lt;= 2) <span class="kw">return</span> n == 2;
+    	<span class="kw">if</span> ((n &amp; 1) == 0) <span class="kw">return</span> <span class="kw">false</span>;
+    	<span class="cm">// 每个质数都当一次底，全都没能证明 n 是合数，就认为 n 是质数</span>
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; (<span class="kw">int</span>)p.size() &amp;&amp; p[i] &lt; n; i++) {
+    		<span class="kw">if</span> (witness(p[i], n)) {
+    			<span class="kw">return</span> <span class="kw">false</span>;
+    		}
+    	}
+    	<span class="kw">return</span> <span class="kw">true</span>;
+    }</pre>
+      <p>底取多少个？模板里给的是前 12 个小质数 2、3、5、7、…、37。它们合起来对 64 位范围内的任何 n 都不会出错，所以日常直接全用。实测 5 万个 63 位随机数，底从 1 个加到 12 个，判定耗时 31.87 ms 到 46.93 ms，多十一个底只多 15 ms，单次判定约 1 微秒。想省就按 n 的大小截一段。</p>
+
+      <h2>四、模板里唯一要改的是整型位数</h2>
+      <p>快速幂里有一句 <code>a = a * a % mod</code>。a 是 <code>n</code> 取过模的结果，n 能到 10<sup>18</sup>，那 a × a 就奔着 10<sup>36</sup> 去了，而 long long 的上限是 9.22 × 10<sup>18</sup>。乘完就已经错了，后面再取模也没用。</p>
+      <p>C++ 的改法最省事：把模板里的 <code>typedef long long ll;</code> 换成 <code>typedef __int128 ll;</code>，乘法在 128 位里算完再取模，中间不丢高位。这是模板里专门标注过的那一行。</p>
+      <p>实测代价：long long 版判定 9999999967、10000000019、100000000003、1000000000039、999999999989、10<sup>18</sup>+3、2<sup>61</sup>-1 这七个质数，全部错报成合数，它把质数说成合数，而且说得理直气壮。换成 __int128 之后，0 到 200000 全表跟试除结果一格不差。</p>
+      <figure class="fig" id="fig-bits">
+        <figcaption>图 5　long long 只有 64 位，两个 10<sup>18</sup> 量级的数相乘需要 120 位以上，高位被丢掉后取模的结果就是错的</figcaption>
+      </figure>
+      <p>不想用 128 位整型，就自己写龟速乘：把 a × b 按 b 的二进制位拆成若干次加法，每加一次取一次模，中间结果永远不超过 2 × mod。原理是位运算实现乘法，多套一层取模即可。代价也实在：实测一次 __int128 模乘 5.05 纳秒，龟速乘 178.42 纳秒，慢了 35 倍，整个 Miller-Rabin 的速度会按这个比例一起放大。能开出 128 位就别省这个。</p>
+              <pre class="code"><span class="cm">// 龟速乘：a * b 用位运算拆开，每一步都 % mod，中间结果永远不超过 2 * mod</span>
+    <span class="cm">// 不需要 128 位整型，代价是一次乘法变成 log b 次加法</span>
+    <span class="kw">ll</span> <span class="fn">multiply</span>(<span class="kw">ll</span> a, <span class="kw">ll</span> b, <span class="kw">ll</span> mod) {
+    	a = (a % mod + mod) % mod;
+    	b = (b % mod + mod) % mod;
+    	<span class="kw">ll</span> ans = 0;
+    	<span class="kw">while</span> (b != 0) {
+    		<span class="kw">if</span> (b &amp; 1) ans = (ans + a) % mod;
+    		a = (a + a) % mod;
+    		b &gt;&gt;= 1;
+    	}
+    	<span class="kw">return</span> ans;
+    }</pre>
+      <p>读入也留个心眼。long 是 64 位，double 也是 64 位，可 double 要腾出若干位去表示小数部分，整数部分只剩 53 位左右。把 131237128371723187 先读成 double 再转成 long，末几位就变了。正确做法是直接用 64 位整型去读，别让它经过浮点。</p>
+
+      <h2>五、两个演示</h2>
+      <div class="viz" id="viz-trial">
+        <p class="viz-title">试除逐帧：朴素版一个数一次除法，6k±1 版三次里只做一次</p>
+        <p class="viz-note">蓝格是已经试过没整除的，橙格是这一轮正在试的，绿格是命中因子。切到 6k±1 看除法次数怎么掉到三分之一。</p>
+        <div id="trial-board"></div>
+        <p class="viz-note" id="trial-note"></p>
+        <p class="viz-answer" id="trial-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="trial-ep"></select></label>
+          <label>写法 <select id="trial-mode"></select></label>
+          <button id="trial-next" type="button">下一步</button>
+          <button id="trial-reset" type="button">重置</button>
+        </div>
+      </div>
+      <div class="viz" id="viz-mr">
+        <p class="viz-title">Miller-Rabin 一轮：从 n-1 = u·2<sup>t</sup> 到三个出口</p>
+        <p class="viz-note">先把 n-1 拆成奇数乘 2 的幂，算出 v = a<sup>u</sup> mod n，之后反复平方。橙色是命中出口的那一格。561 是卡米切尔数，换个底看它会在第几次平方露馅。</p>
+        <div id="mr-board"></div>
+        <p class="viz-note" id="mr-note"></p>
+        <p class="viz-answer" id="mr-answer"></p>
+        <div class="viz-controls">
+          <label>n <select id="mr-ep"></select></label>
+          <label>底 <select id="mr-base"></select></label>
+          <button id="mr-next" type="button">下一步</button>
+          <button id="mr-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>试除法</td><td>从 2 试到根号 n，每次一次取模</td><td>O(根号 n)</td><td>O(1)</td></tr>
+        <tr><td>试除法 6k±1</td><td>只试 6k-1 与 6k+1</td><td>O(根号 n / 3)</td><td>O(1)</td></tr>
+        <tr><td>Miller-Rabin</td><td>s 轮，每轮一次快速幂（log n 次模乘）</td><td>O(s · log<sup>3</sup> n)</td><td>O(1)</td></tr>
+      </table>
+      <p class="breakdown">Miller-Rabin 那个 log<sup>3</sup> 是这么来的：一次 128 位模乘算作 O(log<sup>2</sup> n) 的位运算，一次快速幂要做 O(log n) 次模乘，再乘上 s 轮测试。实测 5 万个 63 位随机数，s = 1 用 31.87 ms、s = 12 用 46.93 ms，一次判定约 1 微秒；而试除判定 10<sup>18</sup> 级别的质数要 555.66 ms，差了六万倍。这里 s 是常数（≤ 12），所以 Miller-Rabin 在 long long 范围内基本可以当成 O(log<sup>3</sup> n)。</p>
+
+      <h2>总结</h2>
+      <p>试除只用跑到根号 n，理由是因子成对出现，小的那个跨不过根号 n。循环条件用 <code>i * i &lt;= n</code>，但 i 得是 long long，int 在 46341 那里平方就溢出了，循环条件会失效。</p>
+      <p>6k±1 把除法次数砍到三分之一。它省的是常数，量级还是根号 n，所以 n 到 10<sup>18</sup> 时一样跑不动，实测一次判定 555.66 ms。</p>
+      <p>Miller-Rabin 是这个时候的答案：n-1 拆成 u·2<sup>t</sup>，用一批小质数当底，算 a<sup>u</sup> mod n 后反复平方，抓非平凡平方根。费马小定理负责「末了不是 1 就是合数」，二次探测定理负责「平方根不对也是合数」，少了后一条就会被卡米切尔数骗过去。</p>
+      <p>模板里唯一容易写错的是乘法的位数。C++ 把 ll 换成 __int128 即可，不想用就写龟速乘，代价是慢几十倍。</p>
+      <p>这里算 a<sup>u</sup> mod n 用的快速幂，下一讲单独拆开讲。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>【模板】Miller-Rabin</td><td><a href="https://www.luogu.com.cn/problem/U148828" target="_blank">【模板】Miller-Rabin</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解097【必备】质数判断、质因子分解、质数筛</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', GREEN = '#15803d';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5';
+  function arrow(svg, x1, y1, x2, y2, color) {
+    svg.appendChild(el('line', {x1:x1, y1:y1, x2:x2, y2:y2, stroke:color, 'stroke-width':1.3}));
+    var ang = Math.atan2(y2 - y1, x2 - x1), len = 7;
+    var p1 = x2 + ',' + y2;
+    var p2 = (x2 - len * Math.cos(ang - 0.42)).toFixed(1) + ',' + (y2 - len * Math.sin(ang - 0.42)).toFixed(1);
+    var p3 = (x2 - len * Math.cos(ang + 0.42)).toFixed(1) + ',' + (y2 - len * Math.sin(ang + 0.42)).toFixed(1);
+    svg.appendChild(el('polygon', {points:p1 + ' ' + p2 + ' ' + p3, fill:color}));
+  }
+  function isP(x) {
+    if (x < 2) return false;
+    for (var i = 2; i * i <= x; i++) if (x % i === 0) return false;
+    return true;
+  }
+
+  // ===== 图 1：因子成对 =====
+  (function(){
+    var host = document.getElementById('fig-sqrt');
+    var W = 660, H = 284;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'n = 36，根号 n = 6：每一对因子里，小的都不过 6', {'font-size':12.5, fill:'#1f2328'}));
+    var y = 170, x0 = 40, unit = (620 - 40) / 36;
+    function px(v){ return x0 + v * unit; }
+    svg.appendChild(el('line', {x1:30, y1:y, x2:640, y2:y, stroke:'#c9ced4', 'stroke-width':1.2}));
+    for (var v = 0; v <= 36; v += 2) {
+      var big = (v % 4 === 0);
+      svg.appendChild(el('line', {x1:px(v), y1:y, x2:px(v), y2:y + (big?6:3), stroke:'#c9ced4', 'stroke-width':1.1}));
+      if (big) svg.appendChild(txt(px(v), y + 19, String(v), {'text-anchor':'middle', 'font-size':10, fill:'#6b7280'}));
+    }
+    var arcs = [[2,18,62],[3,12,86],[4,9,110]];
+    for (var k = 0; k < arcs.length; k++) {
+      var a = arcs[k][0], b = arcs[k][1], h = arcs[k][2];
+      var xa = px(a), xb = px(b), mid = (xa + xb) / 2;
+      svg.appendChild(el('path', {d:'M'+xa+','+(y-12)+' Q'+mid+','+(h-40)+' '+xb+','+(y-12),
+        fill:'none', stroke:GREY, 'stroke-width':1.1}));
+    }
+    var dots = [[2,1],[3,1],[4,1],[6,1],[9,0],[12,0],[18,0]];
+    for (var k = 0; k < dots.length; k++) {
+      var v = dots[k][0], small = dots[k][1];
+      svg.appendChild(el('circle', {cx:px(v), cy:y - 12, r:8, fill: small ? FILL_B : '#ffffff',
+        stroke: small ? BLUE : BLUE, 'stroke-width': small ? 1.5 : 1.1}));
+      svg.appendChild(txt(px(v), y - 5, String(v), {'text-anchor':'middle', 'font-size':10.5,
+        fill: small ? '#1e3a8a' : '#6b7280', 'font-weight': small ? 600 : 400}));
+    }
+    svg.appendChild(el('circle', {cx:px(6), cy:130, r:10, fill:FILL_O, stroke:ORANGE, 'stroke-width':1.4}));
+    svg.appendChild(txt(px(6), 134, '6', {'text-anchor':'middle', 'font-size':11, fill:'#9a3412', 'font-weight':600}));
+    svg.appendChild(el('line', {x1:px(6), y1:44, x2:px(6), y2:y, stroke:ORANGE, 'stroke-width':1.2, 'stroke-dasharray':'4 3'}));
+    svg.appendChild(txt(px(6) + 8, 40, '根号 36 = 6', {'font-size':11, fill:'#9a3412', 'font-weight':600}));
+    svg.appendChild(txt(16, 208, '蓝圈是每对里小的那个，全部落在虚线左边；只要 2 到 6 都没整除，就不可能有别的因子了。', {'font-size':12, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 230, '循环写成 i*i <= n 而不是 i <= sqrt(n)：开方是浮点，边界上差一位就可能多跑或少跑一次。', {'font-size':12, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 252, '注意溢出：int 下 46341*46341 = -2147479015（正确值 2147488281），i*i <= n 从此恒为真。', {'font-size':12, fill:'#9a3412'}));
+    svg.appendChild(txt(16, 274, '用 long long 就安全：它的平方上界是 3037000499。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：6k±1 =====
+  (function(){
+    var host = document.getElementById('fig-mod6');
+    var W = 660, H = 254;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '除以 6 的余数决定要不要试：只有 6k-1 与 6k+1 两行值得试除', {'font-size':12.5, fill:'#1f2328'}));
+    var labels = ['6k', '6k+1', '6k+2', '6k+3', '6k+4', '6k+5'];
+    var skip = [true, false, true, true, true, false];
+    var cw = 62, ch = 26, gap = 5, x0 = 96, y0 = 34;
+    for (var r = 0; r < 6; r++) {
+      var y = y0 + r * (ch + gap);
+      svg.appendChild(txt(16, y + 18, labels[r], {'font-size':12, fill: skip[r] ? '#9aa0a6' : '#374151',
+        'font-weight': skip[r] ? 400 : 600}));
+      for (var k = 0; k < 8; k++) {
+        var v = 6 * k + r;
+        var x = x0 + k * (cw + gap);
+        var prime = isP(v);
+        var fill = skip[r] ? '#f6f7f9' : (prime ? FILL_O : '#ffffff');
+        var stroke = skip[r] ? '#e6e8eb' : (prime ? ORANGE : '#c9ced4');
+        svg.appendChild(el('rect', {x:x, y:y, width:cw, height:ch, rx:5, fill:fill, stroke:stroke,
+          'stroke-width': skip[r] ? 1 : 1.3}));
+        svg.appendChild(txt(x + cw / 2, y + 18, String(v), {'text-anchor':'middle', 'font-size':12.5,
+          fill: skip[r] ? '#9aa0a6' : (prime ? '#9a3412' : '#6b7280'),
+          'font-weight': prime ? 600 : 400}));
+        if (skip[r]) {
+          svg.appendChild(el('line', {x1:x + 8, y1:y + 6, x2:x + cw - 8, y2:y + ch - 6,
+            stroke:'#c9ced4', 'stroke-width':1}));
+          svg.appendChild(el('line', {x1:x + cw - 8, y1:y + 6, x2:x + 8, y2:y + ch - 6,
+            stroke:'#c9ced4', 'stroke-width':1}));
+        }
+      }
+    }
+    svg.appendChild(txt(16, 240, '灰格整行都不用试：偶数行、3 的倍数行。只有 6k-1 与 6k+1 两行需要除法，6 个数里试 2 次。',
+      {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：根号 n 的量级 =====
+  (function(){
+    var host = document.getElementById('fig-scale');
+    var W = 660, H = 248;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '一次判定要试多少次：根号 n（纵轴对数刻度）', {'font-size':12.5, fill:'#1f2328'}));
+    var data = [
+      {n:'10^6',  v:1000},
+      {n:'10^8',  v:10000},
+      {n:'10^10', v:100000},
+      {n:'10^12', v:1000000},
+      {n:'10^14', v:10000000},
+      {n:'10^16', v:100000000},
+      {n:'10^18', v:1000000000}
+    ];
+    var base = 188, top = 40, logMin = 2.5, logMax = 9.02;
+    function hh(v){ var lg = Math.log(v) / Math.LN10; return base - (lg - logMin) / (logMax - logMin) * (base - top); }
+    for (var g = 2; g <= 9; g++) {
+      var gy = hh(Math.pow(10, g));
+      svg.appendChild(el('line', {x1:56, y1:gy, x2:640, y2:gy, stroke:'#eef0f2', 'stroke-width':1}));
+      svg.appendChild(txt(20, gy + 4, '10^' + g, {'font-size':9.5, fill:'#c9ced4'}));
+    }
+    var bw = 62, gap = 16, x0 = 72;
+    for (var i = 0; i < data.length; i++) {
+      var x = x0 + i * (bw + gap), hgt = base - hh(data[i].v);
+      svg.appendChild(el('rect', {x:x, y:hh(data[i].v), width:bw, height:hgt, rx:5,
+        fill:FILL_B, stroke:BLUE, 'stroke-width':1.3}));
+      svg.appendChild(txt(x + bw / 2, base + 16, data[i].n, {'text-anchor':'middle', 'font-size':11.5, fill:'#374151'}));
+      svg.appendChild(txt(x + bw / 2, hh(data[i].v) - 6, '10^' + (Math.round(Math.log(data[i].v) / Math.LN10)),
+        {'text-anchor':'middle', 'font-size':11, fill:'#1e3a8a', 'font-weight':600}));
+    }
+    svg.appendChild(el('line', {x1:56, y1:base, x2:646, y2:base, stroke:'#c9ced4', 'stroke-width':1.2}));
+    svg.appendChild(txt(16, 232, '本机一次 64 位除法约 0.575 纳秒，十亿次约 575 ms，这就是 O(根号 n) 在 long long 上的真实代价。',
+      {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：Miller-Rabin 一轮的分支 =====
+  (function(){
+    var host = document.getElementById('fig-mr');
+    var W = 660, H = 332;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '一个底 a 的一轮测试：三个出口', {'font-size':12.5, fill:'#1f2328'}));
+    function box(x, y, w, h, s, fill, stroke, fc) {
+      svg.appendChild(el('rect', {x:x, y:y, width:w, height:h, rx:7, fill:fill, stroke:stroke, 'stroke-width':1.3}));
+      var parts = String(s).split('\n');
+      for (var i = 0; i < parts.length; i++) {
+        svg.appendChild(txt(x + w / 2, y + h / 2 + (parts.length === 1 ? 4 : (i - (parts.length - 1) / 2) * 15 + 4),
+          parts[i], {'text-anchor':'middle', 'font-size':11.5, fill:fc, 'font-weight':600}));
+      }
+    }
+    box(230, 34, 200, 32, 'n - 1 = u · 2^t', '#ffffff', BLUE, '#1e3a8a');
+    arrow(svg, 330, 66, 330, 84, BLUE);
+    box(230, 86, 200, 32, 'v = a^u mod n', '#ffffff', BLUE, '#1e3a8a');
+    arrow(svg, 330, 118, 330, 136, BLUE);
+    box(206, 138, 248, 34, 'v == 1 或 v == n-1 ?', FILL_B, BLUE, '#1e3a8a');
+    // 右：放行
+    arrow(svg, 454, 155, 560, 155, GREEN);
+    box(500, 138, 124, 34, '这个底放行', FILL_O, ORANGE, '#9a3412');
+    // 下：平方
+    arrow(svg, 330, 172, 330, 196, GREY);
+    box(196, 198, 268, 40, '重复平方至多 t 次\n记 prev = v 再平方', '#ffffff', GREY, '#374151');
+    arrow(svg, 330, 238, 330, 256, GREY);
+    box(150, 258, 360, 32, '中途 v==1 且 prev 不是 ±1 → 合数', FILL_O, ORANGE, '#9a3412');
+    svg.appendChild(txt(16, 316, '跑完 t 次还没放行，末了 v 不是 1 → 合数。s 轮全部放行，就认为 n 是质数。',
+      {'font-size':11.5, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 5：位数 =====
+  (function(){
+    var host = document.getElementById('fig-bits');
+    var W = 660, H = 214;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '乘法需要多少位：long long 装不下两个 10^18 的乘积', {'font-size':12.5, fill:'#1f2328'}));
+    var rows = [
+      {lab:'long long 上限',   val:9223372036854775807, w:63,  c:GREY,  f:'#f6f7f9'},
+      {lab:'10^18 量级',       val:1000000000000000000, w:60,  c:BLUE,  f:FILL_B},
+      {lab:'10^18 × 10^18',     val:0,                   w:120, c:ORANGE,f:FILL_O, txt:'≈ 10^36（需要 120 位）'},
+      {lab:'__int128 上限',     val:0,                   w:127, c:GREEN, f:'#dcfce7', txt:'≈ 1.7 × 10^38'}
+    ];
+    var y = 38;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      svg.appendChild(txt(16, y + 15, r.lab, {'font-size':11.5, fill:'#374151', 'font-weight':600}));
+      var x0 = 150, maxw = 460;
+      var bw = Math.max(24, r.w / 127 * maxw);
+      svg.appendChild(el('rect', {x:x0, y:y, width:bw, height:22, rx:4, fill:r.f, stroke:r.c, 'stroke-width':1.2}));
+      var t = r.txt ? r.txt : r.val.toLocaleString('en-US');
+      if (bw > 120) {
+        svg.appendChild(txt(x0 + 8, y + 16, t, {'font-size':10.5, fill:r.c}));
+      } else {
+        svg.appendChild(txt(x0 + bw + 8, y + 16, t, {'font-size':10.5, fill:r.c}));
+      }
+      y += 30;
+    }
+    svg.appendChild(txt(150, 172, '64 位', {'font-size':10.5, fill:GREY}));
+    svg.appendChild(txt(150 + 63 / 127 * 460, 172, '128 位', {'font-size':10.5, fill:GREEN}));
+    svg.appendChild(txt(16, 196, '两个 10^18 相乘需要 120 位以上，long long 的高位被丢掉，取模结果就是错的。',
+      {'font-size':11.5, fill:'#9a3412'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示 1：试除逐帧 =====
+  (function(){
+    var eps = [
+      {name:'n = 97（质数）', n:97},
+      {name:'n = 91 = 7 × 13', n:91},
+      {name:'n = 221 = 13 × 17', n:221},
+      {name:'n = 1009（质数）', n:1009}
+    ];
+    var st = {ep:0, mode:0, step:1, steps:[], res:''};
+    var board = document.getElementById('trial-board');
+    var note = document.getElementById('trial-note');
+    var ans = document.getElementById('trial-answer');
+    var selEp = document.getElementById('trial-ep');
+    var selMode = document.getElementById('trial-mode');
+    for (var i = 0; i < eps.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(i); o.textContent = eps[i].name;
+      selEp.appendChild(o);
+    }
+    [[0,'朴素：i = 2,3,4,…'],[1,'6k±1：i = 5,11,17,…']].forEach(function(m){
+      var o = document.createElement('option');
+      o.value = String(m[0]); o.textContent = m[1];
+      selMode.appendChild(o);
+    });
+
+    function build(){
+      var n = eps[st.ep].n, six = st.mode === 1;
+      var steps = [], divs = 0, hit = 0, i;
+      if (six) {
+        divs += 2;
+        if (n <= 1) {
+          steps.push({i:0, sq:0, divs:2, done:true, note:'n ≤ 1，返回不是质数'});
+        } else if (n <= 3) {
+          steps.push({i:0, sq:0, divs:2, done:true, ok:true, note:'n ≤ 3，边界直接返回是质数'});
+        } else if (n % 2 === 0 || n % 3 === 0) {
+          steps.push({i:0, sq:0, divs:2, done:true, hit:true, note:'先试 2 和 3，命中，返回合数'});
+        } else {
+          for (i = 5; i * i <= n; i += 6) {
+            divs += 2;
+            var h = (n % i === 0) ? i : ((n % (i + 2) === 0) ? (i + 2) : 0);
+            if (h) {
+              hit = h;
+              steps.push({i:i, sq:i*i, divs:divs, hit:h, note:'i = ' + h + ' 整除 n，返回合数'});
+              break;
+            }
+            steps.push({i:i, sq:i*i, divs:divs, note:'试 ' + i + ' 与 ' + (i + 2) + '，都没整除，i 加 6'});
+          }
+          if (!hit) {
+            steps.push({i:i, sq:i*i, divs:divs, ok:true,
+              note:'i*i = ' + (i * i) + ' 已经超过 n = ' + n + '，循环结束，返回质数'});
+          }
+        }
+      } else {
+        if (n <= 1) {
+          steps.push({i:0, sq:0, divs:0, done:true, note:'n ≤ 1，返回不是质数'});
+        } else {
+          for (i = 2; i * i <= n; i++) {
+            divs++;
+            if (n % i === 0) {
+              hit = i;
+              steps.push({i:i, sq:i*i, divs:divs, hit:i, note:'i = ' + i + ' 整除 n，返回合数'});
+              break;
+            }
+            steps.push({i:i, sq:i*i, divs:divs, note:'试 ' + i + '，没整除，i 加 1'});
+          }
+          if (!hit) {
+            steps.push({i:i, sq:i*i, divs:divs, ok:true,
+              note:'i*i = ' + (i * i) + ' 已经超过 n = ' + n + '，循环结束，返回质数'});
+          }
+        }
+      }
+      st.steps = steps;
+      st.res = hit > 0 ? ('合数：最小的真因子是 ' + hit) : (n <= 1 ? '不是质数' : '质数');
+    }
+
+    function render(){
+      var s = st.steps[st.step - 1];
+      var n = eps[st.ep].n;
+      var html = '<div class="rowline"><span class="k">当前 n</span><span class="fnote">' + n +
+                 '</span><span class="k">写法</span><span class="fnote">' + (st.mode ? '6k±1' : '朴素') + '</span></div>';
+      html += '<div class="rowline"><span class="k">试除进度</span>';
+      if (s.done) {
+        html += '<span class="fnote">（n ≤ 3 或能被 2、3 整除，边界直接返回）</span>';
+      } else {
+        var lim = Math.min(s.i, 60);
+        for (var k = 2; k <= lim; k++) {
+          var cls = 'card';
+          if (st.mode === 1) {
+            var r = k % 6;
+            if (r !== 1 && r !== 5) cls += ' dim';
+          }
+          if (s.hit > 0 && k === s.hit) cls += ' hit';
+          else if (k === s.i) cls += ' pick';
+          else if (k < s.i) cls += ' ok';
+          html += '<span class="' + cls + '">' + k + '</span>';
+        }
+      }
+      html += '</div>';
+      html += '<div class="rowline"><span class="k">i × i vs n</span><span class="fnote">' +
+              (s.done ? '—' : (s.sq + ' ' + (s.sq <= n ? '≤' : '>') + ' ' + n)) + '</span></div>';
+      html += '<div class="rowline"><span class="k">取模次数</span><span class="fnote">' + (s.divs || 0) + '</span></div>';
+      board.innerHTML = html;
+      note.textContent = '第 ' + st.step + ' / ' + st.steps.length + ' 步　' + s.note;
+      ans.textContent = st.step >= st.steps.length ? ('结论：' + st.res) : '';
+      document.getElementById('trial-next').disabled = st.step >= st.steps.length;
+    }
+
+    function reset(){ build(); st.step = 1; render(); }
+    selEp.addEventListener('change', function(){ st.ep = +selEp.value; reset(); });
+    selMode.addEventListener('change', function(){ st.mode = +selMode.value; reset(); });
+    document.getElementById('trial-next').addEventListener('click', function(){
+      if (st.step < st.steps.length) st.step++;
+      render();
+    });
+    document.getElementById('trial-reset').addEventListener('click', reset);
+    reset();
+  })();
+
+  // ===== 演示 2：Miller-Rabin 一轮逐帧 =====
+  (function(){
+    var eps = [
+      {name:'n = 561（卡米切尔数）', n:561},
+      {name:'n = 97（质数）', n:97},
+      {name:'n = 91 = 7 × 13', n:91},
+      {name:'n = 341 = 11 × 31（伪素数）', n:341},
+      {name:'n = 2047 = 23 × 89', n:2047}
+    ];
+    var bases = [2, 3, 5, 7, 11];
+    var st = {ep:0, bi:0, step:1, steps:[], res:''};
+    var board = document.getElementById('mr-board');
+    var note = document.getElementById('mr-note');
+    var ans = document.getElementById('mr-answer');
+    var selEp = document.getElementById('mr-ep');
+    var selBase = document.getElementById('mr-base');
+    for (var i = 0; i < eps.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(i); o.textContent = eps[i].name;
+      selEp.appendChild(o);
+    }
+    for (var j = 0; j < bases.length; j++) {
+      var o2 = document.createElement('option');
+      o2.value = String(j); o2.textContent = '底 a = ' + bases[j];
+      selBase.appendChild(o2);
+    }
+
+    function powmod(a, e, m) {
+      var r = 1n; a = a % m; e = BigInt(e); m = BigInt(m);
+      while (e > 0n) { if (e & 1n) r = (r * a) % m; a = (a * a) % m; e >>= 1n; }
+      return r;
+    }
+
+    function build(){
+      var N = BigInt(eps[st.ep].n);
+      var a = BigInt(bases[st.bi]);
+      var u = N - 1n, t = 0;
+      while ((u & 1n) === 0n) { u >>= 1n; ++t; }
+      var steps = [];
+      steps.push({kind:'split', u:u, t:t, note:'把 n-1 拆成 u × 2^t：u = ' + u + '，t = ' + t});
+      steps.push({kind:'pow', v:powmod(a, u, N), note:'算 v = a^u mod n = ' + powmod(a, u, N)});
+      var v = powmod(a, u, N);
+      var verdict = '合数';
+      if (v === 1n || v === N - 1n) {
+        steps.push({kind:'pass', why: v === 1n ? 'v == 1' : 'v == n-1', note:'v 等于 ' + (v === 1n ? '1' : 'n-1') + '，这个底放行'});
+        verdict = '放行';
+      } else {
+        var seq = [v];
+        for (var s = 1; s <= t; s++) {
+          var prev = v;
+          v = (v * v) % N;
+          seq.push(v);
+          if (v === N - 1n) {
+            steps.push({kind:'pass', why:'平方一次得到 n-1', note:'第 ' + s + ' 次平方得到 n-1，这个底放行'});
+            verdict = '放行';
+            break;
+          }
+          if (v === 1n && prev !== 1n && prev !== N - 1n) {
+            steps.push({kind:'fail', note:'第 ' + s + ' 次平方得到 1，可平方前的 ' + prev + ' 既不是 1 也不是 n-1，说明 1 有非平凡平方根，判定合数'});
+            verdict = '合数';
+            break;
+          }
+        }
+        if (verdict === '合数' && steps[steps.length - 1].kind !== 'fail') {
+          steps.push({kind:'fail', note:'平方了 ' + t + ' 次，末了 v = ' + v + ' 不是 1，费马小定理不成立，判定合数'});
+        }
+        steps[steps.length - 1].seq = seq;
+      }
+      st.steps = steps;
+      st.res = verdict === '放行' ? ('底 a = ' + bases[st.bi] + ' 放行：这一轮没能证明 n 是合数') : ('判定合数');
+    }
+
+    function render(){
+      var s = st.steps[st.step - 1];
+      var N = eps[st.ep].n;
+      var html = '<div class="rowline"><span class="k">n</span><span class="fnote">' + N +
+                 '</span><span class="k">底 a</span><span class="fnote">' + bases[st.bi] + '</span></div>';
+      if (s.kind === 'split') {
+        html += '<div class="rowline"><span class="k">n - 1</span><span class="fnote">' + (N - 1) + ' = ' + s.u + ' × 2^' + s.t + '</span></div>';
+      }
+      if (s.seq) {
+        html += '<div class="rowline"><span class="k">平方序列</span>';
+        for (var k = 0; k < s.seq.length; k++) {
+          var cls = 'card';
+          if (s.kind === 'fail') cls += (k === s.seq.length - 2 ? ' pick' : (k === s.seq.length - 1 ? ' hit' : ' ok'));
+          else cls += (k === s.seq.length - 1 ? ' hit' : ' ok');
+          html += '<span class="' + cls + '">' + s.seq[k].toString() + '<span class="idx">第 ' + k + ' 次</span></span>';
+        }
+        html += '</div>';
+      }
+      if (s.kind === 'pow') {
+        html += '<div class="rowline"><span class="k">v = a^u mod n</span><span class="fnote">' + s.v.toString() + '</span></div>';
+      }
+      board.innerHTML = html;
+      note.textContent = '第 ' + st.step + ' / ' + st.steps.length + ' 步　' + s.note;
+      ans.textContent = st.step >= st.steps.length ? ('结论：' + st.res) : '';
+      document.getElementById('mr-next').disabled = st.step >= st.steps.length;
+    }
+
+    function reset(){ build(); st.step = 1; render(); }
+    selEp.addEventListener('change', function(){ st.ep = +selEp.value; reset(); });
+    selBase.addEventListener('change', function(){ st.bi = +selBase.value; reset(); });
+    document.getElementById('mr-next').addEventListener('click', function(){
+      if (st.step < st.steps.length) st.step++;
+      render();
+    });
+    document.getElementById('mr-reset').addEventListener('click', reset);
+    reset();
+  })();
+})();</script>
+</body>
+</html>

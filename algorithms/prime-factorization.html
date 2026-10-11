@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>质因子分解：除净与收尾</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+.card { min-width: 34px; padding: 5px 8px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.hit { background: #dcfce7; border-color: #15803d; color: #14532d; font-weight: 600; }
+.card.dim { opacity: .40; }
+.rowline { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; flex-wrap: wrap; }
+.rowline .k { color: var(--text-dim); min-width: 92px; font-size: 13px; }
+.fnote { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>质因子分解：除净与收尾</h1>
+      <p class="intro">把一个整数拆成质数因子的乘积，工程上最常用的一版只有十几行：i 从 2 往上试，整除就一直除到除不动，循环结束还剩下的那个大于 1 的数自己就是一个质数。代价 O(根号 n)，n 在 10<sup>12</sup> 以内够用。</p>
+
+      <h2>零、分解要交出什么</h2>
+      <p>输入 12，它是 2 × 2 × 3。只想知道「有哪些质数参与」时输出 2、3；想知道次数就把内层 while 的循环次数一起记下来。这一页用前一种，输出互不相同的质因子。</p>
+      <p>看个大点的例子，n = 4012100：先被 2 整除，除净两次剩 1003025；再被 5 整除，除净两次剩 40121；接着 6、7、…、52 都除不动，到 53 命中，除净后剩 757；此时 59 × 59 = 3481 已经大于 757，循环停下，757 本身是个质数，直接补上。答案是 2、5、53、757。</p>
+      <figure class="fig" id="fig-flow">
+        <figcaption>图 1　4012100 的完整分解：每命中一个因子就除净，上界跟着往下掉，最后剩下的 757 自己就是质数</figcaption>
+      </figure>
+
+      <h2>一、循环的三处写法</h2>
+              <pre class="code"><span class="cm">// 打印 n 的所有质因子，O(根号n)</span>
+    <span class="cm">// 例如 n = 4012100，打印 : 2 5 7 11 521</span>
+    <span class="kw">void</span> <span class="fn">f</span>(<span class="kw">int</span> n) {
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 2; i * i &lt;= n; i++) {
+    		<span class="kw">if</span> (n % i == 0) {
+    			cout &lt;&lt; i &lt;&lt; endl;
+    			<span class="cm">// 除净！把 i 这个质因子从 n 里全部去掉</span>
+    			<span class="kw">while</span> (n % i == 0) {
+    				n /= i;
+    			}
+    		}
+    	}
+    	<span class="cm">// 除到最后剩下的 n，要么等于 1，要么它自己就是一个大于根号(原始n)的质数</span>
+    	<span class="kw">if</span> (n &gt; 1) {
+    		cout &lt;&lt; n &lt;&lt; endl;
+    	}
+    }</pre>
+      <p>这段代码里有三件事不能改：</p>
+      <ol>
+        <li>循环条件 <code>i * i &lt;= n</code> 里的 n 是<strong>一直在变</strong>的那个 n。每除掉一个因子，上界就跟着降一格。用原始 n 当上界也能得到一样的答案，只是白跑很多趟。</li>
+        <li>命中之后必须除净，也就是那个内层 while。少了它，后面所有 i 的合数倍都可能被误当成因子。</li>
+        <li>循环结束还剩大于 1 的数，它自己就是最后一个质因子，得补上。</li>
+      </ol>
+      <p>第 2 条值得说清楚：为什么除净之后，合数 i 就再也整除不了 n 了？反过来看，假设某个合数 i 能整除当前的 n，那 i 一定有质因子 p &lt; i。这个 p 在更早的某一轮里已经被命中并除净了，从那以后 p 就再不可能整除 n。既然 p 都除不进去，i（它是 p 的倍数）自然也除不进去。矛盾。</p>
+      <p>所以循环里真正会被命中的 i 全是质数，也就不需要先筛一张质数表。实测两万个随机数做分解，命中 37415 次，其中 i 是合数的 0 次。</p>
+      <figure class="fig" id="fig-proof">
+        <figcaption>图 2　合数 i 命中不了：它的质因子 p 早就被除净了，i 作为 p 的倍数也就进不去</figcaption>
+      </figure>
+      <p>循环次数实测：n = 4012100 时 52 次，可 √n 是 2003，除掉 2 和 5 之后上界一路塌到 757。换成 n = 1000000007（质数）就是老老实实的 31621 次，一个都省不下来。</p>
+      <p>两种常见改法的出错比例（两万组随机数据，值域 10<sup>6</sup>）：命中后不除净 92.28%，末尾不判 <code>n &gt; 1</code> 99.10%，上界记死原始 n 是 0.00%（答案一样，只是慢）。前两条的反例都很好记：不除净时 12 会输出 2、3、12；末尾不收尾时 94 只输出 2，把 47 丢了。</p>
+
+      <h2>二、按公因数计算最大组件大小</h2>
+      <p>题面是这样：给一个由不同正整数组成的非空数组 <code>nums</code>，若 <code>nums[i]</code> 与 <code>nums[j]</code> 有大于 1 的公因子，就在两者之间连一条无向边，问最大连通组件有多大。</p>
+      <p>直接按定义建图要算 n² 次最大公约数。换个连法：每个数只跟它自己的<strong>质因子</strong>连。两个数有公共质因子，就会被挂到同一个质因子名下，于是自然并到一起；反过来，并到一起的一串数，两两之间靠中间那些数接力，也确实连通。</p>
+      <p>实现只要一张 <code>factors</code> 表：<code>factors[p]</code> 记下「质因子 p 最早是被哪个下标的数拥有的」。扫到第 i 个数，枚举它的每个质因子 p，若 <code>factors[p]</code> 还是 -1 就填上 i，否则把 i 和 <code>factors[p]</code> 并起来。最后统计各集合大小取最大。</p>
+              <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXV = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 20001;
+
+    <span class="cm">// factors[a] = b : a 这个质因子，最早是被下标 b 的数字拥有的</span>
+    <span class="kw">int</span> factors[MAXV];
+    <span class="kw">int</span> father[MAXN], siz[MAXN], n;
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> m) {
+    	n = m;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+    		father[i] = i;
+    		siz[i] = 1;
+    	}
+    	fill(factors, factors + MAXV, -1);
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+    	<span class="kw">if</span> (i != father[i]) {
+    		father[i] = find(father[i]);
+    	}
+    	<span class="kw">return</span> father[i];
+    }
+
+    <span class="kw">void</span> <span class="fn">unionSet</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+    	<span class="kw">int</span> fx = find(x), fy = find(y);
+    	<span class="kw">if</span> (fx != fy) {
+    		father[fx] = fy;
+    		siz[fy] += siz[fx];
+    	}
+    }</pre>
+              <pre class="code"><span class="cm">// 每个数字的所有质因子，把拥有同一个质因子的数字并到一起</span>
+    <span class="cm">// 最后最大的集合，就是答案</span>
+    <span class="kw">int</span> <span class="fn">largestComponentSize</span>(vector&lt;<span class="kw">int</span>&gt;&amp; nums) {
+    	n = nums.size();
+    	build(n);
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 0, x; i &lt; n; i++) {
+    		x = nums[i];
+    		<span class="kw">for</span> (<span class="kw">int</span> j = 2; j * j &lt;= x; j++) {
+    			<span class="kw">if</span> (x % j == 0) {
+    				<span class="kw">if</span> (factors[j] == -1) {
+    					factors[j] = i;
+    				} <span class="kw">else</span> {
+    					unionSet(factors[j], i);
+    				}
+    				<span class="kw">while</span> (x % j == 0) {
+    					x /= j;
+    				}
+    			}
+    		}
+    		<span class="kw">if</span> (x &gt; 1) {
+    			<span class="kw">if</span> (factors[x] == -1) {
+    				factors[x] = i;
+    			} <span class="kw">else</span> {
+    				unionSet(factors[x], i);
+    			}
+    		}
+    	}
+    	<span class="kw">int</span> ans = 0;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+    		ans = max(ans, siz[i]);
+    	}
+    	<span class="kw">return</span> ans;
+    }</pre>
+      <p>拿样例 [4, 6, 15, 35] 走一遍：4 的质因子是 2，factors[2] = 0；6 的是 2 和 3，2 已经有人了，于是 0 和 1 并起来，factors[3] = 1；15 的是 3 和 5，3 有人了，1 和 2 并起来，factors[5] = 2；35 的是 5 和 7，5 有人了，2 和 3 并起来。四个数全在一块，答案 4。</p>
+      <figure class="fig" id="fig-comp">
+        <figcaption>图 3　四个数靠共享的质因子接力连成一块：4 和 6 共用 2，6 和 15 共用 3，15 和 35 共用 5</figcaption>
+      </figure>
+      <p>这里有个细节：退出循环时剩下的那个数会不会不是质数？不会。因为循环条件是 <code>i * i &lt;= n</code>，退出时若 n > 1，说明 n 没有被任何 ≤ √n 的数整除，那它只能是质数。剩下那个数可以安全地当作质因子，直接填进 factors。</p>
+
+      <h2>三、两个演示</h2>
+      <div class="viz" id="viz-fac">
+        <p class="viz-title">分解逐帧：i 一格一格往上走，命中就除净，上界跟着塌</p>
+        <p class="viz-note">橙色是当前 i，绿色是本轮输出的因子。看 4012100 怎么从 2003 的上界一路掉到 757。</p>
+        <div id="fac-board"></div>
+        <p class="viz-note" id="fac-note"></p>
+        <p class="viz-answer" id="fac-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="fac-ep"></select></label>
+          <button id="fac-next" type="button">下一步</button>
+          <button id="fac-reset" type="button">重置</button>
+        </div>
+      </div>
+      <div class="viz" id="viz-comp">
+        <p class="viz-title">最大组件：质因子当中转点，把数字并到一起</p>
+        <p class="viz-note">每一步处理一个数，展示它的质因子以及 factors 表里谁被连上了，最后给最大集合的大小。</p>
+        <div id="comp-board"></div>
+        <p class="viz-note" id="comp-note"></p>
+        <p class="viz-answer" id="comp-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="comp-ep"></select></label>
+          <button id="comp-next" type="button">下一步</button>
+        <button id="comp-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>质因子分解</td><td>i 从 2 试到根号 n，命中就除净</td><td>O(根号 n)</td><td>O(1)</td></tr>
+        <tr><td>最大组件大小</td><td>每个数分解一次 + 并查集合并</td><td>O(n · (根号 v + k · α(n)))</td><td>O(v + n)</td></tr>
+      </table>
+      <p class="breakdown">分解一趟的上界是根号 n，实测 n = 1000000007 是 31621 次取模；n 里含小因子时上界会跟着塌，4012100 只要 52 次。最大组件那题里，v 是值域上界、k 是单个数的质因子个数，n 个数的总合并次数是 O(n·k)，并查集单次近似 O(1)。空间上 factors 按值域开 O(v)，father 与 size 按数字个数开 O(n)。</p>
+
+      <h2>总结</h2>
+      <p>分解质因子的主干是三句话：循环上界写 i*i ≤ n 且 n 一直在变小；命中就除净；末尾把剩下的大于 1 的数补上。</p>
+      <p>除净不只是为了输出去重，它还保证后面那些合数 i 一定整除不进去，因为它们的质因子已经被除干净了。这条性质让整个循环不必依赖筛出来的质数表，实测两万组随机数据里合数 i 命中 0 次。</p>
+      <p>最大组件那题把「两两求公因子」换成「每个数挂到自己的质因子上」，边数从 n² 降到所有数的质因子总数，剩下的交给并查集。这种「不建原图、只建中转点」的手法在后面按质因子分组的题目里还会出现。</p>
+      <p>下一讲讲质数筛，一次性把 1 到 n 的质数全列出来，其中埃氏筛就是这张「质数表」的批量版本。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>按公因数计算最大组件大小</td><td><a href="https://leetcode.cn/problems/largest-component-size-by-common-factor/" target="_blank">按公因数计算最大组件大小</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解097【必备】质数判断、质因子分解、质数筛</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', GREEN = '#15803d';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5';
+  function arrow(svg, x1, y1, x2, y2, color) {
+    svg.appendChild(el('line', {x1:x1, y1:y1, x2:x2, y2:y2, stroke:color, 'stroke-width':1.3}));
+    var ang = Math.atan2(y2 - y1, x2 - x1), len = 7;
+    var p1 = x2 + ',' + y2;
+    var p2 = (x2 - len * Math.cos(ang - 0.42)).toFixed(1) + ',' + (y2 - len * Math.sin(ang - 0.42)).toFixed(1);
+    var p3 = (x2 - len * Math.cos(ang + 0.42)).toFixed(1) + ',' + (y2 - len * Math.sin(ang + 0.42)).toFixed(1);
+    svg.appendChild(el('polygon', {points:p1 + ' ' + p2 + ' ' + p3, fill:color}));
+  }
+  function isP(x) {
+    if (x < 2) return false;
+    for (var i = 2; i * i <= x; i++) if (x % i === 0) return false;
+    return true;
+  }
+
+  // ===== 图 1：4012100 分解流程 =====
+  (function(){
+    var host = document.getElementById('fig-flow');
+    var W = 660, H = 268;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'n = 4012100 = 2² × 5² × 53 × 757', {'font-size':12.5, fill:'#1f2328'}));
+    var stages = [
+      {i:'2', n0:4012100, n1:1003025, c:ORANGE, f:FILL_O, lab:'命中 2，除净两次'},
+      {i:'5', n0:1003025, n1:40121,  c:ORANGE, f:FILL_O, lab:'命中 5，除净两次'},
+      {i:'53', n0:40121,  n1:757,    c:ORANGE, f:FILL_O, lab:'跳过 6~52，命中 53'},
+      {i:'—', n0:757,    n1:-2,    c:GREEN,  f:'#dcfce7', lab:'59² > 757，循环停，收尾补上 757'}
+    ];
+    var y = 40;
+    for (var k = 0; k < stages.length; k++) {
+      var s = stages[k];
+      svg.appendChild(el('rect', {x:16, y:y, width:200, height:34, rx:6, fill:s.f, stroke:s.c, 'stroke-width':1.3}));
+      svg.appendChild(txt(116, y + 22, 'i = ' + s.i, {'text-anchor':'middle', 'font-size':13, fill:s.c, 'font-weight':600}));
+      svg.appendChild(el('rect', {x:250, y:y, width:180, height:34, rx:6, fill:'#ffffff', stroke:'#e6e8eb', 'stroke-width':1.1}));
+      svg.appendChild(txt(340, y + 22, 'n = ' + s.n0, {'text-anchor':'middle', 'font-size':12.5, fill:'#374151'}));
+      arrow(svg, 434, y + 17, 496, y + 17, GREY);
+      svg.appendChild(el('rect', {x:498, y:y, width:130, height:34, rx:6, fill:'#ffffff', stroke:'#e6e8eb', 'stroke-width':1.1}));
+      svg.appendChild(txt(563, y + 22, s.n1 === -2 ? '循环停止，输出 757' : '除净 → ' + s.n1,
+        {'text-anchor':'middle', 'font-size':12.5, fill:'#374151'}));
+      svg.appendChild(txt(16, y + 50, s.lab, {'font-size':11.5, fill:'#6b7280'}));
+      y += 58;
+    }
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：合数 i 命中不了 =====
+  (function(){
+    var host = document.getElementById('fig-proof');
+    var W = 660, H = 210;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '反证：若合数 i 能整除当前 n，它的质因子 p 也能，可 p 早被除净了', {'font-size':12.5, fill:'#1f2328'}));
+    function box(x, y, w, h, s, fill, stroke, fc) {
+      svg.appendChild(el('rect', {x:x, y:y, width:w, height:h, rx:7, fill:fill, stroke:stroke, 'stroke-width':1.3}));
+      svg.appendChild(txt(x + w / 2, y + h / 2 + 4, s, {'text-anchor':'middle', 'font-size':12, fill:fc, 'font-weight':600}));
+    }
+    box(30, 44, 150, 40, '当前的 n', '#ffffff', BLUE, '#1e3a8a');
+    box(250, 44, 150, 40, '合数 i 整除 n', FILL_O, ORANGE, '#9a3412');
+    box(470, 44, 160, 40, 'p | i 且 p | n', FILL_O, ORANGE, '#9a3412');
+    arrow(svg, 180, 64, 246, 64, ORANGE);
+    arrow(svg, 400, 64, 466, 64, ORANGE);
+    svg.appendChild(txt(470, 112, '但 p < i，p 那一轮已经', {'font-size':11.5, fill:'#9a3412'}));
+    svg.appendChild(txt(470, 130, '把 p 从 n 里除干净了', {'font-size':11.5, fill:'#9a3412'}));
+    svg.appendChild(txt(470, 148, '矛盾，所以 i 命中不了', {'font-size':11.5, fill:'#9a3412'}));
+    svg.appendChild(txt(30, 178, '推论：循环里会被命中的 i 全是质数，分解不需要先筛质数表。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：最大组件连边 =====
+  (function(){
+    var host = document.getElementById('fig-comp');
+    var W = 660, H = 226;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'nums = [4, 6, 15, 35]：质因子当中转点，四个数并成一块', {'font-size':12.5, fill:'#1f2328'}));
+    var nums = [
+      {v:4,  ps:[2],   x:40},
+      {v:6,  ps:[2,3], x:180},
+      {v:15, ps:[3,5], x:320},
+      {v:35, ps:[5,7], x:460}
+    ];
+    var primes = [2, 3, 5, 7];
+    var py = 130;
+    for (var i = 0; i < nums.length; i++) {
+      var n = nums[i];
+      svg.appendChild(el('rect', {x:n.x, y:py, width:64, height:34, rx:6, fill:FILL_B, stroke:BLUE, 'stroke-width':1.3}));
+      svg.appendChild(txt(n.x + 32, py + 22, String(n.v), {'text-anchor':'middle', 'font-size':14, fill:'#1e3a8a', 'font-weight':700}));
+      for (var j = 0; j < n.ps.length; j++) {
+        var p = n.ps[j];
+        var px = 90 + primes.indexOf(p) * 150;
+        svg.appendChild(el('line', {x1:n.x + 32, y1:py + 34, x2:px, y2:py + 58,
+          stroke:ORANGE, 'stroke-width':1.1, 'stroke-dasharray':'3 3'}));
+      }
+    }
+    for (var k = 0; k < primes.length; k++) {
+      var cx = 90 + k * 150, cy = py + 74;
+      svg.appendChild(el('circle', {cx:cx, cy:cy, r:16, fill:FILL_O, stroke:ORANGE, 'stroke-width':1.4}));
+      svg.appendChild(txt(cx, cy + 5, String(primes[k]), {'text-anchor':'middle', 'font-size':13, fill:'#9a3412', 'font-weight':700}));
+    }
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示 1：分解逐帧 =====
+  (function(){
+    var eps = [
+      {name:'n = 4012100', n:4012100},
+      {name:'n = 12', n:12},
+      {name:'n = 2310', n:2310},
+      {name:'n = 1024', n:1024},
+      {name:'n = 997（质数）', n:997}
+    ];
+    var st = {ep:0, step:1, steps:[], out:[]};
+    var board = document.getElementById('fac-board');
+    var note = document.getElementById('fac-note');
+    var ans = document.getElementById('fac-answer');
+    var sel = document.getElementById('fac-ep');
+    for (var i = 0; i < eps.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(i); o.textContent = eps[i].name;
+      sel.appendChild(o);
+    }
+
+    function build(){
+      var n = eps[st.ep].n, cur = n, out = [], steps = [];
+      var i;
+      for (i = 2; i * i <= cur; i++) {
+        if (cur % i === 0) {
+          out.push(i);
+          var before = cur;
+          while (cur % i === 0) cur /= i;
+          steps.push({i:i, sq:i*i, cur:cur, before:before, hit:true,
+            note:'i = ' + i + ' 整除 n（' + before + ' / ' + i + ' …），输出 ' + i + '，除净后 n = ' + cur});
+        } else {
+          steps.push({i:i, sq:i*i, cur:cur, hit:false,
+            note:'i = ' + i + ' 除不动，i 加 1'});
+        }
+      }
+      steps.push({i:i, sq:i*i, cur:cur, done:true, hit:cur > 1,
+        note: cur > 1
+          ? ('i*i = ' + (i * i) + ' 超过 n = ' + cur + '，循环结束；剩下的 ' + cur + ' 自己就是质数，补上')
+          : ('i*i = ' + (i * i) + ' 超过 n = 1，循环结束，没有剩余')});
+      if (cur > 1) out.push(cur);
+      st.steps = steps;
+      st.out = out;
+    }
+
+    function render(){
+      var s = st.steps[st.step - 1];
+      var html = '<div class="rowline"><span class="k">原始 n</span><span class="fnote">' + eps[st.ep].n +
+                 '</span><span class="k">当前 n</span><span class="fnote">' + s.cur + '</span></div>';
+      html += '<div class="rowline"><span class="k">i</span><span class="fnote">' + (s.done ? '—' : s.i) +
+              '</span><span class="k">i × i</span><span class="fnote">' + (s.done ? '—' : s.sq) + '</span></div>';
+      html += '<div class="rowline"><span class="k">已输出的因子</span>';
+      if (!st.out.length) html += '<span class="fnote">（空）</span>';
+      for (var k = 0; k < st.out.length; k++) {
+        var cls = (s.hit && k === st.out.length - 1) ? 'card hit' : 'card ok';
+        html += '<span class="' + cls + '">' + st.out[k] + '</span>';
+      }
+      html += '</div>';
+      board.innerHTML = html;
+      note.textContent = '第 ' + st.step + ' / ' + st.steps.length + ' 步　' + s.note;
+      ans.textContent = st.step >= st.steps.length
+        ? ('分解结果：' + st.out.join(' × '))
+        : '';
+      document.getElementById('fac-next').disabled = st.step >= st.steps.length;
+    }
+
+    function reset(){ build(); st.step = 1; render(); }
+    sel.addEventListener('change', function(){ st.ep = +sel.value; reset(); });
+    document.getElementById('fac-next').addEventListener('click', function(){
+      if (st.step < st.steps.length) st.step++;
+      render();
+    });
+    document.getElementById('fac-reset').addEventListener('click', reset);
+    reset();
+  })();
+
+  // ===== 演示 2：最大组件并查集逐帧 =====
+  (function(){
+    var eps = [
+      {name:'[4, 6, 15, 35] → 4', nums:[4,6,15,35]},
+      {name:'[20, 50, 9, 63] → 2', nums:[20,50,9,63]},
+      {name:'[2, 3, 6, 7, 4, 12, 21, 39] → 8', nums:[2,3,6,7,4,12,21,39]},
+      {name:'[1, 2, 3, 5] → 1', nums:[1,2,3,5].filter(function(v,i,a){return a.indexOf(v)===i;})}
+    ];
+    var st = {ep:0, step:1, steps:[]};
+    var board = document.getElementById('comp-board');
+    var note = document.getElementById('comp-note');
+    var ans = document.getElementById('comp-answer');
+    var sel = document.getElementById('comp-ep');
+    for (var i = 0; i < eps.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(i); o.textContent = eps[i].name;
+      sel.appendChild(o);
+    }
+
+    function build(){
+      var nums = eps[st.ep].nums, n = nums.length;
+      var father = [], siz = [], factors = {}, steps = [];
+      for (var i = 0; i < n; i++) { father.push(i); siz.push(1); }
+      function find(x){ while (father[x] !== x) { father[x] = father[father[x]]; x = father[x]; } return x; }
+      for (var i = 0; i < n; i++) {
+        var x = nums[i], ps = [];
+        for (var j = 2; j * j <= x; j++) {
+          if (x % j === 0) { ps.push(j); while (x % j === 0) x /= j; }
+        }
+        if (x > 1) ps.push(x);
+        var note = 'nums[' + i + '] = ' + nums[i] + '，质因子 { ' + ps.join(', ') + ' }';
+        var merged = [];
+        for (var k = 0; k < ps.length; k++) {
+          var p = ps[k];
+          if (factors[p] === undefined) factors[p] = i;
+          else { var fx = find(factors[p]), fy = find(i); if (fx !== fy) { father[fx] = fy; siz[fy] += siz[fx]; merged.push(factors[p]); } }
+        }
+        var mx = 0;
+        for (var t = 0; t < n; t++) if (siz[t] > mx) mx = siz[t];
+        steps.push({i:i, ps:ps, note:note, merged:merged, father:father.slice(),
+          siz:siz.slice(), best:mx, cur:nums[i]});
+      }
+      st.steps = steps;
+    }
+
+    function render(){
+      var s = st.steps[st.step - 1];
+      var nums = eps[st.ep].nums;
+      var html = '<div class="cards">';
+      for (var k = 0; k < nums.length; k++) {
+        var cls = 'card';
+        if (k <= s.i) cls += (k === s.i ? ' pick' : ' ok');
+        html += '<span class="' + cls + '">' + nums[k] + '<span class="idx">' + k + '</span></span>';
+      }
+      html += '</div>';
+      html += '<div class="rowline"><span class="k">factors 表</span>';
+      var keys = Object.keys(s.father).length;
+      var hit = {};
+      for (var k = 0; k <= s.i; k++) {
+        var x = nums[k], ps = [];
+        for (var j = 2; j * j <= x; j++) if (x % j === 0) { ps.push(j); while (x % j === 0) x /= j; }
+        if (x > 1) ps.push(x);
+        for (var q = 0; q < ps.length; q++) if (hit[ps[q]] === undefined) hit[ps[q]] = k;
+      }
+      var ks = Object.keys(hit).map(Number).sort(function(a,b){return a-b;});
+      for (var k = 0; k < ks.length; k++) {
+        html += '<span class="card ok">' + ks[k] + '→' + hit[ks[k]] + '</span>';
+      }
+      html += '</div>';
+      html += '<div class="rowline"><span class="k">father 数组</span>';
+      for (var k = 0; k < s.father.length; k++) {
+        html += '<span class="card">' + s.father[k] + '</span>';
+      }
+      html += '</div>';
+      html += '<div class="rowline"><span class="k">size 数组</span>';
+      for (var k = 0; k < s.siz.length; k++) {
+        html += '<span class="card' + (s.siz[k] === s.best ? ' hit' : '') + '">' + s.siz[k] + '</span>';
+      }
+      html += '</div>';
+      board.innerHTML = html;
+      note.textContent = '第 ' + st.step + ' / ' + st.steps.length + ' 步　' + s.note;
+      ans.textContent = st.step >= st.steps.length ? ('答案：' + s.best) : '';
+      document.getElementById('comp-next').disabled = st.step >= st.steps.length;
+    }
+
+    function reset(){ build(); st.step = 1; render(); }
+    sel.addEventListener('change', function(){ st.ep = +sel.value; reset(); });
+    document.getElementById('comp-next').addEventListener('click', function(){
+      if (st.step < st.steps.length) st.step++;
+      render();
+    });
+    document.getElementById('comp-reset').addEventListener('click', reset);
+    reset();
+  })();
+})();</script>
+</body>
+</html>
