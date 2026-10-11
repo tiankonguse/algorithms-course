@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>博弈：打表求 SG 规律</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.lanes { display: flex; flex-wrap: wrap; gap: 18px; margin: 8px 0 2px; }
+.lane { flex: 1 1 160px; min-width: 150px; }
+.lane h5 { margin: 0 0 6px; font-size: 13px; color: var(--text-dim); font-weight: 600; }
+.lane .box { padding: 8px 10px; border-radius: 6px; font-size: 14px;
+             background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.lane .box.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.lane .box.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.lane .box.dim { opacity: .4; }
+.rowline { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; flex-wrap: wrap; }
+.rowline .k { color: var(--text-dim); min-width: 96px; font-size: 13px; }
+.fnote { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>博弈：打表求 SG 规律</h1>
+      <p class="intro">SG 表推出来之后有两个出路。规律长得齐的，读完表能直接写出一条 O(1) 的结论；规律散掉的，就老老实实查表，靠题目给的数据量决定值不值得继续找。两堆石头的巴什博弈属于前者，它的结论是一个取模比较；三堆石头拿斐波那契数属于后者，表建到 200 项之后 sg 值还在往上爬。</p>
+
+      <h2>零、两道题各自要什么</h2>
+      <p>第一题：两堆石头，数量分别是 a、b，两个人轮流拿，每轮挑其中一堆拿走 1 到 m 颗，拿到最后一颗的人获胜。题源是真实的大厂笔试，没有在线测试，只能拿对数器验。</p>
+      <p>第二题：三堆石头 a、b、c，每轮挑一堆拿走「斐波那契数」颗，也就是 1、2、3、5、8、13、21 这些，拿到最后一颗的人获胜。同样来自大厂笔试，每堆石子的数量在 10<sup>5</sup> 以内，没有在线测试。</p>
+      <p>两题有一个共同点，也是它们能用 SG 定理的前提：一步行动只作用在一堆石子上，动哪一堆完全不影响别的堆。这种结构叫子游戏的和，整局的 SG 就是各堆 SG 的异或。</p>
+
+      <h2>一、两堆的巴什博弈：拆成两个单堆</h2>
+      <p>先看第一题。每步只动一堆，所以它就是两个单堆巴什博弈的并。单堆的 SG 表前面推过，sg[x] = x % (m+1)，代进 SG 定理，总 SG 就是两边余数的异或。</p>
+      <p>关键的一步在这里：两个数异或等于 0，当且仅当这两个数相等。所以「余数异或非 0」和「余数不相等」是同一件事，答案直接写成 <code>a % (m + 1) != b % (m + 1)</code>。这条不需要额外的证明，它是异或运算自带的性质。</p>
+      <figure class="fig" id="fig-two">
+        <figcaption>图 1　m = 3 时 sg[a] ^ sg[b] 的全表。橙格是 0，也就是必败态，位置集中在 a、b 对 4 同余的对角块上</figcaption>
+      </figure>
+      <p>表里能看出分块的结构：sg[x] = x % 4 的取值范围只有 0 到 3，所以整张表按 a%4 和 b%4 分成 4×4 的格子，同余的对角线上全是 0。换个 m，无非是把 4 换成 m+1。</p>
+                  <pre class="code"><span class="cm">// 两堆石头的巴什博弈：每步只动其中一堆，所以它是两个单堆巴什的「和」</span>
+    <span class="cm">// 单堆 sg[x] = x % (m + 1)，总 SG 就是两边异或</span>
+    <span class="kw">string</span> twoPilesSg(<span class="kw">int</span> a, <span class="kw">int</span> b, <span class="kw">int</span> m) {
+        <span class="kw">int</span> n = max(a, b);
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">sg</span>(n + 1, 0);
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">appear</span>(m + 2, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            fill(appear.begin(), appear.end(), 0);
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= m &amp;&amp; i - j &gt;= 0; j++) appear[sg[i - j]] = 1;
+            <span class="kw">for</span> (<span class="kw">int</span> s = 0; s &lt;= m; s++) {
+                <span class="kw">if</span> (!appear[s]) { sg[i] = s; <span class="kw">break</span>; }
+            }
+        }
+        <span class="kw">return</span> (sg[a] ^ sg[b]) != 0 ? "先手" : "后手";
+    }
+
+    <span class="cm">// 照着 sg 表读出来的结论：两边对 m+1 取余，余数相同就必败</span>
+    <span class="kw">string</span> twoPilesFast(<span class="kw">int</span> a, <span class="kw">int</span> b, <span class="kw">int</span> m) {
+        <span class="kw">return</span> a % (m + 1) != b % (m + 1) ? "先手" : "后手";
+    }</pre>
+      <p>写对拍的时候三条路一起跑：记忆化的三维 DP、SG 表、这条 O(1) 结论。把 a、b 取 0 到 100，m 取 1 到 100，一共 101³ 组全跑一遍，三条路 0 处不符。DP 那版跑完 36.99ms，SG 那版更快，O(1) 那版基本不计时间。</p>
+
+      <h2>二、三堆拿斐波那契数：表建了，规律没找着</h2>
+      <p>第二题先把它拆成三个单堆。单堆的走法是「拿走一个斐波那契数」，可拿集合是 {1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144}。注意 1 在里面，它是斐波那契数列的第一项，也是最小的那一项，拿走一颗永远合法。</p>
+      <p>把单堆的 sg 表推到 200 项。前面几十项看着挺整齐，0 到 5 之间反复轮换，像是有周期；但 0 到 143 里 sg 值最大只到 5，从 144 开始冒出 6，145 冒出 7，167 冒出 8。上界一路往上爬，凑不出一个简单的公式。</p>
+      <figure class="fig" id="fig-fib">
+        <figcaption>图 2　三堆题里单堆的 SG 表。前一百多项挤在 0 到 5 之间，144 之后开始出现 6、7、8，规律散掉了</figcaption>
+      </figure>
+      <p>好在题目给的每堆上限只有 10<sup>5</sup>，建一次表就够。build 把 200 项推完只要 0.0085ms，之后每次查询就是三次查表加两次异或，O(1)。</p>
+                  <pre class="code"><span class="cm">// 三堆石头，每轮挑一堆拿走「斐波那契数」颗，1、2、3、5、8、13、21…</span>
+    <span class="cm">// 单堆的 sg 表推到 200 项：前几段看着整齐，后面 sg 值一格一格往上抬</span>
+    <span class="cm">// 每堆不超过 10^5，直接建表，不指望找出 O(1) 的公式</span>
+    <span class="kw">int</span> FIB[11] = {1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144};
+    <span class="kw">int</span> sg[201];
+
+    <span class="kw">void</span> <span class="fn">build</span>() {
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">appear</span>(202, 0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= 200; i++) {
+            fill(appear.begin(), appear.end(), 0);
+            <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; 11 &amp;&amp; i - FIB[j] &gt;= 0; j++) appear[sg[i - FIB[j]]] = 1;
+            <span class="kw">for</span> (<span class="kw">int</span> s = 0; s &lt;= 200; s++) {
+                <span class="kw">if</span> (!appear[s]) { sg[i] = s; <span class="kw">break</span>; }
+            }
+        }
+    }
+
+    <span class="kw">string</span> threePiles(<span class="kw">int</span> a, <span class="kw">int</span> b, <span class="kw">int</span> c) {
+        <span class="kw">return</span> (sg[a] ^ sg[b] ^ sg[c]) != 0 ? "先手" : "后手";
+    }</pre>
+      <figure class="fig" id="fig-routes">
+        <figcaption>图 3　两条路的代价对照：SG 表建一次 O(n) 就能查任意局面；彻底尝试的三维 DP 是 O(n³)，只用来验证</figcaption>
+      </figure>
+      <p>验证这题的暴力没法用 SG，只能顺着局面枚举：三堆的数量当状态，记忆化搜一遍。201³ 组全跑完 235.95ms，和 SG 表 0 处不符。这个 DP 的存在意义只是给 SG 表背书，真交上去的是那张表。</p>
+
+      <h2>三、两个演示</h2>
+      <div class="viz" id="viz-two">
+        <p class="viz-title">两堆巴什：三条路走出同一个答案</p>
+        <p class="viz-note">左栏是记忆化 DP 的彻底尝试，中栏是 SG 表，右栏是取模比较。逐步点开，三个答案应当一路相同。</p>
+        <div id="two-board"></div>
+        <p class="viz-answer" id="two-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="two-ep"></select></label>
+          <button id="two-next" type="button">下一步</button>
+          <button id="two-reset" type="button">重置</button>
+        </div>
+      </div>
+      <div class="viz" id="viz-fib">
+        <p class="viz-title">斐波那契 SG 表：一格一格往上建</p>
+        <p class="viz-note">橙色柱子是 sg 值达到 6 及以上的位置。往下建到 200 项，看看这条上界是怎么爬起来的。</p>
+        <div id="fib-board"></div>
+        <p class="viz-answer" id="fib-answer"></p>
+        <div class="viz-controls">
+          <label>建到 <select id="fib-ep"></select></label>
+          <button id="fib-next" type="button">下一步</button>
+          <button id="fib-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>四、对数器怎么抓错</h2>
+      <p>两题的暴力都不用 SG：第一题顺着局面搜（记忆化），第二题枚举三堆的每一种局面再记忆化。拿暴力当基准，把常见写错的地方各改一处。</p>
+      <table class="complexity">
+        <tr><th>题</th><th>错在哪</th><th>值域 4</th><th>值域 12</th><th>值域 100</th><th>值域 1000</th></tr>
+        <tr><td>两堆巴什</td><td>结论写成 <code>a != b</code></td><td>9.78%</td><td>10.54%</td><td>3.33%</td><td>0.53%</td></tr>
+        <tr><td>两堆巴什</td><td>把结论判反</td><td>100%</td><td>100%</td><td>100%</td><td>100%</td></tr>
+        <tr><td>斐波那契</td><td>可拿集合漏掉 1</td><td colspan="4">24.02%</td></tr>
+        <tr><td>斐波那契</td><td>每步只拿最大的可用斐波那契数</td><td colspan="4">26.94%</td></tr>
+      </table>
+      <p class="breakdown">每组都是 2 万组随机数据，a、b、c 一律落在对应值域里。</p>
+      <figure class="fig" id="fig-rate">
+        <figcaption>图 4　「写成 a != b」这一条的出错比例随值域缩水，判反那条恒为 100%。斐波那契的两条错法稳定在两成半左右</figcaption>
+      </figure>
+      <p>「写成 a != b」在值域小的时候抓得住，值域一大就掉到千分之几：a、b 随机取到 0 到 999 时，两边对 m+1 同余但数值不等的组合本来就不多。判反那条恒错 100%，不用多跑。</p>
+      <p>斐波那契题的两条都稳定在两成半上下，因为错的地方是走法集合本身。漏掉 1 之后，可拿集合的最小值从 1 抬到 2，sg 表前几项整个挪位，三堆里只要有一堆数量是 1 就会错开。只拿最大可用那一版同理，它把「可以拿 2 颗」这类选择全砍掉了，能赢的走法少了一大批，但这些局面本来也不是必败态，所以只错掉一部分。</p>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>两堆巴什的 SG 表</td><td>每个局面标 m 个后继再找 mex</td><td>O(max(a,b)·m)</td><td>O(max(a,b))</td></tr>
+        <tr><td>两堆巴什的三维 DP</td><td>每个状态枚举两堆各自的走法</td><td>O(max²·m)</td><td>O(max²·m)</td></tr>
+        <tr><td>两堆巴什的结论</td><td>两次取模一次比较</td><td>O(1)</td><td>O(1)</td></tr>
+        <tr><td>斐波那契单堆 SG 表</td><td>建表 MAXN 项，每项标 11 个后继</td><td>O(MAXN)</td><td>O(MAXN)</td></tr>
+        <tr><td>斐波那契三堆查询</td><td>三次查表两次异或</td><td>O(1)</td><td>O(1)</td></tr>
+      </table>
+      <p class="breakdown">MAXN 取 200 时 build 实测 0.0085ms。作为验证用的三堆三维 DP 是 O(MAXN³)，201³ 组 235.95ms，换成 10<sup>5</sup> 的规模就彻底跑不动了，它只能待在对拍脚本里。两堆那题的三维 DP 同理，101³ 组 36.99ms 已经是它的上限。</p>
+
+      <h2>总结</h2>
+      <p>两堆的巴什博弈是两个单堆的和，单堆 sg[x] = x % (m+1)，于是总 SG 就是两边余数的异或；异或为 0 等价于两数相等，答案落在「两边对 m+1 同余则必败」上。</p>
+      <p>三堆拿斐波那契数的单堆 SG 表没有简单周期：0 到 143 里最大只到 5，144 起冒出 6，167 冒出 8。好在每堆只有 10<sup>5</sup>，建表 O(MAXN) 就够，不必去凑公式。</p>
+      <p>这两道题的分岔点在于「值不值得继续找规律」。判据不是表好不好看，而是数据量：能建表通过的规模，省下观察规律的力气；建表过不了的规模，才回头去啃公式。这也是打表这件事在博弈题里的正常用法。</p>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解096【必备】博弈类问题必备内容详解-下</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI Wiki</td><td>公平组合游戏</td><td><a href="https://oi-wiki.org/math/game-theory/impartial-game/" target="_blank">公平组合游戏 - OI Wiki</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5';
+  var FIB = [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144];
+  function fibSg(maxN) {
+    var sg = [0], appear;
+    for (var i = 1; i <= maxN; i++) {
+      appear = {};
+      for (var j = 0; j < FIB.length && i - FIB[j] >= 0; j++) appear[sg[i - FIB[j]]] = 1;
+      var m = 0;
+      while (appear[m]) m++;
+      sg.push(m);
+    }
+    return sg;
+  }
+
+  // ===== 图 1：两堆异或全表 =====
+  (function(){
+    var host = document.getElementById('fig-two');
+    var W = 660, H = 300;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'm = 3：sg[a] ^ sg[b]，橙格为 0', {'font-size':12.5, fill:'#1f2328'}));
+    var x0 = 60, y0 = 44, cs = 24, n = 9;
+    for (var b = 1; b <= n; b++) {
+      svg.appendChild(txt(x0 + (b - 1) * cs + cs / 2, y0 - 8, String(b), {'text-anchor':'middle', 'font-size':11, fill:'#6b7280'}));
+    }
+    for (var a = 1; a <= n; a++) {
+      svg.appendChild(txt(x0 - 12, y0 + (a - 1) * cs + cs / 2 + 4, String(a), {'text-anchor':'end', 'font-size':11, fill:'#6b7280'}));
+      for (var b2 = 1; b2 <= n; b2++) {
+        var v = (a % 4) ^ (b2 % 4);
+        var zero = (v === 0);
+        svg.appendChild(el('rect', {x:x0 + (b2 - 1) * cs, y:y0 + (a - 1) * cs, width:cs - 2, height:cs - 2, rx:4,
+          fill: zero ? FILL_O : FILL_B, stroke: zero ? ORANGE : BLUE, 'stroke-width':1}));
+        svg.appendChild(txt(x0 + (b2 - 1) * cs + (cs - 2) / 2, y0 + (a - 1) * cs + cs / 2 + 2, String(v),
+          {'text-anchor':'middle', 'font-size':11.5, fill: zero ? '#9a3412' : '#1e3a8a'}));
+      }
+    }
+    svg.appendChild(txt(x0 + n * cs + 16, y0 + 40, '值只有 0 到 3', {'font-size':12, fill:'#6b7280'}));
+    svg.appendChild(txt(x0 + n * cs + 16, y0 + 62, '按 a%4、b%4 分块', {'font-size':12, fill:'#6b7280'}));
+    svg.appendChild(txt(x0 + n * cs + 16, y0 + 84, '同余的对角块全 0', {'font-size':12, fill:'#9a3412'}));
+    svg.appendChild(txt(16, 280, '两数异或为 0 当且仅当两数相等，所以「余数异或非 0」就是「余数不等」', {'font-size':12, fill:'#6b7280'}));
+    host.appendChild(svg);
+  })();
+
+  // ===== 图 2：斐波那契 sg 折线 =====
+  (function(){
+    var host = document.getElementById('fig-fib');
+    var W = 660, H = 250;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var sg = fibSg(200);
+    svg.appendChild(txt(16, 18, '三堆题的单堆 SG 表 0 到 200，纵轴 0 到 8', {'font-size':12.5, fill:'#1f2328'}));
+    var x0 = 46, y0 = 196, w = 570, h = 148, un = h / 8;
+    svg.appendChild(el('line', {x1:x0, y1:y0, x2:x0 + w, y2:y0, stroke:'#cbd5e1', 'stroke-width':1}));
+    svg.appendChild(el('line', {x1:x0, y1:y0, x2:x0, y2:y0 - h, stroke:'#cbd5e1', 'stroke-width':1}));
+    for (var g = 0; g <= 8; g += 2) {
+      var gy = y0 - g * un;
+      svg.appendChild(el('line', {x1:x0, y1:gy, x2:x0 + w, y2:gy, stroke:'#f1f3f5', 'stroke-width':1}));
+      svg.appendChild(txt(x0 - 8, gy + 4, String(g), {'text-anchor':'end', 'font-size':10, fill:'#9aa0a6'}));
+    }
+    var step = w / 200;
+    var marks = [144, 145, 167];
+    for (var i = 0; i <= 200; i++) {
+      var px = x0 + i * step;
+      var py = y0 - sg[i] * un;
+      var hot = sg[i] >= 6;
+      svg.appendChild(el('rect', {x:px, y:py, width:Math.max(step - 0.6, 1.6), height:y0 - py,
+        fill: hot ? ORANGE : BLUE, opacity: hot ? 0.95 : 0.55}));
+    }
+    marks.forEach(function(i) {
+      var px = x0 + i * step;
+      svg.appendChild(el('line', {x1:px, y1:y0 - sg[i] * un - 22, x2:px, y2:y0, stroke:ORANGE, 'stroke-width':1}));
+      svg.appendChild(txt(px, y0 - sg[i] * un - 28, 'i=' + i, {'text-anchor':'middle', 'font-size':10.5, fill:'#9a3412'}));
+    });
+    svg.appendChild(el('line', {x1:x0, y1:y0 - 5 * un, x2:x0 + w, y2:y0 - 5 * un, stroke:'#ea580c', 'stroke-width':1, 'stroke-dasharray':'4 4', opacity:0.6}));
+    svg.appendChild(txt(x0 + 6, y0 - 5 * un - 6, '0..143 的上界 5', {'font-size':10.5, fill:'#9a3412'}));
+    svg.appendChild(txt(x0, y0 + 20, '0', {'text-anchor':'middle', 'font-size':10.5, fill:'#6b7280'}));
+    svg.appendChild(txt(x0 + 100 * step, y0 + 20, '100', {'text-anchor':'middle', 'font-size':10.5, fill:'#6b7280'}));
+    svg.appendChild(txt(x0 + 200 * step, y0 + 20, '200', {'text-anchor':'middle', 'font-size':10.5, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 234, '0 到 143 最大只到 5，144 之后 6、7、8 陆续出现，没有能一眼读完的周期', {'font-size':12, fill:'#6b7280'}));
+    host.appendChild(svg);
+  })();
+
+  // ===== 图 3：两条路的代价对照 =====
+  (function(){
+    var host = document.getElementById('fig-routes');
+    var W = 660, H = 210;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '同一道题，SG 表和彻底尝试的规模差一个 n 的因子', {'font-size':12.5, fill:'#1f2328'}));
+    var rows = [
+      {k:'SG 表', f:'O(MAXN)', ms:'0.0085 ms', c:BLUE, w:64},
+      {k:'三维 DP', f:'O(MAXN³)', ms:'235.95 ms', c:ORANGE, w:330}
+    ];
+    rows.forEach(function(r, i) {
+      var y = 56 + i * 62;
+      svg.appendChild(txt(16, y + 20, r.k, {'font-size':13, fill:'#374151', 'font-weight':600}));
+      svg.appendChild(el('rect', {x:110, y:y + 5, width:r.w, height:26, rx:5,
+        fill: (i === 0 ? FILL_B : FILL_O), stroke:r.c, 'stroke-width':1.2}));
+      svg.appendChild(txt(116 + r.w, y + 23, r.f, {'font-size':12, fill:r.c}));
+      svg.appendChild(txt(116, y + 48, r.ms + '　（MAXN = 201）', {'font-size':11.5, fill:'#6b7280'}));
+    });
+    svg.appendChild(txt(16, 192, '10⁵ 的规模下，O(MAXN³) 这条路直接跑不动，所以它只待在对拍脚本里', {'font-size':12, fill:'#6b7280'}));
+    host.appendChild(svg);
+  })();
+
+  // ===== 图 4：错法抓取率 =====
+  (function(){
+    var host = document.getElementById('fig-rate');
+    var W = 660, H = 232;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '四类错法在不同值域下的出错比例', {'font-size':12.5, fill:'#1f2328'}));
+    var rows = [
+      {n:'两堆写成 a != b', v:[9.78, 10.54, 3.33, 0.53], c:BLUE},
+      {n:'两堆判反', v:[100, 100, 100, 100], c:ORANGE},
+      {n:'斐波那契漏掉 1', v:[24.02, 24.02, 24.02, 24.02], c:'#15803d'},
+      {n:'只拿最大可用斐波那契', v:[26.94, 26.94, 26.94, 26.94], c:'#7c3aed'}
+    ];
+    var x0 = 150;
+    var LBL = ['4', '12', '100', '1000'];
+    rows.forEach(function(r, ri) {
+      var y = 40 + ri * 34;
+      svg.appendChild(txt(142, y + 5, r.n, {'text-anchor':'end', 'font-size':11.5, fill:'#374151'}));
+      r.v.forEach(function(val, i) {
+        var bx = x0 + i * 112;
+        var bw = Math.max(val / 100 * 96, 1.5);
+        svg.appendChild(el('rect', {x:bx, y:y, width:bw, height:15, rx:3,
+          fill:r.c, opacity:0.85}));
+        svg.appendChild(txt(bx + bw + 5, y + 12, val.toFixed(val < 10 ? 2 : 0) + '%', {'font-size':10, fill:r.c}));
+      });
+    });
+    for (var i = 0; i < 4; i++) {
+      svg.appendChild(txt(x0 + i * 112, 212, '值域 ' + LBL[i], {'font-size':10.5, fill:'#6b7280'}));
+    }
+    svg.appendChild(txt(16, 194, '横条长度就是出错比例，最长的那条是 100%', {'font-size':11.5, fill:'#6b7280'}));
+    host.appendChild(svg);
+  })();
+
+  // ===== 演示 1：两堆三条路 =====
+  (function(){
+    var DATA = [
+      {a:3, b:5, m:3},
+      {a:6, b:6, m:3},
+      {a:4, b:7, m:4},
+      {a:9, b:2, m:3}
+    ];
+    var board = document.getElementById('two-board');
+    var ansEl = document.getElementById('two-answer');
+    var sel = document.getElementById('two-ep');
+    DATA.forEach(function(d, i) {
+      var o = document.createElement('option');
+      o.value = i; o.textContent = 'a = ' + d.a + '，b = ' + d.b + '，m = ' + d.m;
+      sel.appendChild(o);
+    });
+    var st = {ep:0, step:1};
+    function dpWin(a, b, m, memo) {
+      if (m >= Math.max(a, b)) return a !== b;
+      if (a === b) return false;
+      var key = a + ',' + b + ',' + m;
+      if (memo[key] !== undefined) return memo[key];
+      var res = false;
+      for (var p = 1; p <= Math.min(a, m) && !res; p++) if (!dpWin(a - p, b, m, memo)) res = true;
+      for (var q = 1; q <= Math.min(b, m) && !res; q++) if (!dpWin(a, b - q, m, memo)) res = true;
+      memo[key] = res;
+      return res;
+    }
+    function sgOf(x, m) { return x % (m + 1); }
+    function render() {
+      var d = DATA[st.ep], m = d.m;
+      var dp = dpWin(d.a, d.b, m, {});
+      var eor = sgOf(d.a, m) ^ sgOf(d.b, m);
+      var fast = eor !== 0;
+      var html = '<div class="lanes">';
+      html += '<div class="lane"><h5>记忆化 DP</h5><div class="box ' + (st.step >= 1 ? (dp ? 'pick' : 'ok') : 'dim') + '">' + (st.step >= 1 ? (dp ? '先手' : '后手') : '—') + '</div></div>';
+      html += '<div class="lane"><h5>SG 表</h5><div class="box ' + (st.step >= 2 ? (eor !== 0 ? 'pick' : 'ok') : 'dim') + '">' + (st.step >= 2 ? (eor !== 0 ? '先手' : '后手') : '—') + '</div></div>';
+      html += '<div class="lane"><h5>取模比较</h5><div class="box ' + (st.step >= 3 ? (fast ? 'pick' : 'ok') : 'dim') + '">' + (st.step >= 3 ? (fast ? '先手' : '后手') : '—') + '</div></div>';
+      html += '</div>';
+      html += '<div class="rowline"><span class="k">SG 定理</span><span class="fnote">sg[' + d.a + '] = ' + sgOf(d.a, m) + '　sg[' + d.b + '] = ' + sgOf(d.b, m) + '　异或 = ' + eor + '</span></div>';
+      html += '<div class="rowline"><span class="k">取模结论</span><span class="fnote">' + d.a + ' % ' + (m + 1) + ' = ' + sgOf(d.a, m) + '　' + d.b + ' % ' + (m + 1) + ' = ' + sgOf(d.b, m) + '　' + (sgOf(d.a, m) !== sgOf(d.b, m) ? '不等 → 先手' : '相等 → 后手') + '</span></div>';
+      board.innerHTML = html;
+      document.getElementById('two-next').disabled = st.step >= 3;
+      ansEl.textContent = st.step >= 3 ? ('三个答案都是「' + (fast ? '先手' : '后手') + '」，没有分歧') : '';
+    }
+    function reset() { st.step = 1; render(); }
+    sel.addEventListener('change', function(){ st.ep = +sel.value; reset(); });
+    document.getElementById('two-next').addEventListener('click', function(){
+      if (st.step < 3) { st.step++; render(); }
+    });
+    document.getElementById('two-reset').addEventListener('click', reset);
+    reset();
+  })();
+
+  // ===== 演示 2：斐波那契 SG 表逐格建 =====
+  (function(){
+    var MAX = 200;
+    var sgAll = fibSg(MAX);
+    var LIMITS = [30, 60, 150, 200];
+    var board = document.getElementById('fib-board');
+    var ansEl = document.getElementById('fib-answer');
+    var sel = document.getElementById('fib-ep');
+    LIMITS.forEach(function(v, i) {
+      var o = document.createElement('option');
+      o.value = i; o.textContent = v + ' 项';
+      sel.appendChild(o);
+    });
+    var st = {ep:3, step:1};
+    function render() {
+      var lim = LIMITS[st.ep];
+      var shown = Math.min(st.step, lim);
+      var html = '<div class="cells-wrap" style="display:flex;flex-wrap:wrap;gap:2px;margin:8px 0 2px">';
+      var dim = lim > 80;
+      var cw = dim ? 2.2 : 12;
+      var hgt = 34;
+      for (var i = 0; i <= shown; i++) {
+        var v = sgAll[i];
+        var col = v >= 6 ? '#ea580c' : (v === 0 ? '#9aa0a6' : '#2563eb');
+        var h = 4 + v * 4;
+        html += '<span title="sg[' + i + ']=' + v + '" style="display:inline-block;width:' + cw + 'px;height:' + hgt + 'px;position:relative">' +
+                '<span style="position:absolute;bottom:0;left:0;width:' + cw + 'px;height:' + h + 'px;background:' + col + ';border-radius:1px"></span></span>';
+      }
+      html += '</div>';
+      var mx = 0, at = -1;
+      for (var j = 0; j <= shown; j++) if (sgAll[j] > mx) { mx = sgAll[j]; at = j; }
+      html += '<div class="rowline"><span class="k">已建到</span><span class="fnote">sg[' + shown + '] = ' + sgAll[shown] + '　｜　前 ' + shown + ' 项最大值 ' + mx + (at >= 0 ? '（i = ' + at + '）' : '') + '</span></div>';
+      board.innerHTML = html;
+      document.getElementById('fib-next').disabled = shown >= lim;
+      ansEl.textContent = shown >= lim ? ('建到 ' + lim + ' 项完成：最大值 ' + mx + '，出现在 i = ' + at + '。' + (lim >= 150 ? '上界已经爬到 6 以上，凑不出简单公式' : '上界还压在 5 以内')) : '';
+    }
+    function reset() { st.step = 1; render(); }
+    sel.addEventListener('change', function(){ st.ep = +sel.value; reset(); });
+    document.getElementById('fib-next').addEventListener('click', function(){
+      var lim = LIMITS[st.ep];
+      if (st.step < lim) { st.step++; render(); }
+    });
+    document.getElementById('fib-reset').addEventListener('click', reset);
+    reset();
+  })();
+})();</script>
+</body>
+</html>
