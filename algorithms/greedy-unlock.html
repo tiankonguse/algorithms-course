@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>贪心：双堆解锁与差值闭包</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 2px; }
+.card { min-width: 34px; padding: 6px 10px; text-align: center; border-radius: 6px; font-size: 15px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card.lock { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; font-weight: 600; }
+.card.cmp { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.newadd { background: #dcfce7; border-color: #15803d; color: #14532d; font-weight: 600; }
+.card.skip { opacity: .5; }
+.rowline { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; flex-wrap: wrap; }
+.rowline .k { color: var(--text-dim); min-width: 76px; font-size: 13px; }
+.fnote { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>贪心：双堆解锁与差值闭包</h1>
+      <p class="intro">一道题要在资本够得着的项目里挑利润最高的，一道题要反复把两数的差值塞进数组，塞到塞不动为止。两道题都不像排队问题，却都在做同一件事：先把手里能用的东西攥住，等条件变好了再回头补。</p>
+
+      <h2>零、能做的和想做的</h2>
+      <p>先看第一题。有 n 个项目，第 i 个有纯利润 <code>profits[i]</code> 和启动资金 <code>capital[i]</code>。你手上最初有 w 块钱，做完一个项目就把它的利润拿到手，资本变大，于是可能有新项目变得做得起。最多做 k 个不同项目，求最终资本最多是多少。</p>
+      <p>拿一组数据走一遍：<code>k=2</code>、<code>w=0</code>、<code>profit=[1,2,3]</code>、<code>capital=[0,1,1]</code>。</p>
+      <p>一开始资本是 0，只有门槛为 0 的那个项目做得起，做完拿到 1，资本变成 1。这一步之后，门槛是 1 的两个项目同时解锁，挑利润 3 的那个做，最终资本是 4。</p>
+      <p>这里藏着一个容易忽略的顺序：利润最高的项目往往一开始做不了。所以每一步都得分两件事：先把新够得着的项目捞出来，再从捞出来的里面挑利润最高的。</p>
+      <figure class="fig" id="fig-ipo">
+        <figcaption>图 1　两个堆各管一件事：左边按启动资本排队，右边按利润排队</figcaption>
+      </figure>
+
+      <h2>一、两个堆分工</h2>
+      <p>第一个堆按启动资本放小根堆，堆顶是「最容易解锁」的那个项目。</p>
+      <p>第二个堆按纯利润放大根堆，堆顶是「解锁之后最值得做」的那个。</p>
+      <p>每一轮做三件事：把锁住的堆顶里资本门槛不高于当前 w 的全部搬进利润堆；利润堆空了就停，说明没有项目做得起了；否则弹出利润堆顶做掉，w 加上它的利润，k 减一。</p>
+      <figure class="fig" id="fig-ipo-trace">
+        <figcaption>图 2　k=2、w=0 的那组数据，两轮就结束</figcaption>
+      </figure>
+      <p>为什么每轮挑「做得起的里面利润最大的」不会错过更好的结果？</p>
+      <p>关键在于做得起这件事只跟资本有关，而资本只增不减。先做哪个项目，都不会让别的项目变得做不起。所以顺序的选择不影响「哪些项目最终能做」，那就每一轮都拿当前回报最高的。</p>
+      <p>反过来说，顺序颠倒就会出错。假如不看资本门槛、直接挑利润最大的项目做，第一步就会去碰一个做不起的项目。实测这个错法在随机数据上的抓取率是 29.08%；换成「每次都挑启动资本最低的」也有 26.54%。</p>
+    <pre class="code"><span class="cm">// IPO：最多做 k 个项目，初始资本 w，做完项目拿到纯利润</span>
+    <span class="cm">// 两个堆分工：锁住的项目按启动资本排队，解锁的项目按利润排队</span>
+    <span class="kw">int</span> <span class="fn">findMaximizedCapital</span>(<span class="kw">int</span> k, <span class="kw">int</span> w, vector&lt;<span class="kw">int</span>&gt;&amp; profit, vector&lt;<span class="kw">int</span>&gt;&amp; cost) {
+        <span class="kw">int</span> n = profit.size();
+        <span class="cm">// 启动资本小根堆：还没做的项目，资本最小的在堆顶</span>
+        priority_queue&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;, vector&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;, greater&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;&gt; locked;
+        <span class="cm">// 利润大根堆：已经做得起的项目，利润最高的在堆顶</span>
+        priority_queue&lt;<span class="kw">int</span>&gt; unlocked;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            locked.push({cost[i], profit[i]});
+        }
+        <span class="kw">while</span> (k &gt; 0) {
+            <span class="kw">while</span> (!locked.empty() &amp;&amp; locked.top().first &lt;= w) {
+                unlocked.push(locked.top().second);
+                locked.pop();
+            }
+            <span class="kw">if</span> (unlocked.empty()) {
+                <span class="kw">break</span>;
+            }
+            w += unlocked.top();
+            unlocked.pop();
+            k--;
+        }
+        <span class="kw">return</span> w;
+    }</pre>
+
+      <h2>二、第二题：反复加差值</h2>
+      <p>给一个非负数组。每一轮，把所有两两之间的差值取绝对值，凡是数组里还没有的，都加进去，每个值只加一份。然后对新的数组继续做同样的事，直到数组大小不再变化。返回最终的长度。</p>
+      <p>这题连「选哪个」都没有，它是问一个过程什么时候停。先照题面走一遍 <code>arr = [4,10]</code>。</p>
+      <figure class="fig" id="fig-closure">
+        <figcaption>图 3　[4,10] 一路加下去，加出 2、6、8 之后停下</figcaption>
+      </figure>
+      <p>差值是 6，加进去得到 <code>{4,6,10}</code>；再算差值出现 2、4、8，其中 2 和 8 是新的，加进去得到 <code>{2,4,6,8,10}</code>；再算一遍，所有差值都已经在里面了，停下。最终长度 5。</p>
+      <p>照着题面一轮一轮加当然能算出来，但每一轮都要把所有元素两两配一次，元素一多就很重。看一组极端数据：<code>arr = [1, 1000000]</code>，最终集合是 1 到 1000000 全部整数，长度 10<sup>6</sup>，可暴力做法要比较约 5×10<sup>11</sup> 对。</p>
+      <p>好在最终集合的形状是可以直接写出来的。</p>
+
+      <h2>三、最终集合就是一张倍数表</h2>
+      <p>记数组里所有正数的最大公约数为 g，最大值为 mx，有两个方向的观察：</p>
+      <p>1）一开始每个数都是 g 的倍数，而两个 g 的倍数的差还是 g 的倍数，所以新加进来的数也全是 g 的倍数。也就是说，最终集合里的正数只可能是 g 的倍数。</p>
+      <p>2）反过来，能凑出来的最小正数就是 g（它是所有正数的最大公约数），而从 g 出发反复做差，可以把 g 的每个倍数都凑出来。所以 g 到 mx 之间的每个 g 的倍数都会出现。</p>
+      <p>两头一夹，最终集合的正数部分就是 <code>{g, 2g, 3g, …, mx}</code>，一共 <code>mx/g</code> 个。这一段的计算是 O(1) 的，不用真的去加。</p>
+      <p>答案要比 mx/g 多一些，还有两处要补。</p>
+
+      <h2>四、重复值和 0 要单独算</h2>
+      <p>题面说的是往数组里加，不是往集合里加。原数组里出现多次的值会一直留在里面，所以每个值出现 c 次，就比只留一份多出 c−1 个位置。</p>
+      <p>另一个是 0。两个相等的数差值就是 0，所以只要数组里有重复值，0 一定会被加进来；如果 0 本来就在数组里，那它早就占好位置了。不管哪种情况，0 都不在 <code>{g, …, mx}</code> 这一段里，得单独数。</p>
+      <figure class="fig" id="fig-formula">
+        <figcaption>图 4　以 [0,7,7] 为例，最终长度由三块拼出来</figcaption>
+      </figure>
+      <p>核对几组：<code>[6,9]</code> 是 3（<code>{3,6,9}</code>）；<code>[4,10]</code> 是 5；<code>[0,7,7]</code> 是 1 + 1 + 1 = 3；<code>[5,5]</code> 是 1 + 1 + 1 = 3，这里的 0 是重复值自己造出来的；<code>[8,12]</code> 是 3。</p>
+      <p>还有一组要单独兜：全是 0 的时候，最大公约数求不出来（0 不能参与），直接返回原数组长度，<code>[0,0]</code> 就是 2。</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">gcd</span>(<span class="kw">int</span> m, <span class="kw">int</span> n) {
+        <span class="kw">return</span> n == 0 ? m : gcd(n, m % n);
+    }
+
+    <span class="cm">// 加入差值绝对值直到长度固定：返回数组最终的长度</span>
+    <span class="cm">// 结论：所有正数的最大公约数是 g，最大值是 mx，最终一定会凑出 {g, 2g, ..., mx}</span>
+    <span class="cm">// 再去数重复值和 0 各自占了几格</span>
+    <span class="kw">int</span> <span class="fn">len</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr) {
+        <span class="kw">int</span> mx = 0;
+        <span class="kw">int</span> g = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; (<span class="kw">int</span>)arr.size(); i++) {
+            mx = max(mx, arr[i]);
+            <span class="kw">if</span> (arr[i] != 0) {
+                g = arr[i];
+            }
+        }
+        <span class="kw">if</span> (g == 0) {
+            <span class="kw">return</span> arr.size();
+        }
+        map&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt; cnts;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; (<span class="kw">int</span>)arr.size(); i++) {
+            <span class="kw">if</span> (arr[i] != 0) {
+                g = gcd(g, arr[i]);
+            }
+            cnts[arr[i]]++;
+        }
+        <span class="kw">int</span> ans = mx / g;
+        <span class="kw">int</span> maxCnt = 0;
+        <span class="kw">for</span> (map&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;::iterator it = cnts.begin(); it != cnts.end(); it++) {
+            <span class="kw">if</span> (it-&gt;first != 0) {
+                ans += it-&gt;second - 1;
+            }
+            maxCnt = max(maxCnt, it-&gt;second);
+        }
+        map&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;::iterator zero = cnts.find(0);
+        ans += zero != cnts.end() ? zero-&gt;second : (maxCnt &gt; 1 ? 1 : 0);
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2>五、两个演示</h2>
+      <div class="viz" id="viz-ipo">
+        <p class="viz-title">演示 A　先解锁，再挑利润最高的</p>
+        <div class="vc-body"></div>
+        <div class="viz-controls">
+          <label>数据 <select class="vi-case"></select></label>
+          <button class="vi-next">下一步</button>
+          <button class="vi-auto">自动播放</button>
+          <button class="vi-reset">重置</button>
+        </div>
+        <p class="viz-answer vi-answer"></p>
+      </div>
+      <p>每一轮都盯着「本轮解锁」这一栏：它列出来的项目，才是这一轮有资格竞争的。</p>
+      <div class="viz" id="viz-closure">
+        <p class="viz-title">演示 B　差值一轮一轮加下去</p>
+        <div class="vc-body"></div>
+        <div class="viz-controls">
+          <label>数据 <select class="vc2-case"></select></label>
+          <button class="vc2-next">下一步</button>
+          <button class="vc2-auto">自动播放</button>
+          <button class="vc2-reset">重置</button>
+        </div>
+        <p class="viz-answer vc2-answer"></p>
+      </div>
+      <p>绿色的数字是这一轮新加进来的。走到底之后再看答案行，手算出来的长度和公式给的长度是同一个数。</p>
+
+      <h2>六、对数器怎么抓错</h2>
+      <p>项目那题 5000 组随机数据（n ≤ 7，k ≤ 7）：</p>
+      <table class="complexity">
+        <tr><th>做法</th><th>抓取比例</th></tr>
+        <tr><td>完全不看资本门槛，直接挑利润最大的 k 个</td><td>29.08%</td></tr>
+        <tr><td>每次都挑启动资本最低的</td><td>26.54%</td></tr>
+        <tr><td>按利润从高到低排，挑第一个做得起的</td><td>0.00%</td></tr>
+      </table>
+      <p>最后一行值得单独说：它其实就是同一个贪心的另一种写法，把「解锁」和「挑最大」合成一步，按利润降序扫，第一个资本够得着的就是这一轮该做的项目。5000 组里答案一次没差，两种写法等价，用堆只是跑得快些。</p>
+      <p>差值那题，n ≤ 8、值域 0 到 11 的 5000 组：</p>
+      <table class="complexity">
+        <tr><th>错法</th><th>抓取比例</th></tr>
+        <tr><td>只返回 mx/g，不管重复值和 0</td><td>62.94%</td></tr>
+        <tr><td>一律返回 mx/g + 1</td><td>87.78%</td></tr>
+      </table>
+      <p>第二个错法错得更狠，因为数组里没有重复值时 0 根本不会出现（<code>[6,9]</code> 就是 3 而不是 4）。这也说明这题的边界不在数值大小，而在数组里有没有重复值。</p>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>项目解锁</td><td>每个项目进出两个堆各一次，最多 k 次取堆顶</td><td>O(n log n + k log n)</td><td>O(n)，两个堆</td></tr>
+        <tr><td>差值闭包</td><td>扫一遍求最大值和最大公约数 + 数重复</td><td>O(n log mx)</td><td>O(n)，计数表</td></tr>
+      </table>
+      <p class="breakdown">项目那题的堆操作次数是死的：每个项目只会从锁住的堆搬进利润堆一次，也只会被弹出一次，所以总次数和 k 无关。<code>n=10<sup>5</sup></code>、<code>k=10<sup>5</sup></code> 实测 10.27ms。</p>
+      <p class="breakdown">差值那题的每次取余都来自辗转相除，摊下来的代价是 O(log mx)。同一个输入规模下，暴力做法 2 万组要 517.38ms，写成公式只要 66.82ms，而且元素越多、倍数表越长，差距越大。</p>
+
+      <h2>总结</h2>
+      <p>两题都没有排序，但都在回答「现在该动哪一个」。项目那题把项目分成两拨，够得着才进候选，候选里挑利润最高的，靠的是资本只增不减；差值那题干脆没有选择，它问的是过程什么时候停，答案落在最大公约数上：最终集合一定是 <code>{g, …, mx}</code> 这张倍数表。</p>
+      <p>处理这类题有两个习惯值得记住。一个是先分清「手里的」和「想要的」，中间那道门槛要单独维护；另一个是遇到反复迭代的过程，先别急着模拟，看看最终形态能不能直接写出来。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>IPO</td><td><a href="https://leetcode.cn/problems/ipo/" target="_blank">IPO</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解090【必备】贪心经典题目专题2</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', GREEN = '#15803d';
+
+  // ===== 图 1：两个堆 =====
+  (function(){
+    var host = document.getElementById('fig-ipo');
+    var W = 660, H = 268;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(el('rect', {x:24, y:36, width:222, height:150, rx:8, fill:'#ffffff', stroke:'#e6e8eb', 'stroke-width':1.2}));
+    svg.appendChild(el('rect', {x:24, y:36, width:222, height:30, rx:8, fill:'#f6f7f9', stroke:'#e6e8eb', 'stroke-width':1.2}));
+    svg.appendChild(txt(38, 56, '锁住的项目（按启动资本）', {'font-size':12.5, fill:'#1f2328'}));
+    var locked = [['资本 0', '利润 1'], ['资本 1', '利润 2'], ['资本 1', '利润 3']];
+    for (var i = 0; i < locked.length; i++) {
+      var y = 78 + i * 34;
+      svg.appendChild(el('rect', {x:38, y:y, width:194, height:26, rx:4, fill:'#dbeafe', stroke:BLUE, 'stroke-width':1}));
+      svg.appendChild(txt(48, y + 18, locked[i][0], {'font-size':12, fill:'#1e3a8a'}));
+      svg.appendChild(txt(150, y + 18, locked[i][1], {'font-size':12, fill:'#1e3a8a'}));
+    }
+    svg.appendChild(el('rect', {x:414, y:36, width:222, height:150, rx:8, fill:'#ffffff', stroke:'#e6e8eb', 'stroke-width':1.2}));
+    svg.appendChild(el('rect', {x:414, y:36, width:222, height:30, rx:8, fill:'#f6f7f9', stroke:'#e6e8eb', 'stroke-width':1.2}));
+    svg.appendChild(txt(428, 56, '解锁的项目（按利润）', {'font-size':12.5, fill:'#1f2328'}));
+    svg.appendChild(el('rect', {x:428, y:78, width:194, height:26, rx:4, fill:'#ffedd5', stroke:ORANGE, 'stroke-width':1.2}));
+    svg.appendChild(txt(438, 96, '利润 3（堆顶）', {'font-size':12, fill:'#9a3412', 'font-weight':600}));
+    svg.appendChild(txt(438, 128, '堆为空时就停手', {'font-size':12, fill:'#6b7280'}));
+    svg.appendChild(txt(438, 152, '每轮只弹出堆顶一个', {'font-size':12, fill:'#6b7280'}));
+    svg.appendChild(el('line', {x1:250, y1:110, x2:410, y2:110, stroke:BLUE, 'stroke-width':1.6}));
+    svg.appendChild(el('path', {d:'M404 105 L414 110 L404 115 Z', fill:BLUE}));
+    svg.appendChild(txt(330, 100, '资本够得着就搬过去', {'text-anchor':'middle','font-size':12, fill:'#1e3a8a'}));
+    svg.appendChild(el('line', {x1:16, y1:204, x2:644, y2:204, stroke:'#e6e8eb', 'stroke-width':1}));
+    svg.appendChild(txt(16, 228, '当前资本 w = 0。第 0 步只解锁得了「资本 0」那一个，它进了右边的堆，于是右边有得挑。', {'font-size':12}));
+    svg.appendChild(txt(16, 250, '做完之后 w 涨到 1，左边剩下的两个一起解锁，右边出现利润 3，第二轮挑它。', {'font-size':12}));
+    host.appendChild(svg);
+  })();
+
+  // ===== 图 2：两轮走完 =====
+  (function(){
+    var host = document.getElementById('fig-ipo-trace');
+    var W = 660, H = 224;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var lines = [
+      ['第 1 轮', 'w = 0，解锁「资本 0、利润 1」，利润堆 {1}，挑中利润 1，w 变成 1。', '#1e3a8a'],
+      ['第 2 轮', 'w = 1，解锁「资本 1」的两个项目，利润堆 {3, 2}，挑中利润 3，w 变成 4。', '#1e3a8a'],
+      ['结束', 'k 用完了。最终资本 4。', '#14532d']
+    ];
+    for (var i = 0; i < lines.length; i++) {
+      var y = 40 + i * 44;
+      svg.appendChild(el('rect', {x:16, y:y - 22, width:96, height:30, rx:5,
+        fill: i === 2 ? '#dcfce7' : '#f6f7f9', stroke: i === 2 ? GREEN : '#e6e8eb', 'stroke-width':1}));
+      svg.appendChild(txt(64, y, lines[i][0], {'text-anchor':'middle','font-size':12.5,
+        fill: i === 2 ? '#14532d' : '#1f2328', 'font-weight':600}));
+      svg.appendChild(txt(128, y, lines[i][1], {'font-size':12, fill: lines[i][2]}));
+    }
+    svg.appendChild(el('line', {x1:16, y1:174, x2:644, y2:174, stroke:'#e6e8eb', 'stroke-width':1}));
+    svg.appendChild(txt(16, 198, '如果第 1 轮就冲着利润 3 去，会发现它的资本门槛是 1，而手上只有 0，根本做不了。', {'font-size':12}));
+    svg.appendChild(txt(16, 218, '这就是必须先解锁再挑的原因。', {'font-size':12}));
+    host.appendChild(svg);
+  })();
+
+  // ===== 图 3：差值闭包过程 =====
+  (function(){
+    var host = document.getElementById('fig-closure');
+    var W = 660, H = 236;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    function chips(x, y, vals, hot) {
+      for (var i = 0; i < vals.length; i++) {
+        var isNew = hot.indexOf(vals[i]) >= 0;
+        svg.appendChild(el('rect', {x:x, y:y, width:34, height:26, rx:4,
+          fill: isNew ? '#dcfce7' : '#dbeafe', stroke: isNew ? GREEN : BLUE, 'stroke-width':1.2}));
+        svg.appendChild(txt(x + 17, y + 18, String(vals[i]), {'text-anchor':'middle','font-size':12.5,
+          fill: isNew ? '#14532d' : '#1e3a8a', 'font-weight':600}));
+        x += 40;
+      }
+    }
+    var rows = [
+      ['初始', [4, 10], [], '数组里只有 4 和 10。'],
+      ['第 1 轮', [4, 6, 10], [6], '差值 6 是新的，加进去。'],
+      ['第 2 轮', [2, 4, 6, 8, 10], [2, 8], '差值 2 和 8 是新的，加进去。'],
+      ['第 3 轮', [2, 4, 6, 8, 10], [], '这一轮所有差值都能查到，停下。']
+    ];
+    for (var i = 0; i < rows.length; i++) {
+      var y = 36 + i * 44;
+      svg.appendChild(txt(16, y + 18, rows[i][0], {'font-size':12.5, fill:'#1f2328'}));
+      chips(92, y, rows[i][1], rows[i][2]);
+      svg.appendChild(txt(330, y + 18, rows[i][3], {'font-size':12, fill:'#6b7280'}));
+      if (i < rows.length - 1) {
+        svg.appendChild(el('line', {x1:16, y1:y + 32, x2:644, y2:y + 32, stroke:'#e6e8eb', 'stroke-width':1}));
+      }
+    }
+    svg.appendChild(txt(16, 224, '最终 5 个元素。倍数表是 {2,4,6,8,10}，正好 10/2 = 5 个，一个不多一个不少。', {'font-size':12}));
+    host.appendChild(svg);
+  })();
+
+  // ===== 图 4：三块拼起来 =====
+  (function(){
+    var host = document.getElementById('fig-formula');
+    var W = 660, H = 200;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    function box(x, title, val, desc, color, bg) {
+      svg.appendChild(el('rect', {x:x, y:44, width:150, height:96, rx:8, fill:bg, stroke:color, 'stroke-width':1.3}));
+      svg.appendChild(txt(x + 75, 68, title, {'text-anchor':'middle','font-size':12.5, fill:color, 'font-weight':600}));
+      svg.appendChild(txt(x + 75, 102, val, {'text-anchor':'middle','font-size':20, fill:color, 'font-weight':600}));
+      svg.appendChild(txt(x + 75, 126, desc, {'text-anchor':'middle','font-size':11, fill:'#6b7280'}));
+    }
+    box(24, '倍数表', '1', 'mx/g = 7/7', BLUE, '#dbeafe');
+    svg.appendChild(txt(182, 100, '+', {'font-size':20, fill:'#6b7280'}));
+    box(198, '重复值', '1', '7 出现 2 次', BLUE, '#dbeafe');
+    svg.appendChild(txt(356, 100, '+', {'font-size':20, fill:'#6b7280'}));
+    box(372, '0', '1', '数组里本来就有', ORANGE, '#ffedd5');
+    svg.appendChild(txt(530, 100, '=', {'font-size':20, fill:'#6b7280'}));
+    svg.appendChild(txt(566, 82, '3', {'font-size':28, fill:'#14532d', 'font-weight':600}));
+    svg.appendChild(txt(566, 108, '最终长度', {'font-size':11, fill:'#6b7280'}));
+    svg.appendChild(el('line', {x1:16, y1:16, x2:644, y2:16, stroke:'#e6e8eb', 'stroke-width':1}));
+    svg.appendChild(txt(16, 12, 'arr = [0, 7, 7]', {'font-size':12.5, fill:'#1f2328'}));
+    svg.appendChild(txt(16, 172, '若数组里没有 0 也没有重复值，第三块就是 0；重复值也是造出 0 的来源，两者要分开看。', {'font-size':12}));
+    host.appendChild(svg);
+  })();
+
+  // ===== 演示 A：项目解锁 =====
+  (function(){
+    var root = document.getElementById('viz-ipo');
+    var body = root.querySelector('.vc-body');
+    var sel = root.querySelector('.vi-case');
+    var ans = root.querySelector('.vi-answer');
+    var btnNext = root.querySelector('.vi-next'), btnAuto = root.querySelector('.vi-auto'), btnReset = root.querySelector('.vi-reset');
+    var CASES = [
+      {name:'k=2 w=0 profit=[1,2,3] capital=[0,1,1]', k:2, w:0, p:[1, 2, 3], c:[0, 1, 1]},
+      {name:'k=3 w=0 profit=[1,2,3] capital=[0,1,2]', k:3, w:0, p:[1, 2, 3], c:[0, 1, 2]},
+      {name:'k=1 w=2 profit=[1,2,3] capital=[1,1,2]', k:1, w:2, p:[1, 2, 3], c:[1, 1, 2]},
+      {name:'k=3 w=0 profit=[2,4,1] capital=[1,0,2]', k:3, w:0, p:[2, 4, 1], c:[1, 0, 2]}
+    ];
+    CASES.forEach(function(c, i){
+      var o = document.createElement('option');
+      o.value = i; o.textContent = c.name;
+      sel.appendChild(o);
+    });
+    var timer = null, st = null;
+    function pair(x) { return '[资本 ' + x.c + ', 利润 ' + x.p + ']'; }
+    function snapshot(o) {
+      return {
+        w:o.w, k:o.k,
+        locked:o.locked.map(pair),
+        unlocked:o.unlocked.map(function(x) { return x.p; }),
+        newly:o.newly ? o.newly.map(pair) : [],
+        took:o.took ? pair(o.took) : null,
+        note:o.note, kind:o.kind
+      };
+    }
+    function build(c) {
+      var locked = [], unlocked = [], w = c.w, k = c.k, steps = [];
+      for (var i = 0; i < c.p.length; i++) locked.push({p:c.p[i], c:c.c[i]});
+      locked.sort(function(a, b) { return a.c - b.c || a.p - b.p; });
+      steps.push(snapshot({kind:'init', w:w, k:k, locked:locked, unlocked:unlocked, newly:null, took:null,
+        note:'手上 ' + w + ' 块钱，还能做 ' + k + ' 个项目。左边按启动资本排好队。'}));
+      while (k > 0) {
+        var newly = [];
+        while (locked.length && locked[0].c <= w) {
+          var x = locked.shift();
+          unlocked.push(x);
+          newly.push(x);
+        }
+        unlocked.sort(function(a, b) { return b.p - a.p; });
+        if (!unlocked.length) {
+          steps.push(snapshot({kind:'stop', w:w, k:k, locked:locked, unlocked:unlocked, newly:newly, took:null,
+            note:'没有资本门槛不高于 ' + w + ' 的项目了，停手。'}));
+          break;
+        }
+        var pick = unlocked.shift();
+        w += pick.p;
+        k--;
+        steps.push(snapshot({kind:'round', w:w, k:k, locked:locked, unlocked:unlocked, newly:newly, took:pick,
+          note:'资本够得着的都搬过来了，挑利润最高的 ' + pick.p + ' 做掉，资本涨到 ' + w + '。'}));
+      }
+      if (k === 0) {
+        steps.push(snapshot({kind:'done', w:w, k:k, locked:locked, unlocked:unlocked, newly:null, took:null,
+          note:'结束。'}));
+      }
+      return {steps:steps, w:w};
+    }
+    function draw() {
+      var s = st.steps[st.step];
+      var h = '';
+      h += '<div class="rowline"><span class="k">当前资本</span><span class="fnote">' + s.w + '</span></div>';
+      h += '<div class="rowline"><span class="k">还能做</span><span class="fnote">' + s.k + ' 个</span></div>';
+      h += '<div class="rowline"><span class="k">本轮解锁</span><span class="fnote">' +
+           (s.newly.length ? s.newly.join(' ') : (s.kind === 'init' ? '见左边队列' : '没有')) + '</span></div>';
+      h += '<div class="rowline"><span class="k">利润堆</span><span class="fnote">' +
+           (s.unlocked.length ? '{' + s.unlocked.join(', ') + '}' : '空') + '</span></div>';
+      h += '<div class="rowline"><span class="k">挑中</span><span class="fnote">' + (s.took || '—') + '</span></div>';
+      h += '<p class="viz-note">' + s.note + '</p>';
+      h += '<div class="cards">';
+      for (var i = 0; i < s.locked.length; i++) h += '<div class="card skip">' + s.locked[i] + '</div>';
+      for (var j = 0; j < s.unlocked.length; j++) h += '<div class="card lock">' + s.unlocked[j] + '</div>';
+      h += '</div>';
+      body.innerHTML = h;
+      btnNext.disabled = (st.step >= st.steps.length - 1);
+      if (s.kind === 'done' || s.kind === 'stop') {
+        ans.textContent = '最终资本 = ' + st.w;
+      } else {
+        ans.textContent = '';
+      }
+    }
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; btnAuto.textContent = '自动播放'; }
+      st = build(CASES[+sel.value]);
+      st.step = 0;
+      ans.textContent = '';
+      draw();
+    }
+    btnNext.addEventListener('click', function(){ if (st.step < st.steps.length - 1) { st.step++; draw(); } });
+    btnAuto.addEventListener('click', function(){
+      if (timer) { clearInterval(timer); timer = null; btnAuto.textContent = '自动播放'; return; }
+      btnAuto.textContent = '暂停';
+      timer = setInterval(function(){
+        if (st.step < st.steps.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; btnAuto.textContent = '自动播放'; }
+      }, 700);
+    });
+    btnReset.addEventListener('click', reset);
+    sel.addEventListener('change', reset);
+    reset();
+  })();
+
+  // ===== 演示 B：差值闭包 =====
+  (function(){
+    var root = document.getElementById('viz-closure');
+    var body = root.querySelector('.vc-body');
+    var sel = root.querySelector('.vc2-case');
+    var ans = root.querySelector('.vc2-answer');
+    var btnNext = root.querySelector('.vc2-next'), btnAuto = root.querySelector('.vc2-auto'), btnReset = root.querySelector('.vc2-reset');
+    var CASES = [[6, 9], [4, 10], [0, 7, 7], [5, 5], [3, 6, 10], [8, 12]];
+    CASES.forEach(function(c, i){
+      var o = document.createElement('option');
+      o.value = i; o.textContent = '[' + c.join(', ') + ']';
+      sel.appendChild(o);
+    });
+    var timer = null, st = null;
+    function build(arr) {
+      var list = arr.slice(), set = {}, steps = [], i, j;
+      for (i = 0; i < arr.length; i++) set[arr[i]] = 1;
+      steps.push({list:list.slice(), added:[], note:'初始数组，' + list.length + ' 个元素。'});
+      var rounds = 0;
+      while (rounds < 12) {
+        var len = list.length, added = [];
+        for (i = 0; i < len; i++) {
+          for (j = i + 1; j < len; j++) {
+            var d = Math.abs(list[i] - list[j]);
+            if (!set[d]) { set[d] = 1; list.push(d); added.push(d); }
+          }
+        }
+        rounds++;
+        if (!added.length) {
+          steps.push({list:list.slice(), added:[], done:true,
+            note:'这一轮算出来的差值全都在数组里，没有新值，停下。'});
+          break;
+        }
+        steps.push({list:list.slice(), added:added,
+          note:'第 ' + rounds + ' 轮：算出差值 ' + added.join('、') + ' 是数组里没有的，加进去。'});
+      }
+      return {list:list, steps:steps};
+    }
+    function draw() {
+      var s = st.steps[st.step];
+      var sortedList = s.list.slice().sort(function(a, b) { return a - b; });
+      var h = '<div class="rowline"><span class="k">当前长度</span><span class="fnote">' + s.list.length + '</span></div>';
+      h += '<div class="cards">';
+      for (var i = 0; i < sortedList.length; i++) {
+        var isNew = s.added.indexOf(sortedList[i]) >= 0;
+        h += '<div class="card ' + (isNew ? 'newadd' : 'lock') + '">' + sortedList[i] + '</div>';
+      }
+      h += '</div>';
+      h += '<p class="viz-note">' + s.note + '</p>';
+      body.innerHTML = h;
+      btnNext.disabled = (st.step >= st.steps.length - 1);
+      if (s.done) {
+        var mx = 0, g = 0;
+        for (var k = 0; k < s.list.length; k++) mx = Math.max(mx, s.list[k]);
+        for (var m = 0; m < s.list.length; m++) {
+          if (s.list[m] !== 0) g = g ? gcd(g, s.list[m]) : s.list[m];
+        }
+        ans.textContent = '最终长度 = ' + s.list.length + (g ? '（mx/g = ' + mx + '/' + g + ' = ' + (mx / g) + '，再加上重复值和 0）' : '（全是 0，直接返回原长度）');
+      } else {
+        ans.textContent = '';
+      }
+    }
+    function gcd(a, b) { return b ? gcd(b, a % b) : a; }
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; btnAuto.textContent = '自动播放'; }
+      st = build(CASES[+sel.value]);
+      st.step = 0;
+      ans.textContent = '';
+      draw();
+    }
+    btnNext.addEventListener('click', function(){ if (st.step < st.steps.length - 1) { st.step++; draw(); } });
+    btnAuto.addEventListener('click', function(){
+      if (timer) { clearInterval(timer); timer = null; btnAuto.textContent = '自动播放'; return; }
+      btnAuto.textContent = '暂停';
+      timer = setInterval(function(){
+        if (st.step < st.steps.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; btnAuto.textContent = '自动播放'; }
+      }, 700);
+    });
+    btnReset.addEventListener('click', reset);
+    sel.addEventListener('change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>
