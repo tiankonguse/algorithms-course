@@ -1,5 +1,11 @@
 # 自动化：提交并推送 git
 
+- 触发时间：2026-10-12 02:48 (GMT+8)
+- 动作：将工作区改动提交并推送到 origin/main。
+- 结果：提交 `238804c`，14 个文件变更（+4430 / -1），已推送 `b6e347b..238804c`。
+- 范围：099/100/101 课产出 7 页（逆元与容斥组 3 页 mod-inverse / inclusion-exclusion-table / inclusion-exclusion-formula；KMP 组 4 页 kmp / kmp-subtree / kmp-cycle / kmp-jump），新开「逆元与容斥」与「KMP」两组插在「快速幂与矩阵快速幂」之后、「序列与区间」之前；另含 assets/data/algorithms.json（注册 7 页，358 → 365）、prompt.md 补记 099/100/101 课产出及「下一课 102」、3 个记忆文件同步（MEMORY.md + 2026-10-12.md + 自动化 memory.md）、新增自检脚本 .agent/skills/course-site-page/scripts/probe101.js。
+- 结论：成功，无冲突，远程已更新；工作树恢复干净（`## main...origin/main`，HEAD==origin/main）。
+
 - 触发时间：2026-10-12 00:53 (GMT+8)
 - 动作：将工作区改动提交并推送到 origin/main。
 - 结果：提交 `b6e347b`，19 个文件变更（+3232 / -30），已推送 `133a71e..b6e347b`。

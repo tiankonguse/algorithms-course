@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AC 自动机：fail 反图汇总词频</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.card { min-width: 30px; padding: 5px 7px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.bad { background: #fee2e2; border-color: #dc2626; color: #991b1b; font-weight: 600; }
+.card.dim { opacity: .38; }
+.card.empty { background: transparent; border-style: dashed; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>AC 自动机：fail 反图汇总词频</h1>
+      <p class="intro">文章走完一遍，每个位置只知道「最后落在哪个节点」。一个短目标串的出现次数并不在这个节点上，它散落在所有以它为后缀的节点里。把这笔账一次收回来，靠的是 fail 边反过来长成的那棵树。</p>
+
+      <h2>零、题目的要求</h2>
+      <p>题目给 n 个目标串和一篇大文章，要输出每个目标串在文章里各出现了几次。</p>
+      <p>麻烦的地方在于一次落点对应好几个目标串。文章里出现 "aab" 的时候，"ab" 和 "b" 也各出现了一次。AC 自动机走到 "aab" 的结尾节点，这个节点只代表 "aab" 结束了；"ab"、"b" 的次数藏在它的 fail 链上。</p>
+      <p>朴素做法顺着这个思路写：每走一个字符，落到节点 u，然后沿 fail 链一路往上，把链上每个节点的计数都加一。它是对的，代价却不固定——链有多长就要加几次。目标串长 200、文章 10<sup>6</sup> 个字符时，链上每步都要退满，实测一次要 208.542 毫秒，走了 199980100 步。专门的模板题就是卡这个写法的。</p>
+      <figure class="fig" id="fig-chain">
+        <figcaption>图 1　一次落点要照顾一整条 fail 链：文章是 10 个 a，目标串是 a<sup>1</sup>~a<sup>5</sup>，每个位置绕的步数从 1 涨到 5，十步累计 40 次加法，而 fail 树一共才 5 条边</figcaption>
+      </figure>
+
+      <h2>一、fail 边反过来是一棵树</h2>
+      <p>先看清 fail 边的形状。除根之外的每个节点恰好有一条 fail 边指向别的节点，而且 fail 目标的层数严格更小——fail 指向的是自己的一个真后缀，真后缀一定更短。层数严格递减意味着顺着 fail 边走不可能回到自己，也就没有环。</p>
+      <p>节点数是 cnt + 1，fail 边有 cnt 条，连通且无环，这就是一棵树。根的 fail 指向自己（代码里写成 0），其余边按 <code>fail[i] → i</code> 反过来挂，得到的是同一棵树的另一种连法。</p>
+      <p>实测那棵 152118 个节点的自动机，fail 边正好 152118 条，等于节点数减一。</p>
+
+      <h2>二、文章只记单点词频，汇总留给树</h2>
+      <p>既然一次落点的账散在 fail 链上，那么把两件事分开：</p>
+      <p>1）走文章时，只让当前落到的节点加一，得到一个<b>单点词频</b>。这一步和上一页的匹配循环一模一样，每个字符固定一次访问。</p>
+      <p>2）文章走完之后，沿 fail 反图做一次后序遍历，把自己的词频加上所有孩子的词频。加完之后的数字就是答案。</p>
+      <p>为什么这样对？节点 u 的 fail 后代，恰好是那些「以 u 对应串为后缀」的目标串前缀。文章里每个落到后代上的位置，都意味着 u 对应的串在那个位置出现过一次。把后代上的单点计数全加起来，正好是 u 的出现次数。</p>
+      <p>拿 {"he","she","his","hers"} 走 "ushers" 看一遍。9 个节点走完，单点词频是：根 1，s 1，sh 1，she 1，her 1，hers 1，he 与 h、hi、his 都是 0。</p>
+      <p>把 fail 边反过来挂：she 的 fail 是 he，所以 she 挂在 he 下面；hers 的 fail 是 s，所以 hers 挂在 s 下面。he 自己的单点词频是 0，它靠孩子 she 带上来的 1 得到 1；s 自己的是 1，加上 hers 带上来的 1 得到 2。根收下五个孩子，1 + 1 + 1 + 2 + 0 + 1 得到 6，正好是文章长度。</p>
+      <figure class="fig" id="fig-sum">
+        <figcaption>图 2　"ushers" 走一遍后的单点词频与汇总结果：she 的 1 传给 he，hers 的 1 传给 s，短串的次数就是靠这样的父子传递补出来的</figcaption>
+      </figure>
+
+      <h2>三、汇总的写法</h2>
+      <p>反图用链式前向星存，先给每个节点补一条从 fail[i] 到 i 的边：</p>
+        <pre class="code"><span class="cm">// fail 反图用链式前向星存，边一律从 fail[i] 指向 i</span>
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxtE[++edge] = head[u];
+        head[u] = edge;
+        to[edge] = v;
+    }
+
+    <span class="cm">// 走完文章之后，把每个节点的一条 fail 边加成反向边</span>
+    <span class="kw">void</span> <span class="fn">buildFailTree</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnt; i++) {
+            addEdge(fail[i], i);
+        }
+    }</pre>
+      <p>遍历这棵树要注意递归深度。fail 树在最坏情况下是一条长为节点数的链，递归会爆栈，所以改成用显式栈模拟后序：第一次遇到节点时把它的孩子全部压栈，第二次回到这个节点时，孩子都已经处理完，把它们的词频加进来。</p>
+        <pre class="code"><span class="cm">// 用栈模拟后序遍历 fail 反图：第一次碰到孩子，第二次回来时才把词频往上传</span>
+    <span class="kw">void</span> <span class="fn">gather</span>(<span class="kw">int</span> root) {
+        <span class="kw">int</span> r = 0;
+        box[r++] = root;
+        <span class="kw">while</span> (r &gt; 0) {
+            <span class="kw">int</span> cur = box[r - 1];
+            <span class="kw">if</span> (!visited[cur]) {
+                visited[cur] = <span class="kw">true</span>;
+                <span class="kw">for</span> (<span class="kw">int</span> i = head[cur]; i &gt; 0; i = nxtE[i]) {
+                    box[r++] = to[i];
+                }
+            } <span class="kw">else</span> {
+                r--;
+                <span class="kw">for</span> (<span class="kw">int</span> i = head[cur]; i &gt; 0; i = nxtE[i]) {
+                    hits[cur] += hits[to[i]];
+                }
+            }
+        }
+    }</pre>
+      <p>把三件事串起来看耗时：那棵 152118 个节点、文章 10<sup>6</sup> 字符的数据上，插入 0.891 毫秒，建 fail 9.92 毫秒，匹配 15.97 毫秒，建反图 0.397 毫秒，汇总 2.592 毫秒。</p>
+      <figure class="fig" id="fig-cost2">
+        <figcaption>图 3　汇总的两种做法在同一份数据上差五个数量级：树遍历每节点一次，绕圈那条每个位置都要沿链往上走</figcaption>
+      </figure>
+      <p>常见的错法是跳过汇总，直接输出单点词频。短的目标串当场全错：a<sup>1</sup>~a<sup>200</sup> 那组里 a<sup>1</sup> 的单点计数是 1，正确答案是 1000000。长串反而碰巧对——它后面没有更长的串可以继承，单点计数就是它的出现次数。4000 组随机数据里 53.60% 的组答案不一样，比例看着不过半，是因为随机数据里模式串之间很少有后缀关系。</p>
+      <div class="viz" id="viz-sum">
+        <p class="viz-title">沿 fail 反图逐节点回填</p>
+        <p class="viz-note">每点一步处理一个节点，橙色是当前节点，上行的数是单点词频、下行的数是它当前的汇总值。切到「不汇总」，看哪些串的答案还是 0。</p>
+        <div id="sm-board"></div>
+        <p class="viz-note" id="sm-note"></p>
+        <p class="viz-answer" id="sm-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="sm-data"></select></label>
+          <label>版本 <select id="sm-ver"></select></label>
+          <button id="sm-next" type="button">下一步</button>
+          <button id="sm-reset" type="button">重置</button>
+        </div>
+      </div>
+      <div class="viz" id="viz-walk">
+        <p class="viz-title">两条路线的加法次数</p>
+        <p class="viz-note">文章全是一个字符，目标串是它的前缀。每点一步读一个字符，看这一步绕了几层、累计绕了多少层。</p>
+        <div id="wk-board"></div>
+        <p class="viz-note" id="wk-note"></p>
+        <p class="viz-answer" id="wk-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="wk-data"></select></label>
+          <button id="wk-next" type="button">下一步</button>
+          <button id="wk-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>四、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>命中就沿 fail 链累加</td><td>每个位置把 fail 链走一遍</td><td>O(文章长度 × 最长串长)</td><td>O(节点数)</td></tr>
+        <tr><td>只记单点词频</td><td>每个字符一次计数</td><td>O(文章长度)</td><td>O(节点数)</td></tr>
+        <tr><td>fail 反图一遍树遍历</td><td>每个节点进出一次，每条边看一次</td><td>O(节点数)</td><td>O(节点数)</td></tr>
+        <tr><td>合计（优化版）</td><td>建机 + 匹配 + 汇总</td><td>O(26 × 总字符数 + 文章长度)</td><td>O(26 × 总字符数)</td></tr>
+      </table>
+      <p class="breakdown">绕圈那一步的代价取决于数据形状：<code>a</code>、<code>aa</code>、…、<code>a<sup>200</sup></code> 这种互为前缀的目标串会把链拉到 200 层，文章 10<sup>6</sup> 个字符就是 2×10<sup>8</sup> 次加法；随机字母的目标串链长只有几层，同一份代码看着没问题。汇总那一侧不管数据怎么长都是每个节点一次，实测 152118 个节点 2.592 毫秒，反图的三张表各占节点数级别的 int 空间。</p>
+
+      <h2>总结</h2>
+      <p>短目标串的次数被长串的路径盖住了。落点只说明「有一个目标串在这里结束」，其余那些以它为后缀的串要额外记账。</p>
+      <p>分开记：走文章只给落点加一，得出单点词频；再沿 fail 反图后序遍历一次，把孩子的计数往父亲上搬。fail 边严格往浅层指，反过来就是一棵树，节点数减一条边。</p>
+      <p>两边的复杂度都变干净了：匹配 O(文章长度)，汇总 O(节点数)，一起是 O(26 × 总字符数 + 文章长度)；绕圈的写法最坏要乘上最长串长，同一份数据 208.542 毫秒对 0.001 毫秒。</p>
+      <p>下一节换另一类需求：不是事后统计，而是走文章时随时要知道「现在有没有命中」。那时的优化点在建机阶段，把标记提前推到该负责的节点上。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>AC 自动机（二次加强版）</td><td><a href="https://www.luogu.com.cn/problem/P5357" target="_blank">P5357【模板】AC 自动机（二次加强版）</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解102【扩展】 AC自动机原理、优化、代码详解</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>AC 自动机</td><td><a href="https://oi-wiki.org/string/ac-automaton/" target="_blank">oi-wiki.org/string/ac-automaton</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:7, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+
+  // ===== 图 1：一次落点要照顾一整条链 =====
+  (function(){
+    var host = document.getElementById('fig-chain');
+    if (!host) return;
+    var W = 660, H = 214;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '文本 a^10，目标串 a^1 ~ a^5：每个位置沿 fail 链要加几次', {'font-size':12.5, fill:'#1f2328'}));
+    var x0 = 90, cw = 52;
+    for (var i = 0; i < 10; i++) {
+      var steps = Math.min(i + 1, 5);
+      var col = steps >= 5 ? FILL_O : FILL_B;
+      var st = steps >= 5 ? ORANGE : BLUE;
+      var h = 14 + steps * 13;
+      svg.appendChild(box(x0 + i * cw, 148 - h, cw - 8, h, col, st));
+      svg.appendChild(txt(x0 + i * cw + (cw - 8) / 2, 132, String(steps), {'text-anchor':'middle', 'font-size':11, 'font-weight':600, fill: st}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 8) / 2, 164, 'a', {'text-anchor':'middle', 'font-size':12, fill:'#374151'}));
+    }
+    svg.appendChild(el('line', {x1:70, y1:148, x2:640, y2:148, stroke:'#c9ced4', 'stroke-width':1.2}));
+    svg.appendChild(txt(16, 186, '十步累计 40 次加法；fail 树只有 5 条边，树遍历一共 5 次加法。', {'font-size':12, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 204, '纵轴是这一步沿 fail 链加了几个节点。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：单点词频与汇总 =====
+  (function(){
+    var host = document.getElementById('fig-sum');
+    if (!host) return;
+    var W = 660, H = 232;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '{"he","she","his","hers"} 走 "ushers"，9 个节点的单点词频与汇总值', {'font-size':12.5, fill:'#1f2328'}));
+    var nodes = [
+      ['根', 0, 1, 6], ['h', 1, 0, 1], ['he', 2, 0, 1], ['s', 3, 1, 2], ['sh', 4, 1, 1],
+      ['she', 5, 1, 1], ['hi', 6, 0, 0], ['his', 7, 0, 0], ['her', 8, 1, 1], ['hers', 9, 1, 1]
+    ];
+    var head = ['节点', '单点', '汇总'];
+    var xs = [24, 186, 320, 454];
+    var ws = [150, 120, 120, 90];
+    for (var c = 0; c < 3; c++) svg.appendChild(txt(xs[c] + 8, 42, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    for (var i = 0; i < nodes.length; i++) {
+      var y = 50 + i * 17;
+      svg.appendChild(txt(xs[0] + 8, y + 12, nodes[i][0] + '（节点 ' + nodes[i][1] + '）', {'font-size':11.5, fill:'#374151'}));
+      svg.appendChild(txt(xs[1] + 8, y + 12, String(nodes[i][2]), {'font-size':11.5, fill:'#6b7280'}));
+      var diff = nodes[i][3] > nodes[i][2];
+      svg.appendChild(txt(xs[2] + 8, y + 12, String(nodes[i][3]), {'font-size':11.5, 'font-weight': diff ? 700 : 400, fill: diff ? BLUE : '#374151'}));
+      if (nodes[i][0] === 's' || nodes[i][0] === 'he') {
+        svg.appendChild(txt(xs[3] + 8, y + 12, diff ? '孩子在下面' : '', {'font-size':11, fill:ORANGE}));
+      }
+    }
+    svg.appendChild(box(560, 34, 86, 26, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(566, 52, '汇总后的答案', {'font-size':10.5, fill:'#6b7280'}));
+    var ans = [['he', 1], ['she', 1], ['his', 0], ['hers', 1]];
+    for (var k = 0; k < ans.length; k++) {
+      svg.appendChild(txt(566, 80 + k * 20, ans[k][0] + ' = ' + ans[k][1], {'font-size':11.5, 'font-weight':600, fill:'#1f2328'}));
+    }
+    svg.appendChild(txt(16, 226, 's 的 1 加上 hers 带上来的 1 变成 2，he 的 0 加上 she 的 1 变成 1。', {'font-size':11.5, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：耗时（对数轴） =====
+  (function(){
+    var host = document.getElementById('fig-cost2');
+    if (!host) return;
+    var W = 660, H = 190;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'a^1~a^200 目标串 + 10^6 个 a 的文章，汇总这步（毫秒，对数轴）', {'font-size':12.5, fill:'#1f2328'}));
+    var baseY = 132, topY = 40, x0 = 96, bw = 120;
+    svg.appendChild(el('line', {x1:x0 - 12, y1:baseY, x2:620, y2:baseY, stroke:'#c9ced4', 'stroke-width':1.2}));
+    var ticks = [0.001, 0.01, 0.1, 1, 10, 100, 1000];
+    for (var t = 0; t < ticks.length; t++) {
+      var lg = Math.log(ticks[t]) / Math.LN10;
+      var yy = baseY - (lg + 3) / 6 * (baseY - topY);
+      svg.appendChild(el('line', {x1:x0 - 12, y1:yy, x2:620, y2:yy, stroke:'#eef0f2', 'stroke-width':1}));
+      svg.appendChild(txt(x0 - 18, yy + 4, (ticks[t] >= 1 ? String(ticks[t]) : String(ticks[t])), {'text-anchor':'end', 'font-size':10, fill:'#9aa0a6'}));
+    }
+    var bars = [
+      ['fail 反图树遍历', 0.001, BLUE, FILL_B, '0.001 ms'],
+      ['命中就绕 fail 链', 208.542, ORANGE, FILL_O, '208.542 ms']
+    ];
+    for (var i = 0; i < bars.length; i++) {
+      var lg = Math.log(bars[i][1]) / Math.LN10;
+      var h = Math.max(3, (lg + 3) / 6 * (baseY - topY));
+      var x = x0 + 70 + i * 230;
+      svg.appendChild(box(x, baseY - h, bw, h, bars[i][3], bars[i][2]));
+      svg.appendChild(txt(x + bw / 2, baseY - h - 8, bars[i][4], {'text-anchor':'middle', 'font-size':12.5, 'font-weight':700, fill: bars[i][2]}));
+      svg.appendChild(txt(x + bw / 2, baseY + 18, bars[i][0], {'text-anchor':'middle', 'font-size':12, fill:'#374151'}));
+    }
+    svg.appendChild(txt(16, 178, '两边都是每个位置/每个节点固定做一次，绕圈那条的常数取决于链长。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示 1：沿 fail 反图回填 =====
+  (function(){
+    var DATA = [
+      {p:['he','she','his','hers'], t:'ushers'},
+      {p:['a','aa','aaa'], t:'aaaaa'},
+      {p:['ab','bab','bc'], t:'abababc'},
+      {p:['aba','ba','aab'], t:'aabaababa'}
+    ];
+    var VERS = [{k:'ok', n:'正确'}, {k:'nosum', n:'不汇总'}];
+    var selD = document.getElementById('sm-data');
+    var selV = document.getElementById('sm-ver');
+    var board = document.getElementById('sm-board');
+    var note = document.getElementById('sm-note');
+    var ansEl = document.getElementById('sm-answer');
+    var btnN = document.getElementById('sm-next');
+    var btnR = document.getElementById('sm-reset');
+    if (!selD || !board) return;
+    for (var i = 0; i < DATA.length; i++) {
+      var o = document.createElement('option'); o.value = String(i);
+      o.textContent = '{' + DATA[i].p.join(', ') + '} 走 "' + DATA[i].t + '"'; selD.appendChild(o);
+    }
+    for (var i = 0; i < VERS.length; i++) {
+      var o = document.createElement('option'); o.value = VERS[i].k; o.textContent = VERS[i].n; selV.appendChild(o);
+    }
+    var st = {idx:0, ver:'ok', step:0, frames:null, pref:null, ends:null, pats:null, cnt:0};
+
+    function build(pats, text) {
+      var go = [{}], pref = [''], isEnd = [false], cnt = 0, endNode = [];
+      for (var i = 0; i < pats.length; i++) {
+        var u = 0, w = pats[i];
+        for (var j = 0; j < w.length; j++) {
+          var c = w[j];
+          if (go[u][c] === undefined) {
+            cnt++; go[cnt] = {}; pref[cnt] = pref[u] + c; isEnd[cnt] = false; go[u][c] = cnt;
+          }
+          u = go[u][c];
+        }
+        isEnd[u] = true; endNode.push(u);
+      }
+      var real = [];
+      for (var k = 0; k <= cnt; k++) { real[k] = {}; for (var c in go[k]) real[k][c] = go[k][c]; }
+      var alpha = {};
+      for (var k2 = 0; k2 <= cnt; k2++) for (var c2 in real[k2]) alpha[c2] = 1;
+      var fail = new Array(cnt + 1).fill(0);
+      var q = [], l = 0;
+      for (var c0 in real[0]) q.push(real[0][c0]);
+      while (l < q.length) {
+        var u = q[l++];
+        for (var c in alpha) {
+          if (real[u][c] !== undefined) {
+            var t = go[fail[u]][c];
+            fail[real[u][c]] = (t === undefined ? 0 : t);
+            q.push(real[u][c]);
+          } else {
+            var t2 = go[fail[u]][c];
+            go[u][c] = (t2 === undefined ? 0 : t2);
+          }
+        }
+      }
+      // 走文章，只加单点词频
+      var raw = new Array(cnt + 1).fill(0), u2 = 0;
+      for (var i2 = 0; i2 < text.length; i2++) {
+        var nx = go[u2][text[i2]];
+        u2 = (nx === undefined ? 0 : nx);
+        raw[u2]++;
+      }
+      // 反图：fail[i] -> i
+      var kids = [];
+      for (var k3 = 0; k3 <= cnt; k3++) kids[k3] = [];
+      for (var i3 = 1; i3 <= cnt; i3++) kids[fail[i3]].push(i3);
+      // 后序顺序（显式栈）
+      var order = [], stack = [0], seen = new Array(cnt + 1).fill(false);
+      while (stack.length) {
+        var cur = stack[stack.length - 1];
+        if (!seen[cur]) {
+          seen[cur] = true;
+          for (var k4 = 0; k4 < kids[cur].length; k4++) stack.push(kids[cur][k4]);
+        } else {
+          stack.pop();
+          order.push(cur);
+        }
+      }
+      var val = raw.slice();
+      var frames = [{done:-1, val:val.slice(), raw:raw.slice(), txt:'文章走完，先看每个节点的单点词频'}];
+      for (var i4 = 0; i4 < order.length; i4++) {
+        var v = order[i4];
+        var add = [];
+        if (st.ver !== 'nosum') {
+          for (var k5 = 0; k5 < kids[v].length; k5++) {
+            val[v] += val[kids[v][k5]];
+            add.push(kids[v][k5] + ' 的 ' + val[kids[v][k5]]);
+          }
+        }
+        frames.push({done:v, val:val.slice(), raw:raw.slice(), add:add,
+          txt: '处理节点 ' + v + '（"' + pref[v] + '"）：把自己的 ' + raw[v] + ' 加上孩子带上来的计数'});
+      }
+      return {frames:frames, pref:pref, isEnd:isEnd, cnt:cnt, endNode:endNode, fail:fail};
+    }
+
+    function render() {
+      var f = st.frames[st.step];
+      board.innerHTML = '';
+      var p1 = document.createElement('p'); p1.className = 'cap';
+      p1.textContent = '每个格子：节点编号 / 前缀串 / 单点词频 / 当前汇总值';
+      board.appendChild(p1);
+      var wrap = document.createElement('div'); wrap.className = 'cards';
+      for (var i = 0; i <= st.cnt; i++) {
+        var d = document.createElement('div');
+        d.className = 'card' + (i === f.done ? ' pick' : (i <= f.done || f.done < 0 ? ' ok' : ''));
+        d.innerHTML = i + '<span class="idx">' + (st.pref[i] === '' ? '根' : '"' + st.pref[i] + '"') +
+          '</span><span class="idx">单点 ' + f.raw[i] + ' → ' + f.val[i] + '</span>';
+        wrap.appendChild(d);
+      }
+      board.appendChild(wrap);
+      note.textContent = f.txt + (f.add && f.add.length ? '，加上 ' + f.add.join('、') : '');
+      var last = st.step === st.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        var parts = [];
+        for (var k = 0; k < st.pats.length; k++) {
+          parts.push(st.pats[k] + ' = ' + f.val[st.endNode[k]]);
+        }
+        ansEl.textContent = '答案：' + parts.join('，') + '（版本：' + (st.ver === 'nosum' ? '不汇总' : '正确') + '）';
+      } else ansEl.textContent = '';
+    }
+    function rebuild() {
+      var d = DATA[st.idx];
+      st.pats = d.p;
+      var r = build(d.p, d.t);
+      st.frames = r.frames; st.pref = r.pref; st.cnt = r.cnt; st.endNode = r.endNode; st.step = 0;
+      render();
+    }
+    selD.addEventListener('change', function(){ st.idx = Number(selD.value); rebuild(); });
+    selV.addEventListener('change', function(){ st.ver = selV.value; rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+
+  // ===== 演示 2：两条路线的加法次数 =====
+  (function(){
+    var DATA = [
+      {k:5, n:10}, {k:8, n:12}, {k:4, n:16}, {k:6, n:9}
+    ];
+    var selD = document.getElementById('wk-data');
+    var board = document.getElementById('wk-board');
+    var note = document.getElementById('wk-note');
+    var ansEl = document.getElementById('wk-answer');
+    var btnN = document.getElementById('wk-next');
+    var btnR = document.getElementById('wk-reset');
+    if (!selD || !board) return;
+    for (var i = 0; i < DATA.length; i++) {
+      var o = document.createElement('option'); o.value = String(i);
+      o.textContent = '目标串 a^1~a^' + DATA[i].k + '，文章 ' + DATA[i].n + ' 个 a'; selD.appendChild(o);
+    }
+    var st = {idx:0, step:0, frames:null, k:0, n:0};
+
+    function run(k, n) {
+      var frames = [], total = 0;
+      for (var i = 0; i < n; i++) {
+        var land = Math.min(i + 1, k);
+        var steps = land;           // 落点节点 a^land，沿 fail 链往上共 land 个非根节点
+        total += steps;
+        frames.push({i:i, land:land, steps:steps, total:total});
+      }
+      return frames;
+    }
+    function render() {
+      var f = st.frames[st.step];
+      board.innerHTML = '';
+      var p1 = document.createElement('p'); p1.className = 'cap'; p1.textContent = '文章（全是一个字符 a）';
+      board.appendChild(p1);
+      var chars = document.createElement('div'); chars.className = 'cards';
+      for (var i = 0; i < st.n; i++) {
+        var d = document.createElement('div');
+        d.className = 'card' + (i === f.i ? ' pick' : (i > f.i ? ' dim' : ''));
+        d.innerHTML = 'a<span class="idx">' + i + '</span>';
+        chars.appendChild(d);
+      }
+      board.appendChild(chars);
+      note.textContent = '第 ' + f.i + ' 个字符落在节点 a^' + f.land + '，沿 fail 链要加 ' + f.steps +
+        ' 次；到这一步累计 ' + f.total + ' 次加法';
+      var last = st.step === st.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        ansEl.textContent = '绕圈累计 ' + f.total + ' 次加法；fail 树只有 ' + st.k + ' 条边，树遍历一共 ' + st.k + ' 次。';
+      } else ansEl.textContent = '';
+    }
+    function rebuild() {
+      st.k = DATA[st.idx].k; st.n = DATA[st.idx].n;
+      st.frames = run(st.k, st.n); st.step = 0;
+      render();
+    }
+    selD.addEventListener('change', function(){ st.idx = Number(selD.value); rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>

@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AC 自动机：fail 指针与直通表</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.card { min-width: 30px; padding: 5px 7px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.dim { opacity: .38; }
+.card.empty { background: transparent; border-style: dashed; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+.ln { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; flex-wrap: wrap; }
+.ln .k { color: var(--text-dim); min-width: 86px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>AC 自动机：fail 指针与直通表</h1>
+      <p class="intro">一个前缀树上，给每个节点再补一条指向「最长可接的后缀」的边，一堆目标串就能和文章一次对完。这条边怎么定、建的时候怎么不绕圈、匹配的时候怎么让它彻底不出现，是这一页的三件事。</p>
+
+      <h2>零、从 KMP 到多串匹配</h2>
+      <p>判断一篇文章里有没有一个目标串，KMP 把主串指针压成只往前走，线性时间。目标串从一个变成 n 个，逐个跑 KMP 就是「文章长度 × n」的代价，n = 2×10<sup>5</sup>、文章 10<sup>6</sup> 时跑不完。</p>
+      <p>自动机是确定有限状态自动机的简称，对信号序列做判定的数学模型。前缀树是自动机的一种实现，KMP 也能看成一台两状态的自动机。把两者拼起来，就是 AC 自动机：<b>前缀树 + fail 指针</b>。</p>
+      <p>前缀树负责存：所有目标串插进同一棵树，从根往下走一条路径，就拼出某个目标串的一个前缀。fail 指针负责接：某个位置走不下去了，从哪个节点接着往下走，才可能不丢掉已经对上的那段。</p>
+      <p>整节课要用的前置有三块：前缀树、链式前向星（存 fail 反图用）、KMP 的失配回退思想。下面按顺序推。</p>
+
+      <h2>一、fail 指针的含义</h2>
+      <p>树上一个节点 a 对应一个前缀串 s。fail 指针要指向的节点 t 满足三个条件：</p>
+      <p>1）t 是某个目标串的前缀，也就是树上真实存在的一个节点；</p>
+      <p>2）t 对应的串与 s 的某个<b>后缀</b>完全一样；</p>
+      <p>3）在所有满足前两条的 t 里，长度最大，而且 t 不等于 s 本身。</p>
+      <p>拿 "she" 试。它的真后缀有三个候选："he"、"e"、空串。目标是 {"he","she","his","hers"}，"he" 是目标串 "he" 的前缀，在树上就是节点 2；"e" 不是任何目标串的前缀，树上没有这个节点；空串谁都接得住，对应根。三个候选里最长的合法项是 "he"，所以 "she" 的 fail 指向节点 2。</p>
+      <figure class="fig" id="fig-cond">
+        <figcaption>图 1　"s" = "she" 的三个候选后缀，只有 "he" 同时满足「树上存在」与「最长」，fail 落在它的终止节点上</figcaption>
+      </figure>
+      <p>为什么要求 t 不能等于 s？自己指自己没有任何信息量，还容易在建表时把指针接成环。</p>
+      <p>这条边的意义就一句话：<b>保留所有匹配成功的可能性</b>。在文章里某个位置，我们刚刚走完的这段字符可能同时是好几件事——字符串匹配失败，但它的后缀说不定正要开始某个目标串。fail 链把你的「已经匹配到哪」从 s 逐级降到它的最长后缀、次长后缀，直到根。KMP 的 next 数组干的是同一件事，只是模式串只有一个，这条链退化成一条直线。</p>
+      <figure class="fig" id="fig-fail">
+        <figcaption>图 2　{"he","she","his","hers"} 的前缀树，橙色虚线是几条代表性的 fail 边：sh→h、she→he、his→s、hers→s，其余都指向根</figcaption>
+      </figure>
+      <p>这张图里有两条边值得盯一下。"she" 的 fail 指向 "he"，说明读到 "she" 时，如果后面接不上，站在 "he" 这个前缀上继续读照样有机会。"his" 的 fail 指向节点 "s"，说明 "his" 的尾巴正好是 "she" 的开头，这两段在文章里可以重叠。</p>
+
+      <h2>二、建 fail：按层推，空边补成直通边</h2>
+      <p>根的孩子 fail 都是根，因为它们没有更短的真后缀。剩下的节点按<b>层序</b>推：父亲的 fail 一定已经算好了，用它推孩子。</p>
+      <p>处理节点 u 的时候扫它的 26 条边：</p>
+      <p>1）这条边是空的，就把 <code>tree[fail[u]][i]</code> 写进去。写完之后它不再表示「没有边」，而是表示「从 u 读入字符 i 之后该站在哪个节点」。</p>
+      <p>2）这条边是实的，就把 <code>fail[tree[u][i]] = tree[fail[u]][i]</code>，然后把孩子入队。</p>
+      <p>两句话合起来，就是一次遍历里同时办完两件事：给每个孩子定 fail，给每个空位填直通边。填的时候不用沿 fail 往上找，因为 <code>tree[fail[u]][i]</code> 在父亲那一层就已经是补好的直通边了。</p>
+      <p>拿 "sh" 这个节点举例。它的 fail 是 "h"，而 "h" 的 'i' 边通向 "hi"。给 "sh" 读一个 'i'，按直通边就落到 "hi" 上——文章里出现 "shis" 这种串时，"his" 才不会被漏掉。</p>
+      <figure class="fig" id="fig-goto">
+        <figcaption>图 3　节点 sh 的 'i' 边补全前后：补之前是空的，读 'i' 只能回根；补之后一步走到 hi，后面的 "s" 才接得上 "his"</figcaption>
+      </figure>
+      <p>实测一下这一步省了多少：20000 个长度 10 的随机串（总字符 20 万，建出 152266 个节点），按层推加直通表 4.87 毫秒；同样这棵树，逐条边沿 fail 往上找 20.89 毫秒，一共走了 7334182 步。</p>
+      <figure class="fig" id="fig-cost">
+        <figcaption>图 4　同一棵树、同样一份 fail 结果的两种建法，按层推加直通边比逐条边往上找快 4 倍多</figcaption>
+      </figure>
+      <p>匹配阶段更直接。补完直通边之后，走文章只剩一行：</p>
+        <pre class="code"><span class="cm">// 走文章：每一步都只是一次数组访问，fail 指针不再出现在循环里</span>
+    <span class="kw">void</span> <span class="fn">match</span>(<span class="kw">const</span> <span class="kw">string</span>&amp; text, <span class="kw">int</span> n) {
+        <span class="kw">for</span> (<span class="kw">int</span> u = 0, i = 0; i &lt; (<span class="kw">int</span>)text.size(); i++) {
+            u = tree[u][text[i] - 'a'];
+            hits[u]++;
+        }
+    }</pre>
+      <p>fail 指针在这个循环里一次都不出现。所有回退在建机时已经摊平到每条边上，落到哪个节点由 tree 直接回答。10<sup>6</sup> 个字符平均 15.97 毫秒。</p>
+      <p>写错这一步的方式很典型：只设 fail、不补空边，匹配时照样写 <code>u = tree[u][c]</code>。少了那条直通边，本该落在 "sh" 子树里的字符直接掉回根，成片的命中消失。4000 组随机数据（字母表 2~3 个字符、模式长 ≤ 4、文章长 ≤ 40）里，83.97% 的组答案不一样。</p>
+
+      <h2>三、建机与匹配的代码</h2>
+      <p>插入目标串就是普通前缀树，多带一个「这个节点是哪几个目标串的结尾」的记录：</p>
+        <pre class="code"><span class="cm">// 把目标串插进前缀树，顺带记下它的结尾节点编号</span>
+    <span class="kw">void</span> <span class="fn">insert</span>(<span class="kw">int</span> i, <span class="kw">const</span> <span class="kw">string</span>&amp; s) {
+        <span class="kw">int</span> u = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; (<span class="kw">int</span>)s.size(); j++) {
+            <span class="kw">int</span> c = s[j] - 'a';
+            <span class="kw">if</span> (tree[u][c] == 0) {
+                tree[u][c] = ++cnt;
+            }
+            u = tree[u][c];
+        }
+        endv[i] = u;
+    }</pre>
+      <p>建 fail 的两句话，加上队列，就是全部的建机代码：</p>
+        <pre class="code"><span class="cm">// 按层推 fail：空边走直通边，实边往下推的同时把孩子塞进队列</span>
+    <span class="kw">void</span> <span class="fn">setFail</span>() {
+        <span class="kw">int</span> l = 0, r = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 26; i++) {
+            <span class="kw">if</span> (tree[0][i] &gt; 0) {
+                box[r++] = tree[0][i];
+            }
+        }
+        <span class="kw">while</span> (l &lt; r) {
+            <span class="kw">int</span> u = box[l++];
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 26; i++) {
+                <span class="kw">if</span> (tree[u][i] == 0) {
+                    tree[u][i] = tree[fail[u]][i];
+                } <span class="kw">else</span> {
+                    fail[tree[u][i]] = tree[fail[u]][i];
+                    box[r++] = tree[u][i];
+                }
+            }
+        }
+    }</pre>
+      <p>下面两个演示可以把这两段跑起来看。第一个逐节点推 fail，第二个让文章逐字符走一遍。</p>
+      <div class="viz" id="viz-fail">
+        <p class="viz-title">逐节点推 fail，顺带看空边补在哪</p>
+        <p class="viz-note">每点一步处理一个节点，橙色是当前节点，蓝色是已经定好 fail 的节点。切到「空边不补」，看这一步少了什么。</p>
+        <div id="fail-board"></div>
+        <p class="viz-note" id="fail-note"></p>
+        <p class="viz-answer" id="fail-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="fail-data"></select></label>
+          <label>版本 <select id="fail-ver"></select></label>
+          <button id="fail-next" type="button">下一步</button>
+          <button id="fail-reset" type="button">重置</button>
+        </div>
+      </div>
+      <div class="viz" id="viz-match">
+        <p class="viz-title">文章逐字符走一遍</p>
+        <p class="viz-note">每点一步读一个字符，看落到哪个节点、这个节点上有没有目标串结束。切到「空边不补」，同一篇文章的命中会少一截。</p>
+        <div id="mt-board"></div>
+        <p class="viz-note" id="mt-note"></p>
+        <p class="viz-answer" id="mt-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="mt-data"></select></label>
+          <label>版本 <select id="mt-ver"></select></label>
+          <button id="mt-next" type="button">下一步</button>
+          <button id="mt-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>四、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>逐个目标串跑 KMP</td><td>每个目标串扫一遍文章</td><td>O(文章长度 × 目标串个数)</td><td>O(最长串长)</td></tr>
+        <tr><td>AC 自动机建机</td><td>每个节点扫一遍 26 条边</td><td>O(26 × 总字符数)</td><td>O(26 × 总字符数)</td></tr>
+        <tr><td>AC 自动机匹配</td><td>每个字符一次数组访问</td><td>O(文章长度)</td><td>O(1) 额外</td></tr>
+        <tr><td>不补直通边，每步沿 fail 退</td><td>每个字符可能退若干层</td><td>最坏 O(文章长度 × 最长串长)</td><td>O(1) 额外</td></tr>
+      </table>
+      <p class="breakdown">建机那一步的 26 是字母表大小，写成常数就是 O(总字符数)。20 万字符建出 152118 个节点（前缀共享省掉了 47882 个），tree 表 152118 × 26 个 int 约 15.1 MB，所以模板题的 MAXS 直接开到 2×10<sup>5</sup>。匹配阶段每个字符固定一次访问，10<sup>6</sup> 个字符 15.97 毫秒；不补直通边的写法在 a<sup>1</sup>~a<sup>200</sup> 那族数据上多退 999800 步、1.15 毫秒对 0.52 毫秒，数据一换成「失配要退满链长」的形状，差距还会拉开。</p>
+
+      <h2>总结</h2>
+      <p>fail 指针指向「某个目标串前缀」里，与当前节点串的某个后缀相同、长度最大、且不等于自己的那一个。三个条件缺一不可，最后一条是防环的。</p>
+      <p>建机的顺序是层序：根的孩子指向根，其余用 <code>tree[fail[u]][i]</code> 一次推出孩子的 fail，同时把空边填成直通边。填边不用绕圈，这正是它比逐条边往上找快的地方，同样一棵 152266 节点的树 4.87 毫秒对 20.89 毫秒。</p>
+      <p>匹配就是 <code>u = tree[u][c]</code> 加一次计数，O(文章长度)，写错成「不补直通边还一步走」有 83.97% 的随机数据会给出不同答案。</p>
+      <p>这一页只解决了「走到哪个节点」。走到一个节点只说明有个短目标串在这里结束，长一点的、把它当后缀的那些串的次数还躺在 fail 链的下游，下一节把这笔账一次算清。</p>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解102【扩展】 AC自动机原理、优化、代码详解</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>AC 自动机</td><td><a href="https://oi-wiki.org/string/ac-automaton/" target="_blank">oi-wiki.org/string/ac-automaton</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:7, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+  function dash(x1, y1, x2, y2, color) {
+    return el('line', {x1:x1, y1:y1, x2:x2, y2:y2, stroke:color, 'stroke-width':1.3, 'stroke-dasharray':'5 4'});
+  }
+
+  // ===== 图 1：三个候选后缀 =====
+  (function(){
+    var host = document.getElementById('fig-cond');
+    if (!host) return;
+    var W = 660, H = 200;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 's = "she" 的真后缀，逐个问一遍', {'font-size':12.5, fill:'#1f2328'}));
+    var cand = [
+      ['"he"', '是目标串 "he" 的前缀，树上有这个节点', true],
+      ['"e"', '不是任何目标串的前缀，树上没有', false],
+      ['空串', '对应根节点，谁都接得住', false]
+    ];
+    for (var i = 0; i < cand.length; i++) {
+      var y = 34 + i * 44;
+      var ok = cand[i][2];
+      svg.appendChild(box(16, y, 78, 34, ok ? FILL_B : '#ffffff', ok ? BLUE : '#e6e8eb'));
+      svg.appendChild(txt(55, y + 22, cand[i][0], {'text-anchor':'middle', 'font-size':13, fill: ok ? '#1e3a8a' : '#6b7280', 'font-weight': ok ? 700 : 400}));
+      svg.appendChild(txt(108, y + 22, cand[i][1], {'font-size':12, fill: ok ? '#1f2328' : '#9aa0a6'}));
+      svg.appendChild(txt(430, y + 22, ok ? '最长且合法' : '淘汰', {'font-size':12, fill: ok ? BLUE : GREY, 'font-weight':600}));
+    }
+    svg.appendChild(box(16, 168, 260, 24, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(28, 184, 'fail(she) = 节点 "he"，编号 2', {'font-size':12.5, fill:'#1f2328', 'font-weight':600}));
+    svg.appendChild(txt(292, 184, '自己整个串不参与候选', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：前缀树 + fail 边 =====
+  (function(){
+    var host = document.getElementById('fig-fail');
+    if (!host) return;
+    var W = 660, H = 300;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    // 节点：0 根；1 h；2 he；3 s；4 sh；5 she；6 hi；7 his；8 her；9 hers
+    var P = {
+      0:[320,28], 1:[160,88], 2:[84,150], 3:[470,88], 4:[470,150],
+      5:[560,212], 6:[236,150], 7:[290,212], 8:[84,212], 9:[120,272]
+    };
+    var LBL = {0:'根', 1:'h', 2:'he', 3:'s', 4:'sh', 5:'she', 6:'hi', 7:'his', 8:'her', 9:'hers'};
+    var END = {2:1, 5:1, 7:1, 9:1};
+    var EDGES = [[0,1],[0,3],[1,2],[1,6],[2,8],[8,9],[3,4],[4,5],[6,7]];
+    for (var i = 0; i < EDGES.length; i++) {
+      var a = P[EDGES[i][0]], b = P[EDGES[i][1]];
+      svg.appendChild(el('line', {x1:a[0], y1:a[1]+16, x2:b[0], y2:b[1]-16, stroke:'#c9ced4', 'stroke-width':1.4}));
+    }
+    // 代表性的 fail 虚线
+    var FAILS = [[4,1],[5,2],[7,3],[9,3],[1,0],[2,0],[6,0],[8,0],[3,0]];
+    for (var i = 0; i < FAILS.length; i++) {
+      var a = P[FAILS[i][0]], b = P[FAILS[i][1]];
+      var strong = (i < 4);
+      var sx = a[0] + (b[0] > a[0] ? 20 : -20), sy = a[1] + 14;
+      var ex = b[0] + (b[0] > a[0] ? -18 : 18), ey = b[1] + 8;
+      svg.appendChild(el('path', {d:'M'+sx+','+sy+' Q'+((sx+ex)/2)+','+(sy+34)+' '+ex+','+ey,
+        fill:'none', stroke: strong ? ORANGE : '#d7dbe0', 'stroke-width': strong ? 1.5 : 1.1,
+        'stroke-dasharray': strong ? '6 4' : '3 3'}));
+    }
+    for (var k in P) {
+      var p = P[k], isEnd = END[k];
+      svg.appendChild(box(p[0]-26, p[1]-16, 52, 32, isEnd ? FILL_B : '#ffffff', isEnd ? BLUE : '#e6e8eb'));
+      svg.appendChild(txt(p[0], p[1]+5, LBL[k], {'text-anchor':'middle', 'font-size': k === 0 ? 12 : 14,
+        'font-weight': 600, fill: isEnd ? '#1e3a8a' : '#374151'}));
+    }
+    svg.appendChild(txt(16, 22, '蓝底节点是某个目标串的结尾', {'font-size':11.5, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 292, '橙色虚线四条：sh→h、she→he、his→s、hers→s；浅色三条表示剩余 fail 边都指向根。', {'font-size':11.5, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：直通边补全 =====
+  (function(){
+    var host = document.getElementById('fig-goto');
+    if (!host) return;
+    var W = 660, H = 210;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '节点 sh 读入字符 i', {'font-size':12.5, fill:'#1f2328'}));
+    // 补之前
+    svg.appendChild(txt(16, 44, '补之前：tree[sh][i] = 0', {'font-size':12, fill:'#6b7280'}));
+    svg.appendChild(box(30, 56, 62, 34, '#ffffff', '#e6e8eb'));
+    svg.appendChild(txt(61, 78, 'sh', {'text-anchor':'middle', 'font-size':14, 'font-weight':600, fill:'#374151'}));
+    svg.appendChild(el('line', {x1:96, y1:73, x2:186, y2:73, stroke:'#c9ced4', 'stroke-width':1.4}));
+    svg.appendChild(txt(102, 66, 'i', {'font-size':12, fill:'#9aa0a6'}));
+    svg.appendChild(box(190, 56, 62, 34, FILL_R, RED));
+    svg.appendChild(txt(221, 78, '0', {'text-anchor':'middle', 'font-size':14, 'font-weight':600, fill:'#991b1b'}));
+    svg.appendChild(txt(268, 78, '回到根，his 再也没机会', {'font-size':12, fill:'#991b1b'}));
+    // 补之后
+    svg.appendChild(txt(16, 128, '补之后：fail[sh] = h，tree[sh][i] = tree[h][i] = hi', {'font-size':12, fill:'#6b7280'}));
+    svg.appendChild(box(30, 140, 62, 34, FILL_O, ORANGE));
+    svg.appendChild(txt(61, 162, 'sh', {'text-anchor':'middle', 'font-size':14, 'font-weight':600, fill:'#9a3412'}));
+    svg.appendChild(el('line', {x1:96, y1:157, x2:186, y2:157, stroke:ORANGE, 'stroke-width':1.5}));
+    svg.appendChild(txt(102, 150, 'i', {'font-size':12, fill:ORANGE}));
+    svg.appendChild(box(190, 140, 62, 34, FILL_B, BLUE));
+    svg.appendChild(txt(221, 162, 'hi', {'text-anchor':'middle', 'font-size':14, 'font-weight':600, fill:'#1e3a8a'}));
+    svg.appendChild(txt(268, 162, '再读 s 就是 his，命中', {'font-size':12, fill:BLUE}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：建 fail 两种写法 =====
+  (function(){
+    var host = document.getElementById('fig-cost');
+    if (!host) return;
+    var W = 660, H = 176;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '同一棵 152266 个节点的树，建 fail 的耗时（毫秒）', {'font-size':12.5, fill:'#1f2328'}));
+    var baseY = 126, topY = 44, bw = 130;
+    var bars = [
+      ['按层推 + 直通边', 4.87, BLUE, FILL_B],
+      ['逐条边沿 fail 上找', 20.89, ORANGE, FILL_O]
+    ];
+    for (var i = 0; i < bars.length; i++) {
+      var h = bars[i][1] / 22 * (baseY - topY);
+      var x = 120 + i * 240;
+      svg.appendChild(box(x, baseY - h, bw, h, bars[i][3], bars[i][2]));
+      svg.appendChild(txt(x + bw/2, baseY - h - 8, bars[i][1] + ' ms', {'text-anchor':'middle', 'font-size':13, 'font-weight':700, fill: bars[i][2]}));
+      svg.appendChild(txt(x + bw/2, baseY + 18, bars[i][0], {'text-anchor':'middle', 'font-size':12, fill:'#374151'}));
+    }
+    svg.appendChild(el('line', {x1:90, y1:baseY, x2:600, y2:baseY, stroke:'#c9ced4', 'stroke-width':1.2}));
+    svg.appendChild(txt(16, 162, '逐条边沿 fail 上找这条一共走了 7334182 步；按层推那条每个节点只扫 26 条边。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示 1：逐节点推 fail =====
+  (function(){
+    var DATA = [
+      {p:['he','she','his','hers']},
+      {p:['a','aa','aaa']},
+      {p:['ab','bab','bc']},
+      {p:['a','ab','bab','bc','bca','c','caa']}
+    ];
+    var VERS = [{k:'ok', n:'正确'}, {k:'nogoto', n:'空边不补'}];
+    var selD = document.getElementById('fail-data');
+    var selV = document.getElementById('fail-ver');
+    var board = document.getElementById('fail-board');
+    var note = document.getElementById('fail-note');
+    var ansEl = document.getElementById('fail-answer');
+    var btnN = document.getElementById('fail-next');
+    var btnR = document.getElementById('fail-reset');
+    if (!selD || !board) return;
+    for (var i = 0; i < DATA.length; i++) {
+      var o = document.createElement('option'); o.value = String(i);
+      o.textContent = '{' + DATA[i].p.join(', ') + '}'; selD.appendChild(o);
+    }
+    for (var i = 0; i < VERS.length; i++) {
+      var o = document.createElement('option'); o.value = VERS[i].k; o.textContent = VERS[i].n; selV.appendChild(o);
+    }
+    var st = {idx:0, ver:'ok', step:0, frames:null, pref:null, cnt:0, filled:0};
+
+    function build(pats, ver) {
+      var go = [{}], pref = [''], isEnd = [false], cnt = 0;
+      for (var i = 0; i < pats.length; i++) {
+        var u = 0, w = pats[i];
+        for (var j = 0; j < w.length; j++) {
+          var c = w[j];
+          if (go[u][c] === undefined) {
+            cnt++; go[cnt] = {}; pref[cnt] = pref[u] + c; isEnd[cnt] = false; go[u][c] = cnt;
+          }
+          u = go[u][c];
+        }
+        isEnd[u] = true;
+      }
+      var real = [];
+      for (var k = 0; k <= cnt; k++) { real[k] = {}; for (var c in go[k]) real[k][c] = go[k][c]; }
+      var alpha = {};
+      for (var k2 = 0; k2 <= cnt; k2++) for (var c2 in real[k2]) alpha[c2] = 1;
+      var fail = new Array(cnt + 1).fill(0);
+      var frames = [], q = [], l = 0;
+      for (var c0 in real[0]) { fail[real[0][c0]] = 0; q.push(real[0][c0]); }
+      frames.push({u:-1, fail:fail.slice(), filled:[], head:'把根的孩子入队，它们的 fail 都是根'});
+      var filled = 0;
+      while (l < q.length) {
+        var u = q[l++];
+        var made = [];
+        for (var c in alpha) {
+          if (real[u][c] !== undefined) {
+            var src = (ver === 'ok') ? go : real;
+            var t = src[fail[u]][c];
+            fail[real[u][c]] = (t === undefined ? 0 : t);
+            q.push(real[u][c]);
+          } else if (ver === 'ok') {
+            var t2 = go[fail[u]][c];
+            go[u][c] = (t2 === undefined ? 0 : t2);
+            made.push(c + '→' + (go[u][c] === 0 ? '根' : go[u][c]));
+            filled++;
+          }
+        }
+        frames.push({u:u, fail:fail.slice(), filled:made, head:''});
+      }
+      return {frames:frames, pref:pref, cnt:cnt, filled:filled};
+    }
+
+    function render() {
+      var f = st.frames[st.step];
+      board.innerHTML = '';
+      var p1 = document.createElement('p'); p1.className = 'cap';
+      p1.textContent = '每个格子：上行是节点编号，中行是它代表的前缀串，下行是 fail 指向';
+      board.appendChild(p1);
+      var wrap = document.createElement('div'); wrap.className = 'cards';
+      for (var i = 0; i <= st.cnt; i++) {
+        var d = document.createElement('div');
+        d.className = 'card' + (i === f.u ? ' pick' : (i === 0 || f.u > i || f.fail[i] !== 0 ? ' ok' : ''));
+        d.innerHTML = i + '<span class="idx">' + (st.pref[i] === '' ? '根' : '"' + st.pref[i] + '"') +
+          '</span><span class="idx">fail ' + f.fail[i] + '</span>';
+        wrap.appendChild(d);
+      }
+      board.appendChild(wrap);
+      var p2 = document.createElement('p'); p2.className = 'cap';
+      if (f.u < 0) p2.textContent = f.head;
+      else p2.textContent = '处理节点 ' + f.u + '（"' + st.pref[f.u] + '"）：它的 fail 是 ' + f.fail[f.u] +
+        '，这一步补出 ' + f.filled.length + ' 条直通边';
+      board.appendChild(p2);
+      if (f.filled.length) {
+        var p3 = document.createElement('p'); p3.className = 'cap';
+        p3.textContent = '补出来的直通边：' + f.filled.join('，');
+        board.appendChild(p3);
+      }
+      var last = st.step === st.frames.length - 1;
+      btnN.disabled = last;
+      ansEl.textContent = last ? ('建机完成，共补出 ' + st.filled + ' 条直通边（版本：' + (st.ver === 'nogoto' ? '空边不补' : '正确') + '）') : '';
+    }
+    function rebuild() {
+      var r = build(DATA[st.idx].p, st.ver);
+      st.frames = r.frames; st.pref = r.pref; st.cnt = r.cnt; st.filled = r.filled; st.step = 0;
+      render();
+    }
+    selD.addEventListener('change', function(){ st.idx = Number(selD.value); rebuild(); });
+    selV.addEventListener('change', function(){ st.ver = selV.value; rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+
+  // ===== 演示 2：走文章 =====
+  (function(){
+    var DATA = [
+      {p:['he','she','his','hers'], t:'ushers'},
+      {p:['a','aa','aaa'], t:'aaaaa'},
+      {p:['ab','bab','bc'], t:'abababc'},
+      {p:['a','ab','bab','bc','bca','c','caa'], t:'abccab'},
+      {p:['aba','ba','aab'], t:'aabaababa'}
+    ];
+    var VERS = [{k:'ok', n:'正确'}, {k:'nogoto', n:'空边不补'}];
+    var selD = document.getElementById('mt-data');
+    var selV = document.getElementById('mt-ver');
+    var board = document.getElementById('mt-board');
+    var note = document.getElementById('mt-note');
+    var ansEl = document.getElementById('mt-answer');
+    var btnN = document.getElementById('mt-next');
+    var btnR = document.getElementById('mt-reset');
+    if (!selD || !board) return;
+    for (var i = 0; i < DATA.length; i++) {
+      var o = document.createElement('option'); o.value = String(i);
+      o.textContent = '{' + DATA[i].p.join(', ') + '} 走 "' + DATA[i].t + '"'; selD.appendChild(o);
+    }
+    for (var i = 0; i < VERS.length; i++) {
+      var o = document.createElement('option'); o.value = VERS[i].k; o.textContent = VERS[i].n; selV.appendChild(o);
+    }
+    var st = {idx:0, ver:'ok', step:0, frames:null, pats:null, text:''};
+
+    function run(pats, text, ver) {
+      var go = [{}], isEnd = [false], cnt = 0, endNode = [];
+      for (var i = 0; i < pats.length; i++) {
+        var u = 0, w = pats[i];
+        for (var j = 0; j < w.length; j++) {
+          var c = w[j];
+          if (go[u][c] === undefined) {
+            cnt++; go[cnt] = {}; isEnd[cnt] = false; go[u][c] = cnt;
+          }
+          u = go[u][c];
+        }
+        isEnd[u] = true; endNode[i] = u;
+      }
+      var real = [];
+      for (var k = 0; k <= cnt; k++) { real[k] = {}; for (var c in go[k]) real[k][c] = go[k][c]; }
+      var alpha = {};
+      for (var k2 = 0; k2 <= cnt; k2++) for (var c2 in real[k2]) alpha[c2] = 1;
+      var fail = new Array(cnt + 1).fill(0);
+      var q = [], l = 0;
+      for (var c0 in real[0]) q.push(real[0][c0]);
+      while (l < q.length) {
+        var u = q[l++];
+        for (var c in alpha) {
+          if (real[u][c] !== undefined) {
+            var src = (ver === 'ok') ? go : real;
+            var t = src[fail[u]][c];
+            fail[real[u][c]] = (t === undefined ? 0 : t);
+            q.push(real[u][c]);
+          } else if (ver === 'ok') {
+            var t2 = go[fail[u]][c];
+            go[u][c] = (t2 === undefined ? 0 : t2);
+          }
+        }
+      }
+      var table = (ver === 'ok') ? go : real;
+      var hits = new Array(cnt + 1).fill(0);
+      var frames = [], u2 = 0;
+      for (var i2 = 0; i2 < text.length; i2++) {
+        var c3 = text[i2];
+        var nx = table[u2][c3];
+        u2 = (nx === undefined ? 0 : nx);
+        hits[u2]++;
+        var cur = [];
+        for (var k3 = 0; k3 < pats.length; k3++) cur.push(0);
+        for (var x2 = 0; x2 <= cnt; x2++) {
+          if (!hits[x2]) continue;
+          for (var y = x2; y > 0; y = fail[y]) {
+            for (var k4 = 0; k4 < pats.length; k4++) if (endNode[k4] === y) cur[k4] += hits[x2];
+          }
+        }
+        frames.push({i:i2, c:c3, u:u2, isEnd:isEnd[u2], cur:cur, one:hits[u2]});
+      }
+      return {frames:frames};
+    }
+
+    function render() {
+      var f = st.frames[st.step];
+      board.innerHTML = '';
+      var p1 = document.createElement('p'); p1.className = 'cap'; p1.textContent = '文章';
+      board.appendChild(p1);
+      var chars = document.createElement('div'); chars.className = 'cards';
+      for (var i = 0; i < st.text.length; i++) {
+        var d = document.createElement('div');
+        d.className = 'card' + (i === f.i ? ' pick' : (i > f.i ? ' dim' : ''));
+        d.innerHTML = st.text[i] + '<span class="idx">' + i + '</span>';
+        chars.appendChild(d);
+      }
+      board.appendChild(chars);
+      var l1 = document.createElement('p'); l1.className = 'cap';
+      l1.textContent = '读第 ' + f.i + ' 个字符 "' + f.c + '"，落到节点 ' + f.u +
+        (f.isEnd ? '（有目标串在这里结束）' : '（没有目标串在这里结束）');
+      board.appendChild(l1);
+      var l2 = document.createElement('p'); l2.className = 'cap'; l2.textContent = '每个目标串当前的出现次数';
+      board.appendChild(l2);
+      var cnts = document.createElement('div'); cnts.className = 'cards';
+      for (var k = 0; k < st.pats.length; k++) {
+        var d2 = document.createElement('div');
+        d2.className = 'card' + (f.cur[k] > 0 ? ' ok' : '');
+        d2.innerHTML = '"' + st.pats[k] + '"<span class="idx">' + f.cur[k] + '</span>';
+        cnts.appendChild(d2);
+      }
+      board.appendChild(cnts);
+      note.textContent = '节点 ' + f.u + ' 的单点计数是 ' + f.one + '，短目标串的次数要把 fail 链下游的计数一起加上';
+      var last = st.step === st.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        var parts = [];
+        for (var k2 = 0; k2 < st.pats.length; k2++) parts.push(st.pats[k2] + ' = ' + f.cur[k2]);
+        ansEl.textContent = '最终：' + parts.join('，') + '（版本：' + (st.ver === 'nogoto' ? '空边不补' : '正确') + '）';
+      } else ansEl.textContent = '';
+    }
+    function rebuild() {
+      var d = DATA[st.idx];
+      st.pats = d.p; st.text = d.t;
+      st.frames = run(d.p, d.t, st.ver).frames; st.step = 0;
+      render();
+    }
+    selD.addEventListener('change', function(){ st.idx = Number(selD.value); rebuild(); });
+    selV.addEventListener('change', function(){ st.ver = selV.value; rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>
