@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>博弈：巴什与质数次方</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+.card { min-width: 30px; padding: 5px 8px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.dead { background: #ffedd5; border-color: #ea580c; color: #9a3412; }
+.card.dim { opacity: .45; }
+.rowline { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; flex-wrap: wrap; }
+.rowline .k { color: var(--text-dim); min-width: 92px; font-size: 13px; }
+.fnote { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>博弈：巴什与质数次方</h1>
+      <p class="intro">两个人轮流拿石子，每次拿 1 到 m 颗，拿到最后一颗的人赢，答案是 n 除以 m+1 的余数。把「每次拿 1 到 m 颗」换成「每次拿一个质数的自然数次方」，答案变成 n 除以 6 的余数。两题的做法一样：先把必败态认出来，再看它是哪一串等差数。</p>
+
+      <h2>零、两道题各自要什么</h2>
+      <p>第一题：一共 n 颗石子，两人轮流拿，每次可以拿 1 到 m 颗，拿到最后一颗的人获胜，根据 n、m 返回谁赢。</p>
+      <p>第二题：还是一共 n 颗石子，但每轮可以拿 p 的 k 次方颗，p 是质数、k 是自然数。k 取 0 的时候就是拿 1 颗，所以 1 也在可拿的范围里。同样是谁拿走最后一颗谁赢。</p>
+      <p>两题的走法都只跟「还剩多少颗」有关，跟前面怎么走的没关系。这样的局面只有必胜和必败两种，中间没有第三种。想不出来就把 n 从 0 往上，每个局面写一个暴力判胜负，再看表里的规律，博弈题基本都是这么入手的。</p>
+
+      <h2>一、巴什博弈：必败态是 m+1 的倍数</h2>
+      <p>先把最小的局面定下来。n=0 时轮到谁谁输：没有石子可拿，而上一手刚拿走最后一颗。所以 0 是必败态。</p>
+      <p>再看 n=m+1。无论拿 1 到 m 里哪个数，剩下的都落在 1 到 m 之间，对手下一手就能全部拿走。所以 m+1 也是必败态。同一句话往上推一层就成立：只要 n 是 m+1 的倍数，拿完任何 1 到 m 颗，剩下的都不再是 m+1 的倍数，对手有办法把局面重新推回倍数。</p>
+      <p>反过来，n 不是 m+1 的倍数时，余数 r 落在 1 到 m 之间，直接拿 r 颗就把对手按在倍数上。所以结论是 <code>n % (m + 1) != 0</code> 时先手胜。</p>
+      <figure class="fig" id="fig-bash">
+        <figcaption>图 1　m = 3 时，橙色格子是 4 的倍数。从橙色只能落到蓝色，从任何一个蓝色都能一步回到橙色</figcaption>
+      </figure>
+      <p>m 取 3 时，必败态是 0、4、8、12…，间距正好是 m+1。拿 n=10 走一遍：先手拿 2 颗，把 8 交给对手；对手拿 1 到 3 颗都会落到 5、6、7，先手再拿 3、2、1 颗回到 4；对手又只能离开 4，最后 4 颗被先手一次拿走。整局里先手的每一手都在把局面从「不是倍数」推回「倍数」。</p>
+              <pre class="code"><span class="cm">// 巴什博弈：一共 n 颗石子，两人轮流拿，每次可以拿 1 到 m 颗，拿到最后一颗的人获胜</span>
+    <span class="cm">// 必败态就是 m+1 的倍数：站在倍数上，拿多少都会掉出倍数；站在别的数上，总能把对手推回倍数</span>
+    <span class="kw">string</span> bashGame(<span class="kw">int</span> n, <span class="kw">int</span> m) {
+        <span class="kw">return</span> n % (m + 1) != 0 ? "先手" : "后手";
+    }</pre>
+
+      <h2>二、换成质数次方，模数变成 6</h2>
+      <p>第二题能拿的颗数从 1 到 m 这一段换成了一串稀稀拉拉的数：1、2、3、4、5、7、8、9、11、13、16、17、19、23、25、27、29、31、32…。</p>
+      <p>先看这些数除以 6 的余数。质数只有三种情况：p=2 时，2 的 k 次方在 2 和 4 之间来回（2、4、8 的余数是 2、4、2…）；p=3 时可能是 3 或者 9、27，余数恒为 3；p 大于 3 时，质数本身余 1 或 5，再乘几次方还是 1 或 5。四种情况凑起来，余数只可能落在 1 到 5 里，永远不可能是 0。</p>
+      <p>再看另一头：1、2、3、4、5 恰好都能拿。1 是 2 的 0 次方，4 是 2 的 2 次方，2、3、5 本身就是质数。所以 1 到 5 这五种余数，每一种都有一步走到 6 的倍数的走法。</p>
+      <p>两边合起来就是同一个骨架：站在 6 的倍数上，无论拿多少都会离开倍数；站在别的数上，拿「n 除以 6 的余数」颗就能回到倍数。必败态就是 6 的倍数，答案是 <code>n % 6 != 0</code> 时先手胜。</p>
+      <figure class="fig" id="fig-mod6">
+        <figcaption>图 2　可拿的质数次方除以 6 的余数躲开了 0，而 1 到 5 这五个余数都能一步拿到，模数才落在 6 上</figcaption>
+      </figure>
+      <p>把 0 到 10<sup>6</sup> 每个局面逐局推一遍要 2516.55ms，推出来的胜负和 <code>n % 6</code> 的判断 0 处不符。模数偏偏落在 6 上，理由就是上面那两条各占一半：可拿集合的余数躲开了 0，而 0 之前的每个余数都取得到。</p>
+              <pre class="code"><span class="cm">// 质数次方取石子：每一轮可以拿 p 的 k 次方颗，p 是质数、k 是自然数（k 取 0 就是拿 1 颗）</span>
+    <span class="cm">// 质数次方除以 6 的余数只可能是 1 到 5，永远不可能是 0</span>
+    <span class="cm">// 而 1、2、3、4、5 又都能一步拿到，于是必败态就是 6 的倍数</span>
+    <span class="kw">string</span> primePowerStones(<span class="kw">int</span> n) {
+        <span class="kw">return</span> n % 6 != 0 ? "October wins!" : "Roy wins!";
+    }</pre>
+
+      <h2>三、两个演示</h2>
+      <div class="viz" id="viz-bash">
+        <p class="viz-title">巴什博弈：每一手都把对手按回 m+1 的倍数</p>
+        <p class="viz-note">橙格是必败态（m+1 的倍数）。面对必败态的一方怎么走都留不住赢面，演示里让他拿 1 颗。</p>
+        <div id="bash-board"></div>
+        <p class="viz-answer" id="bash-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="bash-ep"></select></label>
+          <button id="bash-next" type="button">下一步</button>
+          <button id="bash-reset" type="button">重置</button>
+        </div>
+      </div>
+      <div class="viz" id="viz-pp">
+        <p class="viz-title">质数次方取石子：余数是多少就拿多少</p>
+        <p class="viz-note">局面不是 6 的倍数时，拿 n%6 颗回到倍数；局面是倍数时，随便拿一颗都会离开倍数。</p>
+        <div id="pp-board"></div>
+        <p class="viz-answer" id="pp-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="pp-ep"></select></label>
+          <button id="pp-next" type="button">下一步</button>
+          <button id="pp-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>四、对数器怎么抓错</h2>
+      <p>两题的暴力都好写：把每个局面标上当前行动者能不能赢，n 从小到大推一遍，<code>win[n]</code> 等于「存在一步走到对手的必败态」。种子换几次都对上，才敢相信那个取模的结论。</p>
+      <table class="complexity">
+        <tr><th>题目</th><th>写法</th><th>随机数据出错比例</th></tr>
+        <tr><td>巴什博弈</td><td>写成 <code>n % m</code>，漏掉那个 +1</td><td>13.66%</td></tr>
+        <tr><td>巴什博弈</td><td>写成 <code>n &gt; m</code>，只看第一步够不够</td><td>28.07%</td></tr>
+        <tr><td>巴什博弈</td><td>把先手后手判反</td><td>100.00%</td></tr>
+        <tr><td>质数次方</td><td>只认质数，漏掉 4、8、9、16 这些幂</td><td>25.00%</td></tr>
+        <tr><td>质数次方</td><td>漏掉 p 的 0 次方，也就是不能拿 1</td><td>33.33%</td></tr>
+        <tr><td>质数次方</td><td>把先手后手判反</td><td>100.00%</td></tr>
+      </table>
+      <p class="breakdown">巴什博弈两千组随机数据，n 取 0 到 100、m 取 1 到 40；质数次方把 0 到 10<sup>6</sup> 的每个 n 都算了一遍。</p>
+      <figure class="fig" id="fig-rate">
+        <figcaption>图 3　几处常见改法的出错比例：判反必错，漏掉 +1 和漏掉 1 颗这类走法只错一部分</figcaption>
+      </figure>
+      <p>「只认质数、漏掉幂」那一条错得很有规律：可拿的颗数变成 1、2、3、5、7、11…，它们在模 4 下的余数是 1、2、3 轮着来，于是必败态整体挪到了 4 的倍数上，正好是 25% 的数。这说明必败态的模数完全由「可拿集合的余数」决定，改一点走法，模数就跟着换一个。</p>
+      <p>漏掉 p 的 0 次方也就是不能拿 1 颗之后，必败态变成 0、1、15、21、35、36、57…这种没有周期的样子，和 6 的倍数差了三分之一。1 颗这一步看着不起眼，它正好补上了余数 1 那一格。</p>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>巴什博弈</td><td>一次取模</td><td>O(1)</td><td>O(1)</td></tr>
+        <tr><td>质数次方</td><td>一次取模</td><td>O(1)</td><td>O(1)</td></tr>
+        <tr><td>找规律用的打表</td><td>每个局面枚举所有走法</td><td>O(n·m)</td><td>O(n)</td></tr>
+      </table>
+      <p class="breakdown">两题的正式答案都只有一次取模，实测 100 万次判断 0.51ms。打表是另一回事：把 m 从 1 到 1000、n 从 0 到 1000 的全表推出来要 104.70ms，质数次方那题把 0 到 10<sup>6</sup> 推完要 2516.55ms，状态数是「n 乘可拿集合大小」的量级。打表只用来找规律，找到规律之后就不需要它了。</p>
+
+      <h2>总结</h2>
+      <p>巴什博弈的必败态是 m+1 的倍数：站在倍数上无论拿多少都会掉出去，站在别的数上拿余数颗就能回来。质数次方版的必败态是 6 的倍数，理由是同一套的两半：可拿的质数次方在模 6 下永远不余 0，而 1 到 5 这五个余数又都能一步拿到。</p>
+      <p>所以这类题的答案都能写成「必败态是某个数的倍数」，那个数就是让「可拿集合的余数」和「能凑出的余数」刚好错开的那一个。改一点走法，模数就跟着换。</p>
+      <p>这两题的结论都依赖走法本身长得整齐。下一讲把整齐这两字去掉，换成 SG 函数和 SG 定理，用一套机械的算表办法处理所有公平组合游戏。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>Roy&October之取石子</td><td><a href="https://www.luogu.com.cn/problem/P4018" target="_blank">Roy&amp;October之取石子</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解095【必备】博弈类问题必备内容详解-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', GREEN = '#15803d';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5';
+  function arrow(svg, x1, y1, x2, y2, color) {
+    svg.appendChild(el('line', {x1:x1, y1:y1, x2:x2, y2:y2, stroke:color, 'stroke-width':1.3}));
+    var ang = Math.atan2(y2 - y1, x2 - x1), len = 7;
+    var p1 = x2 + ',' + y2;
+    var p2 = (x2 - len * Math.cos(ang - 0.42)).toFixed(1) + ',' + (y2 - len * Math.sin(ang - 0.42)).toFixed(1);
+    var p3 = (x2 - len * Math.cos(ang + 0.42)).toFixed(1) + ',' + (y2 - len * Math.sin(ang + 0.42)).toFixed(1);
+    svg.appendChild(el('polygon', {points:p1 + ' ' + p2 + ' ' + p3, fill:color}));
+  }
+
+  // ===== 图 1：m=3 的必败态 =====
+  (function(){
+    var host = document.getElementById('fig-bash');
+    var W = 660, H = 264;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'm = 3：必败态就是 4 的倍数，间隔恒为 4', {'font-size':12.5, fill:'#1f2328'}));
+    var step = 30, x0 = 16, cw = 28;
+    for (var i = 0; i <= 20; i++) {
+      var dead = (i % 4) === 0;
+      var x = x0 + i * step;
+      svg.appendChild(el('rect', {x:x, y:38, width:cw, height:28, rx:5,
+        fill: dead ? FILL_O : '#ffffff', stroke: dead ? ORANGE : '#e6e8eb', 'stroke-width': dead ? 1.4 : 1.1}));
+      svg.appendChild(txt(x + cw / 2, 57, String(i), {'text-anchor':'middle', 'font-size':12,
+        fill: dead ? '#9a3412' : '#374151', 'font-weight': dead ? 600 : 400}));
+      svg.appendChild(txt(x + cw / 2, 80, dead ? '必败' : '必胜', {'text-anchor':'middle', 'font-size':10,
+        fill: dead ? '#9a3412' : '#6b7280'}));
+    }
+    svg.appendChild(el('line', {x1:16, y1:94, x2:644, y2:94, stroke:'#e6e8eb', 'stroke-width':1}));
+    // 左下：8 只能落到 5、6、7
+    function chip(cx, cy, s, hot) {
+      svg.appendChild(el('rect', {x:cx - 19, y:cy - 15, width:38, height:30, rx:5,
+        fill: hot ? FILL_O : FILL_B, stroke: hot ? ORANGE : BLUE, 'stroke-width':1.2}));
+      svg.appendChild(txt(cx, cy + 5, s, {'text-anchor':'middle', 'font-size':13,
+        fill: hot ? '#9a3412' : '#1e3a8a', 'font-weight':600}));
+    }
+    chip(72, 150, '8', true);
+    chip(232, 116, '7', false);
+    chip(232, 150, '6', false);
+    chip(232, 184, '5', false);
+    chip(420, 150, '4', true);
+    arrow(svg, 92, 148, 211, 118, ORANGE);
+    arrow(svg, 92, 150, 211, 150, ORANGE);
+    arrow(svg, 92, 152, 211, 182, ORANGE);
+    arrow(svg, 252, 116, 399, 146, BLUE);
+    arrow(svg, 252, 150, 399, 150, BLUE);
+    arrow(svg, 252, 184, 399, 154, BLUE);
+    svg.appendChild(txt(146, 100, '拿 1、2、3 颗', {'text-anchor':'middle', 'font-size':10.5, fill:'#9a3412'}));
+    svg.appendChild(txt(146, 210, '都掉出倍数', {'text-anchor':'middle', 'font-size':10.5, fill:'#9a3412'}));
+    svg.appendChild(txt(332, 100, '拿 3、2、1 颗', {'text-anchor':'middle', 'font-size':10.5, fill:'#1e3a8a'}));
+    svg.appendChild(txt(332, 210, '回到倍数', {'text-anchor':'middle', 'font-size':10.5, fill:'#1e3a8a'}));
+    svg.appendChild(txt(462, 148, '又回到必败态', {'font-size':10.5, fill:'#9a3412'}));
+    svg.appendChild(txt(16, 248, '0 也是 4 的倍数，谁被迫站在橙色格子上谁就输。', {'font-size':11.5, fill:'#6b7280'}));
+    host.appendChild(svg);
+  })();
+
+  // ===== 图 2：质数次方 mod 6 =====
+  (function(){
+    var host = document.getElementById('fig-mod6');
+    var W = 660, H = 250;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '可拿的质数次方（上排）与它们除以 6 的余数（下排）', {'font-size':12.5, fill:'#1f2328'}));
+    var nums = [1,2,3,4,5,7,8,9,11,13,16,17,19,23,25,27,29,31,32,37];
+    var cw = 29, gap = 1, x0 = 16;
+    for (var i = 0; i < nums.length; i++) {
+      var x = x0 + i * (cw + gap);
+      svg.appendChild(el('rect', {x:x, y:34, width:cw, height:26, rx:4, fill:'#ffffff', stroke:'#e6e8eb', 'stroke-width':1.1}));
+      svg.appendChild(txt(x + cw / 2, 52, String(nums[i]), {'text-anchor':'middle', 'font-size':11.5, fill:'#1f2328'}));
+      var r = nums[i] % 6;
+      svg.appendChild(el('rect', {x:x, y:62, width:cw, height:26, rx:4, fill:FILL_B, stroke:BLUE, 'stroke-width':1.1}));
+      svg.appendChild(txt(x + cw / 2, 80, String(r), {'text-anchor':'middle', 'font-size':11.5, fill:'#1e3a8a', 'font-weight':600}));
+    }
+    svg.appendChild(txt(16 + nums.length * (cw + gap) + 2, 80, '…', {'font-size':13, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 108, '余数落在 1 到 5 里，0 从来没出现过。', {'font-size':11.5, fill:'#9a3412'}));
+    svg.appendChild(el('line', {x1:16, y1:124, x2:644, y2:124, stroke:'#e6e8eb', 'stroke-width':1}));
+    svg.appendChild(txt(16, 146, '另一头：五个余数各自都能一步拿到', {'font-size':12.5, fill:'#1f2328'}));
+    var map = [['1', '1 = 2⁰'], ['2', '2'], ['3', '3'], ['4', '4 = 2²'], ['5', '5']];
+    for (var k = 0; k < map.length; k++) {
+      var bx = 16 + k * 126;
+      svg.appendChild(el('rect', {x:bx, y:162, width:112, height:34, rx:6, fill:FILL_O, stroke:ORANGE, 'stroke-width':1.2}));
+      svg.appendChild(txt(bx + 56, 176, '余 ' + map[k][0] + ' → 拿 ' + map[k][0] + ' 颗', {'text-anchor':'middle', 'font-size':11, fill:'#9a3412'}));
+      svg.appendChild(txt(bx + 56, 191, map[k][1], {'text-anchor':'middle', 'font-size':10.5, fill:'#b45309'}));
+    }
+    svg.appendChild(txt(16, 216, 'p 等于 2 时次方在 2 和 4 之间跳，p 等于 3 时余数恒为 3，p 大于 3 时余数恒为 1 或 5，三种情况都躲开了 0。', {'font-size':11, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 238, '所以一个不是 6 的倍数的局面，总能拿「n mod 6」颗走到 6 的倍数。', {'font-size':11, fill:'#6b7280'}));
+    host.appendChild(svg);
+  })();
+
+  // ===== 图 3：抓取率 =====
+  (function(){
+    var host = document.getElementById('fig-rate');
+    var W = 660, H = 250;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var data = [
+      ['巴什·写成 n % m', 13.66],
+      ['巴什·写成 n > m', 28.07],
+      ['质数次方·只认质数不认幂', 25.00],
+      ['质数次方·漏掉 p 的 0 次方', 33.33],
+      ['巴什·判反', 100.00],
+      ['质数次方·判反', 100.00]
+    ];
+    var x0 = 216, w = 300, y0 = 40, gap = 32;
+    for (var i = 0; i < data.length; i++) {
+      var y = y0 + i * gap;
+      svg.appendChild(txt(x0 - 12, y + 15, data[i][0], {'text-anchor':'end', 'font-size':11.5, fill:'#374151'}));
+      var bw = Math.max(1.5, w * data[i][1] / 100);
+      svg.appendChild(el('rect', {x:x0, y:y, width:bw, height:20, rx:4, fill:FILL_B, stroke:BLUE, 'stroke-width':1.1}));
+      svg.appendChild(txt(x0 + bw + 8, y + 15, data[i][1].toFixed(2) + '%', {'font-size':11.5, fill:'#1e3a8a'}));
+    }
+    svg.appendChild(txt(16, 236, '「只认质数」那一条把必败态整个挪到了 4 的倍数上，所以正好错 25% —— 四分之一。', {'font-size':11, fill:'#6b7280'}));
+    host.appendChild(svg);
+  })();
+
+  // ===== 演示 1：巴什博弈 =====
+  (function(){
+    var DATA = [
+      {n:10, m:3}, {n:8, m:3}, {n:7, m:2}, {n:15, m:4}, {n:18, m:5}
+    ];
+    var board = document.getElementById('bash-board');
+    var ansEl = document.getElementById('bash-answer');
+    var sel = document.getElementById('bash-ep');
+    var st = {ep:0, step:0, steps:[], win:''};
+    for (var i = 0; i < DATA.length; i++) {
+      var o = document.createElement('option');
+      o.value = i;
+      o.textContent = 'n = ' + DATA[i].n + '，m = ' + DATA[i].m;
+      sel.appendChild(o);
+    }
+    function build(ep) {
+      var d = DATA[ep], n = d.n, m = d.m;
+      var who = ['先手', '后手'];
+      var steps = [], cur = n, turn = 0;
+      steps.push({pos:cur, turn:turn, take:null,
+        note:'开局 ' + cur + ' 颗，' + who[turn] + '先走，' + (m + 1) + ' 的倍数是必败态'});
+      while (cur > 0) {
+        var dead = (cur % (m + 1)) === 0;
+        var take = dead ? 1 : (cur % (m + 1));
+        cur -= take;
+        turn = 1 - turn;
+        steps.push({pos:cur, turn:turn, take:take,
+          note: cur === 0 ? ('拿走最后一颗，' + who[1 - turn] + '胜')
+                          : (dead ? ('站在必败态上，随便拿 ' + take + ' 颗')
+                                  : ('拿 ' + take + ' 颗，把 ' + cur + ' 交给对手（' + (m + 1) + ' 的倍数）'))});
+      }
+      st.steps = steps;
+      st.win = (n % (m + 1)) !== 0 ? '先手胜' : '后手胜';
+    }
+    function render() {
+      var d = DATA[st.ep], n = d.n, m = d.m, s = st.steps;
+      var html = '<div class="cards">';
+      for (var i = 0; i <= n; i++) {
+        var dead = (i % (m + 1)) === 0;
+        html += '<span class="card ' + (dead ? 'dead' : '') + '">' + i + '<span class="idx">' + (dead ? '必败' : '必胜') + '</span></span>';
+      }
+      html += '</div><p class="viz-note">橙色格子是 ' + (m + 1) + ' 的倍数。</p>';
+      for (var k = 0; k < s.length; k++) {
+        var done = k < st.step, isCur = k === st.step - 1;
+        var cls = !done ? 'dim' : (isCur ? 'pick' : 'ok');
+        html += '<div class="rowline"><span class="k">' + (k === 0 ? '开局' : ('第 ' + k + ' 手')) + '</span>' +
+                '<span class="card ' + cls + '">剩 ' + s[k].pos + '</span>' +
+                '<span class="card ' + cls + '">' + (k === 0 ? '轮空' : (s[k].take === null ? '' : ('取 ' + s[k].take))) + '</span>' +
+                '<span class="fnote">' + s[k].note + '</span></div>';
+      }
+      board.innerHTML = html;
+      document.getElementById('bash-next').disabled = st.step >= s.length;
+      ansEl.textContent = st.step >= s.length ? ('答案：' + st.win) : '';
+    }
+    function reset() { build(st.ep); st.step = 1; render(); }
+    sel.addEventListener('change', function(){ st.ep = +sel.value; reset(); });
+    document.getElementById('bash-next').addEventListener('click', function(){
+      if (st.step < st.steps.length) st.step++;
+      render();
+    });
+    document.getElementById('bash-reset').addEventListener('click', reset);
+    reset();
+  })();
+
+  // ===== 演示 2：质数次方取石子 =====
+  (function(){
+    var DATA = [7, 11, 12, 19, 24, 36];
+    var board = document.getElementById('pp-board');
+    var ansEl = document.getElementById('pp-answer');
+    var sel = document.getElementById('pp-ep');
+    var st = {ep:0, step:0, steps:[], win:''};
+    for (var i = 0; i < DATA.length; i++) {
+      var o = document.createElement('option');
+      o.value = i;
+      o.textContent = 'n = ' + DATA[i];
+      sel.appendChild(o);
+    }
+    function build(ep) {
+      var n = DATA[ep];
+      var who = ['先手', '后手'];
+      var steps = [], cur = n, turn = 0;
+      steps.push({pos:cur, take:null, turn:turn, note:'开局 ' + cur + ' 颗，' + who[turn] + '先走，6 的倍数是必败态'});
+      while (cur > 0) {
+        var r = cur % 6;
+        var take = (r === 0) ? 1 : r;
+        cur -= take;
+        turn = 1 - turn;
+        steps.push({pos:cur, take:take, turn:turn,
+          note: cur === 0 ? ('拿走最后一颗，' + who[1 - turn] + '胜')
+                          : (r === 0 ? '局面是 6 的倍数，只能拿质数次方，怎么拿都会离开倍数'
+                                     : ('余数 ' + r + ' 是质数次方，拿 ' + take + ' 颗回到 ' + cur + '（6 的倍数）'))});
+      }
+      st.steps = steps;
+      st.win = (n % 6) !== 0 ? 'October wins!（先手胜）' : 'Roy wins!（后手胜）';
+    }
+    function render() {
+      var n = DATA[st.ep], s = st.steps;
+      var html = '<div class="cards">';
+      for (var i = 0; i <= 8 && i <= n; i++) {
+        var dead = (i % 6) === 0;
+        html += '<span class="card ' + (dead ? 'dead' : '') + '">' + i + '<span class="idx">' + (dead ? '必败' : '必胜') + '</span></span>';
+      }
+      html += '</div><p class="viz-note">橙色格子是 6 的倍数：0、6、12、18…</p>';
+      for (var k = 0; k < s.length; k++) {
+        var done = k < st.step, isCur = k === st.step - 1;
+        var cls = !done ? 'dim' : (isCur ? 'pick' : 'ok');
+        html += '<div class="rowline"><span class="k">' + (k === 0 ? '开局' : ('第 ' + k + ' 手')) + '</span>' +
+                '<span class="card ' + cls + '">剩 ' + s[k].pos + '</span>' +
+                '<span class="card ' + cls + '">' + (k === 0 ? '轮空' : ('取 ' + s[k].take)) + '</span>' +
+                '<span class="fnote">' + s[k].note + '</span></div>';
+      }
+      board.innerHTML = html;
+      document.getElementById('pp-next').disabled = st.step >= s.length;
+      ansEl.textContent = st.step >= s.length ? ('答案：' + st.win) : '';
+    }
+    function reset() { build(st.ep); st.step = 1; render(); }
+    sel.addEventListener('change', function(){ st.ep = +sel.value; reset(); });
+    document.getElementById('pp-next').addEventListener('click', function(){
+      if (st.step < st.steps.length) st.step++;
+      render();
+    });
+    document.getElementById('pp-reset').addEventListener('click', reset);
+    reset();
+  })();
+})();</script>
+</body>
+</html>
