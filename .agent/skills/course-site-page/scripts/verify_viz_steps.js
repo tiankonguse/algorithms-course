@@ -1,6 +1,7 @@
 // 逐帧点开交互演示，检查每一步的 svg 是否越界、内容是否为空
 const PORT = process.env.CDP_PORT || '9333';
-const SITE = process.env.SITE_DIR || '/Users/tiankonguse-m3/project/github/AIProject/algorithms-course';
+const os = require('os');
+const SITE = (process.env.SITE_DIR || '~/project/github/AIProject/algorithms-course').replace(/^~(?=\/|$)/, os.homedir());
 const BASE = SITE.replace(/\/$/, '') + '/algorithms/';
 
 const FRAME = `(function(){

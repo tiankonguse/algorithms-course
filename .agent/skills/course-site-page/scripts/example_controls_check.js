@@ -1,7 +1,9 @@
 // 004 课双演示分支自检：切算法/数组/形状到最后一帧，核对计数与 svg 越界
 const PORT = process.env.CDP_PORT || '9333';
+const os = require('os');
+const SITE = (process.env.SITE_DIR || '~/project/github/AIProject/algorithms-course').replace(/^~(?=\/|$)/, os.homedir());
+const BASE = SITE.replace(/\/$/, '') + '/algorithms/';
 const FILE = process.argv[2];
-const BASE = '/Users/tiankonguse-m3/project/github/AIProject/algorithms-course/algorithms/';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function cdp(ws) {
   let id = 0; const waiting = new Map(); const events = [];

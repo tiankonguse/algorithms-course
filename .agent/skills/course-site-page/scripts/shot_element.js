@@ -1,7 +1,8 @@
 // 截图：node shot.js <页面> <css选择器> <输出png> [索引]
 const fs = require('fs');
 const PORT = process.env.CDP_PORT || '9333';
-const SITE = process.env.SITE_DIR || '/Users/tiankonguse-m3/project/github/AIProject/algorithms-course';
+const os = require('os');
+const SITE = (process.env.SITE_DIR || '~/project/github/AIProject/algorithms-course').replace(/^~(?=\/|$)/, os.homedir());
 const BASE = SITE.replace(/\/$/, '') + '/algorithms/';
 
 async function cdp(ws) {

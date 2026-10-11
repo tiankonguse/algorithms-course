@@ -1,6 +1,7 @@
 // 演示分支测试：先执行一段设置脚本（如改滑块），再逐帧点下一步
 const PORT = process.env.CDP_PORT || '9333';
-const SITE = '/Users/tiankonguse-m3/project/github/AIProject/algorithms-course';
+const os = require('os');
+const SITE = (process.env.SITE_DIR || '~/project/github/AIProject/algorithms-course').replace(/^~(?=\/|$)/, os.homedir());
 const FILE = process.argv[2];
 const SETUP = process.argv[3] || '';
 

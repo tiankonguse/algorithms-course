@@ -1,6 +1,7 @@
 // 用 CDP 校验页面：JS 错误、figure/svg 数量、nav/toc/viz、svg 越界
 const PORT = process.env.CDP_PORT || '9333';
-const SITE = process.env.SITE_DIR || '/Users/tiankonguse-m3/project/github/AIProject/algorithms-course';
+const os = require('os');
+const SITE = (process.env.SITE_DIR || '~/project/github/AIProject/algorithms-course').replace(/^~(?=\/|$)/, os.homedir());
 const BASE = SITE.replace(/\/$/, '') + '/algorithms/';
 
 const CHECK = `(function(){

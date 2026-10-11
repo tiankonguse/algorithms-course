@@ -3,7 +3,8 @@
 //   node verify_home.js            # 期望值直接从 algorithms.json 读
 const fs = require('fs');
 const PORT = process.env.CDP_PORT || '9333';
-const SITE = process.env.SITE_DIR || '/Users/tiankonguse-m3/project/github/AIProject/algorithms-course';
+const os = require('os');
+const SITE = (process.env.SITE_DIR || '~/project/github/AIProject/algorithms-course').replace(/^~(?=\/|$)/, os.homedir());
 
 const json = JSON.parse(fs.readFileSync(SITE.replace(/\/$/, '') + '/assets/data/algorithms.json', 'utf8'));
 const expectCards = json.algorithms.length;

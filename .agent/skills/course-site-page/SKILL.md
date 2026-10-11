@@ -171,9 +171,9 @@ python3 -c "import json; from collections import Counter; d=json.load(open('asse
 ## 八、自检（必做）
 
 ```bash
-SKILL=/Users/tiankonguse-m3/.workbuddy/skills/course-site-page/scripts   # 老版 .agents/skills 路径已不存在
+SKILL=~/project/github/AIProject/algorithms-course/.agent/skills/course-site-page/scripts   # 技能随本仓库放在 .agent/skills 下
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-N=/Users/tiankonguse-m3/.workbuddy/binaries/node/versions/22.22.2-3/bin/node
+N=~/.workbuddy/binaries/node/versions/$(cat ~/.workbuddy/binaries/node/versions/current)/bin/node   # 版本号随机器，读 current 拼出
 
 # 一条命令里「起 + 用」：Chrome 随 Bash 命令结束被回收，跨命令连调试端口必 ECONNREFUSED
 rm -rf /tmp/cdpX; "$CHROME" --headless=new --no-sandbox --disable-gpu \
