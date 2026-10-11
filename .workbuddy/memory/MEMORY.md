@@ -88,6 +88,7 @@
 - **演示的控制按钮容器统一写 `class="viz-controls"`**：`shot_element.js` 按 `.viz-controls button` 索引点击，自造 `.btnrow` 会点空、截图停在初始帧。纯 HTML 演示（无 svg）`verify_viz_steps.js` 只打印「跳过 bbox」，排版要自己用 `shot_steps.js` 点 N 帧截图看。
 - **课程代码把树状数组上界写成 `n` 的题**（如 P4093 序列）：随机数据要把值限制在 ≤ n，否则 `more()` 静默不写、对拍假 MISMATCH。先怀疑数据再怀疑代码。
 - **开工先探残留**：`ls -dt /tmp/cppNNN /tmp/hlNNN` + `ls -lT algorithms/` + `find algorithms -newermt '<半小时前>'`。中断运行留下的东西往往很完整（抽好的 C++、编译好的 .bin、brute*.cpp、stress.py、/tmp/hlNNN/out 高亮片段、甚至写完一半的页面），能复用就复用，先跑 stress.py 看代码语义再补拼页面。写 json 前仍 `cp` 备份 + 重读确认。
+- **「下一课」编号与 json 末条目对不上 = 很可能已有失联会话做完**（088 实测）：先查 json 里有没有该课 id、对应页面 mtime 有多久。页面与 json 都已落盘、只差 prompt.md 与解锁的，按死锁规则清 owner 重抢锁，核对页面（结构 + 演示逐帧点到末帧 + 复跑它 /tmp/cppNNN 里的实验）后只补记进度，**不重写页面**；页面里若有明显死数据再顺手清掉并复跑探针确认。
 
 ## 视觉与目录（2026-10-06 第二批补充）
 - **pager 同一个 nav 同一行**：`shared.js` 每页底部渲染一个 `nav.pager`、内含两个 `.pager-item`（上一篇/下一篇）并排；只有单侧链接时单卡片（下一篇靠右）。别把 pager 写成两个 nav（会叠成两行）。
