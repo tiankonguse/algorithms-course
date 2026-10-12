@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多线程汇总与一个不会重复的 id</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>多线程汇总与一个不会重复的 id</h1>
+      <p class="intro">一个装 20 亿个字符串的列表，每个串是若干单词用逗号连起来的，要并行切词、统计每个单词一共出现多少次，最后交出一张汇总表，机器允许开 100 个线程。另一道题看起来毫无关系：设计一个每秒发几百万亿个 id、并且理论上绝不允许重复的系统。两道题的答案都落在一个词上：先各自记账，最后对一次总账。</p>
+
+      <h2>零、加锁的直觉是错的</h2>
+      <p>20 亿个字符串，每个最长 1000 字节，串与串之间互不相干，切词这件事天然可以拆开并行。最顺手的写法是开一堆线程，每个线程读到单词就锁住那张公共的统计表加一。</p>
+      <p>跑一遍就知道这个直觉错得有多离谱。200 万行数据（约 80MB、2000 个不同的词、1500 万个词次），本机 12 核：</p>
+      <table class="complexity">
+        <tr><th>线程数</th><th>全局一把锁</th><th>各线程局部表再合并</th></tr>
+        <tr><td>1</td><td>434.2 ms</td><td>374.4 ms</td></tr>
+        <tr><td>2</td><td>877.0 ms</td><td>198.5 ms</td></tr>
+        <tr><td>4</td><td>1245.9 ms</td><td>106.2 ms</td></tr>
+        <tr><td>8</td><td>1477.1 ms</td><td>72.2 ms</td></tr>
+        <tr><td>12</td><td>2056.9 ms</td><td>73.6 ms</td></tr>
+      </table>
+      <p>全局锁那一列，线程越多越慢：12 个线程比单线程慢 4.7 倍。线程没在干活，全在排队等锁，而且互相把对方的缓存行踢来踢去，切换开销比干活本身还大。局部表那一列是正常的：12 个线程比单线程快 5.1 倍，8 个线程时到了拐点。</p>
+      <p>这两张表的差别只有一处：锁出现在什么位置。全局锁是「每处理一个单词就锁一次」，局部表是「全程不锁，最后合并时锁一次」。</p>
+      <figure class="fig" id="fig-lock">
+        <figcaption>图 1　同样 12 个线程：一把全局锁时线程互相等，耗时随线程数上升；各写各的局部表时才能看到真正的加速</figcaption>
+      </figure>
+
+      <h2>一、各写各的，最后对账</h2>
+      <p>把共享的那张表拆成 T 份，线程 t 只碰自己那份。统计阶段一个锁都不用，等所有线程跑完，主线程把 T 份表合并成一份。</p>
+    <pre class="code"><span class="cm">// 每个线程先写自己的表，最后一个人汇总：锁只在合并时出现</span>
+    vector&lt;unordered_map&lt;<span class="kw">string</span>, <span class="kw">ll</span>&gt;&gt; <span class="fn">local</span>(T);
+    vector&lt;thread&gt; th;
+    <span class="kw">for</span> (<span class="kw">int</span> t = 0; t &lt; T; t++) {
+        th.emplace_back([&amp;, t] {
+            <span class="kw">for</span> (<span class="kw">ll</span> i = t; i &lt; n; i += T) {       <span class="cm">// 步长 T 取行，负载天然均匀</span>
+                <span class="kw">const</span> <span class="kw">string</span>&amp; s = data[i];
+                <span class="kw">for</span> (size_t p = 0; p &lt; s.size(); ) {
+                    size_t q = s.find(',', p);
+                    <span class="kw">if</span> (q == <span class="kw">string</span>::npos) q = s.size();
+                    local[t][s.substr(p, q - p)]++;
+                    p = q + 1;
+                }
+            }
+        });
+    }
+    <span class="kw">for</span> (auto&amp; x : th) x.join();
+    unordered_map&lt;<span class="kw">string</span>, <span class="kw">ll</span>&gt; all;
+    <span class="kw">for</span> (<span class="kw">int</span> t = 0; t &lt; T; t++)
+        <span class="kw">for</span> (auto&amp; p : local[t]) all[p.first] += p.second;</pre>
+      <p>取行的时候用步长 T 而不是把列表切成 T 段，是因为每行的长度差别很大（题目里最长 1000 字节、最短几个字节）。按段切会让某个线程抽到一堆长串，别的线程早早干完闲着；按步长取行，每个线程拿到的数据量天然均匀。这一步的成本是缓存局部性变差，实测下来还是划算的。</p>
+      <p>合并阶段是串行的，但它的工作量只跟「不同词的数量」有关，跟数据条数无关。2000 个不同的词，12 份表合并 24000 次加法，几毫秒的事。</p>
+
+      <h2>二、局部表的内存会被放大</h2>
+      <p>局部表不是白拿的。串行版本只需要一份表，并行版本要 T 份，而且因为每份都在处理不同的数据段，几乎每个词都会出现在每一份表里。</p>
+      <p>用 400 万行、100 万词的词典量一遍：</p>
+      <table class="complexity">
+        <tr><th>线程数 T</th><th>所有局部表加起来有多少条</th><th>表的内存粗估</th></tr>
+        <tr><td>1</td><td>98.2 万</td><td>47 MB</td></tr>
+        <tr><td>4</td><td>252.8 万</td><td>121 MB</td></tr>
+        <tr><td>8</td><td>314.6 万</td><td>151 MB</td></tr>
+        <tr><td>12</td><td>340.1 万</td><td>163 MB</td></tr>
+      </table>
+      <p>串行版本只需要 100 万条，12 个线程要 340 万条，3.4 倍。增长的幅度比 T 小（不是 12 倍），因为线程各自处理的数据段不够长，很多稀有词根本没在任何一段里出现过。但趋势是明确的：线程越多，内存越涨，涨到后来被内存卡住的概率比被 CPU 卡住还大。</p>
+      <p>这也是「100 个线程」这个数字需要打折的地方。真要开到 100 个线程，表的内存就是 100 份起步，先得确认机器扛得住。8 核机器上开 100 个线程，能同时跑的只有 8 个，剩下的在等 CPU，除了把内存翻 10 倍不会有别的效果。</p>
+      <figure class="fig" id="fig-scale">
+        <figcaption>图 2　加速比不是一条直线：12 核机器上 8 个线程到拐点，再往上加线程，局部表的内存还在涨而时间不再降</figcaption>
+      </figure>
+
+      <h2>三、每秒几百万亿个 id</h2>
+      <p>第二道题换个方向：全球使用、每秒要发几百万亿个 id（10<sup>14</sup> 量级），要求理论上绝不允许出现重复。系统只管源源不断地发 id，不需要维护任何关系。</p>
+      <p>先算 10<sup>14</sup> 是什么概念。一天有 86400 秒，这一天就要发 8.64×10<sup>18</sup> 个 id。任何「发完查一下有没有重复」的做法都行不通，查重本身就要维护一个 8.64×10<sup>18</sup> 条记录的集合，比 id 本身还大。</p>
+      <p>也先别急着上随机数。随机 id 不重复靠的是「空间大到撞不上」，那就得算清楚多大的空间才够。m 个 id 落进 b 位的空间，至少撞一次的概率约 1 − e<sup>−m²/2^(b+1)</sup>。把 m 代成一天的量：</p>
+      <table class="complexity">
+        <tr><th>id 位数</th><th>一天发 8.64×10<sup>18</sup> 个，撞上的概率</th></tr>
+        <tr><td>64 位</td><td>1.000（数学上必然）</td></tr>
+        <tr><td>96 位</td><td>1.000</td></tr>
+        <tr><td>122 位（UUID v4 的随机部分）</td><td>0.9991</td></tr>
+        <tr><td>128 位</td><td>0.1039</td></tr>
+        <tr><td>256 位</td><td>0.000</td></tr>
+      </table>
+      <p>结论很刺眼：题面给的并发量下，128 位的纯随机 id 一天之内有 10% 的概率撞上一次，而 UUID v4 的 122 位随机部分几乎是必然要撞。日常系统里 UUID 够用，是因为一天发的量比这少好几个数量级；把并发提到 10<sup>14</sup>，「随机够大所以不会重」这句话就不再成立了。</p>
+      <p>这套公式可以拿缩小版验证：48 位的空间里生成 1 亿个随机数，按公式应该撞 18 次，实测撞了 16 次，量级吻合。</p>
+      <h2>四、用结构代替运气</h2>
+      <p>真正能保证「绝不重复」的 id 不是随机出来的，是拼出来的。把 128 位分成三段：</p>
+      <p>1）高 64 位放时间戳，精度到纳秒。2<sup>64</sup> 纳秒约 584 年，够用很久。</p>
+      <p>2）中间 32 位放机器号，能编 42.9 亿台机器。</p>
+      <p>3）低 32 位放这台机器在当前时刻的序号，每台机器每个纳秒内最多发 42.9 亿个。</p>
+      <p>这三段拼起来，唯一性是可以推出来的，不依赖概率：两台机器的机器号不同，id 一定不同；同一台机器在同一纳秒内，序号不同，id 也不同；同一台机器跨了纳秒，时间戳不同。想让 id 重复，就得让这三段同时相同，而这三段分别被编号、时钟和计数器管着，都撞不上。</p>
+    <pre class="code"><span class="cm">// id = 时间戳(64 位) + 机器号(32 位) + 机器内序号(32 位)，拼成 128 位</span>
+    <span class="cm">// 时间戳不同 → 不会重；时间戳相同而机器号不同 → 也不会重；两者都相同才轮到序号保证</span>
+    pair&lt;ull, ull&gt; <span class="fn">nextId</span>(ull machine, ull&amp; seq) {
+        ull ts = chrono::duration_cast&lt;chrono::nanoseconds&gt;(
+                     chrono::system_clock::now().time_since_epoch()).count();
+        ull hi = ts;                                            <span class="cm">// 高 64 位放时间戳</span>
+        ull lo = ((machine &amp; 0xffffffffULL) &lt;&lt; 32)              <span class="cm">// 低 32 位放机器号</span>
+               | (seq++ &amp; 0xffffffffULL);                       <span class="cm">// 再低 32 位放序号</span>
+        <span class="kw">return</span> {hi, lo};
+    }
+
+    <span class="cm">// 号段模式：每台机器先向中心领一段 [base, base+step)，本地发完再领下一段</span>
+    ull alloc() {
+        <span class="kw">if</span> (cur == limit) {                         <span class="cm">// 本段发完了</span>
+            lock_guard&lt;mutex&gt; <span class="fn">lk</span>(mtx);
+            base = nextBase;                        <span class="cm">// 中心只维护一个「下一段从哪开始」</span>
+            nextBase += step;
+            cur = base; limit = base + step;
+        }
+        <span class="kw">return</span> cur++;
+    }</pre>
+      <p>剩下的问题只有吞吐。实测单机生成 128 位 id（只写进内存，不含落盘和网络）是 2.19 亿个每秒。按这个速度，每秒 10<sup>14</sup> 个需要 46 万台机器。这个数字不算离谱，但它说明「一个不重复的 id」这件事的可行性完全建立在水平扩展上，没有哪一台机器能单独扛住。</p>
+      <p>还有一种更省的做法叫号段。每台机器不自己拼时间戳，而是先向中心申请一段连续编号 [base, base + step)，本地从这段里挨个发，发完再申请下一段。中心只维护一个「下一段从哪开始」的变量，每秒被访问的次数等于机器的数量而不是 id 的数量。号段用完了继续领，天然不会有空洞以外的重复。</p>
+      <figure class="fig" id="fig-id">
+        <figcaption>图 3　128 位的三段：时间戳管跨纳秒，机器号管跨机器，序号管同一纳秒内的并发，唯一性由三段的编号规则保证</figcaption>
+      </figure>
+
+      <div class="viz" id="viz-thread">
+        <p class="viz-title">并发实验台</p>
+        <p class="viz-note">数据是上面那张 200 万行测试的实测值。切换线程数，看两种写法的时间与加速比怎么变。</p>
+        <div id="th-board"></div>
+        <p class="viz-note" id="th-note"></p>
+        <p class="viz-answer" id="th-answer"></p>
+        <div class="viz-controls">
+          <label>线程数 <select id="th-t">
+            <option value="0">1</option>
+            <option value="1">2</option>
+            <option value="2">4</option>
+            <option value="3" selected>8</option>
+            <option value="4">12</option>
+          </select></label>
+          <button id="th-toggle">切换写法</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>空间</th></tr>
+        <tr><td>全局锁逐词加一</td><td>O(N) 次加锁，实际被锁竞争拖慢</td><td>O(不同词数)</td></tr>
+        <tr><td>局部表 + 合并</td><td>O(N/T) 每线程 + O(T·V) 合并</td><td>O(T·V)，V 是不同词数</td></tr>
+        <tr><td>生成一个结构化 id</td><td>O(1)</td><td>O(1)</td></tr>
+        <tr><td>号段模式发一个 id</td><td>O(1) 均摊，每 step 个才访问一次中心</td><td>O(1)</td></tr>
+      </table>
+      <p>局部表方案的两项要一起看。并行部分按 T 分掉，是 O(N/T)；合并部分跟不同词的个数 V 有关，是 O(T·V)。V 很小（比如这里 2000 个词）时合并可以忽略；V 涨到几千万时，合并本身就是主要开销，届时要改成并行合并或者分层合并。</p>
+      <p>空间那一项 O(T·V) 是并行统计的真实成本。串行版本的 O(V) 看着更省，但它在时间上给不出任何东西。</p>
+
+      <h2>总结</h2>
+      <p>并行统计的关键不在线程模型，而在「锁放在哪」。每个词都锁一次的写法，线程越多越慢，12 个线程比单线程慢 4.7 倍；把共享表拆成 T 份、最后合并一次的写法，12 个线程拿到 5.1 倍加速，拐点在 8 线程附近。局部表的代价是内存涨到 3.4 倍左右，线程数不能凭「机器允许开 100 个」就往上堆。</p>
+      <p>id 那半页的关键不在生成速度，而在唯一性的来源。并发到每秒百万亿时，128 位纯随机 id 一天有 10% 的概率撞上，122 位的 UUID v4 几乎必然要撞，随机这条路直接出局。改用「时间戳 + 机器号 + 序号」拼出来的结构化 id，唯一性可以逐段推出来，不靠概率；单机 2.19 亿个每秒，撑起 10<sup>14</sup> 需要 46 万台机器，靠号段模式把中心点从「每个 id 一次」降到「每台机器一段一次」。</p>
+      <p>两道题共用一句话：共享的东西越少，能拆开的部分就越多。统计里共享的是那张表，id 里共享的是那个「下一个可用编号」的计数器。</p>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解107【扩展】大厂面试中经常漫聊的有趣算法问题</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>Wikipedia</td><td>Birthday problem，碰撞概率公式的来源</td><td><a href="https://en.wikipedia.org/wiki/Birthday_problem" target="_blank">en.wikipedia.org/wiki/Birthday_problem</a></td></tr>
+        <tr><td>Wikipedia</td><td>Snowflake ID，结构化 id 与号段方案的常见形态</td><td><a href="https://en.wikipedia.org/wiki/Snowflake_ID" target="_blank">en.wikipedia.org/wiki/Snowflake_ID</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function ln(x1,y1,x2,y2,st,dash,wd){ return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+st+'" stroke-width="'+(wd||1)+'" stroke-dasharray="'+(dash||'none')+'"/>'; }
+
+// ===== 图 1：两条曲线 =====
+(function(){
+  var host=document.getElementById('fig-lock'); if(!host) return;
+  var W=660, HH=240, b='';
+  var x0=64,y0=180,pw=520,ph=130;
+  var TS=[1,2,4,8,12], A=[434.2,877.0,1245.9,1477.1,2056.9], B=[374.4,198.5,106.2,72.2,73.6];
+  var mx=2200;
+  b+=txt(20,20,'处理同样 200 万行数据，两种写法的耗时（12 核）',{'an':'start','fs':12.5,fill:'#1f2328'});
+  b+=ln(x0,y0,x0+pw,y0,'#cbd5e1');
+  b+=ln(x0,36,x0,y0,'#cbd5e1');
+  for(var p=0;p<=4;p++){
+    var y=y0-ph*p/4;
+    b+=ln(x0-4,y,x0,y,'#cbd5e1');
+    b+=txt(x0-8,y+4,(p*550)+'',{'an':'end','fs':10,fill:'#94a3b8'});
+  }
+  b+=txt(x0-52,48,'毫秒',{'an':'start','fs':10.5,fill:'#94a3b8'});
+  function px(i){ return x0+pw*i/(TS.length-1); }
+  function py(v){ return y0-v/mx*ph; }
+  var d1='', d2='';
+  for(var i=0;i<TS.length;i++){
+    d1+=(i?' L':'M')+px(i)+' '+py(A[i]);
+    d2+=(i?' L':'M')+px(i)+' '+py(B[i]);
+  }
+  b+='<path d="'+d1+'" fill="none" stroke="#ea580c" stroke-width="2.5"/>';
+  b+='<path d="'+d2+'" fill="none" stroke="#2563eb" stroke-width="2.5"/>';
+  for(var i=0;i<TS.length;i++){
+    b+='<circle cx="'+px(i)+'" cy="'+py(A[i])+'" r="3.5" fill="#ea580c"/>';
+    b+='<circle cx="'+px(i)+'" cy="'+py(B[i])+'" r="3.5" fill="#2563eb"/>';
+    b+=txt(px(i),y0+16,TS[i]+'',{'fs':11,fill:'#64748b'});
+  }
+  b+=txt(x0+pw/2,y0+34,'线程数',{'fs':11,fill:'#94a3b8'});
+  b+=txt(px(4)-6,py(A[4])-10,'一把全局锁 2065ms',{'an':'end','fs':11,fill:'#ea580c'});
+  b+=txt(px(4)-6,py(B[4])-10,'局部表 74ms',{'an':'end','fs':11,fill:'#2563eb'});
+  b+=ln(px(3),y0-6,px(3),y0,'#9aa0a6','3 3');
+  b+=txt(px(3),y0-14,'8 线程是拐点',{'fs':10.5,fill:'#9aa0a6'});
+  b+=txt(20,HH-8,'横轴是线程数，纵轴是 200 万行数据的处理耗时：加锁那一列随线程数一路上升，局部表那一列先降后平',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 图 2：加速比 =====
+(function(){
+  var host=document.getElementById('fig-scale'); if(!host) return;
+  var W=660, HH=200, b='';
+  var x0=64,y0=152,pw=520,ph=104;
+  var TS=[1,2,4,8,12], SP=[1.00,1.89,3.53,5.19,5.09];
+  b+=txt(20,20,'局部表写法的加速比（以单线程 374ms 为基准）',{'an':'start','fs':12.5,fill:'#1f2328'});
+  b+=ln(x0,y0,x0+pw,y0,'#cbd5e1');
+  b+=ln(x0,36,x0,y0,'#cbd5e1');
+  for(var p=0;p<=3;p++){
+    var y=y0-ph*p/3;
+    b+=ln(x0-4,y,x0,y,'#cbd5e1');
+    b+=txt(x0-8,y+4,(p*4)+'x',{'an':'end','fs':10,fill:'#94a3b8'});
+  }
+  function px(i){ return x0+pw*i/(TS.length-1); }
+  function py(v){ return y0-v/12*ph; }
+  var d='';
+  for(var i=0;i<TS.length;i++) d+=(i?' L':'M')+px(i)+' '+py(SP[i]);
+  b+='<path d="'+d+'" fill="none" stroke="#2563eb" stroke-width="2.5"/>';
+  var di='';
+  for(var i=0;i<TS.length;i++) di+=(i?' L':'M')+px(i)+' '+py(TS[i]);
+  b+='<path d="'+di+'" fill="none" stroke="#9aa0a6" stroke-width="1.8" stroke-dasharray="5 3"/>';
+  for(var i=0;i<TS.length;i++){
+    b+='<circle cx="'+px(i)+'" cy="'+py(SP[i])+'" r="3.5" fill="#2563eb"/>';
+    b+=txt(px(i),y0+16,TS[i]+'',{'fs':11,fill:'#64748b'});
+    b+=txt(px(i),py(SP[i])-8,SP[i].toFixed(2),{'fs':10.5,fill:'#1d4ed8'});
+  }
+  b+=txt(px(4)-2,py(TS[4])-8,'理想线性 12 倍',{'an':'end','fs':10.5,fill:'#9aa0a6'});
+  b+=txt(20,HH-8,'12 核机器上的实测值：8 线程到 5.19 倍，离理想线性还差一半，再多加线程只剩内存开销',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 图 3：128 位分段 =====
+(function(){
+  var host=document.getElementById('fig-id'); if(!host) return;
+  var W=660, HH=210, b='';
+  b+=txt(20,20,'128 位 id 的三段',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var y=44, x0=24, w=612;
+  var segs=[[0,0.5,'时间戳 64 位','#dbeafe','#93c5fd','#1d4ed8'],
+            [0.5,0.75,'机器号 32 位','#ffedd5','#fdba74','#9a3412'],
+            [0.75,1,'序号 32 位','#eef4ff','#cbd5e1','#334155']];
+  for(var i=0;i<segs.length;i++){
+    var s=segs[i];
+    var sx=x0+w*s[0], sw=w*(s[1]-s[0]);
+    b+='<rect x="'+sx+'" y="'+y+'" width="'+(sw-4)+'" height="38" rx="4" fill="'+s[3]+'" stroke="'+s[4]+'"/>';
+    b+=txt(sx+(sw-4)/2,y+24,s[2],{'fs':12,fill:s[5]});
+  }
+  b+=txt(x0,y+60,'2^64 纳秒 ≈ 584 年',{'an':'start','fs':11,fill:'#64748b'});
+  b+=txt(x0+w*0.5+6,y+60,'42.9 亿台机器',{'an':'start','fs':11,fill:'#64748b'});
+  b+=txt(x0+w*0.75+6,y+60,'每纳秒 42.9 亿个',{'an':'start','fs':11,fill:'#64748b'});
+  var y2=124;
+  b+=txt(20,y2,'唯一性怎么推出来',{'an':'start','fs':12,fill:'#1f2328'});
+  var lines=['机器号不同 → id 一定不同，两台机器各发各的',
+             '机器号相同、时间戳不同 → id 一定不同，时钟往前走',
+             '机器号与时间戳都相同 → 只剩同一纳秒内的并发，序号自增保证不同'];
+  for(var i=0;i<lines.length;i++) b+=txt(28,y2+22+i*18,(i+1)+'）'+lines[i],{'an':'start','fs':11,fill:'#475569'});
+  b+=txt(20,HH-8,'三段各管一件事，没有一段依赖「随机得够不够大」',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 演示：并发实验台 =====
+(function(){
+  var board=document.getElementById('th-board');
+  var noteEl=document.getElementById('th-note');
+  var ansEl=document.getElementById('th-answer');
+  var selT=document.getElementById('th-t');
+  var TS=[1,2,4,8,12], A=[434.2,877.0,1245.9,1477.1,2056.9], B=[374.4,198.5,106.2,72.2,73.6];
+  var mode='B';
+  function draw(){
+    var i=Number(selT.value);
+    var mx=2200, W=660, HH=190, x0=52, y0=140, ph=96, bw=64, gap=18;
+    var b='<svg viewBox="0 0 '+W+' '+HH+'" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    b+='<text x="16" y="16" font-size="12.5" fill="#1f2328">200 万行数据的处理耗时（实测，12 核机器）</text>';
+    b+='<line x1="'+x0+'" y1="'+y0+'" x2="644" y2="'+y0+'" stroke="#cbd5e1"/>';
+    for(var k=0;k<TS.length;k++){
+      var x=x0+k*(bw+gap);
+      var v=(mode==='A')?A[k]:B[k];
+      var hgt=v/mx*ph;
+      var col=(mode==='A')?'#ea580c':'#2563eb';
+      b+='<rect x="'+x+'" y="'+(y0-hgt)+'" width="'+bw+'" height="'+hgt+'" rx="3" fill="'+col+'" opacity="'+(k===i?1:0.35)+'"/>';
+      b+='<text x="'+(x+bw/2)+'" y="'+(y0-hgt-6)+'" font-size="10.5" text-anchor="middle" fill="'+(k===i?col:'#94a3b8')+'">'+v.toFixed(0)+'</text>';
+      b+='<text x="'+(x+bw/2)+'" y="'+(y0+16)+'" font-size="11" text-anchor="middle" fill="'+(k===i?'#1f2937':'#94a3b8')+'">'+TS[k]+' 线程</text>';
+    }
+    b+='<text x="16" y="'+(HH-8)+'" font-size="11" fill="#94a3b8">'+(mode==='A'?'橙色：每个词都锁一次公共表':'蓝色：各线程写自己的局部表，最后合并')+'</text>';
+    b+='</svg>';
+    board.innerHTML=b;
+    var v=(mode==='A')?A[i]:B[i];
+    noteEl.textContent='当前：'+(mode==='A'?'全局锁':'局部表')+'，'+TS[i]+' 个线程，实测 '+v.toFixed(1)+' ms。';
+    if(mode==='A'){
+      ansEl.textContent=TS[i]===1?'单线程 434.2 ms，这是加锁写法的基准。':'相对单线程慢了 '+(v/434.2).toFixed(2)+' 倍，线程都耗在等锁和缓存行来回踢上。';
+    } else {
+      var sp=374.4/v;
+      ansEl.textContent=TS[i]===1?'单线程 374.4 ms。':'加速比 '+sp.toFixed(2)+' 倍（理想线性是 '+TS[i]+' 倍），8 线程 5.19 倍是本机的拐点。';
+    }
+  }
+  selT.addEventListener('change', draw);
+  document.getElementById('th-toggle').addEventListener('click', function(){ mode=(mode==='A'?'B':'A'); draw(); });
+  draw();
+})();
+})();</script>
+</body>
+</html>

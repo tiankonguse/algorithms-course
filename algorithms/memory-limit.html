@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>内存限制：40 亿个数怎么数</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+table.cell { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+table.cell td, table.cell th { border: 1px solid #e6e8eb; padding: 4px 8px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+table.cell td.hit { background: #dbeafe; color: #1d4ed8; font-weight: 600; }
+table.cell td.mid { background: #ffedd5; color: #9a3412; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>内存限制：40 亿个数怎么数</h1>
+      <p class="intro">32 位无符号整数的范围是 0 到 4294967295，一共 42.9 亿个格子。文件里正好装着 40 亿个这样的数，内存只有 1GB，甚至只给 3KB。要回答的问题有三种：哪些数没出现过、哪些数恰好出现了两次、第 20 亿小的数是几。答案全都建立在同一件事上：数一数落在某一段里的数有多少个，和这一段的格子数比一比。</p>
+
+      <h2>零、先把账算出来</h2>
+      <p>40 亿个数，每个 4 字节，文件就是 16GB。无论问什么，都必须一遍遍地扫这个文件，因为谁也装不下它。</p>
+      <p>能利用的只有值域和个数之间的差距。值域 2<sup>32</sup> 有 4294967296 个格子，文件里只有 4000000000 个数，中间差着 2.9 亿。就算这 40 亿个数互不相同，也一定至少有 2.9 亿个格子空着。这条鸽巢原理是整个问题的地基。</p>
+      <p>三种问法对应三种预算：</p>
+      <p>1）谁没出现过：每个数只需要回答「出现过没有」，一个二进制位够。</p>
+      <p>2）谁恰好出现两次：每个数要区分「没出现 / 一次 / 两次 / 更多」，两个二进制位够。</p>
+      <p>3）找一个没出现过的数、或者求上中位数，内存小到只有 3KB 甚至几个变量。</p>
+      <figure class="fig" id="fig-bitmap">
+        <figcaption>图 1　同一个值域，1 bit 记「出现过没有」只占 512MB；要数次数就得 2 bit，账立刻变成 1024MB</figcaption>
+      </figure>
+
+      <h2>一、1GB 内存，谁没出现过</h2>
+      <p>开一个 2<sup>32</sup> 位的位图，即 512MB。扫文件，每读到一个数就把对应位置 1。扫完之后再扫一遍位图，位为 0 的位置就是没出现过的数。</p>
+    <pre class="code"><span class="cm">// 40 亿个 32 位整数，1 bit 一个格子就能记下谁出现过</span>
+    <span class="cm">// 值域 2^32 → 位图 2^32 bit = 512 MB</span>
+    vector&lt;ull&gt; <span class="fn">bit</span>(1ULL &lt;&lt; 26, 0);          <span class="cm">// 2^32 / 64 个字</span>
+    <span class="kw">for</span> (<span class="kw">ll</span> i = 0; i &lt; n; i++) {             <span class="cm">// 一遍扫完文件</span>
+        u32 x = readNext();
+        bit[x &gt;&gt; 6] |= 1ULL &lt;&lt; (x &amp; 63);     <span class="cm">// 第 x 号格子置 1</span>
+    }
+    <span class="kw">for</span> (<span class="kw">ll</span> w = 0; w &lt; (1LL &lt;&lt; 26); w++) {   <span class="cm">// 扫位图，0 就是没出现过的数</span>
+        ull miss = ~bit[w];
+        <span class="kw">while</span> (miss) {
+            <span class="kw">int</span> b = __builtin_ctzll(miss);
+            printf("%llu\n", (w &lt;&lt; 6) + b);
+            miss &amp;= miss - 1;
+        }
+    }</pre>
+      <p>内存占用正好是 2<sup>32</sup> / 8 = 536870912 字节 = 512MB，1GB 的预算用掉一半，剩下一半留给读入缓冲和程序本身，很宽裕。实测在 2<sup>28</sup> 的值域上跑一遍，32MB 的位图、2.68 亿个互不相同的数、只缺 1000 个，1.04 秒扫完，缺失数一个不多一个不少。</p>
+      <p>这道题问的是「所有」没出现过的数，所以位图必须开满。如果只问「一个」，第三节的办法能把这个 512MB 砍到几 KB。</p>
+
+      <h2>二、谁恰好出现两次：2 bit 装不下</h2>
+      <p>把位图升级成 2 bit，一个数占两个二进制位：00 没出现，01 出现一次，10 出现两次，11 出现三次及以上（到 11 就不再往上加了）。</p>
+      <p>算一遍内存：2<sup>32</sup> × 2 bit = 2<sup>33</sup> bit = 1073741824 字节 = 1024MB。题目给的 1GB 是 1000MB，1024 比 1000 多出 24MB。就多这么一点，方案就得改。</p>
+      <p>出路是把值域劈成两半。第一趟只看 0 到 2<sup>31</sup>−1 这一段，用一张 512MB 的 2 bit 表；第二趟只看 2<sup>31</sup> 到 2<sup>32</sup>−1 这一段，复用同一张表。代价是文件要读两遍，换来的是内存稳稳落在 512MB。</p>
+      <p>这种「差一点就装下」的局面在大数题里很常见。面试里把这句话说出来，等于把「我知道 1GB 到底是多少字节、也知道这张表到底多大」摆在了桌面上，比一句「用 2 个 bit 就行」结实得多。</p>
+      <p>2 bit 计数的正确性可以用一份缩小版数据验证：值域 2<sup>28</sup> 上让每个数随机出现 0 到 3 次，总共 4.03 亿个数，扫出来的「恰好两次」有 67109606 个，理论值 V/4 = 67108864 个，差 742 个，相对误差 0.001%。</p>
+
+      <h2>三、只有 3KB：分桶再二分</h2>
+      <p>内存压到 3KB，位图彻底没了。这时候换个问法：不问「哪个数没出现」，只问「找一个没出现过的数」。</p>
+      <p>路子还是鸽巢原理，只是把「格子」的粒度放大。3KB = 3072 字节 = 768 个 32 位整数，正好当 768 个计数器用。把 2<sup>32</sup> 的值域切成 768 段，每段 5592406 个可能的数。扫一遍文件，只统计每一段里落了多少个数。</p>
+      <p>扫完之后检查这 768 个计数器：某一段里的实际个数如果小于 5592406，这一段里必然有空洞。挑出第一段满足条件的位置，答案就落在这一段内部。</p>
+      <p>接下来在段内二分。段的长度是 5592406，log<sub>2</sub> 约 22.4，向上取整 23 轮二分就能把区间压到 1 个数。加上定位那 1 遍，总共扫 24 遍文件。</p>
+    <pre class="code"><span class="cm">// 内存只有几个变量：二分值域，每轮重新扫一遍文件，只带一个计数器</span>
+    <span class="cm">// 区间 [lo, hi] 里若有 cnt 个数，而这段值域有 room 个数，cnt &lt; room 就说明这段必有空位</span>
+    ull lo = 0, hi = (1ULL &lt;&lt; 32) - 1;
+    <span class="kw">while</span> (lo &lt; hi) {
+        ull mid = (lo + hi) &gt;&gt; 1;
+        <span class="kw">ll</span> cnt = 0;
+        rewindFile();                        <span class="cm">// 文件重新从头读</span>
+        <span class="kw">for</span> (<span class="kw">ll</span> i = 0; i &lt; n; i++) {
+            u32 x = readNext();
+            <span class="kw">if</span> (x &gt;= lo &amp;&amp; x &lt;= mid) cnt++;
+        }
+        <span class="kw">if</span> ((ull)cnt &lt; mid - lo + 1) hi = mid;   <span class="cm">// 左半段有空洞</span>
+        <span class="kw">else</span> lo = mid + 1;                       <span class="cm">// 左半段是满的，空洞在右边</span>
+    }
+    printf("%llu 没有出现过\n", lo);</pre>
+      <p>二分那一步的判据只有一行：区间 [lo, mid] 里有 cnt 个数，这段值域有 (mid − lo + 1) 个格子，cnt 小于格子数就说明左半边有空洞，往左收缩；否则左半边是满的，空洞在右边。</p>
+      <p>实测（值域 2<sup>28</sup>、268434456 个数、只缺 1000 个）：768 个桶每桶覆盖 349526 个值，第一遍定位到第 0 桶，桶内二分 18 轮，一共 20 遍扫完，找到 95661，验证下来这个数确实没出现过。</p>
+      <p>对照一下不分桶的裸二分：同样这份数据要扫 28 遍。多出来的 8 遍相当于 8 倍的数据读取量。值域换成真实的 2<sup>32</sup> 时，3KB 版本是 1 + 23 = 24 遍，裸二分是 32 遍，差额还是 8 遍，按 16GB 的文件算就是 128GB 的读盘量。</p>
+      <figure class="fig" id="fig-bucket">
+        <figcaption>图 2　3KB 换来的加速：先一遍粗分桶把范围压到 1/768，再在桶内二分，扫描遍数从 32 降到 24</figcaption>
+      </figure>
+
+      <h2>四、只有几个变量：二分到底</h2>
+      <p>连 3KB 都不给，只留几个变量，那就把第二节那 768 个计数器也省掉，一遍一遍地二分整个值域。</p>
+      <p>每一轮只用一个计数器：统计有多少个数落在 [lo, mid]。计数完立刻判断，扔掉计数，进入下一轮。32 轮之后区间长度变成 1，剩下的那个数就是答案。</p>
+      <p>这一版的空间是真正的 O(1)，代价是扫 32 遍文件。实测在 2<sup>28</sup> 值域上跑 28 轮，一共 75 亿次比较，1.85 秒；换算到真实的 40 亿个数，是 32 × 40 亿 = 1370 亿次比较。</p>
+      <p>时间和内存在这里是一根滑杆两端：3KB 的桶把 32 遍压到 24 遍，几个变量则一遍都省不了。选哪一端取决于你更缺什么。</p>
+      <p>顺带把这个骨架挪去解另一个问题。上中位数是第 20 亿小的数（40 亿个数，取 rank = 2<sup>31</sup>）：每轮数一数不大于 mid 的数有多少个，个数够 rank 就往左收缩，不够就往右。同一套循环、同一个计数器，改一行判断条件而已。缩小版实测：2.68 亿个数里第 134217228 小的数是 134217732，复核下来小于它的有 134217227 个、不大于它的有 134217228 个，对得上。</p>
+      <figure class="fig" id="fig-shrink">
+        <figcaption>图 3　二分值域：每轮只留下「有空洞」的那一半，32 轮之后区间只剩一个数，全程只用一个计数器</figcaption>
+      </figure>
+
+      <div class="viz" id="viz-miss">
+        <p class="viz-title">找缺失数实验台</p>
+        <p class="viz-note">值域缩到 0 到 63 便于观察，里面有 58 个数，缺 6 个。点「下一轮」看二分怎么把区间折半，每一轮都只用一个计数器。</p>
+        <div id="ms-table"></div>
+        <div id="ms-range"></div>
+        <p class="viz-note" id="ms-note"></p>
+        <p class="viz-answer" id="ms-answer"></p>
+        <div class="viz-controls">
+          <label>缺哪几个数 <select id="ms-seed">
+            <option value="0">随机一批（跟着种子走）</option>
+            <option value="1">换一批</option>
+            <option value="2">再换一批</option>
+          </select></label>
+          <button id="ms-step">下一轮</button>
+          <button id="ms-auto">跑到底</button>
+          <button id="ms-reset">重置</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>空间</th></tr>
+        <tr><td>位图找所有缺失</td><td>O(N) 扫描 + O(2<sup>b</sup>/64) 扫位图</td><td>2<sup>b</sup> bit，b = 32 时 512MB</td></tr>
+        <tr><td>2 bit 计数找出现两次</td><td>O(N)，分两趟则 2·O(N)</td><td>2·2<sup>b</sup> bit，b = 32 时 1024MB</td></tr>
+        <tr><td>3KB 分桶 + 桶内二分</td><td>O(N·(1 + log(2<sup>b</sup>/B)))，B 是桶数</td><td>O(B)，B = 768 时 3KB</td></tr>
+        <tr><td>几个变量 + 值域二分</td><td>O(N·b)，b = 32 时 32 遍扫描</td><td>O(1)</td></tr>
+      </table>
+      <p>这里的 N 是文件里的数的个数，b 是值域的位数。两个数字都很关键：N 决定一遍扫描要读多少数据，b 决定要扫多少遍。值域是 32 位这件事本身就是优势，如果题面给的是 64 位整数，二分那套要扫 64 遍，位图那套的直接变成 2<sup>64</sup> 个格子，两个方案同时失效。</p>
+      <p>还有一层不写在复杂度里但很要命的账：这 32 遍扫的是同一个 16GB 文件，累计读取 512GB。真正的瓶颈是磁盘，不是 CPU。实测每遍扫 2.68 亿个数约 0.066 秒，换算到 40 亿个数大约每遍 1 秒，32 遍纯计算也就半分钟出头，而磁盘读 512GB 要慢得多。所以省遍数不是省计算，是省 I/O。</p>
+
+      <h2>总结</h2>
+      <p>这一页的全部做法都从同一句话出来：值域只有 2<sup>32</sup> 个格子，个数只有 40 亿，格子数比个数多，就一定有空位。要回答范围问题，就把「格子」按需要切成位、切成 2 bit、切成 768 段，再和实际个数比。</p>
+      <p>位图是成本最低的一档，512MB 换一遍扫描；2 bit 计数账面上是 1024MB，差 24MB 装不进 1GB，分两趟把值域劈开就回到 512MB；3KB 时桶和位图都开不了，改成一遍粗分桶加桶内二分，把 32 遍压到 24 遍；只剩几个变量时老老实实二分 32 遍。</p>
+      <p>这套「数一数某一段里有多少个」的骨架还能顺着换成第 k 小、上中位数这类询问，改的是比较条件，不是框架。往后遇到「内存装不下但值域不大」的题，先算一遍值域和个数的账，思路基本就定了。</p>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解107【扩展】大厂面试中经常漫聊的有趣算法问题</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>Jon Bentley</td><td>Programming Pearls，第 1 章讲到位图与「找一个没出现的数」</td><td><a href="https://en.wikipedia.org/wiki/Programming_Pearls" target="_blank">en.wikipedia.org/wiki/Programming_Pearls</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function box(x,y,w,h,fill,stroke,rx){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(rx==null?4:rx)+'" fill="'+(fill||'#fff')+'" stroke="'+(stroke||'#e6e8eb')+'"/>'; }
+function ln(x1,y1,x2,y2,st,dash,wd){ return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+st+'" stroke-width="'+(wd||1)+'" stroke-dasharray="'+(dash||'none')+'"/>'; }
+
+// ===== 图 1：位图 vs 2 bit =====
+(function(){
+  var host=document.getElementById('fig-bitmap'); if(!host) return;
+  var W=660, HH=210, b='';
+  b+=txt(20,20,'值域 2^32 = 4294967296 个格子',{'an':'start','fs':12.5,fill:'#1f2328'});
+  // 1 bit 行
+  var y1=44, x0=20, w=380;
+  b+=txt(x0,y1-6,'1 bit 记「出现过没有」',{'an':'start','fs':11.5,fill:'#1f2937'});
+  b+=box(x0,y1,w,26,'#dbeafe','#93c5fd');
+  for(var i=1;i<12;i++) b+=ln(x0+w*i/12,y1,x0+w*i/12,y1+26,'#93c5fd');
+  for(var i=0;i<12;i++) b+=txt(x0+w*(i+0.5)/12,y1+17,(i%3===0)?'1':(i%3===1?'0':'1'),{'fs':10,fill:'#1d4ed8'});
+  b+=txt(x0+w+14,y1+17,'512 MB',{'an':'start','fs':12,fill:'#1d4ed8'});
+  // 2 bit 行
+  var y2=104;
+  b+=txt(x0,y2-6,'2 bit 数「出现几次」',{'an':'start','fs':11.5,fill:'#1f2937'});
+  b+=box(x0,y2,w,26,'#ffedd5','#fdba74');
+  for(var i=1;i<12;i++) b+=ln(x0+w*i/12,y2,x0+w*i/12,y2+26,'#fdba74');
+  for(var i=0;i<12;i++) b+=txt(x0+w*(i+0.5)/12,y2+17,['00','01','10','11','00','10','11','01','00','11','10','01'][i],{'fs':9.5,fill:'#9a3412'});
+  b+=txt(x0+w+14,y2+17,'1024 MB',{'an':'start','fs':12,fill:'#ea580c'});
+  b+=txt(x0+w+14,y2+34,'超出 1GB 的 1000MB',{'an':'start','fs':10,fill:'#94a3b8'});
+  b+='<rect x="'+(x0+w-92)+'" y="'+(y2-24)+'" width="88" height="20" rx="3" fill="#fee2e2" stroke="#fca5a5"/>';
+  b+=txt(x0+w-48,y2-10,'这里超了',{'fs':10.5,fill:'#b91c1c'});
+  b+=txt(20,HH-12,'宽度画的是比例：2 bit 只比 1 bit 宽一倍，账面上的 1024MB 却刚好越过 1GB 这条线',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 图 2：分桶把扫描遍数压下来 =====
+(function(){
+  var host=document.getElementById('fig-bucket'); if(!host) return;
+  var W=660, HH=230, b='';
+  b+=txt(20,20,'扫描遍数：裸二分 32 遍 vs 3KB 分桶 24 遍',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var x0=40, y0=52, bw=17, gap=2;
+  // 裸二分 32 格
+  b+=txt(x0,y0-8,'裸二分：32 遍值域二分',{'an':'start','fs':11.5,fill:'#1f2937'});
+  for(var i=0;i<32;i++){
+    b+=box(x0+i*(bw+gap),y0,bw,24,'#ffedd5','#fdba74',3);
+    if(i%4===0) b+=txt(x0+i*(bw+gap)+bw/2,y0+17,String(i+1),{'fs':9.5,fill:'#9a3412'});
+  }
+  var y1=y0+62;
+  b+=txt(x0,y1-8,'3KB 分桶：1 遍粗定位 + 23 遍桶内二分',{'an':'start','fs':11.5,fill:'#1f2937'});
+  for(var i=0;i<24;i++){
+    var hot=(i===0);
+    b+=box(x0+i*(bw+gap),y1,bw,24,hot?'#dbeafe':'#eef4ff',hot?'#93c5fd':'#cbd5e1',3);
+    if(i===0) b+=txt(x0+bw/2,y1+17,'粗',{'fs':9.5,fill:'#1d4ed8'});
+    else if(i%4===1) b+=txt(x0+i*(bw+gap)+bw/2,y1+17,String(i+1),{'fs':9.5,fill:'#64748b'});
+  }
+  b+=txt(x0+24*(bw+gap)+8,y1+17,'少 8 遍',{'an':'start','fs':12,fill:'#1d4ed8'});
+  var y2=y1+64;
+  b+=txt(x0,y2-6,'桶内为什么要 23 轮：每桶 2^32 / 768 = 5592406 个值，log2 约 22.4',{'an':'start','fs':11,fill:'#64748b'});
+  b+=txt(x0,y2+14,'按 16GB 的文件算，少 8 遍就是少读 128GB',{'an':'start','fs':11,fill:'#64748b'});
+  b+=txt(20,HH-10,'每一遍都是把整个文件重新读一次，桶数由内存给多少决定：768 个桶刚好 3KB',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 图 3：区间收缩 =====
+(function(){
+  var host=document.getElementById('fig-shrink'); if(!host) return;
+  var W=660, HH=216, b='';
+  b+=txt(20,20,'每轮只留「有空洞」的那一半',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var x0=62, y=40, w=560, hh=20;
+  var lo=0, hi=1;
+  for(var r=0;r<6;r++){
+    var mid=(lo+hi)/2;
+    var goLeft=(r%2===0);
+    var bx=x0+lo*w, bwid=(hi-lo)*w;
+    b+=box(x0,y+r*25,w,hh,'#f6f7f9','#e6e8eb',2);
+    b+=box(bx,y+r*25,bwid,hh,'#dbeafe','#93c5fd',2);
+    b+=txt(16,y+r*25+14,'第 '+(r+1)+' 轮',{'an':'start','fs':10,fill:'#94a3b8'});
+    if(bwid>70) b+=txt(bx+bwid/2,y+r*25+14,'cnt < 格子数，留下',{'fs':9.5,fill:'#1d4ed8'});
+    if(goLeft) hi=mid; else lo=mid;
+  }
+  b+=txt(16,HH-12,'每一轮统计一次落在左半区间的个数：比格子数少就说明左边有空洞，往左收，否则往右收',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 演示：找缺失数 =====
+(function(){
+  var tableEl=document.getElementById('ms-table');
+  var rangeEl=document.getElementById('ms-range');
+  var noteEl=document.getElementById('ms-note');
+  var ansEl=document.getElementById('ms-answer');
+  var selSeed=document.getElementById('ms-seed');
+  var V=64, MISS=6;
+  var present=[], lo=0, hi=V-1, hist=[], done=false, missSet=[];
+
+  function mulberry(a){
+    return function(){
+      a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), a | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function build(){
+    var rndv=mulberry(101 + Number(selSeed.value)*977);
+    var idx=[]; for(var i=0;i<V;i++) idx.push(i);
+    for(var i=V-1;i>0;i--){ var j=Math.floor(rndv()*(i+1)); var t=idx[i]; idx[i]=idx[j]; idx[j]=t; }
+    missSet = idx.slice(0,MISS).sort(function(a,b){return a-b;});
+    present = [];
+    for(var v=0;v<V;v++) if(missSet.indexOf(v)<0) present.push(v);
+  }
+  function countIn(a,b){
+    var c=0; for(var i=0;i<present.length;i++) if(present[i]>=a&&present[i]<=b) c++;
+    return c;
+  }
+  function drawTable(){
+    var s='<table class="cell"><tr><th>轮</th><th>区间 [lo, hi]</th><th>mid</th><th>左半 [lo, mid] 里的个数</th><th>左半的格子数</th><th>判定</th></tr>';
+    for(var i=0;i<hist.length;i++){
+      var h=hist[i];
+      s+='<tr><td>'+(i+1)+'</td><td>['+h.lo+', '+h.hi+']</td><td class="mid">'+h.mid+'</td><td>'+h.cnt+'</td><td>'+h.room+'</td><td>'+h.verdict+'</td></tr>';
+    }
+    if(!hist.length) s+='<tr><td colspan="6" style="color:#94a3b8">还没开始，点「下一轮」</td></tr>';
+    s+='</table>';
+    tableEl.innerHTML=s;
+  }
+  function drawRange(){
+    var cellW=Math.min(20,600/V);
+    var b='<svg viewBox="0 0 660 116" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    b+='<text x="16" y="16" font-size="12" fill="#1f2328">值域 0 ~ 63 上的数：深色是出现过的，白色是缺失的</text>';
+    for(var v=0;v<V;v++){
+      var x=16+v*cellW;
+      var absent = missSet.indexOf(v)>=0;
+      var inRange = (v>=lo && v<=hi);
+      var fill = absent ? '#fff' : '#2563eb';
+      var op = inRange ? 1 : 0.18;
+      b+='<rect x="'+x+'" y="26" width="'+(cellW-3)+'" height="22" rx="2" fill="'+fill+'" stroke="#cbd5e1" opacity="'+op+'"/>';
+      if(v%8===0) b+='<text x="'+(x+cellW/2)+'" y="64" font-size="9.5" text-anchor="middle" fill="#94a3b8">'+v+'</text>';
+    }
+    var lx=16+lo*cellW, rx=16+(hi+1)*cellW;
+    b+='<rect x="'+lx+'" y="20" width="'+(rx-lx-3)+'" height="34" rx="4" fill="none" stroke="#ea580c" stroke-width="2"/>';
+    b+='<text x="'+lx+'" y="80" font-size="10.5" fill="#ea580c">当前区间 ['+lo+', '+hi+']，'+countIn(lo,hi)+' 个数 / '+(hi-lo+1)+' 个格子</text>';
+    b+='<line x1="16" y1="94" x2="644" y2="94" stroke="#e6e8eb"/>';
+    b+='<text x="16" y="108" font-size="10.5" fill="#94a3b8">每一轮只留橙色框住的这一段，白格子就是还没找出来的缺失数</text>';
+    b+='</svg>';
+    rangeEl.innerHTML=b;
+  }
+  function draw(){
+    drawTable(); drawRange();
+    var cnt=countIn(lo,hi), room=hi-lo+1;
+    noteEl.textContent='当前区间 ['+lo+', '+hi+'] 里有 '+cnt+' 个数，这段值域有 '+room+' 个格子。';
+    if(done){ ansEl.textContent='区间收敛到 '+lo+'，这个数没出现过。整段用了 '+hist.length+' 轮，每轮只带一个计数器。'; }
+    else ansEl.textContent='还没收敛，继续折半。';
+  }
+  function step(){
+    if(done || lo>=hi) return;
+    var olo=lo, ohi=hi;
+    var mid=Math.floor((lo+hi)/2);
+    var cnt=countIn(lo,mid), room=mid-lo+1;
+    var verdict;
+    if(cnt<room){ hi=mid; verdict='有空洞，往左收'; }
+    else { lo=mid+1; verdict='左半是满的，往右收'; }
+    hist.push({lo:olo, hi:ohi, mid:mid, cnt:cnt, room:room, verdict:verdict});
+    if(lo>=hi) done=true;
+    draw();
+  }
+  selSeed.addEventListener('change', function(){ build(); lo=0; hi=V-1; hist=[]; done=false; draw(); });
+  document.getElementById('ms-step').addEventListener('click', step);
+  document.getElementById('ms-auto').addEventListener('click', function(){ while(!done && lo<hi) step(); });
+  document.getElementById('ms-reset').addEventListener('click', function(){ build(); lo=0; hi=V-1; hist=[]; done=false; draw(); });
+  build(); draw();
+})();
+})();</script>
+</body>
+</html>

@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>囚徒与 100 个盒子</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+table.cell { border-collapse: collapse; margin: 4px 0; font-size: 12.5px; }
+table.cell td, table.cell th { border: 1px solid #e6e8eb; padding: 3px 7px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+table.cell td.ok { background: #dbeafe; color: #1d4ed8; }
+table.cell td.bad { background: #ffedd5; color: #9a3412; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>囚徒与 100 个盒子</h1>
+      <p class="intro">100 个犯人编号 0 到 99，100 个盒子编号 0 到 99 排成一排，监狱长把盒子里的编号随机打乱。每个犯人单独进屋，可以打开 50 个盒子找自己的编号，全程不能交流、不能留下记号。只要有一个犯人没找到自己的编号，100 个人全部处决。所有人事先可以商量策略。随口一算的成功率是两人各猜一次硬碰硬，概率低到写不出来；换个思路之后，成功率能到 31.18%。</p>
+
+      <h2>零、两个数字差 30 个数量级</h2>
+      <p>先说最自然的想法：每个人进屋之后随机挑 50 个盒子打开，50 个盒子里恰好有自己编号的概率是 1/2。100 个人互相独立，全体成功的概率是 (1/2)<sup>100</sup> ≈ 7.89×10<sup>−31</sup>。</p>
+      <p>这个数字小到什么程度？拿 20 万次模拟跑一遍，一次都没成功过。就算把模拟次数提到 10<sup>20</sup> 次也未必见得到一次。</p>
+      <p>而最终给出的策略，成功率是 0.31183。也就是说同样 100 个人、同样只能各开 50 个盒子，活下来的概率差了 30 个数量级。差别不在运气，在于每个人打开盒子的顺序是互相牵连的。</p>
+      <figure class="fig" id="fig-box">
+        <figcaption>图 1　盒子编号排成一行，每个盒子里装着一个犯人编号：这本身就是一个置换，置换拆开就是若干个环</figcaption>
+      </figure>
+
+      <h2>一、把盒子看成置换</h2>
+      <p>先给这堆盒子找一个准确的描述。「盒子 i 里装着编号 a[i]」，这句话定义了一个从 0 到 99 的排列 a。因为每个编号恰好出现在一个盒子里，a 是一个置换。</p>
+      <p>置换有一个天然的结构：从任意一个位置出发，沿着 a 一路跳下去，一定会回到起点（因为每一步都是被唯一决定的，不可能走到两个地方去，也不可能永远不回头）。跳过的那些位置构成一个环。</p>
+      <p>举个 6 个盒子的例子。盒子 0 里是 2，盒子 2 里是 5，盒子 5 里是 0，这三个盒子构成一个长度 3 的环；盒子 1 里是 1，自己成环；盒子 3 里是 4、盒子 4 里是 3，构成一个长度 2 的环。整个置换被拆成 3 + 1 + 2 = 6，一个不落。</p>
+      <p>1 号犯人查自己的编号，只需要打开盒子 1，一眼就看到，这叫长度 1 的环。0 号犯人要打开盒子 0、2、5 才能找到，这条环长 3。</p>
+
+      <h2>二、跟着盒子里的编号走</h2>
+      <p>策略只有一句话：犯人 p 先打开盒子 p。如果里面是 q，下一步就打开盒子 q；如果里面是 p，收工。他不需要背任何表，每一步的下一步都由盒子里那张纸条直接告诉他。</p>
+      <p>为什么这条路线有效？因为 p 从盒子 p 出发，沿着置换的环走，走的正是 p 所属的那个环。而 p 一定在这个环上（环的定义就是从 p 出发能回到 p），所以走满一圈必然经过装着 p 的那个盒子，剩下的只是「在 50 步以内走到」。</p>
+    <pre class="code"><span class="cm">// 盒子 i 里装着编号 a[i]。从 i 出发，a[i] 指向下一个盒子，一路走回去就是一个环</span>
+    <span class="cm">// 每个位置只管把自己归位，走完一个环整段都归位，总代价 O(n)</span>
+    <span class="kw">int</span> <span class="fn">maxCircle</span>(vector&lt;<span class="kw">int</span>&gt; a) {
+        <span class="kw">int</span> n = a.size(), mx = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">int</span> cur = 1;
+            <span class="kw">while</span> (i != a[i]) {                 <span class="cm">// 还没走到自己</span>
+                swap(a[i], a[a[i]]);            <span class="cm">// 把身上这个数送回家</span>
+                cur++;
+            }
+            mx = max(mx, cur);
+        }
+        <span class="kw">return</span> mx;
+    }</pre>
+      <p>把 100 个盒子分成若干个环，每个犯人在自己那个环上走。环长就是他要打开的盒子数。所以 100 个人全部成功的条件可以精确地写出来：置换里最长的那个环，长度不超过 50。</p>
+      <p>注意这里省略了什么。犯人在打开的盒子里看到的是别人的编号，他没有破坏任何结构，只是把一个只读的置换沿着自己那条环走了一遍。100 个人各自走各自的环，互不干扰，也不会改变盒子内容。这个策略之所以允许「事先商量」，是因为所有人用的是同一条规则，而不是共享运行时信息。</p>
+
+      <h2>三、最长环恰好是 r 的概率</h2>
+      <p>现在问题变成一个纯计数题：n 个元素的随机置换里，最长环恰好等于 r 的概率是多少。</p>
+      <p>先数「最长环恰好是 r」的置换有多少个。选定这个环上的 r 个元素有 C(n, r) 种选法；这 r 个元素排成一个环有 (r−1)! 种排法（圆排列）；剩下 n−r 个元素随便排，有 (n−r)! 种。乘起来：</p>
+      <p>C(n, r) × (r−1)! × (n−r)! = n! / r</p>
+      <p>全部置换有 n! 个，所以概率是 1/r。100 个元素的置换里，最长环等于 51 的概率是 1/51。</p>
+      <p>这个推导有一个前提：r 要大于 n/2。两个长度都超过 n/2 的环加起来必然超过 n，不可能同时存在于同一个置换里。所以在这个范围内，「存在长度 r 的环」和「最长环恰好是 r」是同一件事，各 r 之间互不相容，概率可以直接相加。</p>
+      <p>于是死亡概率就是 1/51、1/52 一直到 1/100 这些项加起来，活下来的概率是它的补：</p>
+    <pre class="code"><span class="cm">// 存活 ⟺ 最长环不超过每人能开的盒子数</span>
+    <span class="cm">// 最大环恰好是 r 的排列有 n!/r 个，所以概率是 1/r，r &gt; n/2 时互不相容可以直接相加</span>
+    <span class="kw">double</span> <span class="fn">escape</span>(<span class="kw">int</span> people, <span class="kw">int</span> tries) {
+        <span class="kw">double</span> dead = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> r = tries + 1; r &lt;= people; r++) dead += 1.0 / r;
+        <span class="kw">return</span> 1 - dead;                        <span class="cm">// 100 人开 50 个：1 - (1/51 + ... + 1/100) = 0.31183</span>
+    }</pre>
+      <p>100 万次模拟的实测分布和 1/r 对得上：最长环等于 51 的时间里，实测 1.94640%、公式 1.96078%；等于 60 的实测 1.66080%、公式 1.66667%；等于 100 的实测 1.01070%、公式 1.00000%。都在百万次抽样的涨落范围内。</p>
+      <p>公式里那句「一定要保证每人尝试的次数不少于人数的一半」现在有了出处：一旦允许打开的次数少于一半，就可能有两个环都超过这个次数，两个事件不再互不相容，直接相加会把它们重复算一遍。实测 n = 100 时，允许开 20 个盒子的公式会给出 −0.58964 这样一个负数概率，而模拟的真实存活率是 0.00049。</p>
+
+      <h2>四、31.18% 是怎么来的</h2>
+      <p>把公式算出来：死亡概率是 1/51 + 1/52 + … + 1/100 = 0.688172，存活概率 1 减去它就是 0.311828。</p>
+      <p>10 万次模拟：存活 31178 次，频率 0.31178，和公式的 0.31183 差 0.00005。同一批数据里「最长环超过 50 的置换」占 0.68822，公式给的死亡概率 0.68817。</p>
+      <p>模拟次数和公式的贴合程度也在数据里：100 次模拟给出 0.28，1000 次 0.293，1 万次 0.3128，10 万次 0.30988，100 万次 0.31173。每一档都在往 0.31183 靠。</p>
+      <table class="complexity">
+        <tr><th>模拟次数</th><th>存活频率</th><th>与公式 0.311828 的差</th></tr>
+        <tr><td>100</td><td>0.28000</td><td>−0.03183</td></tr>
+        <tr><td>1000</td><td>0.29300</td><td>−0.01883</td></tr>
+        <tr><td>10000</td><td>0.31280</td><td>+0.00097</td></tr>
+        <tr><td>100000</td><td>0.30988</td><td>−0.00195</td></tr>
+        <tr><td>1000000</td><td>0.31173</td><td>−0.00010</td></tr>
+      </table>
+      <figure class="fig" id="fig-dist">
+        <figcaption>图 2　最长环长度的分布（100 万次模拟）：r 从 51 到 100 每一档都贴着 1/r 这条曲线，而这些档加起来就是 0.6882 的死亡概率</figcaption>
+      </figure>
+
+      <h2>五、人越多，越接近 1 − ln2</h2>
+      <p>把 100 换成一般的 n，每人允许打开 n/2 个盒子，存活概率就是 1 − (H(n) − H(n/2))，H 是调和数。当 n 很大时，H(n) − H(n/2) 趋近于 ln2，存活概率趋近于 1 − ln2 = 0.306853。</p>
+      <p>n = 100 时是 0.311828，n = 1000 时 0.307353，n = 10 万时 0.306858，n = 100 万时 0.306853，四位小数已经不动了。</p>
+      <p>这个收敛有个直观解释。死亡的条件是「存在一个长度超过 n/2 的环」，而单个环长度恰好是 r 的概率是 1/r。长度超过一半的那些 r 加起来，正好是一个被截断的调和级数，n 变大时它从上面逼近 ln2。也就是说犯人再多，成功率也不会掉到 30% 以下，反过来说也涨不过 31.2%。</p>
+      <figure class="fig" id="fig-ln2">
+        <figcaption>图 3　存活率随人数收敛：n 从 100 涨到 100 万，值从 0.311828 一路贴到 1 − ln2 = 0.306853</figcaption>
+      </figure>
+
+      <div class="viz" id="viz-prison">
+        <p class="viz-title">盒子与环实验台</p>
+        <p class="viz-note">点「换一批」随机打乱盒子，同色的盒子属于同一个环。点「检查所有人」看每个犯人沿环走的结果，再点「模拟 2000 次」把存活频率量出来。</p>
+        <div id="pr-board"></div>
+        <div id="pr-detail"></div>
+        <p class="viz-note" id="pr-note"></p>
+        <p class="viz-answer" id="pr-answer"></p>
+        <div class="viz-controls">
+          <label>人数 <select id="pr-n">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="100" selected>100</option>
+          </select></label>
+          <button id="pr-new">换一批</button>
+          <button id="pr-check">检查所有人</button>
+          <button id="pr-sim">模拟 2000 次</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>求最长环（就地归位）</td><td>O(n)，每个位置只归位一次</td><td>O(1) 额外空间</td></tr>
+        <tr><td>一个犯人按环走</td><td>O(环长)，最坏 O(n)</td><td>O(1)</td></tr>
+        <tr><td>公式算存活概率</td><td>O(n)，n 个调和项相加</td><td>O(1)</td></tr>
+      </table>
+      <p>求最长环那个实现值得看一眼：它在数组上原地交换，把每个位置的数送回家，走完一个环整段就都归位了，所以 100 个位置总共只走了 100 步，不是 100×100。代价是它破坏原数组，如果还需要原排列就得先复制一份。</p>
+      <p>公式版则是 O(n) 时间、O(1) 空间，一行循环搞定，比模拟快无数倍。缺点是有前提：每人尝试次数必须不少于人数的一半，否则要把各 r 之间的容斥补回来。</p>
+
+      <h2>总结</h2>
+      <p>这道题的关键观察是「盒子与编号构成一个置换」。看清这一点之后，随机开盒的 (1/2)<sup>100</sup> 和跟着环走的 0.3118 之间的差距就有了出处：随机开盒时每个人的 50 个盒子各不相干，跟着环走时 100 个人共用同一份环结构，一个人走对了，同一个环上的其他人也顺路走对。</p>
+      <p>剩下的全是计数：最长环恰好是 r 的置换有 n!/r 个，概率 1/r；r 超过 n/2 时各档互不相容，死亡概率就是 1/51 到 1/100 的和 0.6882。100 万次模拟实测每一档都贴着 1/r，总和也对得上。</p>
+      <p>每人允许开 n/2 个盒子时，存活率随 n 收敛到 1 − ln2 = 0.306853，n = 100 的 0.311828 已经离极限不远。用这个公式时别忘了那个前提：尝试次数少于一半，直接相加会重复计数，n = 100 开 20 个盒子时公式甚至能算出负概率。</p>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解107【扩展】大厂面试中经常漫聊的有趣算法问题</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>Anna Gal, Peter Bro Miltersen</td><td>The Cell Probe Complexity of Succinct Data Structures（2007），这道题的来源</td><td><a href="https://en.wikipedia.org/wiki/100_prisoners_problem" target="_blank">en.wikipedia.org/wiki/100_prisoners_problem</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function box(x,y,w,h,fill,stroke,rx){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(rx==null?4:rx)+'" fill="'+(fill||'#fff')+'" stroke="'+(stroke||'#e6e8eb')+'"/>'; }
+function ln(x1,y1,x2,y2,st,dash,wd){ return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+st+'" stroke-width="'+(wd||1)+'" stroke-dasharray="'+(dash||'none')+'"/>'; }
+
+// ===== 图 1：盒子与环 =====
+(function(){
+  var host=document.getElementById('fig-box'); if(!host) return;
+  var W=660, HH=250, b='';
+  var a=[2,1,5,4,3,0];
+  var col={0:'#2563eb',2:'#2563eb',5:'#2563eb',1:'#ea580c',3:'#16a34a',4:'#16a34a'};
+  b+=txt(20,20,'上面一行是盒子编号 i，下面一行是盒子里装的编号 a[i]',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var x0=60, cw=86, y=42, ch=34;
+  for(var i=0;i<6;i++){
+    var x=x0+i*cw;
+    b+=box(x,y,cw-10,ch,'#f6f7f9','#e6e8eb');
+    b+=txt(x+(cw-10)/2,y+22,'盒子 '+i,{'fs':11.5,fill:'#475569'});
+  }
+  for(var i=0;i<6;i++){
+    var x=x0+i*cw;
+    b+=box(x,y+52,cw-10,ch,col[i]+'22',col[i]);
+    b+=txt(x+(cw-10)/2,y+74,String(a[i]),{'fs':13,fill:col[i]});
+    b+=ln(x+(cw-10)/2,y+ch,x+(cw-10)/2,y+52,'#cbd5e1');
+  }
+  b+=txt(x0-10,y+74,'a[]',{'an':'end','fs':11,fill:'#94a3b8'});
+  var y2=152;
+  b+=txt(20,y2,'沿着 a 跳：0 → 2 → 5 → 0（长度 3 的环）；1 → 1（长度 1）；3 → 4 → 3（长度 2）',{'an':'start','fs':12,fill:'#1f2328'});
+  var seq=[[0,2,5],[1],[3,4]];
+  var cols=['#2563eb','#ea580c','#16a34a'];
+  for(var k=0;k<seq.length;k++){
+    var s=seq[k];
+    for(var j=0;j<s.length;j++){
+      var px=40+k*210+j*46, py=y2+22;
+      b+=box(px,py,36,26,cols[k]+'22',cols[k],3);
+      b+=txt(px+18,py+18,String(s[j]),{'fs':11.5,fill:cols[k]});
+      if(j<s.length-1) b+=txt(px+40,py+18,'→',{'an':'start','fs':12,fill:'#94a3b8'});
+    }
+    b+=txt(40+k*210,y2+66,'环长 '+s.length,{'an':'start','fs':10.5,fill:cols[k]});
+  }
+  b+=txt(20,HH-8,'每个盒子恰好装一个编号、每个编号恰好出现一次，这个结构就是置换；置换拆开只剩若干个环',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 图 2：最长环分布 =====
+(function(){
+  var host=document.getElementById('fig-dist'); if(!host) return;
+  var W=660, HH=240, b='';
+  var x0=52, y0=176, pw=576, ph=126;
+  b+=txt(20,20,'最长环恰好等于 r 的概率（100 万次模拟 vs 公式 1/r）',{'an':'start','fs':12.5,fill:'#1f2328'});
+  b+=ln(x0,y0,x0+pw,y0,'#cbd5e1');
+  b+=ln(x0,34,x0,y0,'#cbd5e1');
+  for(var p=0;p<=4;p++){
+    var y=y0-ph*p/4;
+    b+=ln(x0-4,y,x0,y,'#cbd5e1');
+    b+=txt(x0-8,y+4,(p*0.5)+'%',{'an':'end','fs':10,fill:'#94a3b8'});
+  }
+  var RS=[51,55,60,70,80,90,100];
+  var MEAS=[1.94640,1.82780,1.66080,1.44210,1.23960,1.12160,1.01070];
+  var bw=pw/RS.length;
+  for(var i=0;i<RS.length;i++){
+    var x=x0+i*bw;
+    var h1=MEAS[i]/2*ph, h2=(100/RS[i])/2*ph;
+    b+='<rect x="'+(x+8)+'" y="'+(y0-h1)+'" width="'+(bw-34)+'" height="'+h1+'" rx="2" fill="#2563eb" opacity="0.85"/>';
+    b+='<rect x="'+(x+bw-24)+'" y="'+(y0-h2)+'" width="'+(bw-34)+'" height="'+h2+'" rx="2" fill="#ea580c" opacity="0.85"/>';
+    b+=txt(x+bw/2,y0+16,'r='+RS[i],{'fs':10.5,fill:'#64748b'});
+  }
+  b+=txt(x0+pw-160,42,'蓝：100 万次模拟的实测值',{'an':'start','fs':10.5,fill:'#2563eb'});
+  b+=txt(x0+pw-160,58,'橙：公式 1/r',{'an':'start','fs':10.5,fill:'#ea580c'});
+  var sum=0; for(var r=51;r<=100;r++) sum+=1/r;
+  b+=txt(20,HH-8,'把这些档加起来就是死亡概率 '+sum.toFixed(6)+'，存活概率 '+((1-sum).toFixed(6)),{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 图 3：收敛到 1-ln2 =====
+(function(){
+  var host=document.getElementById('fig-ln2'); if(!host) return;
+  var W=660, HH=210, b='';
+  var x0=64,y0=150,pw=540,ph=104;
+  var NS=[100,1000,10000,100000,1000000];
+  var YS=[0.311828,0.307353,0.306903,0.306858,0.306853];
+  b+=txt(20,20,'每人开一半盒子时，存活率随人数变化',{'an':'start','fs':12.5,fill:'#1f2328'});
+  b+=ln(x0,y0,x0+pw,y0,'#cbd5e1');
+  b+=ln(x0,36,x0,y0,'#cbd5e1');
+  function px(i){ return x0+pw*i/(NS.length-1); }
+  function py(v){ return y0-(v-0.300)/(0.315-0.300)*ph; }
+  var lim=1-Math.log(2);
+  b+=ln(x0,py(lim),x0+pw,py(lim),'#ea580c','4 3');
+  b+=txt(x0+4,py(lim)-8,'1 − ln2 = 0.306853',{'an':'start','fs':10.5,fill:'#ea580c'});
+  var d='';
+  for(var i=0;i<NS.length;i++) d+=(i?' L':'M')+px(i)+' '+py(YS[i]);
+  b+='<path d="'+d+'" fill="none" stroke="#2563eb" stroke-width="2.5"/>';
+  for(var i=0;i<NS.length;i++){
+    b+='<circle cx="'+px(i)+'" cy="'+py(YS[i])+'" r="3.5" fill="#2563eb"/>';
+    b+=txt(px(i),y0+16,NS[i]>=1000?(NS[i]/1000)+'k':'100',{'fs':10.5,fill:'#64748b'});
+    b+=txt(px(i),py(YS[i])-9,YS[i].toFixed(6),{'fs':10,fill:'#1d4ed8'});
+  }
+  b+=txt(x0+pw/2,y0+34,'人数 n',{'fs':11,fill:'#94a3b8'});
+  b+=txt(20,HH-8,'n 越大越贴近极限，100 人的 0.311828 已经把极限的小数点后两位描出来了',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 演示：盒子与环 =====
+(function(){
+  var boardEl=document.getElementById('pr-board');
+  var detailEl=document.getElementById('pr-detail');
+  var noteEl=document.getElementById('pr-note');
+  var ansEl=document.getElementById('pr-answer');
+  var selN=document.getElementById('pr-n');
+  var perm=[], color=[];
+  function mulberry(a){
+    return function(){
+      a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), a | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  var seedv=1;
+  function shuffle(n){
+    var rv=mulberry(seedv);
+    var a=[]; for(var i=0;i<n;i++) a.push(i);
+    for(var i=n-1;i>0;i--){ var j=Math.floor(rv()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t; }
+    return a;
+  }
+  function markColors(a){
+    var n=a.length, seen=new Array(n).fill(-1), c=0;
+    for(var i=0;i<n;i++){
+      if(seen[i]>=0) continue;
+      var cur=i;
+      while(seen[cur]<0){ seen[cur]=c; cur=a[cur]; }
+      c++;
+    }
+    return seen;
+  }
+  function circles(a){
+    var n=a.length, seen=new Array(n).fill(false), res=[];
+    for(var i=0;i<n;i++){
+      if(seen[i]) continue;
+      var cur=i, len=0;
+      while(!seen[cur]){ seen[cur]=true; cur=a[cur]; len++; }
+      res.push(len);
+    }
+    return res;
+  }
+  var PAL=['#2563eb','#ea580c','#16a34a','#9333ea','#0891b2','#ca8a04','#dc2626','#4f46e5'];
+  function drawBoard(showPath){
+    var n=perm.length;
+    var cellW=Math.min(60,632/Math.ceil(n/10)), cellH=30;
+    var rows=Math.ceil(n/10);
+    var H=rows*(cellH+6)+44;
+    var b='<svg viewBox="0 0 660 '+H+'" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    b+='<text x="16" y="16" font-size="12" fill="#1f2328">盒子：上面是盒号，下面是里面的编号；同色属于同一个环</text>';
+    for(var i=0;i<n;i++){
+      var r=Math.floor(i/10), c=i%10;
+      var x=16+c*cellW, y=26+r*(cellH+6);
+      var col=PAL[color[i]%PAL.length];
+      b+=box(x,y,cellW-5,cellH,col+'22',col,3);
+      b+='<text x="'+(x+(cellW-5)/2)+'" y="'+(y+11)+'" font-size="9" text-anchor="middle" fill="#94a3b8">'+i+'</text>';
+      b+='<text x="'+(x+(cellW-5)/2)+'" y="'+(y+24)+'" font-size="11.5" text-anchor="middle" fill="'+col+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+perm[i]+'</text>';
+    }
+    b+='</svg>';
+    boardEl.innerHTML=b;
+  }
+  function checkAll(){
+    var n=perm.length, tries=Math.floor(n/2);
+    var lens=circles(perm);
+    var mx=Math.max.apply(null,lens);
+    var alive=(mx<=tries);
+    drawBoard();
+    var s='<table class="cell"><tr><th>犯人是哪个环</th><th>环长</th><th>开盒次数上限</th><th>结果</th></tr>';
+    for(var i=0;i<lens.length;i++){
+      var ok=lens[i]<=tries;
+      s+='<tr><td>第 '+(i+1)+' 个环</td><td>'+lens[i]+'</td><td>'+tries+'</td><td class="'+(ok?'ok':'bad')+'">'+(ok?'全员找到':'太长了，找不到')+'</td></tr>';
+    }
+    s+='</table>';
+    detailEl.innerHTML=s;
+    noteEl.textContent='这个置换拆成 '+lens.length+' 个环，最长的是 '+mx+'；每人最多开 '+tries+' 个盒子。';
+    ansEl.textContent=alive?('最长环 '+mx+' ≤ '+tries+'，100 个人全部找到自己的编号。'):('最长环 '+mx+' > '+tries+'，这个环上的犯人走不到自己的盒子，全员处决。');
+  }
+  function newPerm(){
+    var n=Number(selN.value);
+    perm=shuffle(n); color=markColors(perm);
+    detailEl.innerHTML='';
+    drawBoard();
+    var lens=circles(perm);
+    noteEl.textContent='新的一批：'+n+' 个盒子，'+(n/2)+' 是每人能开的上限。这个置换拆成 '+lens.length+' 个环，最长 '+Math.max.apply(null,lens)+'。';
+    ansEl.textContent='点「检查所有人」看结果。';
+  }
+  function simulate(){
+    var n=Number(selN.value), tries=Math.floor(n/2), T=2000, ok=0;
+    var rv=mulberry(99);
+    for(var t=0;t<T;t++){
+      var a=[]; for(var i=0;i<n;i++) a.push(i);
+      for(var i=n-1;i>0;i--){ var j=Math.floor(rv()*(i+1)); var tmp=a[i]; a[i]=a[j]; a[j]=tmp; }
+      if(Math.max.apply(null,circles(a))<=tries) ok++;
+    }
+    var p=ok/T;
+    var dead=0; for(var r=tries+1;r<=n;r++) dead+=1/r;
+    ansEl.textContent='模拟 '+T+' 次：活下来 '+ok+' 次，频率 '+p.toFixed(4)+'；公式给 '+(1-dead).toFixed(6)+'。（2000 次模拟的标准误约 '+Math.sqrt(p*(1-p)/T).toFixed(4)+'）';
+  }
+  selN.addEventListener('change', function(){ seedv=seedv*7+3; newPerm(); });
+  document.getElementById('pr-new').addEventListener('click', function(){ seedv=seedv*7+3; newPerm(); });
+  document.getElementById('pr-check').addEventListener('click', checkAll);
+  document.getElementById('pr-sim').addEventListener('click', simulate);
+  newPerm();
+})();
+})();</script>
+</body>
+</html>

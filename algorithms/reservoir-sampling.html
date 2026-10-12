@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>蓄水池采样：袋子只有那么大</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>蓄水池采样：袋子只有那么大</h1>
+      <p class="intro">一台机器不停吐球，1 号、2 号、3 号一路吐下去；手边只有一个能装 10 个球的袋子，每个球要么当场收下，要么永远扔掉。要求是：不管机器什么时候停下，已经吐出的那些球里，每一个留在袋子里的概率都相同。球数和未知的将来搅在一起，看上去无处下手；两行规则就能解掉，而且这条规则顺手解决了「一天里所有登录用户等概率中奖」。</p>
+
+      <h2>零、袋子装不下，还不能反悔</h2>
+      <p>先把题目的约束摆清楚。袋子 10 个位置，机器吐到第几个球是未知的，扔掉的球不能捡回来。如果按「前 10 个先收下」办，第 11 个球开始就没地方放了，后面永远没有球能进袋，这显然不行。</p>
+      <p>如果按「每个球都以固定的概率留下」办，也不行。留下概率设成 1/2，袋子会在几十个球之后被塞满；设得再小一点，袋子又长期装不满，白白浪费容量。留下概率必须跟着「已经吐了多少个」走。</p>
+      <p>还有一个容易先入为主的判断：第 1 个球是不是应该稳稳留下？不是。停在 41 号球的时候，1 号球留在袋里的概率和 41 号球一样，都是 10/41。</p>
+      <figure class="fig" id="fig-machine">
+        <figcaption>图 1　机器不停吐球，袋子只有 m 个位置：每个球当场决定收或不收，收下时还要挑一个旧球请出去</figcaption>
+      </figure>
+
+      <h2>一、两行规则</h2>
+      <p>第 i 个球到来时，只看一件事。</p>
+      <p>1）如果 i ≤ m，袋子还没满，直接放进去，占第 i 个位置。</p>
+      <p>2）如果 i &gt; m，先在 [0, i) 里取一个随机整数，小于 m 就收下这个球，再从 m 个位置里均匀随机挑一个，把原来那个球扔出去。</p>
+      <p>第 2 步的两个随机数缺一不可。第一个决定「要不要」，概率恰好是 m/i；第二个决定「顶掉谁」，概率是 1/m。两个动作乘起来，任意一个旧球被顶掉的概率是 1/i，和它的编号、和它进袋的早晚都无关。</p>
+    <pre class="code">mt19937_64 rng(107);
+    <span class="cm">// 返回 [0, i) 上的均匀整数：用乘高位，不吃取模偏差</span>
+    <span class="kw">int</span> <span class="fn">rnd</span>(<span class="kw">ll</span> i) { <span class="kw">return</span> (<span class="kw">int</span>)((__uint128_t)rng() * (<span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span>)i &gt;&gt; 64); }
+
+    <span class="kw">struct</span> Pool {
+        <span class="kw">int</span> m;                      <span class="cm">// 袋子能装几个</span>
+        vector&lt;<span class="kw">int</span>&gt; bag;
+        Pool(<span class="kw">int</span> s) : m(s), bag(s, 0) {}
+        <span class="kw">void</span> <span class="fn">enter</span>(<span class="kw">ll</span> i) {          <span class="cm">// i 号球吐出来了</span>
+            <span class="kw">if</span> (i &lt;= m) { bag[i - 1] = (<span class="kw">int</span>)i; <span class="kw">return</span>; }   <span class="cm">// 前 m 个先占满</span>
+            <span class="kw">if</span> (rnd(i) &lt; m) bag[rnd(m)] = (<span class="kw">int</span>)i;          <span class="cm">// 以 m/i 的概率进来，再随机踢掉一个</span>
+        }
+    };</pre>
+      <p><code>rnd(i)</code> 返回 [0, i) 上的均匀整数，实现放在第四节说。整个结构只有一个数组和一个整数，空间就是 m 个位置。</p>
+
+      <h2>二、为什么这就等概率</h2>
+      <p>用归纳法看「处理完第 i 个球之后，每个球在袋里的概率」。记这个概率为 P(i)。</p>
+      <p>i = m 时，前 m 个球都在袋里，P(m) = 1 = m/m。</p>
+      <p>假设 P(i−1) = m/(i−1)，来看第 i 个球进来之后发生了什么。</p>
+      <p>新来的第 i 个球：留下来的概率是 m/i。</p>
+      <p>已经在袋里的旧球 x：它被顶掉，需要第 i 个球成功进袋（概率 m/i），同时随机挑位置时挑中它（概率 1/m），乘起来是 1/i。所以它留下的概率是前一时刻的 P(i−1) 乘以 (1 − 1/i)。把式子写开：P(i) = m/(i−1) × (i−1)/i = m/i。</p>
+      <p>新旧两种球在同一个时刻的概率都等于 m/i，归纳成立。</p>
+      <p>这里有个细节值得停下来看一眼：旧球被顶掉的概率是 1/i，这个数和新球的留存概率 m/i 只差一个 m 的倍数。正是这个配合让两边同时收敛到 m/i。如果第二个随机数是在 i 个位置里挑（而不是 m 个位置），旧球被顶掉的概率就变成 m/i × 1/i，概率会一路偏掉。</p>
+
+      <h2>三、任意时刻停下都成立</h2>
+      <p>上面证明的是「处理完第 i 个球」。所以机器吐到第 k 个球时按下暂停，每个已吐出的球留在袋里的概率就是 min(1, m/k)：袋子没装满之前是 1，装满之后是 m/k。</p>
+      <p>袋口 10 个，吐到 41 号球停下，理论概率 10/41 = 0.243902。跑 10 万次实验，把每次袋里那 10 个球都记下来，41 个球各自的入选频率是：</p>
+      <table class="complexity">
+        <tr><th>停在第 k 个球</th><th>理论概率 min(10,k)/k</th><th>第 1 个球的实测频率</th><th>偏离最大的球</th></tr>
+        <tr><td>12</td><td>0.8333</td><td>0.8333</td><td>第 4 个，0.8344（+0.13%）</td></tr>
+        <tr><td>15</td><td>0.6667</td><td>0.6667</td><td>第 6 个，0.6649（−0.27%）</td></tr>
+        <tr><td>20</td><td>0.5000</td><td>0.5006</td><td>第 5 个，0.4980（−0.40%）</td></tr>
+        <tr><td>30</td><td>0.3333</td><td>0.3324</td><td>第 5 个，0.3346（+0.38%）</td></tr>
+        <tr><td>41</td><td>0.2439</td><td>0.2445</td><td>第 29 个，0.2459（+0.83%）</td></tr>
+      </table>
+      <p>每组 30 万次实验，最大偏离都在 1% 以内，而且偏离最大的那个球每次都不一样，没有「早来的球更稳」这种系统性偏差。</p>
+      <figure class="fig" id="fig-prob">
+        <figcaption>图 2　留在袋里的概率随球数变化：袋口 10 个，前 10 个球必然留下，之后沿 m/k 往下走</figcaption>
+      </figure>
+      <p>规模放大到 10 万个球、袋口 1000 个，每个球的理论概率是 0.01。跑 5000 轮，每个球平均被选中 50.0000 次，实测的标准差是 7.0396 次，按二项分布算是 √(5000 × 0.01 × 0.99) = 7.0356 次。10 万个球的频率都落在同一个分布里，没有哪一个球被系统性地偏待。</p>
+
+      <h2>四、随机数怎么取</h2>
+      <p>「以 m/i 的概率收下」这句话在代码里是 <code>随机数 &lt; m</code>，随机数要落在 [0, i) 上。最常见写法是 <code>rand() % i</code>，它有个能算出来的偏差。</p>
+      <p>设随机源在 [0, R] 上均匀，一共 R+1 个取值。对 i 取余，余数 0 到 (R+1) mod i − 1 会各多出现一次，其余余数少一次。差值能有多大？看一张精确枚举的表（用 15 位随机源，R = 32767，要判「落在前 3 个位置」）：</p>
+      <table class="complexity">
+        <tr><th>i</th><th>理论概率 3/i</th><th>取模的实测概率</th><th>偏差</th></tr>
+        <tr><td>1000</td><td>0.003000</td><td>0.003021</td><td>+0.71%</td></tr>
+        <tr><td>8000</td><td>0.000375</td><td>0.000458</td><td>+22.07%</td></tr>
+        <tr><td>20000</td><td>0.000150</td><td>0.000183</td><td>+22.07%</td></tr>
+        <tr><td>30000</td><td>0.000100</td><td>0.000183</td><td>+83.11%</td></tr>
+      </table>
+      <p>偏差的量级是 i/(R+1)：i 越接近随机源的上界，偏得越狠。i = 30000、R = 32767 时，前 2768 个余数每个都能被两个不同的取值撞到，剩下的只能被一个撞到，于是小概率事件被高估了八成。</p>
+      <p>换一个高精度随机源，这一层偏差就没了。用 31 位的 rand()（R = 2147483647）时，i 在 10 万以内的偏差量级是 4.66×10<sup>−5</sup>，可以直接忽略；但 i 涨到 10<sup>8</sup>，偏差又回到 4.66×10<sup>−2</sup>，也就是百分之五。所以「随机数够不够用」这件事要拿 i 和随机源上界比一比，别默认它没问题。</p>
+      <p>真正的均匀整数用乘法取高位：把随机源的 64 位值乘以 i，取乘积的高 64 位。这一步把 [0, 2<sup>64</sup>) 切成 i 段等长的区间，误差只有 2<sup>−64</sup> 量级。袋口只有几十几百个位置、球数最多到十亿量级，这个精度绰绰有余。</p>
+      <p>顺带说一句规模：10 亿个球、袋口 10 个位置，整段处理下来 2.67 秒，每个球摊到 2.7 纳秒，主要开销就是那两个随机数。</p>
+
+      <h2>五、抽奖系统是同一件事</h2>
+      <p>换个说法就是抽奖：一天里所有登录的用户机会均等，最后开 100 个名额。用户什么时候来、一天来多少个，事先都不知道。</p>
+      <p>照搬上面的规则：第 i 个用户到来时，如果池子没满就放进去；满了就以 100/i 的概率把他放进去，再随机顶掉池里一个人。收工时池子里的 100 个用户就是中奖名单。</p>
+    <pre class="code"><span class="cm">// 一天里陆续登录的用户，每人恰好 M/N 的中奖概率；N 是收工时才知道的</span>
+    <span class="cm">// 第 i 个用户到来时，以 M/i 的概率把他放进池子，放进来就随机顶掉一个</span>
+    <span class="kw">struct</span> Lottery {
+        <span class="kw">int</span> m; vector&lt;<span class="kw">int</span>&gt; pool; <span class="kw">int</span> filled = 0;
+        Lottery(<span class="kw">int</span> s) : m(s), pool(s, -1) {}
+        <span class="kw">void</span> <span class="fn">login</span>(<span class="kw">ll</span> i) {                       <span class="cm">// 第 i 个用户</span>
+            <span class="kw">if</span> (filled &lt; m) { pool[filled++] = (<span class="kw">int</span>)i; <span class="kw">return</span>; }
+            <span class="kw">if</span> (rnd(i) &lt; m) pool[rnd(m)] = (<span class="kw">int</span>)i;
+        }
+    };</pre>
+      <p>这套做法的好处是全程不需要知道总人数 N。第 i 个用户被留下的概率是 100/i，而这个概率在后续每一次替换中又不断调整，最终每个人都收敛到 100/N。跑一遍 2000 个用户、100 个名额、2 万次实验：理论概率 0.05，第 1 个用户实测 0.0505，最后一个用户 0.0515，2000 个人里偏离最大的是 +11.10%、最小的是 −10.30%，都在抽样涨落范围内（每人期望中奖 1000 次，标准差 31 次）。</p>
+      <p>如果按人编号先来后到地分配、或者把一天切成一万个时间片各自抽一个中奖者，用户就得赌运气：早上的用户和深夜的用户不在同一个池子里比。蓄水池的做法把所有时刻的用户放进同一个池子，只用一个袋子就完成了全局等概率。</p>
+
+      <div class="viz" id="viz-pool">
+        <p class="viz-title">采样实验台</p>
+        <p class="viz-note">上面是机器和袋子，下面是每个球最终留在袋里的频率。先逐个吐球看袋子怎么换人，再点「跑 5 万次统计」把频率量出来。</p>
+        <div id="pool-board"></div>
+        <div id="pool-chart"></div>
+        <p class="viz-note" id="pool-note"></p>
+        <p class="viz-answer" id="pool-answer"></p>
+        <div class="viz-controls">
+          <label>袋子大小 m <select id="pool-m">
+            <option value="10">10</option>
+            <option value="6">6</option>
+            <option value="20">20</option>
+          </select></label>
+          <button id="pool-next">吐一个球</button>
+          <button id="pool-fill">吐到 41 个</button>
+          <button id="pool-run">跑 5 万次统计</button>
+          <button id="pool-reset">重置</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>收下第 i 个球</td><td>O(1)，两次随机数</td><td>O(1)</td></tr>
+        <tr><td>处理 n 个球</td><td>O(n)</td><td>O(m)，袋子本身</td></tr>
+        <tr><td>抽奖池收一个用户</td><td>O(1)</td><td>O(M)，M 是名额数</td></tr>
+      </table>
+      <p>这里的空间是整套做法最值钱的地方：不管机器吐多少个球，袋子始终只有 m 个位置。10 亿个球、10 个位置，内存占用是 40 字节。时间也没得挑，每个球只做一次概率判断，连球号都不用存下来。</p>
+      <p>要注意的是「不能反悔」这条约束是白送的：一旦决定扔掉就真的扔掉了，不需要记住扔过谁，也不需要回看历史。这正是 O(1) 的原因。凡是需要回看历史才能补救的算法，空间都省不下来。</p>
+
+      <h2>总结</h2>
+      <p>蓄水池采样只有两条规则：前 m 个球直接占满袋子，之后每个球以 m/i 的概率进来、进来时均匀随机顶掉一个位置。归纳一下就能看出，处理完第 i 个球时每个球留在袋里的概率都是 m/i，任意时刻停下来统计，得到的是一份等概率样本。</p>
+      <p>两个随机数各管一件事，第一个管收不收（m/i），第二个管顶掉谁（1/m），乘起来的 1/i 是整段证明的关键。随机数本身的精度也要算一笔账：取模在 i 接近随机源上界时能偏出八成，31 位随机源配 10 万量级的 i 才算太平，乘法取高位是更稳的写法。</p>
+      <p>把球换成登录用户，这套规则就是「每人等概率中奖」的抽奖系统，而且不需要预先知道总人数。往后需要「从一个不知道多大、还在增长的集合里取样本」的场景，第一反应都应该是它。</p>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解107【扩展】大厂面试中经常漫聊的有趣算法问题</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>Wikipedia</td><td>Reservoir sampling</td><td><a href="https://en.wikipedia.org/wiki/Reservoir_sampling" target="_blank">en.wikipedia.org/wiki/Reservoir_sampling</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function box(x,y,w,h,fill,stroke,rx){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(rx==null?4:rx)+'" fill="'+(fill||'#fff')+'" stroke="'+(stroke||'#e6e8eb')+'"/>'; }
+function ln(x1,y1,x2,y2,st,dash,wd){ return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+st+'" stroke-width="'+(wd||1)+'" stroke-dasharray="'+(dash||'none')+'"/>'; }
+
+// 演示用的随机数：mulberry32，固定种子，可复现
+var seed = 1;
+function r32(){
+  seed = (seed + 0x6D2B79F5) | 0;
+  var t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+function rnd(i){ return Math.floor(r32() * i); }
+
+// ===== 图 1：机器吐球 + 袋子 =====
+(function(){
+  var host=document.getElementById('fig-machine'); if(!host) return;
+  var W=660, HH=252, b='';
+  b+=txt(20,20,'机器：1、2、3、4 …… 一路吐下去',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var mx=20, my=40, mw=190, mh=64;
+  b+=box(mx,my,mw,mh,'#eef4ff','#cbd5e1');
+  for(var i=0;i<4;i++){
+    var cx=mx+26+i*46;
+    b+='<circle cx="'+cx+'" cy="'+(my+32)+'" r="13" fill="#2563eb" opacity="'+((i===3)?1:0.45)+'"/>';
+    b+=txt(cx,my+36,String(i+1),{'fs':11,fill:'#fff'});
+  }
+  b+=ln(mx+mw+6,my+32,mx+mw+62,my+32,'#9aa0a6','4 3');
+  b+=txt(mx+mw+34,my+24,'第 i 个球',{'fs':10.5,fill:'#94a3b8'});
+  var bx=mx+mw+70, by=36, bw=180, bh=52;
+  b+=box(bx,by,bw,bh,'#ffedd5','#fdba74');
+  b+=txt(bx+bw/2,by+21,'[0,i) 里的随机数 < m ?',{'fs':11.5});
+  b+=txt(bx+bw/2,by+40,'不满足就永远扔掉',{'fs':10.5,fill:'#64748b'});
+  var gx=bx, gy=126, gw=316, gh=80;
+  b+=box(gx,gy,gw,gh,'#fff','#cbd5e1');
+  b+=txt(gx+gw/2,gy-8,'袋子：只装得下 m 个',{'fs':11.5,fill:'#1f2937'});
+  b+=ln(bx+bw/2,by+bh,bx+bw/2,gy,'#9aa0a6');
+  b+=txt(mx,by+bh+30,'满足时随机顶掉一个',{'an':'start','fs':10.5,fill:'#ea580c'});
+  var cols=5, cell=(gw-24)/cols, cells=[1,2,9,17,23,28,31,35,38,41];
+  for(var k=0;k<10;k++){
+    var r=Math.floor(k/cols), c=k%cols;
+    var px=gx+14+c*cell, py=gy+12+r*36;
+    b+=box(px,py,cell-6,28,(k<2)?'#dbeafe':'#f6f7f9',(k<2)?'#93c5fd':'#e6e8eb',3);
+    b+=txt(px+(cell-6)/2,py+19,String(cells[k]),{'fs':10.5,fill:(k<2)?'#1d4ed8':'#9aa0a6'});
+  }
+  b+=txt(20,HH-12,'机器吐球、当场决定收不收、进袋时挑一个旧球请出去，三步都是常数时间',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 图 2：概率随 k 变化 =====
+(function(){
+  var host=document.getElementById('fig-prob'); if(!host) return;
+  var W=660, HH=252, b='';
+  var x0=64,y0=186,pw=560,ph=136;
+  b+=txt(x0-52,20,'留在袋里的概率',{'an':'start','fs':12,fill:'#1f2937'});
+  b+=ln(x0,y0,x0+pw,y0,'#cbd5e1');
+  b+=ln(x0,40,x0,y0,'#cbd5e1');
+  for(var p=0;p<=4;p++){
+    var y=y0-ph*p/4;
+    b+=ln(x0-4,y,x0,y,'#cbd5e1');
+    b+=txt(x0-8,y+4,(p*25)+'%',{'an':'end','fs':10,fill:'#94a3b8'});
+  }
+  var KS=[5,10,15,20,30,41,60,100];
+  for(var i=0;i<KS.length;i++){
+    var x=x0+pw*i/(KS.length-1);
+    b+=txt(x,y0+16,String(KS[i]),{'fs':10,fill:'#94a3b8'});
+  }
+  b+=txt(x0+pw/2,y0+34,'机器吐到第 k 个球',{'fs':11,fill:'#94a3b8'});
+  var d='', d2='';
+  for(var i=0;i<=200;i++){
+    var k=1+i*(120-1)/200;
+    var pr=Math.min(1, 10/k);
+    var x=x0+pw*i/200, y=y0-ph*pr;
+    d += (i?' L':'M')+x.toFixed(1)+' '+y.toFixed(1);
+  }
+  b+='<path d="'+d+'" fill="none" stroke="#2563eb" stroke-width="2.5"/>';
+  for(var i=0;i<=200;i++){
+    var k=2+i*(120-2)/200;
+    var pr=Math.min(1, 20/k);
+    var x=x0+pw*i/200, y=y0-ph*pr;
+    d2 += (i?' L':'M')+x.toFixed(1)+' '+y.toFixed(1);
+  }
+  b+='<path d="'+d2+'" fill="none" stroke="#ea580c" stroke-width="2" stroke-dasharray="5 3"/>';
+  b+=ln(x0+pw*10/120,y0-ph,x0+pw*10/120,y0, '#9aa0a6','3 3');
+  b+=txt(x0+pw*10/120+6,y0-ph+14,'k = m',{'an':'start','fs':10.5,fill:'#9aa0a6'});
+  b+=txt(x0+pw-150,66,'实线：袋口 m = 10',{'an':'start','fs':11,fill:'#2563eb'});
+  b+=txt(x0+pw-150,84,'虚线：袋口 m = 20',{'an':'start','fs':11,fill:'#ea580c'});
+  b+=txt(20,HH-12,'袋口越大曲线越高，但两条曲线都是「前 m 个球必然留下、之后按 m/k 下滑」的同一个形状',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 演示：采样实验台 =====
+(function(){
+  var board=document.getElementById('pool-board');
+  var chart=document.getElementById('pool-chart');
+  var noteEl=document.getElementById('pool-note');
+  var ansEl=document.getElementById('pool-answer');
+  var selM=document.getElementById('pool-m');
+  var N=41;
+  var bag=[], step=0, freq=null, runs=0;
+
+  function reset(){
+    bag=[]; step=0; freq=new Array(N+1).fill(0); runs=0;
+    seed=1; draw();
+  }
+  function enter(i){
+    if(i<=m()){ bag[i-1]=i; return; }
+    if(rnd(i)<m()) bag[rnd(m())]=i;
+  }
+  function m(){ return Number(selM.value); }
+
+  function drawBag(){
+    var mm=m();
+    var b='<svg viewBox="0 0 660 168" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    b+='<text x="16" y="16" font-size="12.5" fill="#1f2328">机器已经吐到第 '+step+' 个球，袋子 '+bag.filter(function(x){return x>0;}).length+' / '+mm+' 个位置</text>';
+    var x0=16,y0=34,cw=Math.min(64,(628)/mm),ch=30;
+    var rows=Math.ceil(mm/10);
+    for(var k=0;k<mm;k++){
+      var r=Math.floor(k/10), c=k%10;
+      var px=x0+c*cw, py=y0+r*(ch+8);
+      var v=bag[k]||0;
+      b+='<rect x="'+px+'" y="'+py+'" width="'+(cw-5)+'" height="'+ch+'" rx="4" fill="'+(v?'#dbeafe':'#f6f7f9')+'" stroke="'+(v?'#93c5fd':'#e6e8eb')+'"/>';
+      b+='<text x="'+(px+(cw-5)/2)+'" y="'+(py+20)+'" font-size="12" text-anchor="middle" fill="'+(v?'#1d4ed8':'#cbd5e1')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+(v?v:'空')+'</text>';
+    }
+    b+='<line x1="16" y1="'+(y0+rows*(ch+8)+4)+'" x2="644" y2="'+(y0+rows*(ch+8)+4)+'" stroke="#e6e8eb"/>';
+    b+='<text x="16" y="'+(y0+rows*(ch+8)+22)+'" font-size="11" fill="#94a3b8">第 i 个球进来时：i ≤ m 直接占位；否则以 m/i 的概率进来，再从 '+mm+' 个位置里随机挑一个顶掉</text>';
+    b+='</svg>';
+    board.innerHTML=b;
+  }
+  function drawChart(){
+    var mm=m();
+    var W=660, HH=180, y0=150, ph=110, x0=52, pw=576;
+    var b='<svg viewBox="0 0 '+W+' '+HH+'" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    b+='<text x="16" y="16" font-size="12.5" fill="#1f2328">每个球最终留在袋里的频率（跑 '+runs+' 次实验）</text>';
+    b+='<line x1="'+x0+'" y1="'+y0+'" x2="'+(x0+pw)+'" y2="'+y0+'" stroke="#cbd5e1"/>';
+    var theory=Math.min(1, mm/N);
+    var bw=pw/N;
+    var top=runs?1.15*theory:1;
+    for(var i=1;i<=N;i++){
+      var f=runs?freq[i]/runs:0;
+      var hgt=f/top*ph;
+      var x=x0+(i-1)*bw;
+      b+='<rect x="'+x+'" y="'+(y0-hgt)+'" width="'+Math.max(1,bw-2)+'" height="'+hgt+'" fill="#2563eb" opacity="0.8"/>';
+      if(i===1||i%10===0) b+='<text x="'+(x+bw/2)+'" y="'+(y0+14)+'" font-size="9.5" text-anchor="middle" fill="#94a3b8">'+i+'</text>';
+    }
+    var ty=y0-theory/top*ph;
+    b+='<line x1="'+x0+'" y1="'+ty+'" x2="'+(x0+pw)+'" y2="'+ty+'" stroke="#ea580c" stroke-dasharray="4 3"/>';
+    b+='<text x="'+(x0+pw+2)+'" y="'+(ty+4)+'" font-size="10" fill="#ea580c" text-anchor="start">m/'+N+'</text>';
+    b+='</svg>';
+    chart.innerHTML=b;
+  }
+  function draw(){
+    drawBag(); drawChart();
+    var mm=m();
+    noteEl.textContent='理论：每个球留在袋里的概率都是 '+Math.min(1,mm/N).toFixed(6)+'（袋子 '+mm+' 个位置、共 '+N+' 个球）。';
+    if(!runs){ ansEl.textContent='还没跑统计，先吐几个球看看袋子怎么换人。'; return; }
+    var lo=1, hi=1, mx=0, mn=1;
+    for(var i=1;i<=N;i++){ var f=freq[i]/runs; if(f>mx){mx=f;hi=i;} if(f<mn){mn=f;lo=i;} }
+    var t=Math.min(1,mm/N);
+    ansEl.textContent='跑 '+runs+' 次：理论 '+t.toFixed(6)+'；实测最高是第 '+hi+' 个球 '+(mx*100).toFixed(2)+'%（偏离 '+((mx-t)/t*100).toFixed(2)+'%），最低是第 '+lo+' 个球 '+(mn*100).toFixed(2)+'%（偏离 '+((mn-t)/t*100).toFixed(2)+'%）';
+  }
+  selM.addEventListener('change', function(){ reset(); });
+  document.getElementById('pool-next').addEventListener('click', function(){
+    if(step>=N) return;
+    step++; enter(step); draw();
+  });
+  document.getElementById('pool-fill').addEventListener('click', function(){
+    while(step<N){ step++; enter(step); }
+    draw();
+  });
+  document.getElementById('pool-run').addEventListener('click', function(){
+    var mm=m(), T=50000;
+    freq=new Array(N+1).fill(0);
+    for(var t=0;t<T;t++){
+      var bg=[];
+      for(var i=1;i<=N;i++){
+        if(i<=mm) bg[i-1]=i;
+        else if(rnd(i)<mm) bg[rnd(mm)]=i;
+      }
+      for(var k=0;k<mm;k++) freq[bg[k]]++;
+    }
+    runs=T; draw();
+  });
+  document.getElementById('pool-reset').addEventListener('click', reset);
+  reset();
+})();
+})();</script>
+</body>
+</html>
