@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>布隆过滤器：位数组回答「在不在」</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+#bf-state { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; color: #475569; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>布隆过滤器：位数组回答「在不在」</h1>
+      <p class="intro">要把 100 亿条数据放进一个判重系统，原样存下来要 1 TB。布隆过滤器只开一个位数组，用几个哈希位置当指纹，把失误率压到万分之一，代价是它只会认错、不会漏掉，而且删不掉元素。这一页把结构、公式和实测都过一遍。</p>
+
+      <h2>零、1 TB 的数据压成 24 GB</h2>
+      <p>100 亿条数据，每条 100 字节，原样存下来是 1TB。布隆过滤器给出的方案是：开一个 1917 亿 bit 的位数组，也就是 23.96 GB，再准备 13 个哈希函数，就能回答「某条数据在不在这个集合里」，失误率 1.0013×10<sup>-4</sup>。</p>
+      <p>省下来的空间是数量级的。代价也很明确：它会时不时把一条从没插过的数据判成「在集合里」。</p>
+
+      <h2>一、位数组加 k 个哈希位置</h2>
+      <p>结构就两样东西：一个长度 m 的位数组，初始全是 0；以及 k 个哈希函数，每个都把样本映射到 0 到 m−1 之间的一个位置。</p>
+      <p>插入时对样本算 k 个位置，全置 1。查询时算同样 k 个位置，只要有一个是 0，说明这个样本一定没插过；全是 1，才判成「在集合里」。</p>
+    <pre class="code"><span class="cm">// 位数组 + k 个哈希位置，插入置 1，查询全是 1 就判「在」</span>
+    <span class="kw">struct</span> Bloom {
+        vector&lt;u64&gt; bits; size_t m; <span class="kw">int</span> k;
+        Bloom(size_t m_, <span class="kw">int</span> k_) : bits((m_ + 63) / 64, 0), m(m_), k(k_) {}
+
+        <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">const</span> <span class="kw">string</span>&amp; s) {
+            u64 h1 = md5_64(s), h2 = md5_64(s + "#salt") | 1ull;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; k; i++) {
+                size_t p = (h1 + (u64)i * h2) % m;   <span class="cm">// 两个哈希凑出 k 个位置</span>
+                bits[p &gt;&gt; 6] |= 1ull &lt;&lt; (p &amp; 63);
+            }
+        }
+
+        <span class="kw">bool</span> <span class="fn">query</span>(<span class="kw">const</span> <span class="kw">string</span>&amp; s) <span class="kw">const</span> {
+            u64 h1 = md5_64(s), h2 = md5_64(s + "#salt") | 1ull;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; k; i++) {
+                size_t p = (h1 + (u64)i * h2) % m;
+                <span class="kw">if</span> (!((bits[p &gt;&gt; 6] &gt;&gt; (p &amp; 63)) &amp; 1)) <span class="kw">return</span> <span class="kw">false</span>;
+            }
+            <span class="kw">return</span> <span class="kw">true</span>;   <span class="cm">// 全 1 只能说「可能在」</span>
+        }
+    };</pre>
+      <p>实现里不一定要真的写 k 个哈希函数。两个独立的哈希值 h1、h2 足够凑出 k 个位置：第 i 个位置取 h1 + i×h2 对 m 取余，只要 h2 是奇数，这些位置基本不会重复。</p>
+      <figure class="fig" id="fig-bits">
+        <figcaption>图 1　插入两个样本：每个样本置 k 个位置，两次插入可能撞在同一个位置；数组中可能会有谁也不认识的 1（别的样本留下的）</figcaption>
+      </figure>
+
+      <h2>二、失误只有一种方向</h2>
+      <p>查询会出两种偏差，布隆过滤器只占一种。</p>
+      <p>假阴性，也就是「插过却查不到」，不会发生。插入时把它的 k 个位置全置了 1，而位数组只会从 0 变 1，不会从 1 变回 0，所以这几个位置永远是 1，查询一定会命中。</p>
+      <p>假阳性，也就是「没插过却说在集合里」，会发生。这个样本的 k 个位置恰好都被别的样本置成了 1，它就冒充成功。位数组塞得越满，这种巧合越容易发生。</p>
+      <figure class="fig" id="fig-fp">
+        <figcaption>图 2　假阳性是怎么产生的：没插过的样本算出的 3 个位置，恰好被别的样本占了，于是被判成「在集合里」</figcaption>
+      </figure>
+
+      <h2>三、由 n 和 p 反推 m 与 k</h2>
+      <p>工程上真正要回答的问题是：给定样本数 n 和目标失误率 p，位数组要开多大、哈希函数要配几个。三行公式就能算出来。</p>
+    <pre class="code"><span class="cm">// 三个公式：由样本数 n 和目标失误率 p 反推位数组长度 m 与哈希个数 k</span>
+    <span class="kw">long</span> <span class="kw">double</span> L2 = logl(2.0L);
+    <span class="kw">long</span> <span class="kw">double</span> m = -n * logl(p) / (L2 * L2);      <span class="cm">// 需要多少个 bit</span>
+    <span class="kw">int</span> k = (<span class="kw">int</span>)floorl((m / n) * L2 + 0.5L);      <span class="cm">// 需要几个哈希函数</span>
+    <span class="kw">long</span> <span class="kw">double</span> ptrue = powl(1.0L - expl(-n * k / m), k);   <span class="cm">// 真实失误率</span></pre>
+      <p>第一条公式来自「位数组里 1 的比例正好让每个位置的碰撞概率降到最低」，第二条公式是在这个最佳比例下解出哈希个数。第三条公式是把取整之后的 m 与 k 代回去，得到真实失误率。取整总会让真实值比目标略差一点，所以第三步要用扩大之后的 m 重算一次。</p>
+      <table class="complexity">
+        <tr><th>样本数 n</th><th>目标失误率 p</th><th>位数组 m（bit）</th><th>占用空间</th><th>哈希个数 k</th><th>真实失误率</th></tr>
+        <tr><td>10<sup>10</sup></td><td>10<sup>-4</sup></td><td>191701167547</td><td>23.96 GB（22.32 GiB）</td><td>13</td><td>1.0013×10<sup>-4</sup></td></tr>
+        <tr><td>10<sup>10</sup></td><td>10<sup>-5</sup></td><td>239626459434</td><td>29.95 GB（27.90 GiB）</td><td>17</td><td>1.0019×10<sup>-5</sup></td></tr>
+        <tr><td>10<sup>8</sup></td><td>10<sup>-4</sup></td><td>1917011675</td><td>0.24 GB</td><td>13</td><td>1.0013×10<sup>-4</sup></td></tr>
+        <tr><td>10<sup>6</sup></td><td>10<sup>-2</sup></td><td>9585058</td><td>1.20 MB</td><td>7</td><td>1.0039×10<sup>-2</sup></td></tr>
+        <tr><td>10<sup>6</sup></td><td>10<sup>-3</sup></td><td>14377587</td><td>1.80 MB</td><td>10</td><td>1.0000×10<sup>-3</sup></td></tr>
+      </table>
+      <p>看第一行：100 亿条数据、失误率万分之一，占 23.96 GB。同样的失误率再要一个数量级，空间直接跳到 29.95 GB。失误率每降一个数量级，位数组长大致乘以 log 的变化倍数，这个账要提前算清楚，别等系统上线才发现内存不够。</p>
+      <p>另一个容易被忽略的点：公式里只出现样本数 n 和目标失误率 p，没有样本长度。1 亿条 100 字节的 URL 和 1 亿条 10 字节的串，用到的位数组一样大。样本长度只在算哈希时影响时间，不影响空间。</p>
+
+      <h2>四、k 取多少最好</h2>
+      <p>k 太小，每个样本占的位置少、容易被人冒充；k 太大，位数组被置 1 的速度变快、每一步反而更容易撞上。存在一个最优值，就是上面第二条公式给出的 (m/n)·ln2。</p>
+      <p>固定 n = 10<sup>6</sup>、m = 9585058（按 p = 1% 算出来的），把 k 从 1 扫到 20：</p>
+      <table class="complexity">
+        <tr><th>k</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>10</th><th>13</th><th>20</th></tr>
+        <tr><td>真实失误率</td><td>9.91×10<sup>-2</sup></td><td>3.55×10<sup>-2</sup></td><td>1.94×10<sup>-2</sup></td><td>1.36×10<sup>-2</sup></td><td>1.11×10<sup>-2</sup></td><td>1.01×10<sup>-2</sup></td><td>1.00×10<sup>-2</sup></td><td>1.05×10<sup>-2</sup></td><td>1.30×10<sup>-2</sup></td><td>2.08×10<sup>-2</sup></td><td>7.06×10<sup>-2</sup></td></tr>
+      </table>
+      <p>曲线是 U 形的，最低点在 k = 7，正是公式算出来的 6.64 取整的结果。k = 1 时失误率 9.91%，k = 20 时 7.06%，两个方向都比最优点差七倍左右。</p>
+      <figure class="fig" id="fig-kcurve">
+        <figcaption>图 3　固定 m 之后失误率随 k 变化的 U 形曲线，最低点落在公式给出的 k = (m/n)·ln2 附近</figcaption>
+      </figure>
+
+      <h2>五、实测对得上公式</h2>
+      <p>公式是不是准，跑一遍就知道。取 n = 10<sup>6</sup>、p = 1%，公式给出 m = 9585058 bit（1.20 MB）、k = 7。插入 100 万个样本，再用 1000 万个没插过的样本去查：</p>
+      <table class="complexity">
+        <tr><th>指标</th><th>数值</th></tr>
+        <tr><td>位数组</td><td>9585059 bit = 1.20 MB，k = 7</td></tr>
+        <tr><td>插入 100 万个样本耗时</td><td>1030.4 ms</td></tr>
+        <tr><td>假阴性（插过的查不到）</td><td>0 个</td></tr>
+        <tr><td>误判</td><td>100763 个 / 1000 万次查询</td></tr>
+        <tr><td>实测失误率</td><td>1.0076%</td></tr>
+        <tr><td>公式预测</td><td>1.0039%</td></tr>
+      </table>
+      <p>假阴性一个都没有，实测失误率与公式差 0.004 个百分点。再换几档 k，实测值和公式同样是贴着的：</p>
+      <table class="complexity">
+        <tr><th>k</th><th>1</th><th>3</th><th>6</th><th>7</th><th>12</th><th>20</th></tr>
+        <tr><td>理论失误率</td><td>9.9071%</td><td>1.9409%</td><td>1.0143%</td><td>1.0039%</td><td>1.7570%</td><td>7.0629%</td></tr>
+        <tr><td>实测失误率</td><td>9.9130%</td><td>1.9371%</td><td>1.0264%</td><td>1.0240%</td><td>1.7543%</td><td>7.0531%</td></tr>
+      </table>
+      <p>被误判的样本长什么样？它们和已插入的样本没有任何关系。实测里被误判的是 <span class="mono">stranger-62</span>、<span class="mono">stranger-228</span>、<span class="mono">stranger-338</span> 这些串，只是恰好把 7 个位置都撞在了别人置过的位上。</p>
+
+      <div class="viz" id="viz-bloom">
+        <p class="viz-title">布隆过滤器实验台</p>
+        <p class="viz-note">位数组按顺序铺开，深色格子是 1。逐条插入样本看它点亮哪些位置，再挑一个没插过的串查询，看 k 个位置是不是全被点亮。</p>
+        <div id="bf-board"></div>
+        <p class="viz-note" id="bf-state"></p>
+        <p class="viz-answer" id="bf-answer"></p>
+        <div class="viz-controls">
+          <label>位数组 m <select id="bf-m">
+            <option value="64">64</option>
+            <option value="128">128</option>
+          </select></label>
+          <label>哈希个数 k <select id="bf-k">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="5">5</option>
+          </select></label>
+          <label>查询 <select id="bf-q"></select></label>
+          <button id="bf-next" type="button">插入下一条</button>
+          <button id="bf-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>六、用不了的几件事</h2>
+      <p>布隆过滤器只能回答「在不在」，不能把元素取出来，也不能返回元素个数。它整张位数组里存的只是指纹，原始数据一个字节都没留。</p>
+      <p>也不能删元素。把某个元素的 k 个位置清成 0，会连带影响其他元素：那些位置可能是别的样本置的，清掉就让对方变成了假阴性，而假阴性是自己承诺过不会出现的。要支持删除就得换成计数版本，每个位置用一个计数器代替 1 个 bit，空间立刻涨几十倍。</p>
+      <p>用之前还要接受一件事：它的失误率是你自己选的，选错了没得挽回。位数组一旦开好，样本数超过 n 之后失误率会沿着公式往上爬。所以拿它做黑名单、爬虫去重这类系统时，n 一般按未来几年的最大规模估，宁可开大一点。</p>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>插入一个样本</td><td>O(k)，k 个哈希 + k 次置位</td><td>O(1) 额外</td></tr>
+        <tr><td>查询一个样本</td><td>O(k)</td><td>O(1) 额外</td></tr>
+        <tr><td>整个结构</td><td>—</td><td>O(m) bit，与样本长度无关</td></tr>
+        <tr><td>n 个样本、目标失误率 p 需要的位数</td><td>—</td><td>m = −n·ln p / (ln2)<sup>2</sup>，约 1.44·n·log₂(1/p) bit</td></tr>
+      </table>
+      <p>算哈希本身是 O(样本长度)，位数组的访问是常数次。所以布隆过滤器一次查询的代价比哈希表还低，空间更是低一个数量级，差距全在「允许偶尔认错」这一条上。</p>
+
+      <h2>总结</h2>
+      <p>布隆过滤器用一个位数组和 k 个哈希位置回答「在不在」。插入时把 k 个位置置 1，查询时只要有一个是 0 就判「不在」。位数组只会从 0 变 1，所以假阴性不会出现；假阳性会，它就是把「k 个位置恰好都被别人占了」误读成「这个样本在集合里」。</p>
+      <p>参数由三个公式定：m = −n·ln p / (ln2)<sup>2</sup>，k = (m/n)·ln2，再把取整后的 m、k 代回去算真实失误率。100 亿条、失误率万分之一需要 1917 亿 bit，也就是 23.96 GB，配 13 个哈希函数；失误率再降一个数量级，空间涨到 29.95 GB。位数与样本长度无关，只与样本个数和失误率有关。</p>
+      <p>实测 n = 10<sup>6</sup>、p = 1% 时位数组 1.20 MB、k = 7，插入 100 万个样本后查 1000 万次，假阴性 0、实测失误率 1.0076%，与公式的 1.0039% 基本重合。固定 m 扫 k，失误率是 U 形曲线，最低点落在公式给出的位置上。它不能删元素、不能取回数据，这两条在选型时就要接受。</p>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解106【扩展】哈希函数、哈希表、布隆过滤器、一致性哈希</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>Wikipedia</td><td>Bloom filter</td><td><a href="https://en.wikipedia.org/wiki/Bloom_filter" target="_blank">en.wikipedia.org/wiki/Bloom_filter</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function box(x,y,w,h,fill,stroke,rx){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(rx==null?4:rx)+'" fill="'+(fill||'#fff')+'" stroke="'+(stroke||'#e6e8eb')+'"/>'; }
+
+// 和演示一致的哈希
+function fnv32(s){ var h=2166136261>>>0; for(var i=0;i<s.length;i++){ h=(h ^ s.charCodeAt(i))>>>0; h=Math.imul(h,16777619)>>>0; } return h>>>0; }
+function mix32(x){ x=(x^(x>>>16))>>>0; x=Math.imul(x,0x7feb352d)>>>0; x=(x^(x>>>15))>>>0; x=Math.imul(x,0x846ca68b)>>>0; x=(x^(x>>>16))>>>0; return x>>>0; }
+function H(s){ return mix32(fnv32(s)); }
+function positions(s,k,m){ var h1=H(s), h2=(H(s+'#salt')|1)>>>0, p=[]; for(var i=0;i<k;i++) p.push((h1+i*h2)%m); return p; }
+
+var BITS=16;   // 一行画多少格
+
+// ===== 图 1：位数组与两次插入 =====
+(function(){
+  var host=document.getElementById('fig-bits'); if(!host) return;
+  var W=660,HH=214,b='',m=32,k=3;
+  b+=txt(16,18,'插入两个样本（m = 32，k = 3）',{'an':'start','fs':12.5,fill:'#1f2328'});
+  function grid(y,set,label,color){
+    b+=txt(16,y-8,label,{'an':'start','fs':11.5,fill:'#475569'});
+    for(var i=0;i<m;i++){
+      var x=16+(i%16)*39.5, yy=y+Math.floor(i/16)*26;
+      var on=set.indexOf(i)>=0;
+      b+=box(x,yy,34,20,on?color:'#fff',on?'#1f2937':'#e6e8eb',3);
+      b+=txt(x+17,yy+14,String(i),{'fs':9.5,fill:on?'#fff':'#cbd5e1'});
+    }
+  }
+  var p1=positions('alpha',k,m), p2=positions('bravo',k,m);
+  grid(44,p1,'样本 "alpha" 的 3 个位置：'+p1.join('、'),'#2563eb');
+  grid(120,p2,'样本 "bravo" 的 3 个位置：'+p2.join('、')+'（与 alpha 无交集）','#ea580c');
+  b+=txt(16,HH-10,'位数组只记录「这个位置被点过」，不记录是被谁点的，这是假阳性与「不能删除」的共同来源',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 图 2：假阳性 =====
+(function(){
+  var host=document.getElementById('fig-fp'); if(!host) return;
+  var W=660,HH=230,b='',m=24,k=3;
+  b+=txt(16,18,'查询一个从没插入过的样本，3 个位置全被别人的 1 占着',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var setA=positions('alpha',k,m), setB=positions('bravo',k,m), setC=positions('charlie',k,m);
+  var qp=positions('papa',k,m);
+  var all={}; setA.concat(setB,setC).forEach(function(p){ all[p]=1; });
+  for(var i=0;i<m;i++){
+    var x=16+(i%12)*53.5, y=44+Math.floor(i/12)*40;
+    var hit=qp.indexOf(i)>=0;
+    var on=all[i];
+    var col=on?(hit?'#ea580c':'#dbeafe'):'#fff';
+    b+=box(x,y,46,30,col,hit?'#ea580c':'#e6e8eb',4);
+    b+=txt(x+23,y+20,String(i),{'fs':11,fill:on?'#1f2937':'#cbd5e1'});
+  }
+  b+=txt(16,148,'浅蓝 = 被 alpha / bravo / charlie 置过的位置：'+Object.keys(all).sort(function(a,b){return a-b;}).join('、'),{'an':'start','fs':11.5,fill:'#475569'});
+  b+=txt(16,168,'查询 "papa" 算出的 3 个位置是 '+qp.join('、')+'，全部落在浅蓝里，于是它被判成「在集合里」，这就是一次误判',{'an':'start','fs':11.5,fill:'#9a3412'});
+  b+=txt(16,HH-10,'要减少它，要么开大位数组让 1 变稀疏，要么把 k 调到最优点；两条路都写在三个公式里',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 图 3：p_true 随 k 的 U 形曲线 =====
+(function(){
+  var host=document.getElementById('fig-kcurve'); if(!host) return;
+  var W=660,HH=232,b='';
+  var m=9585058, n=1000000, pts=[];
+  for(var k=1;k<=20;k++){
+    var v=Math.pow(1-Math.exp(-n*k/m),k);
+    pts.push([k,v]);
+  }
+  var x0=48,y0=176,w=560,hh=132;
+  var lmin=Math.log10(0.009), lmax=Math.log10(0.09);
+  b+=txt(16,18,'固定 m = 9585058、n = 10^6，真实失误率随 k 的变化（纵轴对数）',{'an':'start','fs':12.5,fill:'#1f2328'});
+  for(var g=0; g<=2; g++){
+    var lv=Math.log10(0.01)+g*0.5;
+    var yy=y0-(lv-lmin)/(lmax-lmin)*hh;
+    b+='<line x1="'+x0+'" y1="'+yy+'" x2="'+(x0+w)+'" y2="'+yy+'" stroke="#e6e8eb"/>';
+    b+=txt(x0-8,yy+4,(Math.pow(10,lv)*100).toFixed(1)+'%',{'fs':10.5,fill:'#94a3b8','an':'end'});
+  }
+  b+='<line x1="'+x0+'" y1="'+y0+'" x2="'+(x0+w)+'" y2="'+y0+'" stroke="#cbd5e1"/>';
+  var path='';
+  for(var i=0;i<pts.length;i++){
+    var px=x0+(pts[i][0]-1)/19*w;
+    var py=y0-(Math.log10(pts[i][1])-lmin)/(lmax-lmin)*hh;
+    path+=(i?' L':'M')+px+' '+py;
+    if(pts[i][0]%2===1) b+=txt(px,y0+16,String(pts[i][0]),{'fs':10.5,fill:'#94a3b8'});
+    if(pts[i][0]===7){
+      b+='<circle cx="'+px+'" cy="'+py+'" r="4" fill="#ea580c"/>';
+      b+=txt(px, py-10, '最低点 k = 7',{'fs':11,fill:'#ea580c'});
+    }
+  }
+  b+='<path d="'+path+'" fill="none" stroke="#2563eb" stroke-width="2"/>';
+  b+=txt(x0+w/2,y0+34,'k（哈希个数）',{'fs':11,fill:'#94a3b8'});
+  b+=txt(16,HH-10,'k 小了每个样本占的位置太少，k 大了位数组被点满得更快，两边都让失误率上升',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 演示：布隆过滤器实验台 =====
+(function(){
+  var board=document.getElementById('bf-board');
+  var stateEl=document.getElementById('bf-state');
+  var ansEl=document.getElementById('bf-answer');
+  var selM=document.getElementById('bf-m');
+  var selK=document.getElementById('bf-k');
+  var selQ=document.getElementById('bf-q');
+  var btnNext=document.getElementById('bf-next');
+  var btnReset=document.getElementById('bf-reset');
+  var SAMPLES=['alpha','bravo','charlie','delta','echo','foxtrot','golf','hotel','india','juliet'];
+  var QUERIES=['kilo','lima','mike','november','oscar','papa','quebec','romeo','sierra','tango'];
+
+  for(var i=0;i<QUERIES.length;i++){
+    var o=document.createElement('option'); o.value=String(i); o.textContent=QUERIES[i]; selQ.appendChild(o);
+  }
+  selQ.value='5';
+  var st={m:64,k:3,step:0,bits:null,q:-1};
+  function build(){ st.m=Number(selM.value); st.k=Number(selK.value); st.step=0; st.q=Number(selQ.value); st.bits=new Array(st.m); for(var i=0;i<st.m;i++) st.bits[i]=0; }  function draw(){
+    var ones=0; for(var i=0;i<st.m;i++) if(st.bits[i]) ones++;
+    var qp=(st.q>=0)?positions(QUERIES[st.q],st.k,st.m):[];
+    var b='<svg viewBox="0 0 660 150" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    var cell=Math.min(16, 620/st.m), rows=Math.ceil(st.m/ (Math.floor(620/cell)) );
+    var per=Math.floor(620/cell);
+    for(var i2=0;i2<st.m;i2++){
+      var r=Math.floor(i2/per), c=i2%per;
+      var x=16+c*cell, y=16+r*(cell+4);
+      var hit=qp.indexOf(i2)>=0, on=st.bits[i2];
+      var fill=on?'#2563eb':'#fff';
+      if(hit&&!on) fill='#ffedd5';
+      if(hit&&on) fill='#ea580c';
+      b+='<rect x="'+x+'" y="'+y+'" width="'+(cell-2)+'" height="'+(cell-2)+'" rx="2" fill="'+fill+'" stroke="'+(hit?'#ea580c':'#e6e8eb')+'"/>';
+    }
+    b+='</svg>';
+    board.innerHTML=b;
+    stateEl.textContent='状态 m='+st.m+'，k='+st.k+'：已插入 '+st.step+' 条，置位 '+ones+' 个，位密度 '+(ones/st.m).toFixed(2)+'　位图 '+st.bits.join('');
+    var allOne=true; for(var j=0;j<qp.length;j++) if(!st.bits[qp[j]]) allOne=false;
+    if(st.q>=0){
+      ansEl.textContent='查询 "'+QUERIES[st.q]+'" 的 '+st.k+' 个位置：'+qp.join('、')+
+        (allOne?'　全是 1，判为「在集合里」'+(st.step>0&&!insHas(QUERIES[st.q])?'（它从没插入过，这是一次误判）':''):'　有 0，判为「不在集合里」');
+    } else { ansEl.textContent=''; }
+  }
+  function insHas(s){ return SAMPLES.slice(0,st.step).indexOf(s)>=0; }
+  function step(){
+    if(st.step>=SAMPLES.length){ ansEl.textContent='10 条样本都插完了，置位 '+(function(){var c=0;for(var i=0;i<st.m;i++) if(st.bits[i]) c++; return c;})()+' 个'; btnNext.disabled=true; return; }
+    var s=SAMPLES[st.step];
+    var ps=positions(s,st.k,st.m);
+    for(var i=0;i<ps.length;i++) st.bits[ps[i]]=1;
+    st.step++;
+    draw();
+    btnNext.disabled=(st.step>=SAMPLES.length);
+  }
+  selM.addEventListener('change',function(){ build(); btnNext.disabled=false; draw(); });
+  selK.addEventListener('change',function(){ build(); btnNext.disabled=false; draw(); });
+  selQ.addEventListener('change',function(){ st.q=Number(selQ.value); draw(); });
+  btnNext.addEventListener('click',step);
+  btnReset.addEventListener('click',function(){ build(); btnNext.disabled=false; draw(); });
+  build(); draw();
+})();
+})();</script>
+</body>
+</html>

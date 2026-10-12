@@ -78,3 +78,5 @@
 - **复用中断残留前先核对它自写的测量脚本**（103）：`/tmp/cppNNN/rate.cpp` 里同一个计数器 `m5` 给两件事计数、`printf` 的标签还跟函数语义对不上（M4 写着「对称点写 c-i」实际是「扩展串只插一个 #」），照读会得出错结论。复用残留时把 rate/presets 源码过一遍（计数器是否一一对应、标签与函数是否一致），有疑问就重写一份分离版再跑。
 - **「看着像错其实等价」要专门量一遍，0.00% 也是结论**（103）：Manacher 更新 r 写成 `if (i + len >= r)` 与 `>` 完全等价（r 的值不变、只是把中心 c 换成 i，实测答案与整份 p 数组 0.00% 差异）；LC 恢复初始状态的判断写 `>=` 与 `==` 也等价，因为公共前缀长度不可能超过后缀自身长度。这类 0.00% 不是抓取失败，是值得写进正文的结论。
 - **复杂度里的空间数字要按题目上限算，不是按测试用的 n 算**（103）：`char ss[MAXN << 1]` 配 `MAXN = 11000001` 是 2200 万格 = 22 MB，p 同样格数是 88 MB；`int z[20000001]` 单张 80 MB、两张 160 MB。写正文前先回去看数组声明的实际长度。
+- **页面 JS 里别拿单个大写字母当维度变量**（106）：`var W=660,H=300` 的 `H` 会和哈希函数 `function H(s)` 撞名，同一个 IIFE 里调 `H()` 就抛 `TypeError: H is not a function`（演示图全空、`verify_pages` 却照样 PASS）。画布高一律写 `HH`。
+- **`verify_home.js` 有版本偏差**（106）：仓库 `.agent/skills/course-site-page/scripts/` 里那份是旧快照（找老结构，报 `Cannot read properties of undefined (reading 'tabs')`），两入口页版在用户级 `~/.workbuddy/skills/course-site-page/scripts/`。跑入口页自检用后者（拷到 `/tmp/skNNN` 再配上仓库的 `cdp_page.js`）。

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>哈希函数：性质与均匀性</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+.hashline { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px;
+            word-break: break-all; margin: 4px 0 10px; color: #1f2937; }
+.hashline b { color: #ea580c; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>哈希函数：性质与均匀性</h1>
+      <p class="intro">哈希函数把任意长的样本压成一个定长的数，输出只有固定那么多种，输入却无限多，碰撞躲不掉。好在只要输出够均匀，碰撞率就能低到可以忽略。这一页把四条性质讲清楚，拆开 MD5 看一眼，再用 100 万个串把「均匀」量出来。</p>
+
+      <h2>零、同一批串，两个函数给出两种分布</h2>
+      <p>把 1048576 个互不相同的 20 位二进制串喂给 MD5，得到 1048576 个哈希值，一个都没撞。再把它们对 13 取余扔进 13 个抽屉，最多的那个装了 81065 个，最少的 80252 个，与平均值 80659.69 差不到 1%。</p>
+      <p>换成只看首字符的哈希函数，同一个集合全挤进 2 个抽屉，另外 11 个空着。两个函数都是「把串变成数」，结果的差别全在第四条性质上。</p>
+
+      <h2>一、四条性质</h2>
+      <p>哈希函数的用处很直接：把复杂样本变成数字，往后样本之间的比较就变成数字之间的比较。它要满足四条性质。</p>
+      <p>1）输入的可能性是无限的，输出的取值范围相对有限，比如 128 位只有 2<sup>128</sup> 个格子。</p>
+      <p>2）输入同样的样本一定得到同样的输出。函数里没有任何随机机制，同一个串今天算和明天算结果一样。</p>
+      <p>3）输入不同的样本也可能得到同样的输出，这叫哈希碰撞。</p>
+      <p>4）大量不同的输入，得到的输出会几乎均匀地铺满整个输出域。</p>
+      <p>第四条最要紧。碰撞理论上躲不掉，抽屉原理摆在那里：格子有限、样本无限。好的哈希函数能做的是把碰撞率压到可以忽略，办法就是让输出尽量均匀。可以这么直观理解：不管输入有没有规律、彼此多相似，一堆不同的输入算出来的输出，从分布上看熵最大。</p>
+      <figure class="fig" id="fig-domain">
+        <figcaption>图 1　无限多的输入压进有限的输出域：碰撞躲不掉，好的哈希函数让每个格子被砸中的机会几乎相等</figcaption>
+      </figure>
+
+      <h2>二、MD5 长什么样</h2>
+      <p>工程上常用的哈希函数有一长串名字：MD5、SHA-1、SHA-256、SHA-512、SHA3 系列。它们的输出长度不同，内部结构都是「把字节流分块，每块揉进一个固定大小的状态里」。看一个最小的：MD5，输出 128 位。</p>
+      <p>状态是 4 个 32 位整数，初值写死在标准里。消息按 64 字节分块，每块都参与 64 轮四则运算与循环移位，轮函数有四种形状（与或非、异或、选择），轮数和移位量也都是固定表。揉完所有块，把 4 个状态字按小端序拼成 32 个十六进制位，就是哈希值。</p>
+    <pre class="code"><span class="cm">// 压缩函数：读 64 字节，把 4 个状态字揉 64 轮</span>
+    <span class="kw">void</span> <span class="fn">md5Block</span>(<span class="kw">const</span> u8* p, u32 st[4]) {
+        u32 M[16];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 16; i++)
+            M[i] = (u32)p[i * 4] | ((u32)p[i * 4 + 1] &lt;&lt; 8)
+                 | ((u32)p[i * 4 + 2] &lt;&lt; 16) | ((u32)p[i * 4 + 3] &lt;&lt; 24);
+        u32 A = st[0], B = st[1], C = st[2], D = st[3];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 64; i++) {
+            u32 F; <span class="kw">int</span> g;
+            <span class="kw">if</span> (i &lt; 16)      { F = (B &amp; C) | (~B &amp; D); g = i; }
+            <span class="kw">else</span> <span class="kw">if</span> (i &lt; 32) { F = (D &amp; B) | (~D &amp; C); g = (5 * i + 1) &amp; 15; }
+            <span class="kw">else</span> <span class="kw">if</span> (i &lt; 48) { F = B ^ C ^ D;          g = (3 * i + 5) &amp; 15; }
+            <span class="kw">else</span>             { F = C ^ (B | ~D);       g = (7 * i) &amp; 15; }
+            u32 tmp = D; D = C; C = B;
+            B = B + md5rol(A + F + MD5_K[i] + M[g], MD5_S[i]);
+            A = tmp;
+        }
+        st[0] += A; st[1] += B; st[2] += C; st[3] += D;
+    }</pre>
+      <p>补位是它对外接口里唯一有点绕的地方。消息长度要先补到 64 的整数倍减 8，空出来的最后 8 字节写原消息的比特长度。补位的第一步永远是补一个 1，也就是 0x80。</p>
+    <pre class="code"><span class="cm">// 补位 + 分块 + 输出：md5 的对外接口就这三步</span>
+    <span class="kw">string</span> md5hex(<span class="kw">const</span> <span class="kw">string</span>&amp; s) {
+        u32 st[4] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476};
+        <span class="kw">string</span> msg = s;
+        u64 bits = (u64)s.size() * 8;          <span class="cm">// 原串的比特长度，最后 8 字节要写它</span>
+        msg.push_back((<span class="kw">char</span>)0x80);             <span class="cm">// 先补一个 1</span>
+        <span class="kw">while</span> (msg.size() % 64 != 56) msg.push_back((<span class="kw">char</span>)0);   <span class="cm">// 再补 0 到 56</span>
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 8; i++) msg.push_back((<span class="kw">char</span>)((bits &gt;&gt; (8 * i)) &amp; 0xff));
+        <span class="kw">for</span> (size_t i = 0; i &lt; msg.size(); i += 64) md5Block((<span class="kw">const</span> u8*)msg.data() + i, st);
+        <span class="kw">const</span> <span class="kw">char</span>* hx = "0123456789abcdef";
+        <span class="kw">string</span> out;
+        <span class="kw">for</span> (<span class="kw">int</span> w = 0; w &lt; 4; w++) <span class="kw">for</span> (<span class="kw">int</span> b = 0; b &lt; 4; b++) {
+            <span class="kw">int</span> v = (st[w] &gt;&gt; (8 * b)) &amp; 0xff;  <span class="cm">// 小端序输出</span>
+            out.push_back(hx[v &gt;&gt; 4]); out.push_back(hx[v &amp; 15]);
+        }
+        <span class="kw">return</span> out;
+    }</pre>
+      <p>拿标准测试向量验一下：空串得到 <span class="mono">d41d8cd98f00b204e9800998ecf8427e</span>，<code>"abc"</code> 得到 <span class="mono">900150983cd24fb0d6963f7d28e17f72</span>，与公开值一致。</p>
+      <p>这套结构带来一个反直觉的现象：改一个字符，输出的一半左右都会变。下面 7 个串只在个别位置不同（第 2 到第 6 个与第 1 个分别差 1、1、1、2、2 个字符），MD5 值彼此看不出半点关系。</p>
+      <figure class="fig" id="fig-avalanche">
+        <figcaption>图 2　改一个字符就换一张脸：7 个只差一两个字符的串，MD5 值互相独立，取余落在 3、4、7、8、12 五个不同的桶里</figcaption>
+      </figure>
+
+      <h2>三、均匀性怎么量</h2>
+      <p>「几乎均匀」是可以量出来的：拿一堆样本算哈希，对 m 取余落进 m 个桶，看每个桶装了多少。桶的大小应该都在样本数除以 m 附近。实测用的样本集合是全部 1048576 个 20 位二进制串。</p>
+    <pre class="code"><span class="cm">// 把一堆样本按哈希值对 m 取余落桶，看最大最小差多少</span>
+    vector&lt;<span class="kw">int</span>&gt; <span class="fn">cnt</span>(m, 0);
+    <span class="kw">for</span> (<span class="kw">const</span> <span class="kw">string</span>&amp; s : strs) cnt[md5_64(s) % m]++;
+
+    <span class="kw">int</span> mx = *max_element(cnt.begin(), cnt.end());
+    <span class="kw">int</span> mn = *min_element(cnt.begin(), cnt.end());
+    <span class="kw">double</span> avg = (<span class="kw">double</span>)strs.size() / m;
+    printf("平均 %.2f，最大 %d (%+.2f%%)，最小 %d (%+.2f%%)\n",
+           avg, mx, (mx - avg) / avg * 100, mn, (mn - avg) / avg * 100);</pre>
+      <p>把偏差按桶数整理出来：</p>
+      <table class="complexity">
+        <tr><th>哈希函数</th><th>桶数 m</th><th>平均每桶</th><th>最多</th><th>偏差</th><th>最少</th><th>偏差</th></tr>
+        <tr><td>MD5</td><td>13</td><td>80659.69</td><td>81065</td><td>+0.50%</td><td>80252</td><td>-0.51%</td></tr>
+        <tr><td>MD5</td><td>50</td><td>20971.52</td><td>21315</td><td>+1.64%</td><td>20690</td><td>-1.34%</td></tr>
+        <tr><td>MD5</td><td>200</td><td>5242.88</td><td>5438</td><td>+3.72%</td><td>5034</td><td>-3.98%</td></tr>
+      </table>
+      <p>偏差随桶数变大而变大，这是采样涨落的必然。单个桶里的数量标准差是它均值的 1/√(1048576/m)：m=13 时是 0.35%，m=200 时是 1.38%。桶数越多、每桶的平均值越小，相对涨落就越大，实测的最多桶落在两三个标准差之内，这已经是均匀哈希函数能给出的最好结果了。</p>
+      <div class="viz" id="viz-uniform">
+        <p class="viz-title">均匀性实验台</p>
+        <p class="viz-note">同一批 1048576 个串，换哈希函数、换桶数，看每个桶装了多少。柱子按桶编号排列，橙色虚线是平均线。</p>
+        <div id="uf-board"></div>
+        <p class="viz-note" id="uf-note"></p>
+        <p class="viz-answer" id="uf-answer"></p>
+        <div class="viz-controls">
+          <label>哈希函数 <select id="uf-hash">
+            <option value="md5">MD5</option>
+            <option value="first">只看首字符</option>
+            <option value="sum">字符求和</option>
+          </select></label>
+          <label>桶数 m <select id="uf-m">
+            <option value="13">13</option>
+            <option value="50">50</option>
+            <option value="200">200</option>
+          </select></label>
+        </div>
+      </div>
+
+      <h2>四、坏的哈希函数是什么样</h2>
+      <p>把上面同一批字符串，换成两个「想当然」的哈希函数再看一眼：一个只看首字符，一个把字符编码加起来。</p>
+      <table class="complexity">
+        <tr><th>哈希函数</th><th>桶数 m</th><th>最多</th><th>偏差</th><th>最少</th><th>偏差</th><th>用到的桶</th></tr>
+        <tr><td>只看首字符</td><td>13</td><td>524288</td><td>+550.00%</td><td>0</td><td>-100.00%</td><td>2 / 13</td></tr>
+        <tr><td>只看首字符</td><td>200</td><td>524288</td><td>+9900.00%</td><td>0</td><td>-100.00%</td><td>2 / 200</td></tr>
+        <tr><td>字符求和</td><td>13</td><td>184756</td><td>+129.06%</td><td>5985</td><td>-92.58%</td><td>13 / 13</td></tr>
+        <tr><td>字符求和</td><td>200</td><td>184756</td><td>+3423.94%</td><td>0</td><td>-100.00%</td><td>21 / 200</td></tr>
+      </table>
+      <p>只看首字符的问题在于字符集太小：这批串的第 1 个字符不是 <code>a</code> 就是 <code>b</code>，输出只有 2 种可能，桶再多也白搭。</p>
+      <p>字符求和看起来用了全部字符，取值却仍然只有 21 种。20 位二进制串的和落在 1940 到 1960 之间，21 个可能值对 200 个桶取余，最多也就能铺满 21 个桶。要让输出铺满，输入的信息必须真的传进输出里，这在多项式哈希里靠乘法和进位，在 MD5 里靠那 64 轮混合。</p>
+      <figure class="fig" id="fig-uniform">
+        <figcaption>图 3　三百万次落桶的两种形状：MD5 的柱子贴着平均线抖，只看首字符和字符求和的柱子一个冲上天、一片塌到底</figcaption>
+      </figure>
+
+      <h2>五、均匀性拿来分组</h2>
+      <p>性质 4 的工程价值在于「均匀分组」。同一个样本的哈希值是固定的，把哈希值对文件数取余，就能保证同一类样本一定进同一个文件，同时不同种类的样本被均匀摊开。</p>
+      <p>经典场景：一台机器内存只有 4G，硬盘上放着 100 亿行字符串，每行 100 字节，要统计出现次数最多的那一个。100 亿行就是 10<sup>12</sup> 字节，整整 1TB，读都读不完，更别说在内存里建表。</p>
+      <p>办法是把文件拆成 1000 份。逐行读原文件，算这一行的哈希值，对 1000 取余决定它写进哪个小文件。每个小文件约 1GB，内存装得下一份，逐份读进内存用哈希表统计出各自的冠军，再在 1000 个候选里比一次就完了。</p>
+      <p>「同一个串一定进同一个文件」保证了统计的正确性，均匀性保证 1000 份文件的大小差不多、不会有一份特别大拖慢整轮。同一台机器上的内存和硬盘之争，就这么变成了一次文件切分。多台机器分片也是同一套逻辑，把「对 1000 取余」换成「对 1000 台机器取余」而已。</p>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>对一个长度 k 的样本求哈希</td><td>O(k)</td><td>O(1) 状态（MD5 固定 4 个 32 位字）</td></tr>
+        <tr><td>MD5 补位与分块</td><td>O(k)，消息长度补到 ≤ k+72</td><td>O(k) 拷贝（可以直接改原串则不额外占）</td></tr>
+        <tr><td>按哈希值把 N 个样本分成 m 组</td><td>O(N·k)</td><td>O(N) 样本 + O(m) 计数</td></tr>
+      </table>
+      <p>空间上有个容易忽略的点：MD5 的状态是定长的 128 位，与样本长度无关，所以「算一次哈希额外要多少空间」是 O(1)；真正随样本增长的是读入这份样本本身，以及实现里那份补位拷贝。</p>
+
+      <h2>总结</h2>
+      <p>四条性质里只有第四条需要刻意设计：输入无限、输出有限，碰撞必然存在，均匀分布才让碰撞率低到能用。MD5 用固定长度的状态加 64 轮混合达到这个效果，改一个字符输出就面目全非。</p>
+      <p>均匀性可以量化，办法是按余数落桶看偏差。1048576 个样本落在 13 个桶里，MD5 的偏差在 1% 以内；只看首字符的哈希只剩 2 个桶能用，字符求和只剩 21 个。那个差值直接决定它能不能用。</p>
+      <p>工程上要抗篡改（防伪造签名）还得挑抗碰撞的算法，MD5 和 SHA-1 在这条线上已经失守了；但竞赛和内存索引要的是均匀与快，这两件事是两回事。下一个用得上均匀性的地方是哈希表，桶的数量和扩容策略直接决定它的实际速度。</p>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解106【扩展】哈希函数、哈希表、布隆过滤器、一致性哈希</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>RFC 1321</td><td>MD5 消息摘要算法（含测试向量）</td><td><a href="https://www.rfc-editor.org/rfc/rfc1321" target="_blank">rfc-editor.org/rfc/rfc1321</a></td></tr>
+        <tr><td>OI Wiki</td><td>哈希表</td><td><a href="https://oi-wiki.org/ds/hash/" target="_blank">oi-wiki.org/ds/hash</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function box(x,y,w,h,fill,stroke,rx){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(rx==null?4:rx)+'" fill="'+(fill||'#fff')+'" stroke="'+(stroke||'#e6e8eb')+'"/>'; }
+function line(x1,y1,x2,y2,st,dash){ return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+st+'" stroke-dasharray="'+(dash||'none')+'"/>'; }
+
+// ===== 图 1：输入无限 vs 输出有限 =====
+(function(){
+  var host = document.getElementById('fig-domain'); if(!host) return;
+  var W=660,H=210,b='';
+  b+=txt(20,20,'输入：无限多种样本',{'an':'start','fs':12.5,fill:'#1f2328'});
+  b+=txt(400,20,'输出：2^128 个格子（有限）',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var lx=20,ly=40,lw=180,lh=140;
+  b+=box(lx,ly,lw,lh,'#eef4ff','#cbd5e1');
+  for(var i=0;i<8;i++) b+=txt(lx+lw/2,ly+16+i*13,'ab'.repeat(6)+'',{'fs':10.5,fill:'#94a3b8'});
+  b+=txt(lx+lw/2,ly+lh-10,'……',{'fs':13,fill:'#64748b'});
+  var rx=400,ry=40,rw=240,rh=140;
+  b+=box(rx,ry,rw,rh,'#fff','#cbd5e1');
+  var cols=8,rows=3,bx=rx+12,by=ry+14,bw=(rw-24)/cols,bh=(rh-28)/rows-6;
+  for(var j=0;j<rows;j++) for(var i2=0;i2<cols;i2++){
+    var hot=(j===1&&i2===3)||(j===2&&i2===3);
+    b+=box(bx+i2*bw,by+j*(bh+6),bw-5,bh,hot?'#ffedd5':'#f6f7f9','#e6e8eb',3);
+  }
+  b+=txt(rx+120,ry+rh-14,'大多数格子空空如也，个别格子被反复砸中',{'fs':11,fill:'#64748b'});
+  b+=txt(240,110,'→',{'fs':22,fill:'#2563eb'});
+  b+=txt(240,132,'哈希函数',{'fs':11,fill:'#64748b'});
+  b+=txt(20,H-10,'碰撞躲不掉：格子数远小于样本数。均匀性要保证的是「每个格子被砸中的机会差不多」',{'an':'start','fs':11.5,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,H,b));
+})();
+
+// ===== 图 2：雪崩效应 =====
+(function(){
+  var host = document.getElementById('fig-avalanche'); if(!host) return;
+  var W=660,H=268;
+  var rows=[
+    ['zuochengyun...zuochengyun1','8478aa9aa72447480926644e3c280706',4],
+    ['zuochengyun...zuochengyun2','9af74b837deb3003983cecf0be1c3646',12],
+    ['zuochengyun...zuochengyun3','9d81566b704473c9d9386408d0f9b509',12],
+    ['zuochengyun...Zuochengyun1','c9f60f3da96e524afbb579e0cf0e7d83',8],
+    ['zuochengyun...Chengyun...2','f4d6fa5996b318a106dccf5ae11be521',7],
+    ['zuochengyun...chengyUn3','6e35cf75fb713aa5e7ae7cf273a54bed',3],
+    ['zuochengyun...zuochengyun1','8478aa9aa72447480926644e3c280706',4]
+  ];
+  var b='';
+  b+=txt(16,18,'改一两个字符，哈希值整段换掉；同一个串再算一次，结果一模一样',{'an':'start','fs':12.5,fill:'#1f2328'});
+  b+=txt(16,40,'输入（节选）',{'an':'start','fs':11,fill:'#94a3b8'});
+  b+=txt(232,40,'MD5',{'an':'start','fs':11,fill:'#94a3b8'});
+  b+=txt(556,40,'% 13',{'an':'start','fs':11,fill:'#94a3b8'});
+  for(var i=0;i<rows.length;i++){
+    var y=56+i*29;
+    var same=(i===6);
+    b+=box(16,y-13,200,22,same?'#eef4ff':'#f6f7f9','#e6e8eb',3);
+    b+=txt(24,y+2,rows[i][0],{'an':'start','fs':10.5,fill:same?'#1d4ed8':'#475569'});
+    b+=box(228,y-13,320,22,'#fff','#e6e8eb',3);
+    b+=txt(236,y+2,rows[i][1],{'fs':11,fill:'#1f2937','an':'start'});
+    b+=box(556,y-13,34,22,'#ffedd5','#ea580c',3);
+    b+=txt(573,y+2,String(rows[i][2]),{'fs':11.5,fill:'#9a3412'});
+  }
+  b+=txt(16,H-12,'第 7 行与第 1 行是同一个串，哈希值完全相同（性质 2）；第 2 到第 6 行各差一两个字符，哈希值毫无相似之处',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,H,b));
+})();
+
+// ===== 数据：2^20 个串的落桶计数 =====
+var DIST = {"md5":{"13":[80949,80389,80252,81065,80690,80744,80729,80645,80768,80832,80754,80271,80488],"50":[20912,21003,20832,20964,21161,20837,20764,21082,20838,20921,20875,21137,21099,20907,21062,20815,21062,20991,20939,20923,20876,20914,20931,20944,20925,20845,20799,20923,20955,21008,20795,20731,20690,21034,21233,20946,20981,20834,21051,21166,20976,21045,21179,21024,21005,21315,21024,21061,21037,21205],"200":[5272,5207,5310,5228,5247,5122,5281,5314,5209,5373,5219,5254,5243,5270,5281,5205,5263,5392,5140,5219,5204,5247,5297,5282,5230,5192,5292,5183,5216,5229,5252,5274,5143,5367,5314,5226,5143,5321,5260,5279,5229,5344,5183,5243,5241,5306,5301,5270,5222,5396,5188,5281,5221,5322,5269,5217,5205,5271,5140,5179,5294,5344,5271,5217,5271,5214,5224,5340,5334,5213,5213,5225,5221,5271,5246,5234,5166,5269,5300,5327,5253,5111,5181,5175,5352,5242,5247,5249,5438,5253,5199,5221,5368,5100,5306,5340,5279,5278,5190,5356,5173,5210,5250,5175,5295,5273,5098,5269,5246,5221,5034,5345,5284,5250,5228,5219,5299,5103,5231,5288,5154,5197,5174,5189,5192,5202,5203,5302,5214,5167,5164,5200,5193,5258,5352,5277,5288,5050,5068,5347,5298,5212,5318,5380,5156,5390,5212,5248,5378,5211,5279,5305,5051,5239,5350,5225,5180,5228,5243,5148,5328,5194,5301,5170,5282,5177,5276,5156,5234,5203,5305,5245,5239,5202,5257,5217,5138,5169,5225,5285,5126,5146,5173,5234,5215,5201,5303,5214,5285,5287,5250,5268,5310,5301,5302,5279,5232,5265,5247,5242]},"first":{"13":[0,0,0,0,0,0,524288,524288,0,0,0,0,0],"50":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,524288,524288,0],"200":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,524288,524288,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"sum":{"13":[184756,167960,125970,77521,38780,15694,5985,5985,15694,38780,77521,125970,167960],"50":[184756,167960,125970,77520,38760,15504,4845,1140,190,20,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,20,190,1140,4845,15504,38760,77520,125970,167960],"200":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,20,190,1140,4845,15504,38760,77520,125970,167960,184756,167960,125970,77520,38760,15504,4845,1140,190,20,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}};
+var N = 1048576;
+var HNAME = {md5:'MD5', first:'只看首字符', sum:'字符求和'};
+
+// ===== 图 3：三种哈希的落桶形状（m=50）=====
+(function(){
+  var host = document.getElementById('fig-uniform'); if(!host) return;
+  var W=660,H=300,b='',m=50;
+  var ks=['md5','first','sum'];
+  var avg=N/m;
+  for(var k=0;k<ks.length;k++){
+    var cnt=DIST[ks[k]][String(m)];
+    var top=56+k*82, bh=52;
+    b+=txt(16,top-8,HNAME[ks[k]],{'an':'start','fs':12,fill:'#1f2937'});
+    b+=txt(96,top-8,'最多 '+cnt.reduce(function(a,c){return Math.max(a,c);},0)+'，最少 '+cnt.reduce(function(a,c){return Math.min(a,c);},0),{'an':'start','fs':11,fill:'#94a3b8'});
+    var x0=16,bw=(W-32)/m;
+    var mx=Math.max.apply(null,cnt);
+    for(var i=0;i<m;i++){
+      var hgt=Math.max(1,cnt[i]/mx*bh);
+      var c=(ks[k]==='md5')?'#2563eb':(ks[k]==='first'?'#ea580c':'#9aa0a6');
+      b+='<rect x="'+(x0+i*bw)+'" y="'+(top+bh-hgt)+'" width="'+(bw-1.5)+'" height="'+hgt+'" fill="'+c+'" opacity="'+((ks[k]==='md5')?0.75:0.85)+'"/>';
+    }
+    b+=line(x0,top+bh-avg/mx*bh,W-16,top+bh-avg/mx*bh,'#ea580c','3 3');
+  }
+  b+=txt(16,H-10,'50 个桶，1048576 个样本。虚线上方是超过平均的桶；MD5 的柱子都贴着虚线，只在均值附近抖动',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,H,b));
+})();
+
+// ===== 演示：均匀性实验台 =====
+(function(){
+  var board=document.getElementById('uf-board');
+  var noteEl=document.getElementById('uf-note');
+  var ansEl=document.getElementById('uf-answer');
+  var selH=document.getElementById('uf-hash');
+  var selM=document.getElementById('uf-m');
+  function draw(){
+    var k=selH.value, m=Number(selM.value);
+    var cnt=DIST[k][String(m)];
+    var avg=N/m;
+    var mx=Math.max.apply(null,cnt), mn=Math.min.apply(null,cnt);
+    var used=cnt.filter(function(c){ return c>0; }).length;
+    var bw=(640/m);
+    var bh=150;
+    var b='<svg viewBox="0 0 660 210" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    b+='<text x="16" y="16" font-size="12.5" fill="#1f2328">每个桶装了多少个样本（106 万个串）</text>';
+    var y0=160;
+    var avgY=y0-avg/(mx||1)*bh;
+    for(var i=0;i<m;i++){
+      var hgt=Math.max(1,cnt[i]/(mx||1)*bh);
+      var col=(k==='md5')?'#2563eb':(k==='first'?'#ea580c':'#9aa0a6');
+      b+='<rect x="'+(16+i*bw)+'" y="'+(y0-hgt)+'" width="'+Math.max(0.6,bw-1.5)+'" height="'+hgt+'" fill="'+col+'" opacity="0.8"/>';
+    }
+    b+='<line x1="16" y1="'+avgY+'" x2="644" y2="'+avgY+'" stroke="#ea580c" stroke-dasharray="4 3"/>';
+    b+='<text x="642" y="'+(avgY+13)+'" font-size="10.5" fill="#ea580c" text-anchor="end">平均</text>';
+    b+='<line x1="16" y1="'+y0+'" x2="644" y2="'+y0+'" stroke="#cbd5e1"/>';
+    b+='<text x="16" y="'+(y0+18)+'" font-size="10.5" fill="#94a3b8">桶 1</text>';
+    b+='<text x="644" y="'+(y0+18)+'" font-size="10.5" fill="#94a3b8" text-anchor="end">桶 '+m+'</text>';
+    b+='</svg>';
+    board.innerHTML=b;
+    noteEl.textContent='平均每桶 '+avg.toFixed(2)+' 个；用到的桶 '+used+' / '+m+'。柱子高低用同一个纵轴，换哈希函数时注意纵轴最高点会变。';
+    ansEl.textContent=HNAME[k]+'，m='+m+'：最多 '+mx+'（'+((mx-avg)/avg*100>=0?'+':'')+((mx-avg)/avg*100).toFixed(2)+'%），最少 '+mn+'（'+((mn-avg)/avg*100).toFixed(2)+'%），'+used+' 个桶被用到';
+  }
+  selH.addEventListener('change',draw);
+  selM.addEventListener('change',draw);
+  draw();
+})();
+})();</script>
+</body>
+</html>

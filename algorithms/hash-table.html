@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>哈希表：桶、扩容与均摊代价</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+#ht-state { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; color: #475569; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>哈希表：桶、扩容与均摊代价</h1>
+      <p class="intro">哈希表常被说成 O(1)，严格讲是均摊 O(k)，k 是样本的平均长度。桶开多大、什么时候扩、一次扩多少、桶里挂什么，全是可调的旋钮，但调来调去只影响常数。这一页把桶、拉链、扩容和开放地址都摆出来，让数字自己说话。</p>
+
+      <h2>零、同一个表，两种哈希函数</h2>
+      <p>100 万个 64 位 key 插进拉链哈希表，再全量查一遍：用 MD5 落桶，插入 198.73 毫秒、查询 11.29 毫秒。把桶的选择改成「所有 key 都进 0 号桶」，插入涨到 33.5 秒，查询 51.9 秒，比较次数是 3166 亿次。</p>
+      <p>表的结构一模一样，唯一区别是哈希函数把 key 摊开还是堆在一起。所以哈希表的性能问题，一半在哈希函数上。</p>
+
+      <h2>一、桶数组加链表</h2>
+      <p>哈希表的主体是一个桶数组。key 先用哈希函数变成整数，再对桶数取余得到下标，元素就挂在那个桶里。同一个桶里的多个元素串成一条链，查询时沿链逐个比 key。</p>
+    <pre class="code"><span class="cm">// 拉链哈希表：桶里挂链表，装满就翻倍</span>
+    size_t cap = 1, sz = 0;
+    vector&lt;vector&lt;pair&lt;u64, u64&gt;&gt;&gt; <span class="fn">b</span>(1);
+
+    <span class="kw">void</span> <span class="fn">growTable</span>() {
+        vector&lt;vector&lt;pair&lt;u64, u64&gt;&gt;&gt; <span class="fn">nb</span>(cap * 2);
+        <span class="kw">for</span> (size_t i = 0; i &lt; cap; i++)
+            <span class="kw">for</span> (auto&amp; kv : b[i]) nb[kv.first % (cap * 2)].push_back(kv);
+        b.swap(nb); cap *= 2;
+    }
+
+    <span class="kw">void</span> <span class="fn">put</span>(u64 key, u64 val) {
+        <span class="kw">if</span> ((sz + 1) &gt; 0.75 * cap) growTable();
+        auto&amp; chain = b[key % cap];
+        <span class="kw">for</span> (auto&amp; kv : chain) <span class="kw">if</span> (kv.first == key) { kv.second = val; <span class="kw">return</span>; }
+        chain.push_back({key, val}); sz++;
+    }
+
+    <span class="kw">bool</span> <span class="fn">get</span>(u64 key) {
+        <span class="kw">for</span> (auto&amp; kv : b[key % cap]) <span class="kw">if</span> (kv.first == key) <span class="kw">return</span> <span class="kw">true</span>;
+        <span class="kw">return</span> <span class="kw">false</span>;
+    }</pre>
+      <p>算哈希、取余、沿链比较，这三步构成一次操作。桶数取 2 的幂时 <code>% cap</code> 可以写成 <code>&amp; (cap-1)</code>，编译器也会替你这么改，所以这个取余不是瓶颈。</p>
+      <figure class="fig" id="fig-struct">
+        <figcaption>图 1　桶数组加拉链：key 先变整数再取余定桶，桶内多个元素串成一条链，链表长度就是查询时要多比几次的量</figcaption>
+      </figure>
+
+      <h2>二、什么时候扩、扩多少</h2>
+      <p>桶太少，链就长，查询退化成遍历链表；桶太多，内存白占。常见做法是给负载因子设一个阈值，元素数超过「桶数 × 阈值」就扩容。</p>
+      <p>扩容因子是每次把桶数乘几倍。取 2 倍时桶数翻倍，取 1.5 倍时更省内存但要多扩几次。100 万个 key、阈值 0.75，实测三档：</p>
+      <table class="complexity">
+        <tr><th>扩容因子</th><th>最终桶数</th><th>扩容次数</th><th>累计搬运元素</th><th>占插入数的倍</th><th>插入耗时</th></tr>
+        <tr><td>2.0</td><td>2097152</td><td>21</td><td>1572862</td><td>1.57</td><td>245.38 ms</td></tr>
+        <tr><td>1.5</td><td>1574803</td><td>35</td><td>2362201</td><td>2.36</td><td>335.25 ms</td></tr>
+        <tr><td>1.1</td><td>1353651</td><td>138</td><td>10152780</td><td>10.15</td><td>1323.96 ms</td></tr>
+      </table>
+      <p>扩容因子越小，最终占的内存越少，但扩容次数和搬家总量涨得很快。1.1 倍时扩容 138 次、搬了 1015 万个元素，插入耗时是 2 倍的 5 倍多。这笔账很直白：扩容因子记作 a 时，总搬运量约是元素数的 1/(1−1/a) 倍，a 取 2 是 2 倍量级，取 1.1 就是 10 倍量级。</p>
+      <p>阈值改起来的影响是另一个方向。同样 100 万个 key、扩容因子 2 倍：</p>
+      <table class="complexity">
+        <tr><th>扩容阈值</th><th>最终桶数</th><th>累计搬运</th><th>比较次数</th><th>插入耗时</th><th>查询耗时</th></tr>
+        <tr><td>0.50</td><td>2097152</td><td>1048575</td><td>1606728</td><td>148.88 ms</td><td>10.98 ms</td></tr>
+        <tr><td>0.75</td><td>2097152</td><td>1572862</td><td>1770523</td><td>198.73 ms</td><td>11.29 ms</td></tr>
+        <tr><td>1.00</td><td>1048576</td><td>1048575</td><td>2214676</td><td>143.16 ms</td><td>13.41 ms</td></tr>
+        <tr><td>2.00</td><td>524288</td><td>1048574</td><td>3430042</td><td>133.56 ms</td><td>16.31 ms</td></tr>
+      </table>
+      <p>阈值放到 2.0，桶只用了 52.4 万个、内存省一半，插入反而最快，代价是比较次数从 160 万涨到 343 万、查询慢了一半。阈值 0.5 是反过来的取舍。这几个数字都说明同一件事：阈值在「内存」和「比较次数」之间挪，挪不出复杂度级别。</p>
+
+      <h2>三、扩容的代价是摊出来的</h2>
+      <p>单看一次扩容，它要新建一个桶数组，把老数组里的每个元素重新算一遍桶位置再挂过去，这一步是 O(元素个数)。如果每次插入都扩，那是灾难。</p>
+      <p>好在扩容因子大于 1，桶数是指数增长的：1、2、4、8……到第 k 次扩容时桶数是 2<sup>k</sup>，前 k 次扩容搬走的总元素数不超过最后一次的两倍。100 万个 key 总共搬了 157 万格，平均每次插入只多搬 1.57 格，是个常数。这就是均摊 O(1) 的来源。</p>
+      <figure class="fig" id="fig-grow">
+        <figcaption>图 2　前 12 个元素的扩容阶梯：桶数按 1、2、4、8、16 跳，每次扩容把已有元素全部搬一遍，但总量是等比数列，摊到每次插入上是常数</figcaption>
+      </figure>
+      <p>真正决定单次操作时间的还是 k。key 越长，算哈希要读的字节越多，链上比较也要按长度比，两者都随 k 增长。拿长度不同的 key 各插 20 万次：</p>
+      <table class="complexity">
+        <tr><th>key 长度 k</th><th>单次插入平均耗时</th></tr>
+        <tr><td>8</td><td>0.716 微秒</td></tr>
+        <tr><td>32</td><td>0.672 微秒</td></tr>
+        <tr><td>128</td><td>1.103 微秒</td></tr>
+        <tr><td>512</td><td>2.219 微秒</td></tr>
+        <tr><td>2048</td><td>6.460 微秒</td></tr>
+      </table>
+      <p>长度涨到 256 倍，时间涨到 9 倍。所以哈希表增删改查的复杂度写 O(k)，k 是样本平均长度；只有当 key 是定长整数这种 k 为常数的场景，才退化成常说的 O(1)。</p>
+      <figure class="fig" id="fig-factor">
+        <figcaption>图 3　三种扩容因子的搬家总量：因子越接近 1，桶省下来的内存都要用搬家次数换回去</figcaption>
+      </figure>
+
+      <h2>四、另一种桶：开放地址</h2>
+      <p>不挂链表也能做哈希表。开放地址的思路是「位置被占了就往后找下一个空格」，所有元素都躺在同一个大数组里，省掉了链表的指针开销，缓存也更友好。</p>
+    <pre class="code"><span class="cm">// 开放地址：位置被占了就往后找下一个空格</span>
+    vector&lt;u64&gt; <span class="fn">slot</span>(cap); vector&lt;<span class="kw">char</span>&gt; <span class="fn">used</span>(cap, 0);
+
+    <span class="kw">void</span> <span class="fn">put</span>(u64 key) {
+        size_t i = key % cap;
+        <span class="kw">while</span> (used[i]) { <span class="kw">if</span> (slot[i] == key) <span class="kw">return</span>; i = (i + 1) % cap; }
+        used[i] = 1; slot[i] = key;
+    }
+
+    <span class="kw">bool</span> <span class="fn">get</span>(u64 key) {
+        size_t i = key % cap;
+        <span class="kw">while</span> (used[i]) { <span class="kw">if</span> (slot[i] == key) <span class="kw">return</span> <span class="kw">true</span>; i = (i + 1) % cap; }
+        <span class="kw">return</span> <span class="kw">false</span>;   <span class="cm">// 遇到第一个空格就说明没有</span>
+    }</pre>
+      <p>删除是它的麻烦处：直接把槽清空会切断探测链，后面的元素就找不到了。要么留下墓碑标记，要么定期整理整个表，这一块比拉链版多一份麻烦。</p>
+      <p>开放地址的性能对装载因子极度敏感。数组长度固定成 100 万，插入不同数量的 key，统计每次操作的平均探测次数：</p>
+      <table class="complexity">
+        <tr><th>装载因子</th><th>平均探测次数</th></tr>
+        <tr><td>0.5</td><td>0.496</td></tr>
+        <tr><td>0.7</td><td>1.176</td></tr>
+        <tr><td>0.9</td><td>4.488</td></tr>
+      </table>
+      <p>从 0.5 到 0.9，平均探测次数翻了 9 倍。线性探测还有聚簇问题：连续被占的段会越来越长，新元素落进长段里要走更多步。所以开放地址的阈值一般压在 0.7 以下，而拉链版敢放到 1 甚至 2。</p>
+
+      <div class="viz" id="viz-table">
+        <p class="viz-title">哈希表操作台</p>
+        <p class="viz-note">上半部分是 12 个 key 的逐帧插入，能看到扩容时所有元素重排；下半部分把 2000 个 key 全插一遍，比较不同扩容因子与阈值下的桶数、扩容次数、搬家总量。</p>
+        <div id="ht-board"></div>
+        <p class="viz-note" id="ht-state"></p>
+        <p class="viz-answer" id="ht-answer"></p>
+        <div class="viz-controls">
+          <label>阈值 <select id="ht-lf">
+            <option value="0.75">0.75</option>
+            <option value="1">1.00</option>
+          </select></label>
+          <button id="ht-next" type="button">插入下一个 key</button>
+          <button id="ht-reset" type="button">重置</button>
+        </div>
+        <p class="viz-note">下面把 2000 个 key 全插一遍，换扩容因子与阈值再看一遍。</p>
+        <p class="viz-answer" id="ht-answer2"></p>
+        <div class="viz-controls">
+          <label>扩容因子 <select id="ht-grow">
+            <option value="2">2.0</option>
+            <option value="1.5">1.5</option>
+            <option value="1.1">1.1</option>
+          </select></label>
+          <label>阈值 <select id="ht-lf2">
+            <option value="0.5">0.50</option>
+            <option value="0.75">0.75</option>
+            <option value="1">1.00</option>
+          </select></label>
+        </div>
+      </div>
+
+      <h2>五、那五个可调的地方</h2>
+      <p>把上面这些串起来，一个哈希表能定制的地方就这五处：初始开多少个桶、链表多长时触发扩容、一次扩多少倍、用哪种哈希函数、桶里挂链表还是开放地址还是红黑树。</p>
+      <p>工程实现里它们各有各的默认值。比如有的语言在单条链太长时把链转成红黑树，把最坏情况的 O(n) 压到 O(log n)；有的语言把初始桶数设得很小、把阈值调得很大，赌的是「多数哈希表其实很短命」。</p>
+      <p>但不管怎么定制，能动的只有常数：桶数决定内存，阈值和扩容因子决定搬家总量与链长的取舍，哈希函数决定分布。时间复杂度始终是均摊 O(k)，没有哪一种定制能把它变成别的。</p>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>插入 / 查询 / 删除一个 key</td><td>均摊 O(k)，k 是 key 长度；k 为常数时是 O(1)</td><td>O(1) 额外</td></tr>
+        <tr><td>一次扩容</td><td>O(元素个数 + 桶数)</td><td>临时要一份新桶数组，峰值 O(n)</td></tr>
+        <tr><td>n 次插入的总扩容代价</td><td>O(n)，与扩容因子成常数倍</td><td>—</td></tr>
+        <tr><td>整表的空间</td><td>—</td><td>O(n + 桶数)，拉链版还有每个节点的指针开销</td></tr>
+      </table>
+
+      <h2>总结</h2>
+      <p>哈希表是桶数组加冲突处理。拉链版每个桶挂一条链，溢出元素串在链上；开放地址把元素都放在同一个数组里，靠向后探测找空位，代价是对装载因子更敏感，装载因子从 0.5 到 0.9 平均探测次数涨了 9 倍。</p>
+      <p>扩容是哈希表里唯一「昂贵」的动作，但桶数按倍数增长，总搬运量只是元素数的常数倍，摊到每次插入上就是常数。100 万个 key、扩容因子 2 倍时总共搬了 157 万格，平均每插一个多搬 1.57 格。</p>
+      <p>复杂度写作均摊 O(k)，k 是 key 长度，而不是笼统的 O(1)；key 长度从 8 涨到 2048，单次插入从 0.716 微秒涨到 6.460 微秒。桶数、阈值、扩容因子、哈希函数、桶结构这五处都能调，调的都是常数。哈希函数把 key 摊得多开，决定了这一切能不能成立。</p>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解106【扩展】哈希函数、哈希表、布隆过滤器、一致性哈希</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI Wiki</td><td>哈希表</td><td><a href="https://oi-wiki.org/ds/hash/" target="_blank">oi-wiki.org/ds/hash</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function box(x,y,w,h,fill,stroke,rx){ return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(rx==null?4:rx)+'" fill="'+(fill||'#fff')+'" stroke="'+(stroke||'#e6e8eb')+'"/>'; }
+
+// 和页面演示一致的哈希（整数 key）
+function mix32(x){ x=(x^(x>>>16))>>>0; x=Math.imul(x,0x7feb352d)>>>0; x=(x^(x>>>15))>>>0; x=Math.imul(x,0x846ca68b)>>>0; x=(x^(x>>>16))>>>0; return x>>>0; }
+
+// ===== 图 1：桶数组 + 拉链 =====
+(function(){
+  var host=document.getElementById('fig-struct'); if(!host) return;
+  var W=660,H=286,b='';
+  b+=txt(16,18,'key 先变成整数，再对桶数取余',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var bx=24,by=44,bw=64,bh=26;
+  var chains=[[],[2,10],[],[],[5],[],[7],[]];
+  var names=['0','1','2','3','4','5','6','7'];
+  for(var i=0;i<8;i++){
+    var y=by+i*24;
+    b+=box(bx,y,bw,bh,'#eef4ff','#cbd5e1',3);
+    b+=txt(bx+bw/2,y+17,'桶 '+names[i],{'fs':11,fill:'#1d4ed8'});
+    if(chains[i].length){
+      b+='<line x1="'+(bx+bw)+'" y1="'+(y+13)+'" x2="'+(bx+bw+26)+'" y2="'+(y+13)+'" stroke="#9aa0a6"/>';
+      var px=bx+bw+26;
+      for(var j=0;j<chains[i].length;j++){
+        b+=box(px,y+2,54,bh-4,'#ffedd5','#ea580c',3);
+        b+=txt(px+27,y+17,'key '+chains[i][j],{'fs':11,fill:'#9a3412'});
+        if(j+1<chains[i].length) b+='<line x1="'+(px+54)+'" y1="'+(y+13)+'" x2="'+(px+70)+'" y2="'+(y+13)+'" stroke="#9aa0a6"/>';
+        px+=70;
+      }
+    } else {
+      b+=txt(bx+bw+22,y+17,'空',{'an':'start','fs':11,fill:'#cbd5e1'});
+    }
+  }
+  b+=txt(470,60,'key=10 落在桶 2，',{'an':'start','fs':11.5,fill:'#475569'});
+  b+=txt(470,78,'和 key=2 串成一条链；',{'an':'start','fs':11.5,fill:'#475569'});
+  b+=txt(470,96,'查询时先取余定位桶，',{'an':'start','fs':11.5,fill:'#475569'});
+  b+=txt(470,114,'再沿链逐个比 key。',{'an':'start','fs':11.5,fill:'#475569'});
+  b+=txt(470,146,'链长 = 平均每桶元素数',{'an':'start','fs':11.5,fill:'#1d4ed8'});
+  b+=txt(470,164,'取余要散得均匀靠哈希',{'an':'start','fs':11.5,fill:'#1d4ed8'});
+  b+=txt(16,H-12,'桶数取 2 的幂时，% cap 会被编译器改写成 & (cap-1)，这个取余不是瓶颈',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,H,b));
+})();
+
+// ===== 图 2：扩容阶梯（12 个 key，因子 2）=====
+(function(){
+  var host=document.getElementById('fig-grow'); if(!host) return;
+  var W=660,H=232,b='';
+  var caps=[2,4,4,8,8,8,16,16,16,16,16,16];
+  b+=txt(16,18,'每插入一个 key 之后的桶数（阈值 0.75，扩容因子 2）',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var x0=56,y0=176,w=(W-90)/12,bh=110;
+  var lg=Math.log2(16);
+  for(var i=0;i<12;i++){
+    var hgt=Math.log2(caps[i])/lg*bh;
+    var first=(i===0||caps[i]!==caps[i-1]);
+    b+='<rect x="'+(x0+i*w+3)+'" y="'+(y0-hgt)+'" width="'+(w-6)+'" height="'+hgt+'" fill="'+(first?'#ffedd5':'#dbeafe')+'" stroke="'+(first?'#ea580c':'#2563eb')+'"/>';
+    b+=txt(x0+i*w+w/2,y0+16,String(i+1),{'fs':10.5,fill:'#94a3b8'});
+    if(first) b+=txt(x0+i*w+w/2,y0-hgt-6,String(caps[i]),{'fs':10.5,fill:'#ea580c'});
+  }
+  b+=txt(x0-14,y0-110+4,'16',{'fs':10.5,fill:'#94a3b8','an':'end'});
+  b+=txt(x0-14,y0-55+4,'4',{'fs':10.5,fill:'#94a3b8','an':'end'});
+  b+=txt(x0-14,y0+4,'1',{'fs':10.5,fill:'#94a3b8','an':'end'});
+  b+='<line x1="'+x0+'" y1="'+(y0)+'" x2="'+(W-24)+'" y2="'+y0+'" stroke="#cbd5e1"/>';
+  b+='<line x1="'+(x0-6)+'" y1="'+(y0-bh)+'" x2="'+(x0-6)+'" y2="'+y0+'" stroke="#cbd5e1"/>';
+  b+=txt(16,y0+34,'插入序号',{'an':'start','fs':10.5,fill:'#94a3b8'});
+  b+=txt(16,38,'橙色 = 这一次触发了扩容，把已有元素全部搬到新桶数组',{'an':'start','fs':11,fill:'#9a3412'});
+  b+=txt(16,H-10,'桶数按倍数跳，等比数列求和不超过末项的两倍，所以总搬运量只是元素数的常数倍',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,H,b));
+})();
+
+// ===== 图 3：三种扩容因子的搬家总量 =====
+(function(){
+  var host=document.getElementById('fig-factor'); if(!host) return;
+  var W=660,H=200,b='';
+  var data=[['因子 2.0',1.57,'#2563eb'],['因子 1.5',2.36,'#60a5fa'],['因子 1.1',10.15,'#ea580c']];
+  b+=txt(16,18,'100 万个 key 的累计搬家量（按插入数归一）',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var x0=150,mx=11.0,w=380;
+  for(var i=0;i<3;i++){
+    var y=46+i*42;
+    b+=txt(x0-10,y+18,data[i][0],{'fs':11.5,fill:'#475569','an':'end'});
+    var lw=data[i][1]/mx*w;
+    b+=box(x0,y,lw,26,data[i][2],'none',4);
+    b+=txt(x0+lw+8,y+18,data[i][1]+' × n',{'an':'start','fs':11.5,fill:'#1f2937'});
+  }
+  b+='<line x1="'+x0+'" y1="40" x2="'+x0+'" y2="'+172+'" stroke="#cbd5e1"/>';
+  b+=txt(16,H-12,'搬家量按元素数归一：因子 1.1 时每插一个元素要在扩容上多搬 10 个元素',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,H,b));
+})();
+
+// ===== 演示：哈希表操作台 =====
+(function(){
+  var board=document.getElementById('ht-board');
+  var stateEl=document.getElementById('ht-state');
+  var ansEl=document.getElementById('ht-answer');
+  var ansEl2=document.getElementById('ht-answer2');
+  var selLf=document.getElementById('ht-lf');
+  var btnNext=document.getElementById('ht-next');
+  var btnReset=document.getElementById('ht-reset');
+  var selGrow=document.getElementById('ht-grow');
+  var selLf2=document.getElementById('ht-lf2');
+  var CUR=12;
+
+  function Table(lf,grow){ this.lf=lf; this.grow=grow; this.cap=1; this.sz=0; this.b=[[]];
+    this.moves=0; this.rehash=0; this.cmp=0; this.grew=false; }
+  Table.prototype.growTable=function(){
+    var ncap=Math.floor(this.cap*this.grow); if(ncap<=this.cap) ncap=this.cap+1;
+    var nb=[]; for(var i=0;i<ncap;i++) nb.push([]);
+    for(var i=0;i<this.cap;i++) for(var j=0;j<this.b[i].length;j++){
+      var k=this.b[i][j]; nb[mix32(k)%ncap].push(k); this.moves++;
+    }
+    this.b=nb; this.cap=ncap; this.rehash++;
+  };
+  Table.prototype.put=function(key){
+    this.grew=false;
+    if((this.sz+1) > this.lf*this.cap){ this.growTable(); this.grew=true; }
+    var ch=this.b[mix32(key)%this.cap];
+    for(var i=0;i<ch.length;i++){ this.cmp++; if(ch[i]===key) return; }
+    ch.push(key); this.sz++;
+  };
+  Table.prototype.maxChain=function(){ var m=0; for(var i=0;i<this.cap;i++) m=Math.max(m,this.b[i].length); return m; };
+  Table.prototype.state=function(){
+    var parts=[];
+    for(var i=0;i<this.cap;i++) if(this.b[i].length) parts.push(i+':'+this.b[i].join(','));
+    return 'cap='+this.cap+';'+parts.join(';');
+  };
+
+  var st={step:0,t:null,hot:0};
+  function buildSmall(){ st.t=new Table(Number(selLf.value),2); st.step=0; st.hot=0; }
+  function drawSmall(){
+    var t=st.t, rows=t.cap;
+    var b='<svg viewBox="0 0 660 260" width="100%" xmlns="http://www.w3.org/2000/svg">';
+    b+='<text x="16" y="18" font-size="12.5" fill="#1f2328">'+esc('已插入 '+t.sz+' / '+CUR+' 个 key（key 就是 1..12），桶数 '+t.cap)+'</text>';
+    var y0=30, rowh=Math.min(26,(260-y0-10)/rows);
+    for(var i=0;i<rows;i++){
+      var y=y0+i*rowh;
+      var isHot=(i===st.hot && st.hot>=0);
+      b+='<rect x="16" y="'+(y+2)+'" width="60" height="'+(rowh-4)+'" rx="3" fill="'+(isHot?'#ffedd5':'#eef4ff')+'" stroke="'+(isHot?'#ea580c':'#cbd5e1')+'"/>';
+      b+='<text x="46" y="'+(y+rowh/2+4)+'" font-size="10.5" fill="#1d4ed8" text-anchor="middle">桶 '+i+'</text>';
+      var px=82;
+      for(var j=0;j<t.b[i].length;j++){
+        var hk=(isHot && t.b[i][j]===t.sz);
+        b+='<rect x="'+px+'" y="'+(y+2)+'" width="42" height="'+(rowh-4)+'" rx="3" fill="'+(hk?'#ea580c':'#fff')+'" stroke="#ea580c"/>';
+        b+='<text x="'+(px+21)+'" y="'+(y+rowh/2+4)+'" font-size="10.5" fill="'+(hk?'#fff':'#9a3412')+'" text-anchor="middle">'+t.b[i][j]+'</text>';
+        px+=48;
+      }
+    }
+    b+='</svg>';
+    board.innerHTML=b;
+    stateEl.textContent='当前状态 '+t.state();
+    ansEl.textContent='已插入 '+t.sz+' 个 key：桶数 '+t.cap+'，扩容 '+t.rehash+' 次'+(st.grewMsg||'');
+  }
+  function step(){
+    if(st.step>=CUR){ ansEl.textContent='12 个 key 插完了：桶数 '+st.t.cap+'，扩容 '+st.t.rehash+' 次'; btnNext.disabled=true; return; }
+    st.step++;
+    st.t.put(st.step);
+    st.grewMsg = st.t.grew ? ('，插入 '+st.step+' 时触发了一次扩容') : '';
+    st.hot = mix32(st.step)%st.t.cap;
+    drawSmall();
+    btnNext.disabled=(st.step>=CUR);
+  }
+  function stat(){
+    var grow=Number(selGrow.value), lf=Number(selLf2.value);
+    var t=new Table(lf,grow);
+    for(var i=1;i<=2000;i++) t.put(i);
+    ansEl2.textContent='2000 个 key（扩容因子 '+grow.toFixed(1)+'，阈值 '+lf.toFixed(2)+'）：桶数 '+t.cap+'，扩容 '+t.rehash+
+      ' 次，累计搬家 '+t.moves+' 格（'+(t.moves/2000).toFixed(2)+' × n），比较 '+t.cmp+' 次，最长链 '+t.maxChain();
+  }
+  btnNext.addEventListener('click',step);
+  btnReset.addEventListener('click',function(){ buildSmall(); btnNext.disabled=false; drawSmall(); });
+  selLf.addEventListener('change',function(){ buildSmall(); btnNext.disabled=false; drawSmall(); });
+  selGrow.addEventListener('change',stat);
+  selLf2.addEventListener('change',stat);
+  buildSmall(); drawSmall(); stat();
+})();
+})();</script>
+</body>
+</html>

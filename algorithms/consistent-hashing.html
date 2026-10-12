@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一致性哈希：机器进出只搬一段</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+#ch-counts { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: #475569; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>一致性哈希：机器进出只搬一段</h1>
+      <p class="intro">用 key 对机器数取余决定数据放哪台机器，加一台机器就要搬走九成数据。一致性哈希把哈希值排成一个环，机器进环、数据顺时针找第一个机器，增减机器只影响环上的一段弧。这一页把迁移比例、负载倾斜和虚拟节点都量一遍。</p>
+
+      <h2>零、加一台机器要搬多少</h2>
+      <p>10 台机器加 1 台，取模方案要搬走 90.93% 的 key。换成一致性哈希，搬走 9.38%，接近理论上的 1/11。</p>
+      <p>差别出在结构上：取模方案里「落在哪台机器」由 key 除以机器数的余数决定，机器数一改，几乎所有 key 的余数都变了。</p>
+
+      <h2>一、取模方案的弱点</h2>
+      <p>最简单的分布式存储是这样安排的：数据根据 key 决定存到哪台机器，机器一共 N 台，落在 <code>key % N</code> 号机器上。查询时用同一个公式算出机器号，找过去就行。</p>
+      <p>这个方案在机器数不变时很完美。麻烦出在「机器数会变」这件事上：扩一台、挂一台、换一台，N 都变了，所有 key 的落点都要重算。</p>
+      <table class="complexity">
+        <tr><th>变化</th><th>位置不变的 key</th><th>需要搬走的 key</th></tr>
+        <tr><td>10 台 → 11 台</td><td>9.07%</td><td>90.93%</td></tr>
+        <tr><td>10 台 → 9 台</td><td>10.03%</td><td>89.97%</td></tr>
+      </table>
+      <p>具体来说，只有那些「原余数和现余数恰好相同」的 key 才不动，这个概率约等于 1/(N+1)。其余九成的数据全要跨机器搬家，一台机器扩容引发的是一次全量迁移。</p>
+
+      <h2>二、把哈希域弯成一个环</h2>
+      <p>一致性哈希换个思路：先规定一个固定的哈希域，比如 32 位整数，取值从 0 到 2<sup>32</sup>−1；把这个区间首尾相接画成一个环。机器和数据都用同一个哈希函数映射到这个环上。</p>
+      <p>每台机器在环上占一个点。数据进来时算出它的环上位置，从这个位置出发顺时针找，遇到的第一个机器点就是它的归属。</p>
+    <pre class="code"><span class="cm">// 环上定位：把机器的哈希值排好序，找第一个不小于 key 的点</span>
+    vector&lt;pair&lt;u64, <span class="kw">int</span>&gt;&gt; pts;   <span class="cm">// (环上位置, 机器号)</span>
+    sort(pts.begin(), pts.end());
+
+    <span class="kw">int</span> <span class="fn">locate</span>(u64 key) {
+        auto it = lower_bound(pts.begin(), pts.end(), make_pair(key, -1));
+        <span class="kw">if</span> (it == pts.end()) it = pts.begin();   <span class="cm">// 绕回环头</span>
+        <span class="kw">return</span> it-&gt;second;
+    }</pre>
+      <p>环上定位是一次二分查找，不需要遍历所有机器。数据落在哪个点由「它顺时针方向的第一个机器点」唯一确定，与机器总数无关，这是它和取模方案最大的区别。</p>
+      <figure class="fig" id="fig-ring">
+        <figcaption>图 1　哈希域首尾相接成环，8 台机器落在环上各自的位置，数据从自己的位置顺时针找第一个机器点</figcaption>
+      </figure>
+
+      <h2>三、增减机器只动一段弧</h2>
+      <p>加一台机器时，新机器点插进环里，只有「从新点出发逆时针到上一个机器点」这一段弧上的数据会改投它，其余数据完全不动。平均算下来，N 台机器加入第 N+1 台，搬走的比例是 1/(N+1)。</p>
+      <p>10 台机器上的 100 万个 key，实测三档虚拟节点数：</p>
+      <table class="complexity">
+        <tr><th>每台机器的虚拟节点数</th><th>10 台 → 11 台搬走</th><th>10 台 → 9 台搬走</th></tr>
+        <tr><td>1</td><td>0.28%</td><td>9.54%</td></tr>
+        <tr><td>100</td><td>9.38%</td><td>10.74%</td></tr>
+        <tr><td>1000</td><td>8.63%</td><td>9.76%</td></tr>
+      </table>
+      <p>虚拟节点多的时候，迁移比例稳定在 1/11 附近。只有 1 个虚拟节点那一行的 0.28% 看着更漂亮，其实是个警告：新机器恰好落进一段很窄的弧，只接到 0.28% 的数据。它省下了迁移量，也意味着这台新机器几乎分不到活。负载倾斜的问题在下一节。</p>
+      <figure class="fig" id="fig-add">
+        <figcaption>图 2　新增一台机器，只有它接管的那段弧上的数据要改投；其余机器的负责范围一点不动</figcaption>
+      </figure>
+
+      <h2>四、虚拟节点</h2>
+      <p>机器数少的时候，环上只有那么几个点，落在相邻两个机器点之间的弧度大小差别很大，有的机器负责很宽的一段、有的很窄。数据按位置均匀铺满环，就变成了机器之间负载严重不均。</p>
+      <p>解决办法是让一台机器在环上占多个点：对每台机器编出若干虚拟节点，每个虚拟节点用不同的名字算哈希，散落在环上各处。数据归属仍然是「顺时针第一个点」，但一台机器拥有了很多段弧，总长度自然被摊平。</p>
+    <pre class="code"><span class="cm">// 虚拟节点：一台机器在环上放 v 个点，一台机器的负载就摊平了</span>
+    <span class="kw">void</span> <span class="fn">addNode</span>(<span class="kw">int</span> id, <span class="kw">const</span> <span class="kw">string</span>&amp; name, <span class="kw">int</span> vnodes) {
+        <span class="kw">for</span> (<span class="kw">int</span> v = 0; v &lt; vnodes; v++)
+            pts.push_back({md5_64(name + "#" + to_string(v)), id});
+    }</pre>
+      <p>50 台机器、100 万个 key，看每台机器分到的份额（均匀时应该是 2%）：</p>
+      <table class="complexity">
+        <tr><th>每台机器虚拟节点数</th><th>环上点数</th><th>最大份额</th><th>最小份额</th><th>极差</th><th>标准差 / 平均</th></tr>
+        <tr><td>1</td><td>50</td><td>7.55%</td><td>0.05%</td><td>7.50%</td><td>0.852</td></tr>
+        <tr><td>5</td><td>250</td><td>5.55%</td><td>0.70%</td><td>4.84%</td><td>0.487</td></tr>
+        <tr><td>20</td><td>1000</td><td>3.51%</td><td>1.05%</td><td>2.46%</td><td>0.250</td></tr>
+        <tr><td>100</td><td>5000</td><td>2.55%</td><td>1.38%</td><td>1.17%</td><td>0.107</td></tr>
+        <tr><td>1000</td><td>50000</td><td>2.12%</td><td>1.85%</td><td>0.27%</td><td>0.030</td></tr>
+        <tr><td>5000</td><td>250000</td><td>2.07%</td><td>1.93%</td><td>0.14%</td><td>0.017</td></tr>
+      </table>
+      <p>只有 1 个虚拟节点时，最多的机器扛了 7.55% 的数据，最少的只有 0.05%，差了 150 倍。加到 1000 个虚拟节点，极差收到 0.27%，标准差只占平均值的 3%。</p>
+      <p>虚拟节点带来两个附带好处：负载可以在机器之间手动调配（想给某台机器减负，就少给它几个虚拟节点），扩容时新机器也能立刻均匀接活，不用等它自然接满。代价是环上的点数变成「机器数 × 虚拟节点数」，定位要做的那次二分多花 log 倍的时间，实测 25000 个点的环上定位一次只要 0.053 微秒。</p>
+      <figure class="fig" id="fig-vnode">
+        <figcaption>图 3　同一批 2000 个 key：只有 1 个虚拟节点时 8 台机器份额从 4% 到 31% 不等，加到 50 个虚拟节点后都挤到 11% 到 17%</figcaption>
+      </figure>
+
+      <h2>五、一台机器挂掉</h2>
+      <p>减机器和加机器是对称的。50 台机器、每台 200 个虚拟节点，第 3 台退出后，实测 1.90% 的 key 换了位置，正好是它原来负责的份额。</p>
+      <p>这些 key 全被它的后继接走，但因为每个虚拟节点的后继各不相同，压力实际上摊到了 49 台机器上，最重的一台只多接了 0.11% 的 key。虚拟节点少的时候就不是这样了：一台机器挂掉，它的后继可能要一次性接过一大段弧，变成新的瓶颈。</p>
+
+      <h2>六、哈希 key 怎么选</h2>
+      <p>一致性哈希的均匀性依赖一个前提：机器点和数据点都要在环上散得开。机器名一般用「机器编号 + 虚拟节点序号」拼出来算哈希，这些名字互相独立，散得开。</p>
+      <p>数据这一侧的 key 要自己挑。挑的原则是「不同的数据得到不同且零散的位置」，所以要用会增加信息量的字段组合。拿用户维度的数据举例，用 <code>user_id</code> 参一个随机种子或时间片，就比用自增的 <code>id</code> 稳；用一段可能被截断的文本当 key，也比用它的前几个字节好。</p>
+      <p>反例是「key 的取值集中在一个小范围」。比如把一天的数据都按同一个日期字符串当 key，那它们全落在一个点上，虚拟节点再多也摊不开。环的均匀性靠的是输入本身的熵，这一点和哈希函数的均匀性是一回事。</p>
+
+      <div class="viz" id="viz-ring">
+        <p class="viz-title">一致性哈希环控制台</p>
+        <p class="viz-note">环上是 8 台机器（可增减），彩色弧段是它负责的范围，环外的小点是一批数据。右侧柱子统计 2000 个数据各落在哪台机器上。</p>
+        <div id="ch-board"></div>
+        <p class="viz-note" id="ch-counts"></p>
+        <p class="viz-answer" id="ch-answer"></p>
+        <div class="viz-controls">
+          <label>每台机器虚拟节点数 <select id="ch-v">
+            <option value="1">1</option>
+            <option value="5">5</option>
+            <option value="50">50</option>
+          </select></label>
+          <button id="ch-add" type="button">加一台机器</button>
+          <button id="ch-del" type="button">减少一台机器</button>
+          <button id="ch-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>定位一个数据（环上二分）</td><td>O(log V)，V = 机器数 × 虚拟节点数</td><td>O(1)</td></tr>
+        <tr><td>接入一台机器</td><td>O(v·log V) 建点；搬走的比例是 1/(N+1)</td><td>每个虚拟节点一个点</td></tr>
+        <tr><td>整个环</td><td>—</td><td>O(V) 个点，与数据量无关</td></tr>
+      </table>
+      <p>环本身只存机器点，和数据量无关，所以数据涨到亿级也不会让定位变慢；25000 个点的环上定位一次 0.053 微秒。真正随数据量增长的是「算 key 的哈希」和「按结果把数据搬过去」这两件事，前者是 O(key 长度)，后者是扩容时的一次性开销。</p>
+
+      <h2>总结</h2>
+      <p>取模方案在机器数变化时要重算所有 key 的落点，10 台加 1 台搬走 90.93%。一致性哈希把哈希域弯成环，机器和数据都落在这个环上，数据顺时针找第一个机器点，加一台机器只搬走它接管的那段弧。</p>
+      <p>迁移比例的理论值是 1/(N+1)，实测虚拟节点够多时是 9.38%，与 1/11 吻合。只有 1 个虚拟节点时搬走 0.28%，省的是迁移量，换来的是一台机器几乎分不到数据。</p>
+      <p>虚拟节点解决负载倾斜：50 台机器、1 个虚拟节点时份额从 0.05% 到 7.55%，加到 1000 个虚拟节点后极差只剩 0.27%。机器挂掉时压力也会被多个后继分摊，实测第 3 台退出只影响 1.90% 的 key，最重的一台多接 0.11%。定位是一次二分，代价 O(log V)，环的空间与数据量无关。</p>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解106【扩展】哈希函数、哈希表、布隆过滤器、一致性哈希</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>Wikipedia</td><td>Consistent hashing</td><td><a href="https://en.wikipedia.org/wiki/Consistent_hashing" target="_blank">en.wikipedia.org/wiki/Consistent_hashing</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+
+function fnv32(s){ var h=2166136261>>>0; for(var i=0;i<s.length;i++){ h=(h^s.charCodeAt(i))>>>0; h=Math.imul(h,16777619)>>>0; } return h>>>0; }
+function mix32(x){ x=(x^(x>>>16))>>>0; x=Math.imul(x,0x7feb352d)>>>0; x=(x^(x>>>15))>>>0; x=Math.imul(x,0x846ca68b)>>>0; x=(x^(x>>>16))>>>0; return x>>>0; }
+function H(s){ return mix32(fnv32(s)); }
+var COLORS=['#2563eb','#ea580c','#059669','#7c3aed','#dc2626','#0891b2','#ca8a04','#db2777','#0f766e'];
+
+// 页内共用的环工具
+function buildRing(nMachines,vnodes){
+  var pts=[];
+  for(var i=0;i<nMachines;i++) for(var v=0;v<vnodes;v++) pts.push({pos:H('machine-'+i+'#'+v), id:i});
+  pts.sort(function(a,b){ return a.pos-b.pos; });
+  return pts;
+}
+function locate(pts,pos){
+  var lo=0,hi=pts.length-1,ans=0;
+  while(lo<=hi){ var mid=(lo+hi)>>1; if(pts[mid].pos>=pos){ ans=mid; hi=mid-1; } else lo=mid+1; }
+  return pts[ans].id;
+}
+
+// ===== 图 1：环 + 顺时针归属 =====
+(function(){
+  var host=document.getElementById('fig-ring'); if(!host) return;
+  var W=660,HH=344,b='',pts=buildRing(8,1);
+  var cx=220,cy=160,r=110;
+  b+=txt(16,18,'8 台机器落在环上（32 位哈希域）',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var sortedPts=pts;
+  for(var i=0;i<sortedPts.length;i++){
+    var a0=sortedPts[i].pos/4294967296*2*Math.PI-Math.PI/2;
+    var a1=sortedPts[(i+1)%sortedPts.length].pos/4294967296*2*Math.PI-Math.PI/2;
+    if(i===sortedPts.length-1) a1+=2*Math.PI;
+    var x0=cx+r*Math.cos(a0),y0=cy+r*Math.sin(a0),x1=cx+r*Math.cos(a1),y1=cy+r*Math.sin(a1);
+    var large=(a1-a0)>Math.PI?1:0;
+    b+='<path d="M'+x0+' '+y0+' A'+r+' '+r+' 0 '+large+' 1 '+x1+' '+y1+'" fill="none" stroke="'+COLORS[sortedPts[i].id]+'" stroke-width="9" opacity="0.35"/>';
+  }
+  b+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="#e6e8eb"/>';
+  for(var j=0;j<pts.length;j++){
+    var a=pts[j].pos/4294967296*2*Math.PI-Math.PI/2;
+    var x=cx+r*Math.cos(a), y=cy+r*Math.sin(a);
+    b+='<circle cx="'+x+'" cy="'+y+'" r="6" fill="'+COLORS[pts[j].id]+'" stroke="#fff" stroke-width="2"/>';
+    b+=txt(cx+(r+26)*Math.cos(a),cy+(r+26)*Math.sin(a)+4,'m'+pts[j].id,{'fs':11,fill:COLORS[pts[j].id]});
+  }
+  var kpos=H('key-0');
+  var ka=kpos/4294967296*2*Math.PI-Math.PI/2;
+  var kid=locate(pts,kpos);
+  b+='<line x1="'+cx+'" y1="'+cy+'" x2="'+(cx+r*Math.cos(ka))+'" y2="'+(cy+r*Math.sin(ka))+'" stroke="#9aa0a6" stroke-dasharray="3 3"/>';
+  b+='<circle cx="'+(cx+(r+13)*Math.cos(ka))+'" cy="'+(cy+(r+13)*Math.sin(ka))+'" r="4.5" fill="#1f2937"/>';
+  b+=txt(cx,cy+4,'key-0 → m'+kid,{'fs':11,fill:'#1f2937'});
+  b+=txt(400,64,'数据从自己的位置出发',{'an':'start','fs':11.5,fill:'#475569'});
+  b+=txt(400,82,'顺时针找第一个机器点，',{'an':'start','fs':11.5,fill:'#475569'});
+  b+=txt(400,100,'那个点属于哪台机器，',{'an':'start','fs':11.5,fill:'#475569'});
+  b+=txt(400,118,'数据就存在哪台机器。',{'an':'start','fs':11.5,fill:'#475569'});
+  b+=txt(400,150,'相邻两个机器点之间的',{'an':'start','fs':11.5,fill:'#1d4ed8'});
+  b+=txt(400,168,'弧，就是左边那台机器',{'an':'start','fs':11.5,fill:'#1d4ed8'});
+  b+=txt(400,186,'负责的范围。',{'an':'start','fs':11.5,fill:'#1d4ed8'});
+  b+=txt(16,HH-12,'只有 8 个点时各段的弧度差别很大，这是后面要引入虚拟节点的原因',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 图 2：新增一台机器只接管一段弧 =====
+(function(){
+  var host=document.getElementById('fig-add'); if(!host) return;
+  var W=660,HH=322,b='',pts=buildRing(8,1);
+  var cx=220,cy=160,r=110;
+  b+=txt(16,18,'加入第 9 台机器（橙色点），只有它接管的弧换主人',{'an':'start','fs':12.5,fill:'#1f2328'});
+  for(var i=0;i<pts.length;i++){
+    var a0=pts[i].pos/4294967296*2*Math.PI-Math.PI/2;
+    var a1=pts[(i+1)%pts.length].pos/4294967296*2*Math.PI-Math.PI/2;
+    if(i===pts.length-1) a1+=2*Math.PI;
+    var x0=cx+r*Math.cos(a0),y0=cy+r*Math.sin(a0),x1=cx+r*Math.cos(a1),y1=cy+r*Math.sin(a1);
+    var large=(a1-a0)>Math.PI?1:0;
+    var owner=pts[i].id;
+    b+='<path d="M'+x0+' '+y0+' A'+r+' '+r+' 0 '+large+' 1 '+x1+' '+y1+'" fill="none" stroke="'+COLORS[owner]+'" stroke-width="9" opacity="0.3"/>';
+  }
+  var newPos=H('machine-8#0');
+  var na=newPos/4294967296*2*Math.PI-Math.PI/2;
+  var nx=cx+r*Math.cos(na), ny=cy+r*Math.sin(na);
+  var prev=pts[pts.length-1];
+  var pa=prev.pos/4294967296*2*Math.PI-Math.PI/2;
+  var arcStart=Math.min(pa,na), arcEnd=Math.max(pa,na);
+  var sx=cx+r*Math.cos(arcStart), sy=cy+r*Math.sin(arcStart);
+  var ex=cx+r*Math.cos(arcEnd), ey=cy+r*Math.sin(arcEnd);
+  if((arcEnd-arcStart)>Math.PI-0.001){
+    sx=cx+r*Math.cos(na); sy=cy+r*Math.sin(na); ex=cx+r*Math.cos(pa); ey=cy+r*Math.sin(pa);
+  }
+  var large2=(arcEnd-arcStart)>Math.PI?1:0;
+  b+='<path d="M'+sx+' '+sy+' A'+r+' '+r+' 0 '+large2+' 1 '+ex+' '+ey+'" fill="none" stroke="#ea580c" stroke-width="11" opacity="0.85"/>';
+  b+='<circle cx="'+nx+'" cy="'+ny+'" r="7" fill="#ea580c" stroke="#fff" stroke-width="2"/>';
+  b+=txt(cx+(r+28)*Math.cos(na),cy+(r+28)*Math.sin(na)+4,'m8',{'fs':11.5,fill:'#ea580c'});
+  b+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="#e6e8eb"/>';
+  for(var j=0;j<pts.length;j++){
+    var a=pts[j].pos/4294967296*2*Math.PI-Math.PI/2;
+    b+='<circle cx="'+(cx+r*Math.cos(a))+'" cy="'+(cy+r*Math.sin(a))+'" r="5" fill="'+COLORS[pts[j].id]+'" stroke="#fff" stroke-width="2"/>';
+  }
+  b+=txt(400,64,'橙色那一段原本属于它',{'an':'start','fs':11.5,fill:'#9a3412'});
+  b+=txt(400,82,'逆时针方向的上一台机器，',{'an':'start','fs':11.5,fill:'#9a3412'});
+  b+=txt(400,100,'现在整段改投 m8。',{'an':'start','fs':11.5,fill:'#9a3412'});
+  b+=txt(400,132,'其余 8 段的归属一个没变，',{'an':'start','fs':11.5,fill:'#475569'});
+  b+=txt(400,150,'所以搬走的数据 ≈ 1/9。',{'an':'start','fs':11.5,fill:'#475569'});
+  b+=txt(16,HH-12,'机器越多，每段弧越平均，一台机器加入时接管的份额越接近 1/(N+1)',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 图 3：虚拟节点摊平负载（实测值）=====
+(function(){
+  var host=document.getElementById('fig-vnode'); if(!host) return;
+  var W=660,HH=262,b='';
+  var one=[414,105,80,200,114,306,626,155];
+  var fifty=[227,243,234,257,338,237,230,234];
+  b+=txt(16,18,'同一批 2000 个 key，8 台机器各分到多少（实测）',{'an':'start','fs':12.5,fill:'#1f2328'});
+  var x0=60,y0=196,w=560,bh=130,mx=700;
+  for(var g=0;g<2;g++){
+    var data=(g===0)?one:fifty;
+    var base=y0-g*0;
+    for(var i=0;i<8;i++){
+      var x=x0+i*(w/8);
+      var hgt=data[i]/mx*bh;
+      var col=(g===0)?'#ea580c':'#2563eb';
+      b+='<rect x="'+(x+8)+'" y="'+(y0-hgt-(g===0?0:0))+'" width="'+(w/8-16)+'" height="'+hgt+'" fill="'+col+'" opacity="'+(g===0?0.85:0.5)+'"/>';
+      if(g===0) b+=txt(x+w/16,y0+16,'m'+i,{'fs':10.5,fill:'#94a3b8'});
+    }
+  }
+  b+='<line x1="'+x0+'" y1="'+y0+'" x2="'+(x0+w)+'" y2="'+y0+'" stroke="#cbd5e1"/>';
+  b+=txt(x0-8,y0-100,'630',{'fs':10.5,fill:'#94a3b8','an':'end'});
+  b+=txt(x0-8,y0-4,'0',{'fs':10.5,fill:'#94a3b8','an':'end'});
+  b+=txt(x0+w/2,y0+34,'橙色 = 1 个虚拟节点，蓝色 = 50 个虚拟节点（同一批 key）',{'fs':11,fill:'#475569'});
+  b+=txt(16,HH-10,'1 个虚拟节点时最少的机器只有 80 个 key，最多的 626 个；50 个虚拟节点时最少的 227 个、最多的 338 个',{'an':'start','fs':11,fill:'#94a3b8'});
+  host.insertAdjacentHTML('afterbegin',svg(W,HH,b));
+})();
+
+// ===== 演示：环控制台 =====
+(function(){
+  var board=document.getElementById('ch-board');
+  var cntEl=document.getElementById('ch-counts');
+  var ansEl=document.getElementById('ch-answer');
+  var selV=document.getElementById('ch-v');
+  var btnAdd=document.getElementById('ch-add');
+  var btnDel=document.getElementById('ch-del');
+  var btnReset=document.getElementById('ch-reset');
+  var KEYS=[]; for(var i=0;i<2000;i++) KEYS.push(H('key-'+i));
+  var SAMPLE=24;
+  var st={n:8,v:1,prev:null,msg:''};
+
+  function owners(n,v){
+    var pts=buildRing(n,v), own=[];
+    for(var i=0;i<KEYS.length;i++) own.push(locate(pts,KEYS[i]));
+    var cnt=[]; for(var j=0;j<n;j++) cnt.push(0);
+    for(var i2=0;i2<KEYS.length;i2++) cnt[own[i2]]++;
+    return {pts:pts,own:own,cnt:cnt};
+  }
+  function render(){
+    var r=owners(st.n,st.v);
+    var W=660,HH=430,cx=200,cy=210,rr=136,b='';
+    b+=txt(16,18,'环上 '+r.pts.length+' 个点（'+st.n+' 台机器 × '+st.v+' 个虚拟节点）',{'an':'start','fs':12.5,fill:'#1f2328'});
+    for(var i=0;i<r.pts.length;i++){
+      var a0=r.pts[i].pos/4294967296*2*Math.PI-Math.PI/2;
+      var nxt=r.pts[(i+1)%r.pts.length].pos/4294967296*2*Math.PI-Math.PI/2;
+      var a1=(i===r.pts.length-1)?nxt+2*Math.PI:nxt;
+      var x0=cx+rr*Math.cos(a0),y0=cy+rr*Math.sin(a0),x1=cx+rr*Math.cos(a1),y1=cy+rr*Math.sin(a1);
+      var large=(a1-a0)>Math.PI?1:0;
+      b+='<path d="M'+x0+' '+y0+' A'+rr+' '+rr+' 0 '+large+' 1 '+x1+' '+y1+'" fill="none" stroke="'+COLORS[r.pts[i].id%COLORS.length]+'" stroke-width="10" opacity="0.45"/>';
+    }
+    b+='<circle cx="'+cx+'" cy="'+cy+'" r="'+rr+'" fill="none" stroke="#e6e8eb"/>';
+    for(var j=0;j<r.pts.length;j++){
+      if(r.pts.length>60 && j%2) continue;
+      var a=r.pts[j].pos/4294967296*2*Math.PI-Math.PI/2;
+      b+='<circle cx="'+(cx+rr*Math.cos(a))+'" cy="'+(cy+rr*Math.sin(a))+'" r="2.5" fill="'+COLORS[r.pts[j].id%COLORS.length]+'"/>';
+    }
+    // 每台机器在它最宽的那段弧中间贴一个标签
+    for(var q=0;q<st.n;q++){
+      var best=-1,bestSpan=-1;
+      for(var t=0;t<r.pts.length;t++){
+        if(r.pts[t].id!==q) continue;
+        var pv=(t>0)?r.pts[t-1].pos:(r.pts[r.pts.length-1].pos-4294967296);
+        var span=r.pts[t].pos-pv;
+        if(span>bestSpan){ bestSpan=span; best=t; }
+      }
+      if(best<0) continue;
+      var pv2=(best>0)?r.pts[best-1].pos:(r.pts[r.pts.length-1].pos-4294967296);
+      var midPos=pv2+bestSpan/2;
+      var a3=(midPos/4294967296)*2*Math.PI-Math.PI/2;
+      b+=txt(cx+(rr+24)*Math.cos(a3),cy+(rr+24)*Math.sin(a3)+4,'m'+q,{'fs':11,fill:COLORS[q%COLORS.length]});
+    }
+    for(var s=0;s<SAMPLE;s++){
+      var a2=KEYS[s]/4294967296*2*Math.PI-Math.PI/2;
+      b+='<circle cx="'+(cx+(rr-16)*Math.cos(a2))+'" cy="'+(cy+(rr-16)*Math.sin(a2))+'" r="3.5" fill="#1f2937" stroke="#fff" stroke-width="1"/>';
+    }
+    var bx=400,by=60,bh=150,cmax=Math.max.apply(null,r.cnt);
+    var stepW=Math.min(28,244/st.n), bw=Math.max(9,stepW-4), showNum=(st.n<=12);
+    b+=txt(bx,44,'2000 个数据各落在哪台机器',{'an':'start','fs':11.5,fill:'#1f2328'});
+    for(var z=0;z<st.n;z++){
+      var hgt=r.cnt[z]/cmax*bh;
+      var xx=bx+z*stepW;
+      b+='<rect x="'+xx+'" y="'+(by+bh-hgt)+'" width="'+bw+'" height="'+Math.max(1,hgt)+'" fill="'+COLORS[z%COLORS.length]+'" opacity="0.8"/>';
+      if(showNum) b+=txt(xx+bw/2,by+bh+14,String(r.cnt[z]),{'fs':10,fill:'#475569'});
+    }
+    b+='<line x1="'+bx+'" y1="'+(by+bh)+'" x2="'+(bx+st.n*stepW)+'" y2="'+(by+bh)+'" stroke="#cbd5e1"/>';
+    b+=txt(bx,by+bh+34,'m0 … m'+(st.n-1),{'an':'start','fs':10.5,fill:'#94a3b8'});
+    b+=txt(16,HH-10,'彩色弧段 = 每台机器负责的范围；环内的小黑点是抽样的数据，按位置归属，不用连线也看得出它们分布得均不均匀',{'an':'start','fs':11,fill:'#94a3b8'});
+    board.innerHTML=svg(W,HH,b);
+    var parts=[]; for(var y=0;y<st.n;y++) parts.push('m'+y+' '+r.cnt[y]);
+    cntEl.textContent='每台机器分到：'+parts.join('、')+'　（共 2000 个数据）';
+    var ans='当前 '+st.n+' 台机器 × '+st.v+' 个虚拟节点：最多 '+Math.max.apply(null,r.cnt)+' 个，最少 '+Math.min.apply(null,r.cnt)+' 个';
+    if(st.msg) ans+='。'+st.msg;
+    ansEl.textContent=ans;
+    return r;
+  }
+  function moved(oldOwn,newOwn){
+    var c=0; for(var i=0;i<oldOwn.length;i++) if(oldOwn[i]!==newOwn[i]) c++;
+    return c;
+  }
+  selV.addEventListener('change',function(){ st.v=Number(selV.value); st.msg=''; render(); });
+  btnAdd.addEventListener('click',function(){
+    if(st.n>=16){ st.msg='这一页最多加到 16 台机器'; render(); return; }
+    var before=owners(st.n,st.v).own;
+    st.n++;
+    var after=owners(st.n,st.v).own;
+    var mv=moved(before,after);
+    st.msg='加入 m'+(st.n-1)+' 后台，搬走了 '+mv+' / 2000 个数据（'+(mv/20).toFixed(2)+'%），理论值 1/'+st.n+' = '+(100/st.n).toFixed(2)+'%';
+    render();
+  });
+  btnDel.addEventListener('click',function(){
+    if(st.n<=2){ st.msg='至少留两台机器'; render(); return; }
+    var before=owners(st.n,st.v).own;
+    st.n--;
+    var after=owners(st.n,st.v).own;
+    var mv=moved(before,after);
+    st.msg='撤掉一台机器后，搬走了 '+mv+' / 2000 个数据（'+(mv/20).toFixed(2)+'%）';
+    render();
+  });
+  btnReset.addEventListener('click',function(){ st.n=8; st.v=Number(selV.value); st.msg=''; render(); });
+  render();
+})();
+})();</script>
+</body>
+</html>
