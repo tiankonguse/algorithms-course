@@ -103,3 +103,14 @@
 - 进度回写：prompt.md 新增 096 条目、「下一课 096 → 097」；本地日志 `.workbuddy/memory/2026-10-11.md` 追加一段；`memory/MEMORY.md` 本轮无组顺序改动（该文件已无组顺序列表，组信息以 json `groups` 为准）。
 - 下一课：**097**。
 
+## 2026-10-12 17:04 起（本次，锁 sess103-170740）
+- 读 prompt.md 得「下一课」= **103**（097~102 已由其它会话完成并回写，自动化 memory 的旧快照停在 096 不作数）；json 无 103 条目、锁不在 → 抢锁 LOCK_OK，收口 `rm -f owner` 释放（目录保留）。
+- **开工探到残留**：`/tmp/cpp103` 里 sol.cpp / stress.cpp / bench.cpp / rate.cpp / presets.cpp / verify_snip.cpp 与 6 段 snip 片段齐备（上一会话 15:56~16:00 中断，页面与 json 都没落盘），本轮以复用残留为主：stress 复跑 3000 组四条全 bad=0、presets 出全部演示预设、bench 与自写 small*.cpp 补小规模耗时；rate.cpp 计数器串用 + 标签错位，重写 rate2.cpp 后按三档值域重跑。
+- 转换第 **103** 课（Manacher算法、扩展KMP）→ 3 个页面，**新开「Manacher 与 Z 算法」组**，插在「后缀数组」之后（字符串分类第 5 组）：
+  - `manacher.html`：扩展串统一奇偶 + 回文半径 p + c/r 最右覆盖 + 四种情况合成一个 while（P3805）。
+  - `z-function.html`：z 数组、e 数组与权值异或和（P5410），两套求法与 Manacher 同源。
+  - `revert-initial-state.html`：每秒挪 k 格，z[i] == n−i 判定与兜底 (n+k−1)/k（LC 3031）。
+- 关键数字：P3805 n=5.5×10⁶ 全 a 36.98ms（同 n=16000 暴力 87.52ms 对 Manacher 0.5778ms）；P5410 |a|=|b|=10⁷ 全 a z 25.14ms / e 26.62ms；zArray 10⁶/2×10⁶/5×10⁶ = 4.06/8.31/23.27ms；LC 正解 n=10⁶ 2.65ms 对暴力 32.26ms@16000。三条结论：更新 r 写 `>=` 与 `>` 完全等价（0.00%，连 p 数组都一样）；LC 判断写 `>=` 同理（z[i] ≤ n−i）；白拿类错法从小字符表 47%/61%/30% 掉到 26 字母表的 9.60%/13.15%/0.55%。
+- 自检：verify_pages 三页 PASS（figs/svg 5/5、5/5、4/4；pager 链 后缀数组 → Manacher → 扩展 KMP → 恢复到初始状态 → 二进制与位运算）、verify_home PASS（字符串 16 页）、/tmp/probe103.js 79 组 select 组合 ALL OK、/tmp/overlap096.js 修掉 1 处重叠后 ALL CLEAN、杂字与 AI 味 CLEAN。修过：fig-cases 越界（H 320→340）、z 加速图标签压索引、演示说明与实现不符、内存数字按上限重算。
+- 进度回写：prompt.md 补 103 条目 +「下一课 104」；本地日志 2026-10-12.md 追加一段；MEMORY.md 踩坑节补三条（复用残留先核对测量脚本 / 「看着像错其实等价」要专门量 / 空间数字按题目上限算）。
+- 下一课：**104**。

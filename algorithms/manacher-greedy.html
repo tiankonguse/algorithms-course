@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manacher：不重叠回文子串的最多数目</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.card { min-width: 28px; padding: 5px 7px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.used { background: #e5e7eb; border-color: #9aa0a6; color: #4b5563; }
+.card.empty { background: transparent; border-style: dashed; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>Manacher：不重叠回文子串的最多数目</h1>
+      <p class="intro">把串切成若干段，每段都得是长度不小于 k 的回文，问最多能切几段。看到「最多几段」会先想到 DP，但这里每一段只要长度够就能拿，早切一段给后面留的空间更大，贪心就够了。真正要解决的是另一件事：怎么在线性时间里找到离当前位置最近的、长度够 k 的那个回文。</p>
+
+      <h2>零、题目</h2>
+      <p>给定字符串 s 和正数 k，可以随意把 s 切成多个子串，要求切出来的每个子串都是长度不小于 k 的回文，且彼此没有重合，返回最多能切出几段。</p>
+      <p>数据范围是 |s| ≤ 2000、k ≤ 2000，平方做法能过。暴力先预处理任意区间是不是回文（O(m<sup>2</sup>) 的空间），再跑一遍 DP：f[i] 表示前 i 个字符最多切几段，转移是 f[i] = max(f[i − 1], max{ f[j] + 1 | j ≤ i − k 且 s[j, i) 是回文 })。</p>
+      <p>实测这份 DP 在 m = 1000 时 0.31 毫秒，2000 时 1.70 毫秒，4000 时 17.19 毫秒，翻倍就涨到四倍。线性做法在 n = 10<sup>6</sup> 上只要 6.17 毫秒。</p>
+
+      <h2>一、贪心怎么切</h2>
+      <p>维护一个位置 l，表示「已经被切掉的部分的右边界」。从 l 出发往右找离 l 最近的、长度不小于 k 的回文，把它切下来，段数加一，l 挪到这个回文右边那一格，重复到找不到为止。</p>
+      <p>为什么挑最早结束的那个？假设某个最优方案里，第一段结束得比贪心选的那段晚，那就把它换成贪心选的这段。新段的右边界只会更靠左，剩下的可切范围是原来那段的超集，后面所有段照搬过来仍然合法，段数不变。所以贪心选的第一段不亏，而它结束得最早，归纳下去每一段都不亏。</p>
+      <figure class="fig" id="fig-greedy">
+        <figcaption>图 1　橙框是贪心选的第一段，它比另一个合法方案更早结束，右边剩下的范围更大</figcaption>
+      </figure>
+      <p>这里的 l 落在扩展串的偶数下标上，也就是某个 '#' 的位置。真实串的每个字符落在奇数下标上，所以「l 落在 '#' 上」等于说 l 就是「第 l / 2 个字符之前」这个分界点。</p>
+
+      <h2>二、左边界为什么要跟着 l 走</h2>
+      <p>找回文这件事，扩展串和 p 数组现成就有，但直接照搬会出问题：切过的部分不能再被用到。如果一个回文从 l 左边伸过来盖住了 l，它就和已经切掉的那段重合了，不合法。</p>
+      <p>所以往外扩的时候，左边界不是 0 而是 l：</p>
+      <p>while (i + len &lt; n &amp;&amp; i − len &gt;= l &amp;&amp; ss[i + len] == ss[i − len])</p>
+      <p>只有 i − len &gt;= l 这一处和标准的 Manacher 不同。它把「回文不能越过 l」这句话直接写进了扩展条件里，比事后检查省事。</p>
+      <figure class="fig" id="fig-left">
+        <figcaption>图 2　同一个回文，从 l 往左伸的部分会与已切区间重合，扩到 l 就得停</figcaption>
+      </figure>
+
+      <h2>三、半径和长度差 1</h2>
+      <p>len 是扩展串上的半径，真实回文长度是 len − 1，所以「长度不小于 k」写成半径就是「半径大于 k」，也就是 len &gt;= k + 1。</p>
+      <p>半径一旦超过 k，就说明以这个 i 为中心存在一个长度不小于 k 的回文。不需要找到最长的那个，取长度刚好 k 的那个反而更有用：以 i 为中心、半径 k + 1 的回文在扩展串里盖住 [i − k, i + k]，右端点是 i + k，把切点放在这里，剩下的范围最大。</p>
+      <p>i + k 的奇偶性不好说，而 l 必须落在 '#' 上，所以返回前还差一步修正：ss[i + k] 不是 '#' 就再加 1。</p>
+      <figure class="fig" id="fig-return">
+        <figcaption>图 3　半径 4 已经大于 k = 3，取长度 3 的那一段，右端点 i + 3 落在字母上就再往右挪一格</figcaption>
+      </figure>
+      <p>把这个修正去掉，20000 组随机串里有 6.46% 会算错（字符表取 2、串长 30），把字符表放大到 26、串长 200 只剩 1.67%。</p>
+
+      <h2>四、代码</h2>
+      <p>主体就是一个 while，每次问一次「下一个回文在哪」。</p>
+    <pre class="code"><span class="cm">// 从下标 0 开始，每次切掉一个长度 &gt;= k 的回文，能切几个切几个</span>
+    <span class="kw">int</span> <span class="fn">maxPalindromes</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;str, <span class="kw">int</span> k) {
+        manacherss(str);
+        <span class="kw">int</span> ans = 0, next = 0;
+        <span class="kw">while</span> ((next = findNext(next, k)) != -1) {
+            ans++;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>find 是改过左边界的 Manacher。它从 l 出发，一旦某个中心的半径超过 k 就立刻返回，不把 p 数组填完。</p>
+    <pre class="code"><span class="cm">// 在扩展串上从 l 出发往右找，一旦有中心的半径 &gt; k 就收工</span>
+    <span class="cm">// 返回长度 k 的那个回文的最右下标，一定让它落在 '#' 上</span>
+    <span class="kw">int</span> <span class="fn">findNext</span>(<span class="kw">int</span> l, <span class="kw">int</span> k) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = l, c = l, r = l, len; i &lt; n; i++) {
+            len = r &gt; i ? min(p[2 * c - i], r - i) : 1;
+            <span class="kw">while</span> (i + len &lt; n &amp;&amp; i - len &gt;= l &amp;&amp; ss[i + len] == ss[i - len]) {
+                <span class="kw">if</span> (++len &gt; k) {
+                    <span class="kw">return</span> i + k + (ss[i + k] != '#' ? 1 : 0);
+                }
+            }
+            <span class="kw">if</span> (i + len &gt; r) {
+                r = i + len;
+                c = i;
+            }
+            p[i] = len;
+        }
+        <span class="kw">return</span> -1;
+    }</pre>
+
+      <h2>五、为什么这样是 O(n)</h2>
+      <p>find 返回的位置是 i + k 或 i + k + 1，其中 i ≥ l、k ≥ 1，所以它严格大于 l。下一轮从这个更大的下标开始扫，各轮扫过的中心区间互不重叠，合起来不超过 n 个中心。</p>
+      <p>while 里真正往外扩的步数也有账可算：右边被 n 挡着，左边被 l 挡着，l 只增不减；白拿的 p[2c − i] 那部分是一步到位，不花时间。所以整趟的扩展次数是线性的。</p>
+      <p>返回 −1 的那一次会把 i 从 l 扫到 n，看着像一次平方，但它只可能出现一次，而且那一段下标后面不会再被扫第二遍。</p>
+
+      <h2>六、三个错法</h2>
+      <p>1）左边界只挡 0。切过的部分又被算进来，答案偏大。字符表 2、串长 30 时 54.77% 出错，字符表 4、串长 80 降到 29.02%，字符表 26、串长 200 只剩 7.62%。</p>
+      <p>2）阈值写成 len &gt;= k。这样是要求真实长度不小于 k − 1，切出来的段会比正解多。三档分别是 57.23%、53.42%、28.82%，是三个错法里最容易被抓到的。</p>
+      <p>3）返回时不做奇偶修正。切点落在字母上下一次扩展就会多算或漏算一格，抓取率 6.46%、7.33%、1.67%，字母表一变大就很难抓到。</p>
+      <figure class="fig" id="fig-bad">
+        <figcaption>图 4　三个错法在三档数据上的抓取率，字母表越大越难抓到</figcaption>
+      </figure>
+      <p>这一题的抓取率随字母表变大而下降，和随机串里能凑出多少回文直接相关：字符表越小，随机串里的回文越多，切点位置一变就容易撞出不同的答案。</p>
+      <div class="viz" id="viz-split">
+        <p class="viz-title">逐步切分</p>
+        <p class="viz-note">每点一步找出一段长度不小于 k 的回文并切掉。灰底是已经切走的部分，橙框是这一步切下来的段。切到错误版本，看段数从哪一步开始和正解不一样。</p>
+        <div id="split-board"></div>
+        <p class="viz-note" id="split-note"></p>
+        <p class="viz-answer" id="split-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="split-str"></select></label>
+          <label>k <select id="split-k"></select></label>
+          <label>版本 <select id="split-ver"></select></label>
+          <button id="split-next" type="button">下一步</button>
+          <button id="split-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>七、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>区间回文表 + DP</td><td>枚举每个区间的回文性，再枚举转移</td><td>O(m<sup>2</sup>)</td><td>O(m<sup>2</sup>)</td></tr>
+        <tr><td>Manacher 上贪心</td><td>每轮从 l 出发扫到第一个够长的回文</td><td>O(m)</td><td>O(m)</td></tr>
+      </table>
+      <p class="breakdown">贪心的每一轮把 l 往右推，各轮扫过的中心不重叠，加上扩展次数被 l 和 n 两头夹住，总共 O(m)。空间按 |s| ≤ 2000 的开法，ss 与 p 各 4003 格；把上限放到 10<sup>6</sup> 也只有 2 MB 字符加 8 MB int。n = 10<sup>6</sup>、k = 3 实测 6.17 毫秒，DP 那一档在 m = 4000 就到 17.19 毫秒了。</p>
+
+      <h2>总结</h2>
+      <p>贪心的依据是「早结束的段不亏」：最早结束的那段换上去，右边可用的范围只会更大。</p>
+      <p>实现上只需要在 Manacher 的扩展条件里把左边界从 0 改成 l，再把「长度不小于 k」翻译成「半径大于 k」。返回的切点要做一次奇偶修正，好让下一个 l 落在 '#' 上。</p>
+      <p>时间和空间都是 O(m)。这套「在 Manacher 上跳着找」的写法，同一趟扫描里既填 p 又直接产出切点，比先算完 p 再回头找要少一趟。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>不重叠回文子字符串的最大数目</td><td><a href="https://leetcode.cn/problems/maximum-number-of-non-overlapping-palindrome-substrings/" target="_blank">2472. 不重叠回文子字符串的最大数目</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解104【扩展】 Manacher算法相关题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>Manacher 算法</td><td><a href="https://oi-wiki.org/string/manacher/" target="_blank">oi-wiki.org/string/manacher</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:6, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+
+  // ===== 图 1：贪心早结束 =====
+  (function(){
+    var host = document.getElementById('fig-greedy');
+    if (!host) return;
+    var W = 660, H = 212;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var s = 'aabbaa', cw = 44, x0 = 60;
+    svg.appendChild(txt(16, 18, '原串 "aabbaa"，k = 2', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < s.length; i++) {
+      svg.appendChild(box(x0 + i * cw, 30, cw - 6, 30, '#ffffff', '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 50, s[i], {'text-anchor':'middle', 'font-size':14, fill:'#374151'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 72, String(i), {'text-anchor':'middle', 'font-size':9.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(16, 108, '贪心：第一段选 "aa"（[0, 2)），结束得最早', {'font-size':12.5, fill:ORANGE}));
+    svg.appendChild(el('rect', {x:x0, y:116, width:2 * cw - 6, height:26, rx:5, fill:FILL_O, stroke:ORANGE, 'stroke-width':1.3}));
+    svg.appendChild(txt(x0 + cw - 3, 134, 'aa', {'text-anchor':'middle', 'font-size':13, 'font-weight':700, fill:'#9a3412'}));
+    svg.appendChild(txt(16, 164, '另一个合法方案：第一段选 "abba"（[1, 5)），结束得晚', {'font-size':12.5, fill:BLUE}));
+    svg.appendChild(el('rect', {x:x0 + cw, y:172, width:4 * cw - 4, height:26, rx:5, fill:FILL_B, stroke:BLUE, 'stroke-width':1.3}));
+    svg.appendChild(txt(x0 + 3 * cw - 2, 190, 'abba', {'text-anchor':'middle', 'font-size':13, 'font-weight':700, fill:'#1e3a8a'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：左边界必须跟着 l =====
+  (function(){
+    var host = document.getElementById('fig-left');
+    if (!host) return;
+    var W = 660, H = 200;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var s = 'abccba', cw = 44, x0 = 60;
+    svg.appendChild(txt(16, 18, '原串 "abccba"，已经切掉 [0, 1) 的 "a"，于是 l = 2', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < s.length; i++) {
+      var used = i === 0;
+      svg.appendChild(box(x0 + i * cw, 30, cw - 6, 30, used ? '#e5e7eb' : '#ffffff', used ? GREY : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 50, s[i], {'text-anchor':'middle', 'font-size':14, 'font-weight': used ? 700 : 400, fill: used ? '#4b5563' : '#374151'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 72, String(i), {'text-anchor':'middle', 'font-size':9.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(el('line', {x1:x0 + cw, y1:26, x2:x0 + cw, y2:80, stroke:ORANGE, 'stroke-width':1.6}));
+    svg.appendChild(txt(x0 + cw, 94, 'l', {'text-anchor':'middle', 'font-size':12, 'font-weight':700, fill:ORANGE}));
+    svg.appendChild(txt(16, 122, '越界的写法：回文伸到 l 左边，和已切区间撞上', {'font-size':12.5, fill:RED}));
+    svg.appendChild(el('rect', {x:x0 - 26, y:130, width:3 * cw + 20, height:24, rx:5, fill:FILL_R, stroke:RED, 'stroke-width':1.2}));
+    svg.appendChild(txt(x0 - 26, 172, '这一截落在已经切过的 [0, 1) 上，不能用', {'font-size':11.5, fill:RED}));
+    svg.appendChild(txt(420, 150, '左边界改成 l', {'font-size':12, fill:BLUE}));
+    svg.appendChild(txt(420, 168, 'i − len ≥ l', {'font-size':12.5, 'font-weight':700, fill:BLUE}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：半径 > k 与返回下标 =====
+  (function(){
+    var host = document.getElementById('fig-return');
+    if (!host) return;
+    var W = 660, H = 210;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var ext = '#a#b#c#b#a#';
+    var cw = 40, x0 = 56, k = 3, ci = 4;
+    svg.appendChild(txt(16, 18, '"abcba" 的扩展串，中心 i = 4、半径 4，k = 3', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < ext.length; i++) {
+      var inLen = i >= ci - k && i <= ci + k;
+      svg.appendChild(box(x0 + i * cw, 30, cw - 4, 30, inLen ? FILL_O : '#ffffff', inLen ? ORANGE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 4) / 2, 50, ext[i], {'text-anchor':'middle', 'font-size':13, fill: inLen ? '#9a3412' : '#374151'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 4) / 2, 72, String(i), {'text-anchor':'middle', 'font-size':9.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(el('line', {x1:x0 + ci * cw + (cw - 4) / 2, y1:26, x2:x0 + ci * cw + (cw - 4) / 2, y2:76, stroke:BLUE, 'stroke-width':1.6}));
+    svg.appendChild(txt(x0 + ci * cw, 90, '中心', {'text-anchor':'middle', 'font-size':11.5, fill:BLUE}));
+    svg.appendChild(txt(16, 118, '半径 k + 1 = 4 盖住 [i − k, i + k] = [1, 7]，右端点 7 落在 "#" 上，直接返回', {'font-size':12.5, fill:'#374151'}));
+    svg.appendChild(box(24, 132, 612, 32, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(40, 153, '真实长度 = 半径 − 1，所以「长度 ≥ k」等价于「半径 > k」，代码里写成 ++len > k', {'font-size':12.5, 'font-weight':700, fill:'#1f2328'}));
+    svg.appendChild(txt(24, 192, '返回的右端点 i + k：是 "#" 就用 i + k，是字母就再 +1，保证下一个 l 落在 "#" 上。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：错法抓取率 =====
+  (function(){
+    var host = document.getElementById('fig-bad');
+    if (!host) return;
+    var W = 660, H = 178;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '错法抓取率（每档 20000 组随机串）', {'font-size':12.5, fill:'#1f2328'}));
+    var head = ['错法', '表 2 / 长 30', '表 4 / 长 80', '表 26 / 长 200'];
+    var xs = [24, 250, 390, 530];
+    for (var c = 0; c < head.length; c++) svg.appendChild(txt(xs[c], 44, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    var rows = [
+      ['阈值写 len &gt;= k', '57.23%', '53.42%', '28.82%', RED],
+      ['左边界只挡 0', '54.77%', '29.02%', '7.62%', '#374151'],
+      ['返回不做奇偶修正', '6.46%', '7.33%', '1.67%', '#374151']
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 68 + r * 26;
+      svg.appendChild(txt(xs[0], y, rows[r][0], {'font-size':12, fill:rows[r][4]}));
+      svg.appendChild(txt(xs[1], y, rows[r][1], {'font-size':12, fill:rows[r][4]}));
+      svg.appendChild(txt(xs[2], y, rows[r][2], {'font-size':12, fill:rows[r][4]}));
+      svg.appendChild(txt(xs[3], y, rows[r][3], {'font-size':12, fill:rows[r][4]}));
+    }
+    svg.appendChild(txt(24, 172, '字母表越大，随机串里能凑出的回文越少，错法越难现形。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示：逐步切分 =====
+  (function(){
+    var CASES = ['abba', 'abccba', 'aaaa', 'abcba', 'abacaba', 'aabbaa'];
+    var KS = [2, 3, 4, 5];
+    var VERS = [
+      {k:'ok', n:'正确'},
+      {k:'lb0', n:'左边界只挡 0'},
+      {k:'ge', n:'阈值写 len >= k'}
+    ];
+    var selS = document.getElementById('split-str');
+    var selK = document.getElementById('split-k');
+    var selV = document.getElementById('split-ver');
+    var board = document.getElementById('split-board');
+    var note = document.getElementById('split-note');
+    var ansEl = document.getElementById('split-answer');
+    var btnN = document.getElementById('split-next');
+    var btnR = document.getElementById('split-reset');
+    if (!selS || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = '"' + CASES[i] + '"'; selS.appendChild(o);
+    }
+    for (var i = 0; i < KS.length; i++) {
+      var o = document.createElement('option'); o.value = String(KS[i]); o.textContent = String(KS[i]); selK.appendChild(o);
+    }
+    for (var i = 0; i < VERS.length; i++) {
+      var o = document.createElement('option'); o.value = VERS[i].k; o.textContent = VERS[i].n; selV.appendChild(o);
+    }
+    var st = {caseIdx:0, k:2, ver:'ok', step:0, res:null};
+
+    // 逐步模拟课程代码里的 find + 贪心
+    function run(s, k, ver) {
+      var ext = '#';
+      for (var i = 0; i < s.length; i++) ext += s[i] + '#';
+      var n = ext.length;
+      var p = new Array(n).fill(0);
+      var frames = [];
+      var l = 0, segs = [], ans = 0;
+      var guard = 0;
+      while (guard++ < 200) {
+        var found = -1, note = '';
+        for (var i = l, c = l, r = l, len; i < n; i++) {
+          len = r > i ? Math.min(p[2 * c - i], r - i) : 1;
+          var leftLimit = (ver === 'lb0') ? 0 : l;
+          var hit = false;
+          while (i + len < n && i - len >= leftLimit && ext[i + len] === ext[i - len]) {
+            len++;
+            var need = (ver === 'ge') ? (len >= k) : (len > k);
+            if (need) { hit = true; break; }
+          }
+          if (i + len > r) { r = i + len; c = i; }
+          p[i] = len;
+          if (hit) {
+            found = i + k + (ext[i + k] !== '#' ? 1 : 0);
+            note = 'i = ' + i + ' 处半径 ' + len + ' 已经' + (ver === 'ge' ? '不小于' : '大于') + ' k = ' + k;
+            break;
+          }
+        }
+        if (found === -1) {
+          frames.push({l:l, segs:segs.slice(), ans:ans, note:'找不到长度 ' + k + ' 以上的回文了，收工', done:true});
+          break;
+        }
+        var real = found / 2;
+        segs.push([l / 2, real]);
+        ans++;
+        frames.push({l:found, segs:segs.slice(), ans:ans, note:note + '，切走 [' + (l / 2) + ', ' + real + ')', done:false});
+        l = found;
+        if (l >= n) break;
+      }
+      return {s:s, frames:frames, ans:ans, segs:segs};
+    }
+    function render() {
+      var f = st.res.frames[st.step];
+      var m = st.res.s.length;
+      board.innerHTML = '';
+      var l1 = document.createElement('p'); l1.className = 'cap';
+      l1.textContent = '原串';
+      board.appendChild(l1);
+      var d1 = document.createElement('div'); board.appendChild(d1);
+      var vals = st.res.s.split(''), cls = [];
+      for (var i = 0; i < m; i++) {
+        var c = null;
+        for (var j = 0; j < f.segs.length; j++) {
+          if (i >= f.segs[j][0] && i < f.segs[j][1]) c = (j === f.segs.length - 1) ? 'pick' : 'used';
+        }
+        cls[i] = c;
+      }
+      var wrap = document.createElement('div');
+      wrap.className = 'cards';
+      for (var i = 0; i < m; i++) {
+        var d = document.createElement('div');
+        var cc = 'card' + (cls[i] ? ' ' + cls[i] : '');
+        d.className = cc;
+        d.innerHTML = vals[i] + '<span class="idx">' + i + '</span>';
+        wrap.appendChild(d);
+      }
+      d1.appendChild(wrap);
+      var l2 = document.createElement('p'); l2.className = 'cap';
+      l2.textContent = '已经切下的段';
+      board.appendChild(l2);
+      var segTxt = document.createElement('p');
+      segTxt.className = 'breakdown';
+      if (f.segs.length === 0) segTxt.textContent = '（还没有）';
+      else {
+        var parts = [];
+        for (var j = 0; j < f.segs.length; j++) {
+          parts.push('"' + st.res.s.substring(f.segs[j][0], f.segs[j][1]) + '"（长度 ' + (f.segs[j][1] - f.segs[j][0]) + '）');
+        }
+        segTxt.textContent = parts.join('　+　');
+      }
+      board.appendChild(segTxt);
+      var l3 = document.createElement('p'); l3.className = 'cap';
+      l3.textContent = '下一段的起点（扩展串下标）l = ' + f.l;
+      board.appendChild(l3);
+      note.textContent = f.note;
+      var last = st.step === st.res.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        var label = st.ver === 'lb0' ? '左边界只挡 0' : (st.ver === 'ge' ? '阈值写 len >= k' : '正确');
+        ansEl.textContent = '最多切 ' + st.res.ans + ' 段（版本：' + label + '）';
+      } else {
+        ansEl.textContent = '';
+      }
+    }
+    function rebuild() {
+      st.res = run(CASES[st.caseIdx], st.k, st.ver);
+      st.step = 0;
+      render();
+    }
+    selS.addEventListener('change', function(){ st.caseIdx = Number(selS.value); rebuild(); });
+    selK.addEventListener('change', function(){ st.k = Number(selK.value); rebuild(); });
+    selV.addEventListener('change', function(){ st.ver = selV.value; rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.res.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>

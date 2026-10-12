@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>恢复到初始状态的最短时间</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.card { min-width: 30px; padding: 5px 7px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.bad { background: #fee2e2; border-color: #dc2626; color: #991b1b; font-weight: 600; }
+.card.dim { opacity: .38; }
+.card.empty { background: transparent; border-style: dashed; }
+.card.miss { background: #f6f7f9; border-color: #e6e8eb; color: #9aa0a6; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>恢复到初始状态的最短时间</h1>
+      <p class="intro">每一秒把串的前 k 个字符扔掉，末尾补上 k 个任意字符。问最少几秒能让它变回原样。补的字符可以自己挑，所以能不能恢复，看的只是「剩下的那一段和后缀对得上多少」。这件事 z 数组已经算过了。</p>
+
+      <h2>零、题目</h2>
+      <p>给定一个下标从 0 开始的字符串 word 和一个整数 k。每一秒必须执行两个动作：删掉 word 的前 k 个字符，然后在末尾添加 k 个任意字符。添加的字符不必和删掉的一样。</p>
+      <p>返回把 word 恢复到初始状态所需的最短时间，这个时间必须大于 0。</p>
+      <p>第一反应是逐秒模拟。一秒一秒地挪，每挪一次检查整串是不是回到原样。n = 16000 的输入实测 32.26 毫秒，n 每翻一倍耗时乘 4，因为每秒钟光搬字符就是 O(n)。</p>
+      <p>慢在把「挪动」这件事真的做了。其实不用挪，只要知道挪完之后剩下的那一段和原串的前缀重不重合。</p>
+
+      <h2>一、什么时候算恢复</h2>
+      <p>挪 t 秒之后，原来下标 t·k 的字符跑到下标 0 的位置上，剩下的 word[t·k .. n−1] 整段往前顶了 t·k 格，后面空出来的 t·k 个位置由我们添加的字符填。</p>
+      <p>添加的字符是随便选的，所以只要后面的空位还在，就总能把它们填成想要的值。真正要满足的只有一条：挪完之后前 n − t·k 个字符，本来就是原串的前 n − t·k 个字符。</p>
+      <p>也就是说，word 从下标 i = t·k 起的后缀，与 word 自己的最长公共前缀长度要正好等于 n − i。差一位都不行，因为短了说明中间有字符对不上，而那段字符不是我们能改的。</p>
+      <p>「后缀与前缀的最长公共前缀长度」这件事，正是 z 数组的定义。于是一段一段挪的模拟，变成一次查表。</p>
+      <figure class="fig" id="fig-shift">
+        <figcaption>图 1　"abbabb"、k = 2 的三秒：前两秒剩下的 "babb"、"bb" 都对不上前缀，第三秒原字符全部挪了出去，补什么就是什么</figcaption>
+      </figure>
+
+      <h2>二、z 数组扫一遍</h2>
+      <p>对 word 求一遍 z 数组，然后只看 i = k, 2k, 3k, … 这些位置。第一个满足 z[i] = n − i 的 i，答案就是 i / k。</p>
+      <p>拿 "abacaba"、k = 3 走一遍。n = 7，z = [7,0,1,0,3,0,1]。i = 3 时 n − i = 4，而 z[3] = 0，对不上；i = 6 时 n − i = 1，z[6] = 1，正好相等，答案是 6 / 3 = 2 秒。</p>
+      <p>i = 6 这一格说的是：挪 6 步之后只剩下最后一个字符 'a'，它和前缀的第一个字符 'a' 相同；剩下的空位由第五秒、第六秒补进去的字符负责。六秒里前两秒补的字符要填的正是 "ab"，选对了整串就回到 "abacaba"。</p>
+      <figure class="fig" id="fig-lookup">
+        <figcaption>图 2　"abacaba"、k = 3：只查 3 与 6 两格，z[6] = 1 与 n − i = 1 相等，答案 6 / 3 = 2</figcaption>
+      </figure>
+    <pre class="code"><span class="cm">// 每一秒挪 k 格，剩下的那一段和前缀长得一样就停；都挪完了也停</span>
+    <span class="kw">int</span> <span class="fn">minimumTimeToInitialState</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;word, <span class="kw">int</span> k) {
+        <span class="kw">int</span> n = (<span class="kw">int</span>)word.size();
+        zArray(word);
+        <span class="kw">for</span> (<span class="kw">int</span> i = k; i &lt; n; i += k) {
+            <span class="kw">if</span> (z[i] == n - i) {
+                <span class="kw">return</span> i / k;
+            }
+        }
+        <span class="kw">return</span> (n + k - 1) / k;
+    }</pre>
+
+      <h2>三、两个边界</h2>
+      <p>第一个边界是 i 从 k 开始，不是从 0。题目要求时间必须大于 0，i = 0 时 z[0] = n 与 n − 0 恒等，直接返回 0 就违反了这条规定。</p>
+      <p>第二个边界是每格只查 k 的倍数，不是每一步都查。挪了整数秒之后错位量一定是 k 的整数倍，不落在这些位置上的 i 对应的是某个非整数秒的错位，不是合法答案。逐格查的话即使查到了也说明不了问题。</p>
+      <p>两个边界都守住了，还剩一种情况：k 的倍数位置上全都不满足。这时候原串的字符会一个不剩地全部被挪出去，整串由补的字符组成，补什么就是什么，必然能恢复。需要的秒数是 n 除以 k 向上取整，写成 (n + k − 1) / k。</p>
+      <p>"abbabb"、k = 2 就是这种情况：i = 2、i = 4 都对不上，直到第三秒原字符全部挪出，答案 ceil(6 / 2) = 3。</p>
+      <p>点开下面的演示，六组输入、四个版本可以换着看。</p>
+      <div class="viz" id="viz-lc">
+        <p class="viz-title">一秒一秒地挪</p>
+        <p class="viz-note">上面是原串，中间和后缀行是把剩下的这一段对齐到前缀之后的结果，绿的表示这一位相等。切到错误版本，看答案在哪一版开始偏。</p>
+        <div id="lc-board"></div>
+        <p class="viz-note" id="lc-note"></p>
+        <p class="viz-answer" id="lc-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="lc-case"></select></label>
+          <label>版本 <select id="lc-ver"></select></label>
+          <button id="lc-next" type="button">下一步</button>
+          <button id="lc-reset" type="button">重置</button>
+        </div>
+      </div>
+      <p>写的时候有四处容易错。</p>
+      <p>一，兜底的答案写成 n / k 少了向上取整。只有当 n 恰好是 k 的整数倍时两者才相等，随机数据上 67.64% 出错；串越长越容易现形，长随机串上 73.58%。</p>
+      <p>二，找不到对齐位置时返回 0。它违反了「时间必须大于 0」这一条，而且 0 秒在逻辑上也说不通，随机小串上 88.84% 出错，长串上 99.00%。</p>
+      <p>三，扫描步长写成 1，每格都查。查到非 k 倍数的 i 时，i / k 这个除法给出的是向下取整的秒数，既不是真实的错位秒数也不是答案。字符表 3 时 31.92% 出错；字符表 26、串长 200 时只剩 2.94%，因为随机长串几乎不会在非 k 倍数的位置碰巧对上。</p>
+      <p>四，判断写成 z[i] &gt;= n − i。这一处改不改答案一样，实测 0.00% 差异。原因是 z[i] 是后缀与前缀的公共前缀长度，最多只能是后缀自身的长度 n − i，所以 z[i] &gt; n − i 永远不成立，等号两边没有区别。</p>
+      <figure class="fig" id="fig-bad">
+        <figcaption>图 3　四个错法在两组随机输入上的抓取率：兜底与返回 0 很稳，扫描步长随串变长而难抓</figcaption>
+      </figure>
+
+      <h2>四、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>逐秒模拟</td><td>每一秒搬一次字符并整串比对</td><td>O(n<sup>2</sup> / k)</td><td>O(n)</td></tr>
+        <tr><td>z 数组扫一遍</td><td>求一遍 z，再查 n / k 个位置</td><td>O(n)</td><td>O(n)</td></tr>
+      </table>
+      <p class="breakdown">z 数组本身是线性的，扫描只看 n / k 个位置，两者相加仍然是 O(n)。空间是一张长度 n 的 int 表，n = 10<sup>6</sup> 时 4 MB。逐秒模拟在 n = 16000 上 32.26 毫秒，换成 z 数组之后同样的输入 0.044 毫秒。</p>
+      <figure class="fig" id="fig-perf">
+        <figcaption>图 4　n = 16000 的 "aaa…ab"、k = 1：逐秒模拟 32.26 毫秒，z 数组 0.044 毫秒，纵轴取对数</figcaption>
+      </figure>
+
+      <h2>总结</h2>
+      <p>挪 t 秒之后能不能恢复，等价于 word 从 i = t·k 起的后缀与前缀的公共前缀长度恰好等于 n − i，也就是 z[i] = n − i。补进去的字符随便选，只要这条成立就能补齐。</p>
+      <p>扫的时候 i 取 k 的倍数、从 k 开始，第一个命中的 i 除以 k 就是答案；一个都不命中就返回 (n + k − 1) / k，即原字符全部挪出去所需的秒数。</p>
+      <p>时间 O(n)、空间 O(n)。n = 16000 上逐秒模拟 32.26 毫秒、z 数组 0.044 毫秒。判断那一行写 &gt;= 与写 == 等价，因为公共前缀长度不可能超过后缀自身长度。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>将单词恢复初始状态所需的最短时间 II</td><td><a href="https://leetcode.cn/problems/minimum-time-to-revert-word-to-initial-state-ii/" target="_blank">3031. 将单词恢复初始状态所需的最短时间 II</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解103【扩展】 Manacher算法、扩展KMP</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>Z 函数（扩展 KMP）</td><td><a href="https://oi-wiki.org/string/z-func/" target="_blank">oi-wiki.org/string/z-func</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:7, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+
+  // ===== 图 1：逐秒挪 =====
+  (function(){
+    var host = document.getElementById('fig-shift');
+    if (!host) return;
+    var W = 660, H = 268;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var word = 'abbabb', k = 2, n = 6;
+    var cw = 40, x0 = 130;
+    svg.appendChild(txt(16, 18, '"abbabb"，k = 2，n = 6', {'font-size':12.5, fill:'#1f2328'}));
+    svg.appendChild(txt(16, 52, '原串', {'font-size':11.5, fill:'#6b7280'}));
+    for (var i = 0; i < n; i++) {
+      svg.appendChild(box(x0 + i * cw, 36, cw - 6, 30, '#ffffff', '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 36 + 21, word[i], {'text-anchor':'middle', 'font-size':14, fill:'#374151'}));
+    }
+    var rows = [
+      {t:1, shift:2, tail:'babb', cmp:'abba', y:78, ok:false, note:'"babb" 与 "abba" 第一位就不同'},
+      {t:2, shift:4, tail:'bb',   cmp:'ab',   y:140, ok:false, note:'"bb" 与 "ab" 第一位还是不同'},
+      {t:3, shift:6, tail:'',     cmp:'',     y:202, ok:true,  note:'原字符全部挪出，补的字符自己挑 → 3 秒'}
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var w = rows[r];
+      svg.appendChild(txt(16, w.y + 21, '第 ' + w.t + ' 秒后', {'font-size':11.5, fill:'#6b7280'}));
+      for (var i = 0; i < n; i++) {
+        var filled = i < w.shift;
+        svg.appendChild(box(x0 + i * cw, w.y, cw - 6, 30,
+          filled ? '#f6f7f9' : '#ffffff', filled ? '#e6e8eb' : '#e6e8eb'));
+        svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, w.y + 21, filled ? '?' : word[i],
+          {'text-anchor':'middle', 'font-size':14, fill: filled ? '#9aa0a6' : '#374151'}));
+      }
+      if (w.ok) {
+        for (var i = 0; i < n; i++) {
+          svg.appendChild(box(x0 + i * cw, w.y + 34, cw - 6, 22, FILL_O, ORANGE));
+          svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, w.y + 49, word[i], {'text-anchor':'middle', 'font-size':11.5, 'font-weight':700, fill:'#9a3412'}));
+        }
+        svg.appendChild(txt(x0 + n * cw + 4, w.y + 50, '补成 ' + word, {'font-size':11.5, fill:ORANGE}));
+      } else {
+        svg.appendChild(txt(x0 + n * cw + 4, w.y + 21, w.note, {'font-size':11, fill:RED}));
+      }
+    }
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：查表 =====
+  (function(){
+    var host = document.getElementById('fig-lookup');
+    if (!host) return;
+    var W = 660, H = 226;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var word = 'abacaba', zv = [7,0,1,0,3,0,1], k = 3, n = 7;
+    var cw = 46, x0 = 44;
+    svg.appendChild(txt(16, 18, 'word = "abacaba"，n = 7，k = 3', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < n; i++) {
+      var isK = (i % k === 0 && i > 0);
+      svg.appendChild(box(x0 + i * cw, 30, cw - 6, 30, isK ? FILL_B : '#ffffff', isK ? BLUE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 30 + 21, word[i], {'text-anchor':'middle', 'font-size':14,
+        'font-weight': isK ? 700 : 400, fill: isK ? '#1e3a8a' : '#374151'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 74, String(i), {'text-anchor':'middle', 'font-size':10, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(16, 106, 'z 数组', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < n; i++) {
+      var isK = (i % k === 0 && i > 0);
+      svg.appendChild(box(x0 + i * cw, 118, cw - 6, 28, isK ? FILL_O : '#ffffff', isK ? ORANGE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 118 + 20, String(zv[i]), {'text-anchor':'middle', 'font-size':13,
+        'font-weight': isK ? 700 : 400, fill: isK ? '#9a3412' : '#374151'}));
+    }
+    svg.appendChild(txt(16, 172, '只看 k 的倍数这两格：', {'font-size':12, fill:'#374151'}));
+    svg.appendChild(txt(190, 172, 'i = 3：z[3] = 0 ≠ 4　　i = 6：z[6] = 1 = 1 ✓', {'font-size':12, 'font-weight':700, fill:'#1f2328'}));
+    svg.appendChild(txt(16, 198, '答案 6 / 3 = 2 秒', {'font-size':13, 'font-weight':700, fill:ORANGE}));
+    svg.appendChild(txt(150, 198, 'i 从 k 开始，i = 0 不算（时间必须大于 0）', {'font-size':11.5, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：错法抓取率 =====
+  (function(){
+    var host = document.getElementById('fig-bad');
+    if (!host) return;
+    var W = 660, H = 184;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '错法抓取率（每组 20000 个随机输入）', {'font-size':12.5, fill:'#1f2328'}));
+    var head = ['错法', '字符表 3 / 串长 40', '字符表 26 / 串长 200'];
+    var xs = [24, 250, 470];
+    for (var c = 0; c < head.length; c++) svg.appendChild(txt(xs[c], 44, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    var rows = [
+      ['找不到时返回 0', '88.84%', '99.00%', RED],
+      ['兜底写成 n / k', '67.64%', '73.58%', RED],
+      ['扫描步长写成 1', '31.92%', '2.94%', '#374151'],
+      ['判断写成 &gt;=', '0.00%', '0.00%', GREY]
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 68 + r * 27;
+      for (var c = 0; c < 3; c++) {
+        svg.appendChild(txt(xs[c], y, rows[r][c], {'font-size':11.5, fill: c === 0 ? rows[r][3] : '#374151'}));
+      }
+    }
+    svg.appendChild(txt(24, 178, '最后一行改不改答案一样，因为公共前缀长度不可能超过后缀本身的长度。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：性能 =====
+  (function(){
+    var host = document.getElementById('fig-perf');
+    if (!host) return;
+    var W = 660, H = 156;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'n = 16000 的 "aaa…ab"、k = 1，单位毫秒（对数刻度）', {'font-size':12.5, fill:'#1f2328'}));
+    var x0 = 116, w = 400;
+    var lo = Math.log10(0.02), hi = Math.log10(60);
+    function bx(v) { return w * (Math.log10(v) - lo) / (hi - lo); }
+    var bars = [
+      {n:'逐秒模拟', v:32.26, c:RED, f:FILL_R},
+      {n:'z 数组', v:0.044, c:BLUE, f:FILL_B}
+    ];
+    for (var i = 0; i < bars.length; i++) {
+      var y = 38 + i * 46;
+      svg.appendChild(txt(x0 - 12, y + 22, bars[i].n, {'text-anchor':'end', 'font-size':12, fill:'#374151'}));
+      svg.appendChild(box(x0, y, Math.max(bx(bars[i].v), 3), 32, bars[i].f, bars[i].c));
+      svg.appendChild(txt(x0 + Math.max(bx(bars[i].v), 3) + 10, y + 21, bars[i].v + ' ms', {'font-size':12.5, 'font-weight':700, fill:bars[i].c}));
+    }
+    svg.appendChild(txt(16, 146, '这条输入串每一秒都要比到最后一个字符才失败，最坏情况下逐秒模拟按平方增长。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示：一秒一秒地挪 =====
+  (function(){
+    var CASES = [['abbabb',2], ['abcabc',3], ['aabaab',2], ['abacaba',3], ['abababab',2], ['abac',3]];
+    var VERS = [
+      {k:'ok', n:'正确'},
+      {k:'floor', n:'兜底写成 n / k'},
+      {k:'perstep', n:'扫描步长写成 1'},
+      {k:'zero', n:'找不到返回 0'}
+    ];
+    var selC = document.getElementById('lc-case');
+    var selV = document.getElementById('lc-ver');
+    var board = document.getElementById('lc-board');
+    var note = document.getElementById('lc-note');
+    var ansEl = document.getElementById('lc-answer');
+    var btnN = document.getElementById('lc-next');
+    var btnR = document.getElementById('lc-reset');
+    if (!selC || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option'); o.value = String(i);
+      o.textContent = '"' + CASES[i][0] + '"  k=' + CASES[i][1];
+      selC.appendChild(o);
+    }
+    for (var i = 0; i < VERS.length; i++) {
+      var o = document.createElement('option'); o.value = VERS[i].k; o.textContent = VERS[i].n; selV.appendChild(o);
+    }
+    var st = {caseIdx:0, ver:'ok', step:0, res:null};
+
+    function zOf(s) {
+      var n = s.length, zz = new Array(n).fill(0);
+      zz[0] = n;
+      for (var i = 1, c = 1, r = 1, len; i < n; i++) {
+        len = r > i ? Math.min(r - i, zz[i - c]) : 0;
+        while (i + len < n && s[i + len] === s[len]) len++;
+        if (i + len > r) { r = i + len; c = i; }
+        zz[i] = len;
+      }
+      return zz;
+    }
+    function build(word, k, ver) {
+      var n = word.length;
+      var z = zOf(word);
+      var idxs = [];
+      if (ver === 'perstep') {
+        for (var i = 1; i < n; i++) idxs.push(i);
+      } else {
+        for (var i = k; i < n; i += k) idxs.push(i);
+      }
+      var frames = [], hit = -1;
+      for (var t = 0; t < idxs.length; t++) {
+        var i = idxs[t];
+        var okMatch = (z[i] === n - i);
+        frames.push({
+          i:i, shift: Math.min(Math.floor(i / k), n), z:z,
+          match: okMatch,
+          note:'i = ' + i + '，z[' + i + '] = ' + z[i] + '，n − i = ' + (n - i) +
+               (okMatch ? '，相等' : '，不等')
+        });
+        if (okMatch) { hit = i; break; }
+      }
+      var done = false;
+      if (hit < 0) {
+        var full = Math.ceil(n / k);
+        frames.push({
+          i:null, shift:n, z:z, match:true, done:true,
+          note:'k 的倍数位置全都不满足，只能等原字符全部挪出去，补成原串'
+        });
+        done = true;
+      }
+      var ans;
+      if (hit >= 0) {
+        ans = (ver === 'perstep') ? Math.floor(hit / k) : hit / k;
+      } else {
+        if (ver === 'floor') ans = Math.floor(n / k);
+        else if (ver === 'zero') ans = 0;
+        else ans = Math.ceil(n / k);
+      }
+      return {word:word, k:k, n:n, z:z, frames:frames, hit:hit, ans:ans};
+    }
+    function render() {
+      var r = st.res, f = r.frames[st.step];
+      var n = r.n, sh = f.shift;
+      board.innerHTML = '';
+
+      var l0 = document.createElement('p'); l0.className = 'cap';
+      l0.textContent = '原串 word（前 ' + sh + ' 个位置会被挪出去）';
+      board.appendChild(l0);
+      var d0 = document.createElement('div'); board.appendChild(d0);
+      var wrap0 = document.createElement('div'); wrap0.className = 'cards';
+      for (var i = 0; i < n; i++) {
+        var d = document.createElement('div');
+        d.className = 'card' + (i < sh ? ' dim' : '') + (i === sh && sh < n ? ' pick' : '');
+        d.innerHTML = r.word[i] + '<span class="idx">' + i + '</span>';
+        wrap0.appendChild(d);
+      }
+      d0.appendChild(wrap0);
+
+      var l1 = document.createElement('p'); l1.className = 'cap';
+      l1.textContent = f.i === null ? '原字符已经全部挪出' :
+        ('把剩下的 word[' + f.i + '..] 对齐到前缀，逐位比（对 ' + (n - f.i) + ' 位）');
+      board.appendChild(l1);
+      var d1 = document.createElement('div'); board.appendChild(d1);
+      var wrap1 = document.createElement('div'); wrap1.className = 'cards';
+      if (f.i === null) {
+        for (var i = 0; i < n; i++) {
+          var d = document.createElement('div');
+          d.className = 'card pick';
+          d.innerHTML = r.word[i] + '<span class="idx">补</span>';
+          wrap1.appendChild(d);
+        }
+      } else {
+        var cnt = n - f.i;
+        for (var j = 0; j < cnt; j++) {
+          var same = (r.word[j] === r.word[f.i + j]);
+          var d = document.createElement('div');
+          d.className = 'card ' + (same ? 'ok' : 'bad');
+          d.innerHTML = r.word[j] + '↔' + r.word[f.i + j] + '<span class="idx">' + j + '</span>';
+          wrap1.appendChild(d);
+        }
+      }
+      d1.appendChild(wrap1);
+
+      var l2 = document.createElement('p'); l2.className = 'cap'; l2.textContent = 'word 的 z 数组';
+      board.appendChild(l2);
+      var d2 = document.createElement('div'); board.appendChild(d2);
+      var wrap2 = document.createElement('div'); wrap2.className = 'cards';
+      for (var i = 0; i < n; i++) {
+        var isK = (i % r.k === 0 && i > 0);
+        var d = document.createElement('div');
+        d.className = 'card' + (isK ? ' ok' : '') + (f.i !== null && i === f.i ? ' pick' : '');
+        d.innerHTML = r.z[i] + '<span class="idx">' + i + '</span>';
+        wrap2.appendChild(d);
+      }
+      d2.appendChild(wrap2);
+
+      note.textContent = f.note;
+      var last = st.step === r.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        var label = st.ver === 'floor' ? '兜底写成 n / k' :
+                    (st.ver === 'perstep' ? '扫描步长写成 1' :
+                    (st.ver === 'zero' ? '找不到返回 0' : '正确'));
+        ansEl.textContent = '答案 ' + r.ans + ' 秒（版本：' + label + '）';
+      } else {
+        ansEl.textContent = '';
+      }
+    }
+    function rebuild() {
+      st.res = build(CASES[st.caseIdx][0], CASES[st.caseIdx][1], st.ver);
+      st.step = 0;
+      render();
+    }
+    selC.addEventListener('change', function(){ st.caseIdx = Number(selC.value); rebuild(); });
+    selV.addEventListener('change', function(){ st.ver = selV.value; rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.res.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>

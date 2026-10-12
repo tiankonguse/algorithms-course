@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扩展 KMP：z 数组与 e 数组</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.card { min-width: 30px; padding: 5px 7px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.bad { background: #fee2e2; border-color: #dc2626; color: #991b1b; font-weight: 600; }
+.card.dim { opacity: .38; }
+.card.empty { background: transparent; border-style: dashed; }
+.card.miss { background: #f6f7f9; border-color: #e6e8eb; color: #9aa0a6; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>扩展 KMP：z 数组与 e 数组</h1>
+      <p class="intro">KMP 回答的是「模式串在主串里出现过没有」，这里问的是另一个问题：一个串的每一个后缀，和它自己的最长公共前缀能有多长。把答案按起点下标排成一个数组，就是 z 数组。求法跟 Manacher 是同一套：记住最靠右的那段匹配，能搬就搬，只在撞到边界时才真的往外比。</p>
+
+      <h2>零、问题</h2>
+      <p>题目给两个字符串 a 和 b，要两个数组。</p>
+      <p>z 数组：b 的每一个后缀与 b 自己的最长公共前缀长度。特别地 z[0] 就是 b 的长度。</p>
+      <p>e 数组：a 的每一个后缀与 b 的最长公共前缀长度。b 有多长，能匹配的长度就封顶在多少。</p>
+      <p>朴素做法对每个起点往后一位一位地比，最坏要 O(n<sup>2</sup>)。n = 8000 的随机 3 字母串实测 10.13 毫秒，n 每翻一倍耗时乘 4。</p>
+      <p>能不能让后面那些起点的比较少做一点？可以，因为前缀比对的结果前面已经算过了。</p>
+
+      <h2>一、z 数组</h2>
+      <p>z[i] 是 b[i..] 与 b 的最长公共前缀长度。拿 b = "aabaaab" 数一遍：</p>
+      <p>z[0] 定义成 7。z[1] 从 'a' 起，和前缀开头 'a' 相等，再比第二位是 'a' 与 'a'，第三位 'b' 与 'b' 也相等，第四位 'a' 与前缀的第四个字符 'a' 相等，第五位 'a' 与前缀的 'a' 相等，第六位 'a' 与前缀的 'b' 不等，所以 z[1] = 1。</p>
+      <p>z[3] 从 "aaab" 起，与前缀 "aab..." 前两位 'a'、'a' 相等，第三位 'a' 与 'b' 不等，z[3] = 2。z[4] 从 "aab" 起，与前缀 "aab" 逐位相等，三位都对完，z[4] = 3。</p>
+      <figure class="fig" id="fig-z">
+        <figcaption>图 1　b = "aabaaab" 的 z 数组是 [7,1,0,2,3,1,0]，z[4] = 3 表示从下标 4 起的 "aab" 与前缀完全相同</figcaption>
+      </figure>
+      <p>每个位置单独暴力比对都能得到正确答案，麻烦的地方在于重复劳动。z 数组编出来之后，「b 的某个后缀与前缀重合多长」这件事就变成查表。</p>
+
+      <h2>二、和 Manacher 同款的加速</h2>
+      <p>从左往右算 z[i]，同时记住一个范围：目前为止匹配长度伸得最远的那一段，它的起点是 c，右端第一个没被覆盖的位置是 r。也就是 b[c..r−1] 已经确认与前缀 b[0..r−c−1] 相等。</p>
+      <p>来到出发点 i 时：</p>
+      <p>1）i 没有被 r 包住（i ≥ r）。前面那段覆盖不到 i，只能从 0 开始一位一位比。</p>
+      <p>2）i 被 r 包住（i &lt; r）。b[i..r−1] 这一段与前缀的 b[i−c..r−c−1] 逐位相等，是被 c 那一段带出来的。所以 b[i..] 与前缀的最长公共前缀，至少和 b[i−c..] 与前缀的一样长，也就是 z[i−c]。</p>
+      <p>同样只能搬 z[i−c] 和 r − i 里小的那个。z[i−c] 超出 r − i 的部分落在覆盖范围之外，没有保证，得自己比；z[i−c] 没超的部分可以放心搬过来。</p>
+      <p>初值取 min(r − i, z[i − c])，再交给 while 补差额，i 没被覆盖时初值取 0。写出来和 Manacher 只差几个字符。</p>
+      <figure class="fig" id="fig-acc">
+        <figcaption>图 2　i 落在 [c, r) 里时，参照的是前缀方向的 i − c；只有 r − i 这一段是被保证过的，多出来的要重新比</figcaption>
+      </figure>
+    <pre class="code"><span class="cm">// z 数组：b 的每个后缀与 b 自己的最长公共前缀，z[0] 直接定为串长</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXZ = 20000001;
+
+    <span class="kw">int</span> z[MAXZ];
+
+    <span class="kw">void</span> <span class="fn">zArray</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;s) {
+        <span class="kw">int</span> n = (<span class="kw">int</span>)s.size();
+        z[0] = n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, c = 1, r = 1, len; i &lt; n; i++) {
+            len = r &gt; i ? min(r - i, z[i - c]) : 0;
+            <span class="kw">while</span> (i + len &lt; n &amp;&amp; s[i + len] == s[len]) {
+                len++;
+            }
+            <span class="kw">if</span> (i + len &gt; r) {
+                r = i + len;
+                c = i;
+            }
+            z[i] = len;
+        }
+    }</pre>
+      <p>注意两个初值都从 1 开始：z[0] 是定义出来的不用比，出发点从 i = 1 起；c 和 r 一开始都给 1，相当于还没有任何一段被确认过，i = 1 会老老实实从头比。</p>
+      <p>每次 while 成功一圈就把 r 往右推一格，r 只增不减，整趟下来 while 成功执行的次数不超过 n。n = 10<sup>6</sup> 的串 4.06 毫秒，2×10<sup>6</sup> 8.31 毫秒，5×10<sup>6</sup> 23.27 毫秒。</p>
+      <figure class="fig" id="fig-perf">
+        <figcaption>图 3　n = 8000 的随机 3 字母串：朴素比对 10.13 毫秒，z 数组 0.054 毫秒，纵轴取对数</figcaption>
+      </figure>
+
+      <h2>三、e 数组</h2>
+      <p>e 数组问的是 a 的每个后缀与 b 的最长公共前缀。求法和 z 完全一样，只多一条上限：匹配长度不能超过 b 的长度。</p>
+      <p>借的东西不一样。求 z 时借的是 z[i − c]，因为被比较的是 b 自己和 b 自己；求 e 时 a 与 b 是两个串，被覆盖的区间里有保证的只有「a 的这段与 b 的前缀相等」，所以借的是已经算好的 z[i − c]。方向不能反过来写。</p>
+      <figure class="fig" id="fig-e">
+        <figcaption>图 4　a = "aabaabaaa"、b = "aab" 的 e 数组：e[3] = 3 表示 a[3..] 的 "aab" 与 b 完全对上</figcaption>
+      </figure>
+    <pre class="code"><span class="cm">// e 数组：a 的每个后缀与 b 的最长公共前缀，比 z 多一条 len &lt; m 的上界</span>
+    <span class="kw">int</span> e[MAXZ];
+
+    <span class="kw">void</span> <span class="fn">eArray</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;a, <span class="kw">const</span> <span class="kw">string</span> &amp;b) {
+        <span class="kw">int</span> n = (<span class="kw">int</span>)a.size(), m = (<span class="kw">int</span>)b.size();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, c = 0, r = 0, len; i &lt; n; i++) {
+            len = r &gt; i ? min(r - i, z[i - c]) : 0;
+            <span class="kw">while</span> (i + len &lt; n &amp;&amp; len &lt; m &amp;&amp; a[i + len] == b[len]) {
+                len++;
+            }
+            <span class="kw">if</span> (i + len &gt; r) {
+                r = i + len;
+                c = i;
+            }
+            e[i] = len;
+        }
+    }</pre>
+      <p>e 的循环从头开始，i = 0 也要算，这一点和 z 不同：z[0] 有定义，e[0] 得老老实实求。</p>
+      <p>点开下面两个演示，z 和 e 各有一个，五个版本对比着看。</p>
+      <div class="viz" id="viz-z">
+        <p class="viz-title">逐格建 z 数组</p>
+        <p class="viz-note">每点一步处理一个出发点，蓝底是这一格匹配出来的区间。切到错误版本，看数组从哪一格开始偏。</p>
+        <div id="z-board"></div>
+        <p class="viz-note" id="z-note"></p>
+        <p class="viz-answer" id="z-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="z-str"></select></label>
+          <label>版本 <select id="z-ver"></select></label>
+          <button id="z-next" type="button">下一步</button>
+          <button id="z-reset" type="button">重置</button>
+        </div>
+      </div>
+      <div class="viz" id="viz-e">
+        <p class="viz-title">e 数组：a 的后缀对上 b</p>
+        <p class="viz-note">上面一排是 a，下面一排是 b，b 对齐在 a 的起点上。每点一步处理一个出发点，看这一格的匹配能走多远。</p>
+        <div id="e-board"></div>
+        <p class="viz-note" id="e-note"></p>
+        <p class="viz-answer" id="e-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="e-case"></select></label>
+          <label>版本 <select id="e-ver"></select></label>
+          <button id="e-next" type="button">下一步</button>
+          <button id="e-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>四、权值异或和</h2>
+      <p>题目不要求输出整份数组，只要一个数：对数组 x，位置 i 的权值是 (i + 1) × (x[i] + 1)，整份数组的权值是全部位置权值的异或和。</p>
+      <p>两个地方要注意。下标从 1 开始数，不是 0；z[0] = n 这一格也在内，忘掉它整个答案就错了。</p>
+      <p>异或和用 64 位整数接。单格最大接近 2×10<sup>7</sup> × (2×10<sup>7</sup> + 1) = 4×10<sup>14</sup>，三十二位放不下。</p>
+    <pre class="code"><span class="cm">// 权值：i 位置的贡献是 (i+1)*(x[i]+1)，整份数组的权值取异或和</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">eor</span>(<span class="kw">const</span> <span class="kw">int</span> *arr, <span class="kw">int</span> n) {
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            ans ^= (<span class="kw">long</span> <span class="kw">long</span>)(i + 1) * (arr[i] + 1);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>|a| = |b| = 10<sup>7</sup> 的随机 26 字母串，z 与 e 加起来不到 26 毫秒；两个权值分别是 28327782 和 14122929。全 a 串上两个数组完全一样，权值都是 25000001122304。</p>
+      <p>写的时候有六处容易错。</p>
+      <p>一，z[0] 不能忘。定义成 0 的话第 0 格差一个数，权值必错，实测 100% 抓得到。</p>
+      <p>二，加速的参照是 z[i − c]，写成 z[c] 就在借另一个位置的旧值。小字符表上很显眼，字符表取 3 时 61.14%，取 26 时就只剩 13.15%。</p>
+      <p>三，初值要夹 r − i。只写 z[i − c] 会让半径冲过覆盖范围，字符表 3 时 17.09%，字符表 26 时 0.14%。</p>
+      <p>四，e 的加速借 z 而不是借 e 自己。写成 e[i − c] 之后参照值来自另一个串的历史，字符表 3 时 29.55%，字符表 26 时 0.55%。</p>
+      <p>五，权值下标从 0 起算，97.21% 出错。</p>
+      <p>六，e 数组的 (a, b) 别写反。反了之后算的是 b 的后缀与 a 的最长公共前缀，长度都不一样，89.96% 出错。</p>
+      <figure class="fig" id="fig-bad">
+        <figcaption>图 5　六个错法在三组随机串上的抓取率：z[0] 与权值下标必错，加速类的错法随字符表变大而难抓</figcaption>
+      </figure>
+
+      <h2>五、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>朴素比对</td><td>每个起点各自逐位比</td><td>O(n<sup>2</sup>)</td><td>O(1)</td></tr>
+        <tr><td>z 数组</td><td>每个起点白拿一段再补扩</td><td>O(n)</td><td>O(n)</td></tr>
+        <tr><td>e 数组</td><td>借 z 的覆盖范围，比 b 的长度封顶</td><td>O(n + m)</td><td>O(n + m)</td></tr>
+      </table>
+      <p class="breakdown">线性的理由和 Manacher 一样：while 每成功一圈，r 至少右移一格，r 单调不减且最多到 n，所以 while 成功执行的总次数不超过 2n。e 数组多出来的那条 len &lt; m 只是让半径不超过 |b|，不影响摊还。空间上 z 与 e 各按题目上限 2×10<sup>7</sup> 开 int 表，每张 80 MB，两张一共 160 MB，开数组时要照这个数字留。</p>
+
+      <h2>总结</h2>
+      <p>z 数组是 b 的每个后缀与 b 自己的最长公共前缀，z[0] = n；e 数组是 a 的每个后缀与 b 的最长公共前缀，上限是 |b|。</p>
+      <p>两套求法共用一套加速：c 是当前匹配伸得最远的起点，r 是它右边第一个没覆盖的位置。i 被 r 包住时，z 借 z[i − c]、e 借 z[i − c]，再夹一个 r − i，剩下的交给 while。</p>
+      <p>时间 O(n + m)，空间 O(n + m)。n = 8000 上朴素比对 10.13 毫秒、z 数组 0.054 毫秒；n = 10<sup>7</sup> 的规模下两个数组加一起不到 26 毫秒。权值那一份要注意下标从 1 数、且用 64 位接。</p>
+      <p>把 z 数组拿到手之后，一串周期问题都能变成一次查表，这就是下一节要做的事。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>【模板】扩展 KMP（Z 函数）</td><td><a href="https://www.luogu.com.cn/problem/P5410" target="_blank">P5410 【模板】扩展 KMP（Z 函数）</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解103【扩展】 Manacher算法、扩展KMP</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>Z 函数（扩展 KMP）</td><td><a href="https://oi-wiki.org/string/z-func/" target="_blank">oi-wiki.org/string/z-func</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:7, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+
+  // ===== 图 1：z 数组 =====
+  (function(){
+    var host = document.getElementById('fig-z');
+    if (!host) return;
+    var W = 660, H = 236;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var b = 'aabaaab', zv = [7,1,0,2,3,1,0];
+    var cw = 52, x0 = 44;
+    svg.appendChild(txt(16, 18, 'b = "aabaaab"', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < b.length; i++) {
+      var hi = (i === 3 || i === 4);
+      svg.appendChild(box(x0 + i * cw, 30, cw - 6, 32, hi ? FILL_B : '#ffffff', hi ? BLUE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 30 + 22, b[i], {'text-anchor':'middle', 'font-size':15,
+        'font-weight': hi ? 700 : 400, fill: hi ? '#1e3a8a' : '#374151'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 30 + 44, String(i), {'text-anchor':'middle', 'font-size':10, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(16, 96, 'z 数组', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < zv.length; i++) {
+      var hi = (i === 3 || i === 4);
+      svg.appendChild(box(x0 + i * cw, 108, cw - 6, 30, hi ? FILL_O : '#ffffff', hi ? ORANGE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 108 + 21, String(zv[i]), {'text-anchor':'middle', 'font-size':13.5,
+        'font-weight': hi ? 700 : 400, fill: hi ? '#9a3412' : '#374151'}));
+    }
+    svg.appendChild(box(24, 152, 268, 34, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(38, 174, 'z[3] = 2', {'font-size':13, 'font-weight':700, fill:'#1f2328'}));
+    svg.appendChild(txt(112, 174, '"aaab" 与前缀重合 "aa"', {'font-size':11.5, fill:'#6b7280'}));
+    svg.appendChild(box(316, 152, 268, 34, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(330, 174, 'z[4] = 3', {'font-size':13, 'font-weight':700, fill:'#1f2328'}));
+    svg.appendChild(txt(404, 174, '"aab" 三位全对上', {'font-size':11.5, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 210, 'z[0] = 7 是定义，整串与自己的公共前缀当然是自己。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：加速的参照方向 =====
+  (function(){
+    var host = document.getElementById('fig-acc');
+    if (!host) return;
+    var W = 660, H = 196;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var cw = 44, x0 = 44;
+    var n = 10, c = 4, r = 9, i = 7;
+    svg.appendChild(txt(16, 18, 'b 与 b 自己比，两排对齐看', {'font-size':12.5, fill:'#1f2328'}));
+    // 第一排：前缀方向
+    svg.appendChild(txt(16, 46, '前缀 b[0..r−c−1]', {'font-size':11, fill:BLUE}));
+    for (var k = 0; k < r - c; k++) {
+      var hi = (k === i - c);
+      svg.appendChild(box(x0 + k * cw, 54, cw - 6, 30, hi ? FILL_O : FILL_B, hi ? ORANGE : BLUE));
+      svg.appendChild(txt(x0 + k * cw + (cw - 6) / 2, 54 + 21, hi ? 'i−c' : String(k), {'text-anchor':'middle', 'font-size':12, fill: hi ? '#9a3412' : '#1e3a8a'}));
+    }
+    // 第二排：覆盖段 b[c..r-1]
+    svg.appendChild(txt(16, 116, '覆盖段 b[c..r−1]', {'font-size':11, fill:BLUE}));
+    for (var k = c; k < r; k++) {
+      var hi = (k === i);
+      svg.appendChild(box(x0 + k * cw, 124, cw - 6, 30, hi ? FILL_O : FILL_B, hi ? ORANGE : BLUE));
+      svg.appendChild(txt(x0 + k * cw + (cw - 6) / 2, 124 + 21, hi ? 'i' : String(k), {'text-anchor':'middle', 'font-size':12, fill: hi ? '#9a3412' : '#1e3a8a'}));
+    }
+    svg.appendChild(el('line', {x1:x0 + (i - c) * cw + (cw - 6) / 2, y1:88, x2:x0 + i * cw + (cw - 6) / 2, y2:120,
+      stroke:ORANGE, 'stroke-width':1.4, 'stroke-dasharray':'4 3'}));
+    svg.appendChild(el('line', {x1:x0 + r * cw - 3, y1:44, x2:x0 + r * cw - 3, y2:160, stroke:GREY, 'stroke-width':1.2, 'stroke-dasharray':'4 3'}));
+    svg.appendChild(txt(x0 + r * cw + 6, 60, 'r', {'font-size':12, 'font-weight':700, fill:GREY}));
+    svg.appendChild(txt(x0 + c * cw + 2, 172, 'c', {'font-size':12, 'font-weight':700, fill:GREY}));
+    svg.appendChild(txt(300, 172, 'r − i = 2 是能搬的部分', {'font-size':12, fill:'#374151'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：性能 =====
+  (function(){
+    var host = document.getElementById('fig-perf');
+    if (!host) return;
+    var W = 660, H = 156;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'n = 8000 随机 3 字母串，单位毫秒（对数刻度）', {'font-size':12.5, fill:'#1f2328'}));
+    var x0 = 116, w = 400;
+    var lo = Math.log10(0.02), hi = Math.log10(30);
+    function bx(v) { return w * (Math.log10(v) - lo) / (hi - lo); }
+    var bars = [
+      {n:'朴素比对 z', v:10.13, c:RED, f:FILL_R},
+      {n:'z 数组', v:0.054, c:BLUE, f:FILL_B}
+    ];
+    for (var i = 0; i < bars.length; i++) {
+      var y = 38 + i * 46;
+      svg.appendChild(txt(x0 - 12, y + 22, bars[i].n, {'text-anchor':'end', 'font-size':12, fill:'#374151'}));
+      svg.appendChild(box(x0, y, Math.max(bx(bars[i].v), 3), 32, bars[i].f, bars[i].c));
+      svg.appendChild(txt(x0 + Math.max(bx(bars[i].v), 3) + 10, y + 21, bars[i].v + ' ms', {'font-size':12.5, 'font-weight':700, fill:bars[i].c}));
+    }
+    svg.appendChild(txt(16, 146, '朴素比对的耗时随 n 平方增长，z 数组随 n 线性。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：e 数组 =====
+  (function(){
+    var host = document.getElementById('fig-e');
+    if (!host) return;
+    var W = 660, H = 226;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var a = 'aabaabaaa', b = 'aab', ev = [3,1,0,3,1,0,2,2,1];
+    var cw = 50, x0 = 44;
+    svg.appendChild(txt(16, 18, 'a = "aabaabaaa"', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < a.length; i++) {
+      var hi = (i >= 3 && i <= 5);
+      svg.appendChild(box(x0 + i * cw, 30, cw - 6, 32, hi ? FILL_B : '#ffffff', hi ? BLUE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 30 + 22, a[i], {'text-anchor':'middle', 'font-size':15,
+        'font-weight': hi ? 700 : 400, fill: hi ? '#1e3a8a' : '#374151'}));
+    }
+    svg.appendChild(txt(16, 96, 'e 数组', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < ev.length; i++) {
+      var hi = (i >= 3 && i <= 5);
+      svg.appendChild(box(x0 + i * cw, 108, cw - 6, 30, hi ? FILL_O : '#ffffff', hi ? ORANGE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 108 + 21, String(ev[i]), {'text-anchor':'middle', 'font-size':13.5,
+        'font-weight': hi ? 700 : 400, fill: hi ? '#9a3412' : '#374151'}));
+    }
+    svg.appendChild(txt(16, 164, 'b = "aab" 从 a 的下标 3 处开始对：', {'font-size':12, fill:'#374151'}));
+    for (var i = 0; i < b.length; i++) {
+      svg.appendChild(box(x0 + (3 + i) * cw, 176, cw - 6, 30, FILL_O, ORANGE));
+      svg.appendChild(txt(x0 + (3 + i) * cw + (cw - 6) / 2, 176 + 21, b[i], {'text-anchor':'middle', 'font-size':14, 'font-weight':700, fill:'#9a3412'}));
+    }
+    svg.appendChild(txt(x0 + 6 * cw + 10, 197, '三位全对上，e[3] = 3', {'font-size':12, fill:ORANGE}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 5：错法抓取率 =====
+  (function(){
+    var host = document.getElementById('fig-bad');
+    if (!host) return;
+    var W = 660, H = 252;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '错法抓取率（每组 20000 个随机串）', {'font-size':12.5, fill:'#1f2328'}));
+    var head = ['错法', '字符表 3 串长 40', '字符表 2 串长 20', '字符表 26 串长 200'];
+    var xs = [20, 218, 344, 470];
+    for (var c = 0; c < head.length; c++) svg.appendChild(txt(xs[c], 44, head[c], {'font-size':11, fill:'#6b7280'}));
+    var rows = [
+      ['z[0] 忘掉给 0', '100.00%', '100.00%', '100.00%', RED],
+      ['权值下标从 0 起', '97.21%', '95.70%', '99.83%', RED],
+      ['a 与 b 角色互换', '89.96%', '84.20%', '87.58%', '#374151'],
+      ['参照写成 z[c]', '61.14%', '54.15%', '13.15%', '#374151'],
+      ['e 的加速借 e 自己', '29.55%', '39.35%', '0.55%', '#374151'],
+      ['不夹 r − i', '17.09%', '37.55%', '0.14%', '#374151']
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 68 + r * 27;
+      for (var c = 0; c < 4; c++) {
+        svg.appendChild(txt(xs[c], y, rows[r][c], {'font-size':11.5, fill: c === 0 ? rows[r][4] : '#374151'}));
+      }
+    }
+    svg.appendChild(txt(20, 240, '后三行的抓取率随字符表变大而下降，小字符表才看得见差别。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示 1：逐格建 z 数组 =====
+  (function(){
+    var CASES = ['aabaaab', 'ababab', 'aaaa', 'abcabca', 'ababa'];
+    var VERS = [
+      {k:'ok', n:'正确'},
+      {k:'z0', n:'z[0] 忘掉给 0'},
+      {k:'zc', n:'参照写成 z[c]'},
+      {k:'noclamp', n:'不夹 r-i'}
+    ];
+    var selS = document.getElementById('z-str');
+    var selV = document.getElementById('z-ver');
+    var board = document.getElementById('z-board');
+    var note = document.getElementById('z-note');
+    var ansEl = document.getElementById('z-answer');
+    var btnN = document.getElementById('z-next');
+    var btnR = document.getElementById('z-reset');
+    if (!selS || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = '"' + CASES[i] + '"'; selS.appendChild(o);
+    }
+    for (var i = 0; i < VERS.length; i++) {
+      var o = document.createElement('option'); o.value = VERS[i].k; o.textContent = VERS[i].n; selV.appendChild(o);
+    }
+    var st = {caseIdx:0, ver:'ok', step:0, res:null};
+
+    function compute(s, ver) {
+      var n = s.length;
+      var zz = new Array(n).fill(0);
+      zz[0] = (ver === 'z0') ? 0 : n;
+      var frames = [];
+      var c = 1, r = 1;
+      frames.push({i:0, c:1, r:1, z:zz.slice(), note:'z[0] = ' + (ver === 'z0' ? '0（错法）' : n + '，接着从 i = 1 开始')});
+      for (var i = 1; i < n; i++) {
+        var borrowed;
+        if (ver === 'zc') borrowed = (r > i) ? Math.min(r - i, zz[c]) : 0;
+        else if (ver === 'noclamp') borrowed = (r > i) ? zz[i - c] : 0;
+        else borrowed = (r > i) ? Math.min(r - i, zz[i - c]) : 0;
+        var len = borrowed;
+        while (i + len < n && s[i + len] === s[len]) len++;
+        if (i + len > r) { r = i + len; c = i; }
+        zz[i] = len;
+        frames.push({i:i, c:c, r:r, z:zz.slice(),
+          note:'i = ' + i + '，先白拿 ' + borrowed + '，扩到 z[' + i + '] = ' + len});
+      }
+      return {z:zz, frames:frames, n:n};
+    }
+    function weight(zv) {
+      var ans = 0;
+      for (var i = 0; i < zv.length; i++) ans = ans ^ (i + 1) * (zv[i] + 1);
+      return ans;
+    }
+    function cards(host, values, cls, pick) {
+      host.innerHTML = '';
+      var wrap = document.createElement('div');
+      wrap.className = 'cards';
+      for (var i = 0; i < values.length; i++) {
+        var d = document.createElement('div');
+        var c = 'card';
+        if (values[i] === null) c += ' empty';
+        if (cls && cls[i]) c += ' ' + cls[i];
+        if (i === pick) c += ' pick';
+        d.className = c;
+        d.innerHTML = (values[i] === null ? '·' : String(values[i])) + '<span class="idx">' + i + '</span>';
+        wrap.appendChild(d);
+      }
+      host.appendChild(wrap);
+    }
+    function render() {
+      var f = st.res.frames[st.step];
+      var s = CASES[st.caseIdx], n = s.length;
+      board.innerHTML = '';
+      var l1 = document.createElement('p'); l1.className = 'cap'; l1.textContent = '串 b（0 到 ' + (n - 1) + '）';
+      board.appendChild(l1);
+      var d0 = document.createElement('div'); board.appendChild(d0);
+      var cls = [];
+      for (var i = 0; i < n; i++) {
+        if (i >= f.i && i < f.i + f.z[f.i]) cls[i] = 'ok';
+      }
+      cards(d0, s.split(''), cls, f.i);
+      var l2 = document.createElement('p'); l2.className = 'cap'; l2.textContent = 'z 数组（已算出的格子）';
+      board.appendChild(l2);
+      var d1 = document.createElement('div'); board.appendChild(d1);
+      var show = [];
+      for (var i = 0; i < n; i++) {
+        show[i] = (i <= f.i) ? f.z[i] : null;
+      }
+      cards(d1, show, cls, f.i);
+      var l3 = document.createElement('p'); l3.className = 'cap';
+      l3.textContent = 'i = ' + f.i + '　c = ' + f.c + '　r = ' + f.r;
+      board.appendChild(l3);
+      note.textContent = f.note;
+      var last = st.step === st.res.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        ansEl.textContent = 'z = [' + st.res.z.join(', ') + ']，权值 ' + weight(st.res.z);
+      } else {
+        ansEl.textContent = '';
+      }
+    }
+    function rebuild() {
+      st.res = compute(CASES[st.caseIdx], st.ver);
+      st.step = 0;
+      render();
+    }
+    selS.addEventListener('change', function(){ st.caseIdx = Number(selS.value); rebuild(); });
+    selV.addEventListener('change', function(){ st.ver = selV.value; rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.res.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+
+  // ===== 演示 2：e 数组 =====
+  (function(){
+    var PAIRS = [['aabaabaaa','aab'], ['abab','ab'], ['aaabaaa','aab'], ['abcabcab','abc'], ['aabaab','ab']];
+    var VERS = [
+      {k:'ok', n:'正确'},
+      {k:'ehistory', n:'e 的加速借 e 自己'},
+      {k:'swap', n:'a 与 b 角色互换'}
+    ];
+    var selC = document.getElementById('e-case');
+    var selV = document.getElementById('e-ver');
+    var board = document.getElementById('e-board');
+    var note = document.getElementById('e-note');
+    var ansEl = document.getElementById('e-answer');
+    var btnN = document.getElementById('e-next');
+    var btnR = document.getElementById('e-reset');
+    if (!selC || !board) return;
+    for (var i = 0; i < PAIRS.length; i++) {
+      var o = document.createElement('option'); o.value = String(i);
+      o.textContent = 'a="' + PAIRS[i][0] + '"  b="' + PAIRS[i][1] + '"';
+      selC.appendChild(o);
+    }
+    for (var i = 0; i < VERS.length; i++) {
+      var o = document.createElement('option'); o.value = VERS[i].k; o.textContent = VERS[i].n; selV.appendChild(o);
+    }
+    var st = {caseIdx:0, ver:'ok', step:0, res:null};
+
+    function zOf(s) {
+      var n = s.length, zz = new Array(n).fill(0);
+      zz[0] = n;
+      for (var i = 1, c = 1, r = 1, len; i < n; i++) {
+        len = r > i ? Math.min(r - i, zz[i - c]) : 0;
+        while (i + len < n && s[i + len] === s[len]) len++;
+        if (i + len > r) { r = i + len; c = i; }
+        zz[i] = len;
+      }
+      return zz;
+    }
+    function compute(A, B, ver) {
+      if (ver === 'swap') { var t = A; A = B; B = t; }
+      var zv = zOf(B);
+      var n = A.length, m = B.length;
+      var ee = new Array(n).fill(0);
+      var frames = [];
+      for (var i = 0, c = 0, r = 0, len; i < n; i++) {
+        if (ver === 'ehistory') len = r > i ? Math.min(r - i, ee[i - c]) : 0;
+        else len = r > i ? Math.min(r - i, zv[i - c]) : 0;
+        var borrowed = len;
+        while (i + len < n && len < m && A[i + len] === B[len]) len++;
+        if (i + len > r) { r = i + len; c = i; }
+        ee[i] = len;
+        frames.push({i:i, c:c, r:r, e:ee.slice(), borrowed:borrowed,
+          note:'i = ' + i + '，先白拿 ' + borrowed + '，扩到 e[' + i + '] = ' + len});
+      }
+      return {A:A, B:B, z:zv, e:ee, frames:frames};
+    }
+    function weight(v) {
+      var ans = 0;
+      for (var i = 0; i < v.length; i++) ans = ans ^ (i + 1) * (v[i] + 1);
+      return ans;
+    }
+    function render() {
+      var r = st.res, f = r.frames[st.step];
+      board.innerHTML = '';
+      var l1 = document.createElement('p'); l1.className = 'cap'; l1.textContent = 'a（被比的那一串）';
+      board.appendChild(l1);
+      var d0 = document.createElement('div'); board.appendChild(d0);
+      var cls0 = [];
+      for (var i = 0; i < r.A.length; i++) {
+        if (i >= f.i + f.borrowed && i < f.i + f.e[f.i]) cls0[i] = 'bad';
+        else if (i >= f.i && i < f.i + f.e[f.i]) cls0[i] = 'ok';
+      }
+      var wrap0 = document.createElement('div');
+      wrap0.className = 'cards';
+      for (var i = 0; i < r.A.length; i++) {
+        var d = document.createElement('div');
+        d.className = 'card' + (cls0[i] ? ' ' + cls0[i] : '') + (i === f.i ? ' pick' : '');
+        d.innerHTML = r.A[i] + '<span class="idx">' + i + '</span>';
+        wrap0.appendChild(d);
+      }
+      d0.appendChild(wrap0);
+      var l2 = document.createElement('p'); l2.className = 'cap'; l2.textContent = 'b（对齐在 a 的起点上）';
+      board.appendChild(l2);
+      var d1 = document.createElement('div'); board.appendChild(d1);
+      var wrap1 = document.createElement('div');
+      wrap1.className = 'cards';
+      for (var i = 0; i < r.A.length; i++) {
+        var d = document.createElement('div');
+        if (i < r.B.length) {
+          d.className = 'card' + (i < f.borrowed ? ' ok' : (i < f.e[f.i] ? ' bad' : ' miss'));
+          d.innerHTML = r.B[i] + '<span class="idx">' + i + '</span>';
+        } else {
+          d.className = 'card empty';
+          d.innerHTML = '·<span class="idx">' + i + '</span>';
+        }
+        wrap1.appendChild(d);
+      }
+      d1.appendChild(wrap1);
+      var l3 = document.createElement('p'); l3.className = 'cap'; l3.textContent = 'e 数组（已算出的格子）';
+      board.appendChild(l3);
+      var d2 = document.createElement('div'); board.appendChild(d2);
+      var show = [];
+      for (var i = 0; i < r.e.length; i++) show[i] = (i <= f.i) ? r.e[i] : null;
+      var wrap2 = document.createElement('div');
+      wrap2.className = 'cards';
+      for (var i = 0; i < show.length; i++) {
+        var d = document.createElement('div');
+        d.className = 'card' + (show[i] === null ? ' empty' : '') + (i === f.i ? ' pick' : '');
+        d.innerHTML = (show[i] === null ? '·' : String(show[i])) + '<span class="idx">' + i + '</span>';
+        wrap2.appendChild(d);
+      }
+      d2.appendChild(wrap2);
+      var l4 = document.createElement('p'); l4.className = 'cap';
+      l4.textContent = 'i = ' + f.i + '　c = ' + f.c + '　r = ' + f.r;
+      board.appendChild(l4);
+      note.textContent = f.note;
+      var last = st.step === r.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        ansEl.textContent = 'e = [' + r.e.join(', ') + ']，权值 ' + weight(r.e) +
+          (st.ver === 'swap' ? '（a、b 已互换）' : '');
+      } else {
+        ansEl.textContent = '';
+      }
+    }
+    function rebuild() {
+      st.res = compute(PAIRS[st.caseIdx][0], PAIRS[st.caseIdx][1], st.ver);
+      st.step = 0;
+      render();
+    }
+    selC.addEventListener('change', function(){ st.caseIdx = Number(selC.value); rebuild(); });
+    selV.addEventListener('change', function(){ st.ver = selV.value; rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.res.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>

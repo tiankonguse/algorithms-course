@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manacher：长度前 k 名的奇数回文长度乘积</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.card { min-width: 28px; padding: 5px 7px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.empty { background: transparent; border-style: dashed; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+table.buckets { border-collapse: collapse; margin: 10px 0 2px; font-size: 13.5px; }
+table.buckets th, table.buckets td { border: 1px solid var(--border); padding: 4px 10px; text-align: right; font-variant-numeric: tabular-nums; }
+table.buckets th { background: #f6f7f9; font-weight: 600; }
+table.buckets tr.hot td { background: #ffedd5; }
+table.buckets tr.cool td { color: var(--text-dim); }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>Manacher：长度前 k 名的奇数回文长度乘积</h1>
+      <p class="intro">数回文的时候只关心奇数长度，而且要按长度排序取前 K 个再乘起来。逐个回文去数显然不行，回文最多能有 n<sup>2</sup> / 2 个。半径数组里藏着一个包含关系：一个中心的最长回文是 p[i] − 1，那么比它短的那些奇数长度，在这个中心上也各出现了一次。抓住这一点，按长度分桶就够了。</p>
+
+      <h2>零、题目</h2>
+      <p>给定长度为 n 的串 s 和正整数 K，把所有长度为奇数的回文子串按长度降序排，取前 K 个，求这 K 个长度的乘积对 19930726 取模的结果；如果奇数长度回文子串总数不到 K 个，输出 −1。</p>
+      <p>数据范围 n ≤ 10<sup>6</sup>、K ≤ 10<sup>12</sup>。样例是 n = 5、K = 3、"ababa"：奇数回文按长度排下来是 5、3、3、3、1、1、1、1、1，前三个乘起来 5 × 3 × 3 = 45。</p>
+
+      <h2>一、奇长度只认字母中心</h2>
+      <p>扩展串奇数下标放的是原串的字符，偶数下标放的是 '#'。中心落在字母上的回文，两端剥掉相同个数的字符后还是回文，真实长度一定是奇数；中心落在 '#' 上的回文长度一定是偶数。</p>
+      <p>所以只扫奇数下标：<code>for (int i = 1; i &lt; n; i += 2)</code>。这一步挑错就把两种长度的回文混在一起了，而偶长度的回文本来一个都不该算。</p>
+      <figure class="fig" id="fig-parity">
+        <figcaption>图 1　"ababa" 的扩展串：奇数下标是字母，以它们为中心出来的是奇长度回文</figcaption>
+      </figure>
+
+      <h2>二、一个中心给出一整档长度</h2>
+      <p>以 i 为中心的最长回文长度是 p[i] − 1。把这段回文两端同时剥掉一层，剩下的还是回文，长度少 2。一路剥到只剩中心那个字符，得到的长度依次是 1、3、5、…、p[i] − 1。</p>
+      <p>也就是说，每个奇中心给出的是一整列长度：从 1 到这个上界的所有奇数长度各一次。反过来说，「长度恰好是 len 的回文有几个」等于「最长长度不小于 len 的奇中心有几个」，长度的取值向下封闭，这两个数其实是同一个。</p>
+      <p>于是不用记每层的次数，只把最长的那一档记进桶：<code>cnt[p[i] − 1]++</code>，然后从最长的长度往下走，边走边累加。累加值 sum 的含义就变成了「长度恰好是 len 的回文个数」。</p>
+      <figure class="fig" id="fig-bucket">
+        <figcaption>图 2　"ababa" 的三个桶：桶值 1、2、2，累加之后分别是长度 5、3、1 的回文个数</figcaption>
+      </figure>
+      <p>取前 K 个的时候按长度从大到小走，第 len 档上有 sum 个（累积值），能全拿就全拿，剩下不到 sum 个就只拿剩下的那几个。每拿 t 个长度 len，就把 len<sup>t</sup> 乘进答案，K 减掉 sum。K 减到不大于 0 就停；走完所有档 K 还有剩，说明总数不够，返回 −1。</p>
+
+      <h2>三、幂用快速幂算</h2>
+      <p>乘进去的幂次可能非常大：K 到 10<sup>12</sup>，同一个长度可能被拿走上亿次。一次一次乘是不行的，一次乘法取一次模，10<sup>12</sup> 次乘就是 10<sup>12</sup> 次取模。快速幂把指数拆成二进制，每一位平方一次底数、是 1 就乘一次答案，复杂度降到 O(log K)，约 40 次乘法。</p>
+      <p>实测 power(3, 10<sup>7</sup>)：快速幂 0.0001 毫秒，朴素乘 31.50 毫秒，差三十万倍。指数从 10<sup>7</sup> 涨到 10<sup>12</sup>，快速幂只多十几步，朴素乘直接没得跑。</p>
+      <figure class="fig" id="fig-pow">
+        <figcaption>图 3　指数 10<sup>7</sup> 时两种幂写法的耗时，横轴取对数</figcaption>
+      </figure>
+
+      <h2>四、代码</h2>
+      <p>先跑 Manacher 拿到 p，再把奇数中心的桶填上，然后从长到短扫一遍。</p>
+    <pre class="code"><span class="cm">// cnt[len] 记「最长回文恰好是 len 的中心」有几个，从长到短累加就是长度 &gt;= len 的个数</span>
+    <span class="kw">int</span> <span class="fn">topKProduct</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;s, <span class="kw">long</span> <span class="kw">long</span> k) {
+        <span class="kw">int</span> m = (<span class="kw">int</span>)s.size();
+        manacher(s);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i += 2) {        <span class="cm">// 奇数下标是字母，只有它们能给出奇长度回文</span>
+            cntLen[p[i] - 1]++;
+        }
+        <span class="kw">long</span> <span class="kw">long</span> ans = 1, sum = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> len = ((m &amp; 1) == 1) ? m : (m - 1); len &gt;= 1 &amp;&amp; k &gt; 0; len -= 2) {
+            sum += cntLen[len];
+            ans = ans * power(len, min(k, sum)) % MOD;
+            k -= sum;
+        }
+        <span class="kw">return</span> k &gt; 0 ? -1 : (<span class="kw">int</span>)ans;
+    }</pre>
+      <p>幂单独写一个函数，注意中间乘积要用 64 位。</p>
+    <pre class="code"><span class="cm">// 快速幂：指数最大 10^12，一次一次乘是跑不完的</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">power</span>(<span class="kw">long</span> <span class="kw">long</span> x, <span class="kw">long</span> <span class="kw">long</span> e) {
+        <span class="kw">long</span> <span class="kw">long</span> ans = 1;
+        <span class="kw">while</span> (e &gt; 0) {
+            <span class="kw">if</span> ((e &amp; 1) == 1) {
+                ans = ans * x % MOD;
+            }
+            x = x * x % MOD;
+            e &gt;&gt;= 1;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2>五、几个数字</h2>
+      <p>模数是 19930726，不是常见的 10<sup>9</sup> + 7，抄错一位就全错。桶的下标是长度，最长到 n，按题目上限开 10<sup>6</sup> 个 int 就够。</p>
+      <p>中间乘积 ans × len<sup>t</sup> 与底数平方 x × x 都在模数以内两次相乘，最大约 19930726<sup>2</sup> ≈ 4 × 10<sup>14</sup>，bool 与 int 都接不住，必须 unsigned 之外的 64 位整数，写成 int 会悄悄截断。</p>
+      <p>n = 10<sup>6</sup> 全 a、K = 10<sup>11</sup> 实测 23.56 毫秒，答案 9965363。</p>
+
+      <h2>六、两个错法</h2>
+      <p>一，桶的下标写成 p[i] 而不是 p[i] − 1，长度整体多算 1，20000 组随机串上 100% 出错。</p>
+      <p>二，扫中心的时候连偶数下标一起扫。看着像是把偶长度的回文也算进来了，实测却 0.00% 有差别：偶中心的 p[i] − 1 一定是偶数，只会落进偶数下标那些桶，而从长到短扫长度时只走奇数长度，偶数桶根本读不到。这是个真的等价写法，只是白扫了一半的中心。</p>
+      <figure class="fig" id="fig-bad">
+        <figcaption>图 4　两个错法在 20000 组随机串上的抓取率，第二行是白扫但结果不变的写法</figcaption>
+      </figure>
+      <div class="viz" id="viz-prod">
+        <p class="viz-title">按长度取前 K 个</p>
+        <p class="viz-note">每点一步走到下一个更短的长度档：看累积个数怎么涨、这一步乘进去几个 len、乘积变成多少。乘积用 BigInt 算，模 19930726。</p>
+        <div id="prod-board"></div>
+        <p class="viz-note" id="prod-note"></p>
+        <p class="viz-answer" id="prod-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="prod-str"></select></label>
+          <label>K <select id="prod-k"></select></label>
+          <button id="prod-next" type="button">下一步</button>
+          <button id="prod-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>七、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>枚举所有奇数回文再排序</td><td>回文最多 n<sup>2</sup> / 2 个，排一遍</td><td>O(n<sup>2</sup> log n)</td><td>O(n<sup>2</sup>)</td></tr>
+        <tr><td>桶 + 从长到短</td><td>填桶 O(n)，每档一次快速幂 O(log K)</td><td>O(n + n log K)</td><td>O(n)</td></tr>
+      </table>
+      <p class="breakdown">从长到短最多走 n / 2 档，每档一次快速幂最多 40 步乘法，所以是 O(n log K)，n 的系数很小。空间上按 n = 10<sup>6</sup> 算：ss 是 2 × 10<sup>6</sup> 个 char（2 MB），p 是 2 × 10<sup>6</sup> 个 int（8 MB），桶是 10<sup>6</sup> 个 int（4 MB），合计 14 MB 上下。</p>
+
+      <h2>总结</h2>
+      <p>奇数长度的回文只认字母中心，扫中心时下标步长写 2。</p>
+      <p>每个中心给出的是从 1 到 p[i] − 1 的一整列奇数长度，所以只需要把最长的那一档记进桶，再用从长到短的累加把「不超过上界的中心数」变成「长度不小于 len 的个数」。</p>
+      <p>幂次用快速幂，中间乘积用 64 位。整体是 O(n log K)、O(n) 空间。桶这一招换个问法照样能用，只要问题关心的是「按长度分批计数」。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>【国家集训队】拉拉队排练</td><td><a href="https://www.luogu.com.cn/problem/P1659" target="_blank">P1659 [国家集训队] 拉拉队排练</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解104【扩展】 Manacher算法相关题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>快速幂</td><td><a href="https://oi-wiki.org/math/binary-exponentiation/" target="_blank">oi-wiki.org/math/binary-exponentiation</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:6, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+
+  // ===== 图 1：扩展串的奇偶下标 =====
+  (function(){
+    var host = document.getElementById('fig-parity');
+    if (!host) return;
+    var W = 660, H = 176;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var ext = '#a#b#a#b#a#', cw = 46, x0 = 62;
+    svg.appendChild(txt(16, 18, '"ababa" 的扩展串，长度 11', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < ext.length; i++) {
+      var odd = (i & 1) === 1;
+      svg.appendChild(box(x0 + i * cw, 30, cw - 6, 30, odd ? FILL_O : FILL_B, odd ? ORANGE : BLUE));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 50, ext[i], {'text-anchor':'middle', 'font-size':14, 'font-weight':700, fill: odd ? '#9a3412' : '#1e3a8a'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 72, String(i), {'text-anchor':'middle', 'font-size':9.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(16, 106, '奇数下标（1、3、5、7、9）', {'font-size':12.5, fill:ORANGE}));
+    svg.appendChild(txt(200, 106, '放字母，中心在这里 → 奇数长度回文', {'font-size':12, fill:'#374151'}));
+    svg.appendChild(txt(16, 130, '偶数下标（0、2、4、…）', {'font-size':12.5, fill:BLUE}));
+    svg.appendChild(txt(200, 130, "放 '#'，中心在这里 → 偶数长度回文", {'font-size':12, fill:'#374151'}));
+    svg.appendChild(txt(16, 160, '只扫奇数下标，就是把偶长度的回文整批排除掉。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：三个桶 =====
+  (function(){
+    var host = document.getElementById('fig-bucket');
+    if (!host) return;
+    var W = 660, H = 226;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '"ababa"：每个奇中心只记最长的那一档，桶值再往下累加', {'font-size':12.5, fill:'#1f2328'}));
+    var lens = [5, 3, 1], cnt = [1, 2, 2], acc = [1, 3, 5], cw = 130, x0 = 110;
+    var rows = [
+      {y:44, label:'桶 cnt[len]', color:BLUE, fill:FILL_B},
+      {y:92, label:'累加 sum', color:ORANGE, fill:FILL_O},
+      {y:140, label:'该长度的回文个数', color:'#374151', fill:'#f6f7f9'}
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      svg.appendChild(txt(x0 - 12, rows[r].y + 21, rows[r].label, {'text-anchor':'end', 'font-size':11.5, fill:rows[r].color}));
+      for (var i = 0; i < lens.length; i++) {
+        svg.appendChild(box(x0 + i * cw, rows[r].y, cw - 22, 30, rows[r].fill, rows[r].color));
+      }
+    }
+    for (var i = 0; i < lens.length; i++) {
+      svg.appendChild(txt(x0 + i * cw + (cw - 22) / 2, 64, String(cnt[i]), {'text-anchor':'middle', 'font-size':14, 'font-weight':700, fill:'#1e3a8a'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 22) / 2, 112, String(acc[i]), {'text-anchor':'middle', 'font-size':14, 'font-weight':700, fill:'#9a3412'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 22) / 2, 160, String(acc[i]), {'text-anchor':'middle', 'font-size':14, 'font-weight':700, fill:'#374151'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 22) / 2, 186, '长度 ' + lens[i], {'text-anchor':'middle', 'font-size':12, fill:'#6b7280'}));
+    }
+    svg.appendChild(txt(16, 212, 'K = 3 时：长度 5 拿 1 个，长度 3 拿 2 个，答案 5 × 3 × 3 = 45。', {'font-size':12, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：快速幂对比 =====
+  (function(){
+    var host = document.getElementById('fig-pow');
+    if (!host) return;
+    var W = 660, H = 150;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'power(3, 10⁷)，单位毫秒（对数刻度）', {'font-size':12.5, fill:'#1f2328'}));
+    var x0 = 120, w = 380;
+    var lo = Math.log10(0.00005), hi = Math.log10(100);
+    function bx(v) { return Math.max(w * (Math.log10(v) - lo) / (hi - lo), 2); }
+    var rows = [
+      {n:'快速幂', v:0.0001, c:BLUE, f:FILL_B},
+      {n:'朴素乘', v:31.50, c:RED, f:FILL_R}
+    ];
+    for (var i = 0; i < rows.length; i++) {
+      var y = 44 + i * 46;
+      svg.appendChild(txt(x0 - 12, y + 21, rows[i].n, {'text-anchor':'end', 'font-size':12.5, fill:'#374151'}));
+      svg.appendChild(box(x0, y, bx(rows[i].v), 28, rows[i].f, rows[i].c));
+      svg.appendChild(txt(x0 + bx(rows[i].v) + 10, y + 19, rows[i].v + ' ms', {'font-size':12.5, 'font-weight':700, fill:rows[i].c}));
+    }
+    for (var e = -4; e <= 2; e += 2) {
+      var gx = x0 + w * (e - lo) / (hi - lo);
+      if (gx > x0 + w) continue;
+      svg.appendChild(el('line', {x1:gx, y1:38, x2:gx, y2:132, stroke:'#e6e8eb', 'stroke-width':1}));
+      svg.appendChild(txt(gx, 148, '10^' + e, {'text-anchor':'middle', 'font-size':10.5, fill:'#9aa0a6'}));
+    }
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：错法抓取率 =====
+  (function(){
+    var host = document.getElementById('fig-bad');
+    if (!host) return;
+    var W = 660, H = 140;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '20000 组随机串（字符表 2 / 串长 30）', {'font-size':12.5, fill:'#1f2328'}));
+    var head = ['写法', '出错比例', '说明'];
+    var xs = [24, 300, 400];
+    for (var c = 0; c < head.length; c++) svg.appendChild(txt(xs[c], 44, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    var rows = [
+      ['桶下标写成 p[i]', '100.00%', '长度整体多算 1', RED],
+      ['奇偶中心一起统计', '0.00%', '偶数桶永远读不到', GREY]
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 68 + r * 26;
+      svg.appendChild(txt(xs[0], y, rows[r][0], {'font-size':12, fill:rows[r][3]}));
+      svg.appendChild(txt(xs[1], y, rows[r][1], {'font-size':12, fill:rows[r][3]}));
+      svg.appendChild(txt(xs[2], y, rows[r][2], {'font-size':11.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(24, 134, '第二行白扫了一半中心，答案却逐位相同。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示：按长度取前 K 个 =====
+  (function(){
+    var CASES = ['ababa', 'aaaa', 'abcba', 'aaaaaa', 'abababa', 'aabbaa'];
+    var KS = [1, 2, 3, 5, 6, 10];
+    var MOD = 19930726n;
+    var selS = document.getElementById('prod-str');
+    var selK = document.getElementById('prod-k');
+    var board = document.getElementById('prod-board');
+    var note = document.getElementById('prod-note');
+    var ansEl = document.getElementById('prod-answer');
+    var btnN = document.getElementById('prod-next');
+    var btnR = document.getElementById('prod-reset');
+    if (!selS || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = '"' + CASES[i] + '"'; selS.appendChild(o);
+    }
+    for (var i = 0; i < KS.length; i++) {
+      var o = document.createElement('option'); o.value = String(KS[i]); o.textContent = String(KS[i]); selK.appendChild(o);
+    }
+    var st = {caseIdx:0, k:3, step:0, res:null};
+
+    function powMod(base, e) {
+      var b = BigInt(base), r = 1n, ee = BigInt(e);
+      while (ee > 0n) {
+        if (ee & 1n) r = r * b % MOD;
+        b = b * b % MOD;
+        ee >>= 1n;
+      }
+      return r;
+    }
+    function run(s, K) {
+      var ext = '#';
+      for (var i = 0; i < s.length; i++) ext += s[i] + '#';
+      var n = ext.length;
+      var p = new Array(n).fill(0);
+      for (var i = 0, c = 0, r = 0, len; i < n; i++) {
+        len = r > i ? Math.min(p[2 * c - i], r - i) : 1;
+        while (i + len < n && i - len >= 0 && ext[i + len] === ext[i - len]) len++;
+        if (i + len > r) { r = i + len; c = i; }
+        p[i] = len;
+      }
+      var cnt = {};
+      var total = 0;
+      for (var i = 1; i < n; i += 2) {
+        var L = p[i] - 1;
+        cnt[L] = (cnt[L] || 0) + 1;
+      }
+      var m = s.length;
+      var start = (m & 1) ? m : m - 1;
+      var frames = [];
+      var k = BigInt(K), sum = 0, ans = 1n;
+      var allLens = [];
+      for (var L = 1; L <= start; L += 2) allLens.push(L);
+      frames.push({len:start, sum:0, take:0, ans:1n, k:k, cnt:cnt, note:'起点：从长度 ' + start + ' 开始往下走', done:false});
+      for (var len = start; len >= 1 && k > 0n; len -= 2) {
+        sum += (cnt[len] || 0);
+        var take = Number(k < BigInt(sum) ? k : BigInt(sum));
+        if (take > 0) ans = ans * powMod(len, take) % MOD;
+        k -= BigInt(sum);
+        frames.push({len:len, sum:sum, take:take, ans:ans, k:k, cnt:cnt, note:'长度 ' + len + '：累积 ' + sum + ' 个，这一档取 ' + take + ' 个', done:(k <= 0n)});
+      }
+      var ok = (k <= 0n);
+      if (ok) {
+        frames.push({len:0, sum:sum, take:0, ans:ans, k:k, cnt:cnt, note:'K 已经取够，收工', done:true, last:true});
+      } else {
+        frames.push({len:0, sum:sum, take:0, ans:ans, k:k, cnt:cnt, note:'长度档走完了 K 还有剩，说明奇数回文总数不到 K 个', done:true, last:true});
+      }
+      total = 0;
+      var acc = 0;
+      for (var L = start; L >= 1; L -= 2) { acc += (cnt[L] || 0); total += acc; }
+      return {s:s, ext:ext, frames:frames, ans:ok ? ans : -1n, ok:ok, total:total, start:start, cnt:cnt};
+    }
+    function render() {
+      var f = st.res.frames[st.step];
+      board.innerHTML = '';
+      var wrap = document.createElement('div');
+      wrap.className = 'cards';
+      for (var L = 1; L <= st.res.start; L += 2) {
+        var d = document.createElement('div');
+        d.className = 'card' + (L === f.len ? ' pick' : (L > f.len ? ' empty' : ''));
+        d.innerHTML = (st.res.cnt[L] || 0) + '<span class="idx">长 ' + L + '</span>';
+        wrap.appendChild(d);
+      }
+      var cap = document.createElement('p'); cap.className = 'cap';
+      cap.textContent = '奇数长度 → 该长度的回文个数（桶）';
+      board.appendChild(cap);
+      board.appendChild(wrap);
+      var tbl = document.createElement('table');
+      tbl.className = 'buckets';
+      var tr1 = document.createElement('tr');
+      tr1.innerHTML = '<th>当前长度</th><th>累积个数 sum</th><th>这一步取几个</th><th>K 还剩</th>';
+      tbl.appendChild(tr1);
+      var tr2 = document.createElement('tr');
+      tr2.innerHTML = '<td>' + (f.len > 0 ? f.len : '—') + '</td><td>' + f.sum + '</td><td>' + f.take + '</td><td>' + String(f.k) + '</td>';
+      tbl.appendChild(tr2);
+      board.appendChild(tbl);
+      var pn = document.createElement('p'); pn.className = 'breakdown';
+      pn.textContent = '当前乘积（模 19930726）= ' + String(f.ans);
+      board.appendChild(pn);
+      note.textContent = f.note;
+      var last = st.step === st.res.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        ansEl.textContent = st.res.ok
+          ? ('取够 K 个，答案 ' + String(st.res.ans) + '（奇数长度回文一共 ' + st.res.total + ' 个）')
+          : ('奇数长度回文只有 ' + st.res.total + ' 个，不到 K，返回 -1');
+      } else {
+        ansEl.textContent = '';
+      }
+    }
+    function rebuild() {
+      st.res = run(CASES[st.caseIdx], st.k);
+      st.step = 0;
+      render();
+    }
+    selS.addEventListener('change', function(){ st.caseIdx = Number(selS.value); rebuild(); });
+    selK.addEventListener('change', function(){ st.k = Number(selK.value); rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.res.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>

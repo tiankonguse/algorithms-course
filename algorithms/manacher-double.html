@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manacher：最长双回文串</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 2px; }
+.card { min-width: 26px; padding: 5px 6px; text-align: center; border-radius: 6px; font-size: 13.5px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.own { background: #ffedd5; border-color: #ea580c; color: #9a3412; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.empty { background: transparent; border-style: dashed; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>Manacher：最长双回文串</h1>
+      <p class="intro">双回文串是能切成两段、每段都是回文的串，要求最长的那个。看起来要枚举所有切法，实际上只要把「以每个位置结尾的最长回文」和「以每个位置开头的最长回文」各算一份，在两个数组上扫一遍就够了。麻烦的地方在于这两个数组不能一边跑一边算：分界点右边的量得等整趟扫完才知道，所以只能在半径数组上正着扫一次、倒着扫一次。</p>
+
+      <h2>零、题目</h2>
+      <p>给定字符串 s，求 s 的最长双回文子串的长度。双回文子串指的是能分成两段、且两段都是回文的子串，两段都不能为空。比如 "aabb" 可以分成 "aa" 和 "bb"，答案就是 4。|s| ≤ 10<sup>5</sup>。</p>
+      <p>样例 "baacaabbacabb" 的答案是 12，切法是从第 2 个字符开始的 "aacaabbacabb"，分成 "aacaa" 和 "bbacabb" 两段。"aacaa" 没有更长的单回文，但它拆成两个回文之后有 12 个字符，比整串里最长的单回文更长。</p>
+      <p>暴力是枚举分界点，再从分界点向两边各扩一次求最长回文，O(m<sup>2</sup>)。m = 10<sup>5</sup> 就跑不动了。</p>
+
+      <h2>一、把答案拆成两侧</h2>
+      <p>设分界点在真实串的位置 p（真实下标，表示「前 p 个字符」之后），1 ≤ p ≤ m − 1。定义两个量：</p>
+      <p>L[p]：以 p 结尾的最长回文长度，也就是最长的 s[a, p) 是回文；</p>
+      <p>R[p]：以 p 开头的最长回文长度，也就是最长的 s[p, b) 是回文。</p>
+      <p>左右两段互相不影响，所以固定 p 时能拼出 L[p] + R[p]，答案就是 max(L[p] + R[p])。</p>
+      <p>为什么这样就够？任意一个双回文子串 t = s[a, b) 被某个 p 切成 s[a, p) 与 s[p, b) 两段回文，那么这个 p 处 L[p] ≥ p − a 且 R[p] ≥ b − p，加起来不小于 |t|，最大值不会比答案小；反过来，L[p] 和 R[p] 各自对应一段真实的回文，拼起来也是合法的双回文串，最大值不会比答案大。两边一夹，等号成立。</p>
+      <figure class="fig" id="fig-split">
+        <figcaption>图 1　"aabb" 在分界点 p = 2 处拆开：左边 "aa" 是以 2 结尾的最长回文，右边 "bb" 是以 2 开头的最长回文</figcaption>
+      </figure>
+
+      <h2>二、两个数组怎么从半径数组里扫出来</h2>
+      <p>真实位置 k 对应扩展串下标 2k，也就是第 k 个 '#'，所以 L[p] 就是 Lft[2p]、R[p] 就是 Rgt[2p]，两个数组都只用到偶数下标。</p>
+      <p>Lft 从左往右扫。j 从 0 开始每次走 2，i 从 0 开始每次走 1。以 i 为中心的回文右端是 i + p[i] − 1，只要 i + p[i] &gt; j 就说明这个回文盖住了 j，那么「以 j / 2 结尾的回文」至少能取到 j − i 这么长，直接写进 Lft[j]，然后 j 往右走一格。</p>
+      <p>为什么写进去的就是最大值？j 只增不减，而 i 也是从左往右的。第一个盖住 j 的中心，必然是所有盖住 j 的中心里最靠右的那个中心左侧最近的，它对应的左端点最靠左，也就是能给出的最长回文最长。后面那些盖住 j 的中心都更靠右，给不出更长的。</p>
+      <p>换个角度看更直接：Lft[j] = j − i 里的 i 是「回文能往左伸到多远的那个中心」，j 越大，第一个够到它的 i 就越靠右，差值也越大，和「以 j / 2 结尾的最长回文」是同一个东西。</p>
+      <figure class="fig" id="fig-left">
+        <figcaption>图 2　Lft 的扫描：j 停在某个 '#' 上，i 一路往右，第一次有回文盖住 j 就写值</figcaption>
+      </figure>
+      <p>Rgt 完全对称：i 和 j 都从最右边出发往左走，条件是 i − p[i] &lt; j，也就是回文的左端越过了 j，写 Rgt[j] = i − j。</p>
+      <p>两趟扫描都是线性的：j 在每趟里只朝一个方向走，总共不超过 n 步，i 也是走过一遍就结束。</p>
+      <figure class="fig" id="fig-right">
+        <figcaption>图 3　Rgt 的扫描方向相反：i 与 j 都从右端出发，回文左端越过 j 时写值</figcaption>
+      </figure>
+
+      <h2>三、分界点只能取中间那些</h2>
+      <p>最后一遍扫描 i 从 2 到 n − 3、步长 2。i = 2 对应真实分界点 1，i = n − 3 对应真实分界点 m − 1，正好把「左右两段都非空」这件事卡住。</p>
+      <p>i = 0 是串的起点，Lft[0] 必然是 0，允许它参与就等于承认「右半段自己算一个双回文串」，而单个回文不是双回文串。i = n − 1 是串末尾，同理。这处的边界看着无关紧要，实际上会把答案放大。"abacaba" 整串是回文，Rgt[0] = 7，边界放宽就会输出 7，而正解是 6（"a" 配 "bacab"）。</p>
+      <figure class="fig" id="fig-range">
+        <figcaption>图 4　两端各留出至少一个字符，i 的可用范围是 [2, n − 3]</figcaption>
+      </figure>
+
+      <h2>四、代码</h2>
+      <p>两趟扫描放在一起，两个数组都开 2n + 1 那么大。</p>
+    <pre class="code"><span class="cm">// left[j]：以 j/2 这个位置结尾的最长回文长度，j 只走偶数下标</span>
+    <span class="cm">// right[j]：以 j/2 这个位置开头的最长回文长度</span>
+    <span class="kw">void</span> <span class="fn">buildLR</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0, j = 0; i &lt; n; i++) {
+            <span class="kw">while</span> (i + p[i] &gt; j) {              <span class="cm">// 回文盖住了 j，长度就是 j - i</span>
+                Lft[j] = j - i;
+                j += 2;
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = n - 1, j = n - 1; i &gt;= 0; i--) {
+            <span class="kw">while</span> (i - p[i] &lt; j) {
+                Rgt[j] = i - j;
+                j -= 2;
+            }
+        }
+    }</pre>
+      <p>最后扫一遍分界点。</p>
+    <pre class="code"><span class="cm">// 在每个分界点上把左右拼起来，两边都得非空</span>
+    <span class="kw">int</span> <span class="fn">longestDoublePalindrome</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;s) {
+        manacher(s);
+        buildLR();
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n - 3; i += 2) {
+            ans = max(ans, Lft[i] + Rgt[i]);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2>五、两个错法</h2>
+      <p>一，j 每次只走 1。20000 组随机串上 0.00% 有差别，这次是真等价：偶数下标拿到的值和不走 1 时完全相同，因为要让 j 走到某个偶数，中间必须先经过它左边那个奇数，而写出那个奇数值的 i 同时也满足写出偶数值的条件；奇数下标的槽位后面根本不会读。白扫一半，答案不变。</p>
+      <p>二，分界点范围放宽成 [0, n − 1]。这是真错，但随机数据里极难抓到，20000 组随机串只有 0.01% 露头，字符表放大到 26 就是 0.00%。原因是要露头得碰上「整串本身就是回文」这类极端形状。写的时候别指望对拍帮你发现它。</p>
+      <figure class="fig" id="fig-bad">
+        <figcaption>图 5　两个错法在 20000 组随机串上的抓取率，第一行等价，第二行要靠人工构造才现形</figcaption>
+      </figure>
+      <div class="viz" id="viz-double">
+        <p class="viz-title">逐个分界点拼双回文串</p>
+        <p class="viz-note">每点一步换一个分界点：橙框是左边那段，蓝框是右边那段，下面的两行是 Lft 与 Rgt 在偶数下标上的值。切到放宽边界的版本，看 "abacaba" 的答案从 6 变成 7。</p>
+        <div id="dbl-board"></div>
+        <p class="viz-note" id="dbl-note"></p>
+        <p class="viz-answer" id="dbl-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="dbl-str"></select></label>
+          <label>版本 <select id="dbl-ver"></select></label>
+          <button id="dbl-next" type="button">下一步</button>
+          <button id="dbl-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>六、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>枚举分界点各自往两边扩</td><td>每个分界点最多扩 m 次</td><td>O(m<sup>2</sup>)</td><td>O(1)</td></tr>
+        <tr><td>Manacher + 两趟扫描</td><td>填 p、扫 Lft、扫 Rgt、扫分界点</td><td>O(m)</td><td>O(m)</td></tr>
+      </table>
+      <p class="breakdown">四趟都是线性的，前两趟把 j 单向推到底，最后那趟是 n / 2 个分界点各看一眼。空间按 |s| ≤ 10<sup>5</sup> 的开法：ss 是 2 × 10<sup>5</sup> 个 char，p、Lft、Rgt 各 2 × 10<sup>5</sup> 个 int，四份加起来约 2.6 MB。n = 10<sup>5</sup> 的随机串实测 1.84 毫秒，全 a 串 0.91 毫秒。题目给的内存是 125 MB，余量很大。</p>
+
+      <h2>总结</h2>
+      <p>双回文串的答案等于「以每个位置结尾的最长回文」加上「以每个位置开头的最长回文」，在分界点上取最大。</p>
+      <p>两份数组都在半径数组上扫一遍就出来：Lft 从左往右，j 只走偶数下标，第一个盖住 j 的中心给出的就是最优值；Rgt 方向相反，条件也反过来。</p>
+      <p>最后的分界点范围要卡在中间，两端各留一个字符。整体 O(m) 时间、O(m) 空间，四趟线性扫描，常数很小。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>【国家集训队】最长双回文串</td><td><a href="https://www.luogu.com.cn/problem/P4555" target="_blank">P4555 [国家集训队] 最长双回文串</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解104【扩展】 Manacher算法相关题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>Manacher 算法</td><td><a href="https://oi-wiki.org/string/manacher/" target="_blank">oi-wiki.org/string/manacher</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:6, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+
+  // ===== 图 1：在分界点拆开 =====
+  (function(){
+    var host = document.getElementById('fig-split');
+    if (!host) return;
+    var W = 660, H = 172;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var s = 'aabb', cw = 58, x0 = 150;
+    svg.appendChild(txt(16, 18, '原串 "aabb"，分界点 p = 2', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < s.length; i++) {
+      var left = i < 2;
+      svg.appendChild(box(x0 + i * cw, 32, cw - 8, 34, left ? FILL_O : FILL_B, left ? ORANGE : BLUE));
+      svg.appendChild(txt(x0 + i * cw + (cw - 8) / 2, 55, s[i], {'text-anchor':'middle', 'font-size':15, 'font-weight':700, fill: left ? '#9a3412' : '#1e3a8a'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 8) / 2, 79, String(i), {'text-anchor':'middle', 'font-size':9.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(el('line', {x1:x0 + 2 * cw - 4, y1:26, x2:x0 + 2 * cw - 4, y2:92, stroke:'#1f2328', 'stroke-width':1.6, 'stroke-dasharray':'4 3'}));
+    svg.appendChild(txt(x0 + 2 * cw - 4, 106, 'p', {'text-anchor':'middle', 'font-size':12, 'font-weight':700, fill:'#1f2328'}));
+    svg.appendChild(txt(56, 132, 'L[2] = 2', {'font-size':12.5, 'font-weight':700, fill:ORANGE}));
+    svg.appendChild(txt(56, 152, '以 2 结尾的最长回文是 "aa"', {'font-size':11.5, fill:'#6b7280'}));
+    svg.appendChild(txt(376, 132, 'R[2] = 2', {'font-size':12.5, 'font-weight':700, fill:BLUE}));
+    svg.appendChild(txt(376, 152, '以 2 开头的最长回文是 "bb"', {'font-size':11.5, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：Lft 的扫描 =====
+  (function(){
+    var host = document.getElementById('fig-left');
+    if (!host) return;
+    var W = 660, H = 196;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var ext = '#a#a#b#b#', cw = 46, x0 = 82, ci = 2;
+    svg.appendChild(txt(16, 18, '扩展串 "#a#a#b#b#"，中心 i = 2、p[2] = 3', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < ext.length; i++) {
+      var inRange = i >= ci - 3 + 1 && i <= ci + 3 - 1;
+      var isC = i === ci;
+      svg.appendChild(box(x0 + i * cw, 30, cw - 6, 30, isC ? FILL_O : (inRange ? FILL_B : '#ffffff'), isC ? ORANGE : (inRange ? BLUE : '#e6e8eb')));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 50, ext[i], {'text-anchor':'middle', 'font-size':13, fill:'#374151'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 72, String(i), {'text-anchor':'middle', 'font-size':9.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(el('line', {x1:x0 + 4 * cw + (cw - 6) / 2, y1:26, x2:x0 + 4 * cw + (cw - 6) / 2, y2:76, stroke:BLUE, 'stroke-width':1.6}));
+    svg.appendChild(txt(x0 + 4 * cw - 10, 90, 'j = 4', {'text-anchor':'middle', 'font-size':12, 'font-weight':700, fill:BLUE}));
+    svg.appendChild(txt(16, 122, 'i + p[i] = 5 > j = 4，回文盖住了 j，写 Lft[4] = j − i = 2', {'font-size':12.5, fill:'#374151'}));
+    svg.appendChild(box(24, 136, 612, 30, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(40, 156, 'Lft[4] = 2 就是「以真实位置 2 结尾的最长回文长度」，也就是 "aa"', {'font-size':12.5, 'font-weight':700, fill:'#1f2328'}));
+    svg.appendChild(txt(24, 186, 'j 一路只往右走，写完就不回头，所以第一趟是线性的。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：Rgt 的扫描 =====
+  (function(){
+    var host = document.getElementById('fig-right');
+    if (!host) return;
+    var W = 660, H = 196;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var ext = '#a#a#b#b#', cw = 46, x0 = 82, ci = 6;
+    svg.appendChild(txt(16, 18, '同一个串，中心 i = 6、p[6] = 3，方向反过来', {'font-size':12.5, fill:'#1f2328'}));
+    for (var i = 0; i < ext.length; i++) {
+      var inRange = i >= ci - 3 + 1 && i <= ci + 3 - 1;
+      var isC = i === ci;
+      svg.appendChild(box(x0 + i * cw, 30, cw - 6, 30, isC ? FILL_O : (inRange ? FILL_B : '#ffffff'), isC ? ORANGE : (inRange ? BLUE : '#e6e8eb')));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 50, ext[i], {'text-anchor':'middle', 'font-size':13, fill:'#374151'}));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 72, String(i), {'text-anchor':'middle', 'font-size':9.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(el('line', {x1:x0 + 4 * cw + (cw - 6) / 2, y1:26, x2:x0 + 4 * cw + (cw - 6) / 2, y2:76, stroke:BLUE, 'stroke-width':1.6}));
+    svg.appendChild(txt(x0 + 4 * cw - 10, 90, 'j = 4', {'text-anchor':'middle', 'font-size':12, 'font-weight':700, fill:BLUE}));
+    svg.appendChild(txt(16, 122, 'i − p[i] = 3 < j = 4，回文左端越过了 j，写 Rgt[4] = i − j = 2', {'font-size':12.5, fill:'#374151'}));
+    svg.appendChild(box(24, 136, 612, 30, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(40, 156, 'Rgt[4] = 2 就是「以真实位置 2 开头的最长回文长度」，也就是 "bb"', {'font-size':12.5, 'font-weight':700, fill:'#1f2328'}));
+    svg.appendChild(txt(24, 186, 'i 与 j 都从右端出发往左走，同样只走一趟。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：分界点范围 =====
+  (function(){
+    var host = document.getElementById('fig-range');
+    if (!host) return;
+    var W = 660, H = 190;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '真实分界点 p 与扩展串下标 i = 2p', {'font-size':12.5, fill:'#1f2328'}));
+    var m = 7, cw = 74, x0 = 66;
+    for (var p = 0; p <= m; p++) {
+      var ok = (p >= 1 && p <= m - 1);
+      var i = 2 * p;
+      svg.appendChild(box(x0 + p * cw, 32, cw - 12, 34, ok ? FILL_B : '#f6f7f9', ok ? BLUE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + p * cw + (cw - 12) / 2, 55, String(p), {'text-anchor':'middle', 'font-size':14, 'font-weight':700, fill: ok ? '#1e3a8a' : '#9aa0a6'}));
+      svg.appendChild(txt(x0 + p * cw + (cw - 12) / 2, 80, 'i = ' + i, {'text-anchor':'middle', 'font-size':10, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(16, 108, '两端不能用：p = 0 时左边没有字符，p = m 时右边没有字符。', {'font-size':12.5, fill:RED}));
+    svg.appendChild(box(24, 122, 612, 30, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(40, 142, 'i 的扫描区间就是从 2 到 n − 3，两端各让出一个字符的位置。', {'font-size':12.5, 'font-weight':700, fill:'#1f2328'}));
+    svg.appendChild(txt(24, 174, '放宽到最后两个下标，"abacaba" 会被算成 7，而正解是 6。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 5：错法抓取率 =====
+  (function(){
+    var host = document.getElementById('fig-bad');
+    if (!host) return;
+    var W = 660, H = 140;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '20000 组随机串（字符表 2 / 串长 30）', {'font-size':12.5, fill:'#1f2328'}));
+    var head = ['写法', '出错比例', '说明'];
+    var xs = [24, 300, 400];
+    for (var c = 0; c < head.length; c++) svg.appendChild(txt(xs[c], 44, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    var rows = [
+      ['j 每次只走 1', '0.00%', '白扫一半，值相同', GREY],
+      ['分界点放宽到 [0, n − 1]', '0.01%', '随机数据抓不到', RED]
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 68 + r * 26;
+      svg.appendChild(txt(xs[0], y, rows[r][0], {'font-size':12, fill:rows[r][3]}));
+      svg.appendChild(txt(xs[1], y, rows[r][1], {'font-size':12, fill:rows[r][3]}));
+      svg.appendChild(txt(xs[2], y, rows[r][2], {'font-size':11.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(24, 134, '第二行是真错，得靠构造数据才会现形。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示：逐个分界点拼 =====
+  (function(){
+    var CASES = ['baacaabbacabb', 'aabb', 'abacaba', 'aaaa', 'abccba', 'abcde'];
+    var VERS = [
+      {k:'ok', n:'正确'},
+      {k:'wide', n:'分界点放宽到两端'}
+    ];
+    var selS = document.getElementById('dbl-str');
+    var selV = document.getElementById('dbl-ver');
+    var board = document.getElementById('dbl-board');
+    var note = document.getElementById('dbl-note');
+    var ansEl = document.getElementById('dbl-answer');
+    var btnN = document.getElementById('dbl-next');
+    var btnR = document.getElementById('dbl-reset');
+    if (!selS || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = '"' + CASES[i] + '"'; selS.appendChild(o);
+    }
+    for (var i = 0; i < VERS.length; i++) {
+      var o = document.createElement('option'); o.value = VERS[i].k; o.textContent = VERS[i].n; selV.appendChild(o);
+    }
+    var st = {caseIdx:0, ver:'ok', step:0, res:null};
+
+    function run(s, ver) {
+      var ext = '#';
+      for (var i = 0; i < s.length; i++) ext += s[i] + '#';
+      var n = ext.length;
+      var p = new Array(n).fill(0);
+      for (var i = 0, c = 0, r = 0, len; i < n; i++) {
+        len = r > i ? Math.min(p[2 * c - i], r - i) : 1;
+        while (i + len < n && i - len >= 0 && ext[i + len] === ext[i - len]) len++;
+        if (i + len > r) { r = i + len; c = i; }
+        p[i] = len;
+      }
+      var Lft = new Array(n + 2).fill(0), Rgt = new Array(n + 2).fill(0);
+      for (var i = 0, j = 0; i < n; i++) { while (i + p[i] > j) { Lft[j] = j - i; j += 2; } }
+      for (var i = n - 1, j = n - 1; i >= 0; i--) { while (i - p[i] < j) { if (j < 0) break; Rgt[j] = i - j; j -= 2; } }
+      var lo = (ver === 'wide') ? 0 : 2, hi = (ver === 'wide') ? (n - 1) : (n - 3);
+      var frames = [];
+      var best = 0, bestI = -1;
+      frames.push({i:null, left:0, right:0, sum:0, best:0, bestI:-1, Lft:Lft, Rgt:Rgt, note:'准备就绪，Lft 与 Rgt 已经扫好'});
+      for (var i = lo; i <= hi; i += 2) {
+        var left = Lft[i], right = Rgt[i], sum = left + right;
+        if (sum > best) { best = sum; bestI = i; }
+        frames.push({i:i, left:left, right:right, sum:sum, best:best, bestI:bestI, Lft:Lft, Rgt:Rgt,
+          note:'分界点 p = ' + (i / 2) + '：左 ' + left + ' + 右 ' + right + ' = ' + sum});
+      }
+      var sub = '';
+      return {s:s, n:n, frames:frames, best:best, bestI:bestI, sub:sub};
+    }
+    function render() {
+      var f = st.res.frames[st.step];
+      var m = st.res.s.length;
+      board.innerHTML = '';
+      var l1 = document.createElement('p'); l1.className = 'cap';
+      l1.textContent = '原串' + (f.i === null ? '' : '，分界点 p = ' + (f.i / 2));
+      board.appendChild(l1);
+      var d1 = document.createElement('div'); board.appendChild(d1);
+      var p0 = f.i === null ? -1 : f.i / 2;
+      var lstart = p0 < 0 ? -1 : p0 - f.left, rstop = p0 < 0 ? -1 : p0 + f.right;
+      var wrap = document.createElement('div');
+      wrap.className = 'cards';
+      for (var i = 0; i < m; i++) {
+        var dv = document.createElement('div');
+        var cc = 'card';
+        if (p0 >= 0 && i >= lstart && i < p0) cc += ' own';
+        else if (p0 >= 0 && i >= p0 && i < rstop) cc += ' ok';
+        dv.className = cc;
+        dv.innerHTML = st.res.s[i] + '<span class="idx">' + i + '</span>';
+        wrap.appendChild(dv);
+      }
+      d1.appendChild(wrap);
+      var l2 = document.createElement('p'); l2.className = 'cap';
+      l2.textContent = 'Lft（偶数下标，只列真实位置 0 到 ' + m + '）';
+      board.appendChild(l2);
+      var d2 = document.createElement('div'); board.appendChild(d2);
+      var w2 = document.createElement('div'); w2.className = 'cards';
+      for (var k = 0; k <= m; k++) {
+        var dv = document.createElement('div');
+        dv.className = 'card' + (f.i !== null && k === f.i / 2 ? ' pick' : (k === m ? ' empty' : ''));
+        dv.innerHTML = f.Lft[2 * k] + '<span class="idx">' + k + '</span>';
+        w2.appendChild(dv);
+      }
+      d2.appendChild(w2);
+      var l3 = document.createElement('p'); l3.className = 'cap';
+      l3.textContent = 'Rgt';
+      board.appendChild(l3);
+      var d3 = document.createElement('div'); board.appendChild(d3);
+      var w3 = document.createElement('div'); w3.className = 'cards';
+      for (var k = 0; k <= m; k++) {
+        var dv = document.createElement('div');
+        dv.className = 'card' + (f.i !== null && k === f.i / 2 ? ' pick' : (k === m ? ' empty' : ''));
+        dv.innerHTML = f.Rgt[2 * k] + '<span class="idx">' + k + '</span>';
+        w3.appendChild(dv);
+      }
+      d3.appendChild(w3);
+      var info = document.createElement('p'); info.className = 'breakdown';
+      info.textContent = f.i === null ? '还没有开始扫描' :
+        '当前 Lft + Rgt = ' + f.sum + '　当前最大值 ' + f.best + (f.bestI >= 0 ? '（分界点 ' + (f.bestI / 2) + '）' : '');
+      board.appendChild(info);
+      note.textContent = f.note;
+      var last = st.step === st.res.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        var label = st.ver === 'wide' ? '分界点放宽到两端' : '正确';
+        var sub = st.res.bestI >= 0 ? st.res.s.substring(st.res.bestI / 2 - st.res.frames[st.res.frames.length - 1].Lft[st.res.bestI], st.res.bestI / 2 + st.res.frames[st.res.frames.length - 1].Rgt[st.res.bestI]) : '';
+        ansEl.textContent = '最长双回文串长度 ' + st.res.best + (sub ? '（"' + sub + '"）' : '') + '（版本：' + label + '）';
+      } else {
+        ansEl.textContent = '';
+      }
+    }
+    function rebuild() {
+      st.res = run(CASES[st.caseIdx], st.ver);
+      st.step = 0;
+      render();
+    }
+    selS.addEventListener('change', function(){ st.caseIdx = Number(selS.value); rebuild(); });
+    selV.addEventListener('change', function(){ st.ver = selV.value; rebuild(); });
+    btnN.addEventListener('click', function(){ if (st.step < st.res.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function(){ st.step = 0; render(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>

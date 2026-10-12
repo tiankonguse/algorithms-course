@@ -1,6 +1,13 @@
 # 项目约定（algorithms-course）
 
-> 本文件只放**规则**。状态在别处：进度 / 下一课 / 已完成看 `prompt.md`，组顺序与页清单看 `assets/data/algorithms.json`（`groups` 有序，每条算法带 `group`）。
+> 本文件只放**规则**。状态在别处：进度 / 下一课 / 已完成看 `prompt.md`，目录与页清单看 `assets/data/algorithms.json`。
+
+## 目录结构（2026-10-12 重建为三层，参考 OI-wiki）
+- json 顶层三键：`categories`（一级分类有序数组）+ `groups`（二级分类 `{name, cat, desc}`，`cat` 指向一级）+ `algorithms`（页面，`group` = 二级分类名）。**第三层就是页面本身**，没有第四层。
+- 一级分类：语言基础 / 算法基础 / 搜索 / 动态规划 / 字符串 / 数学 / 数据结构 / 图论 / 计算几何 / 杂项 / 专题；**没有页面的分类不出现在顶栏**（计算几何、专题暂空）。二级分类名**全局唯一**（重名会串分类）。
+- 新建页面：条目 append 进 `algorithms`（`group` 写目标二级分类名）即可；目标二级分类已存在就不用动 `groups` / `categories`。
+- UI：顶栏是一级分类（一行全部显示，带篇数）；点开一级后，左侧列二级，二级可展开出第三层页面列表，**默认全部折叠**，只自动展开当前页所在的那一组。首页正文也只渲染当前一级分类的内容（`#catalogTitle` + `#index-list`）。
+- 手动展开状态记 `localStorage['algoNavOpenSubs']`（键是 `一级>二级`）；搜索命中时临时全展开、清空恢复。
 
 ## 内容
 - 每页必含「复杂度分析」：一张 `table.complexity` + 空间说明，明确 O(...)。
@@ -19,9 +26,9 @@
 - 纯静态无构建：`index.html` + `algorithms/*.html`；`assets/css/shared.css`、`assets/js/shared.js`、`assets/data/algorithms.json`。
 - 页面骨架固定（`.layout` + `aside#sidebar` + `main .algo-section` + `aside.toc-panel ul#toc`），侧栏 / 目录 / 翻页 / 复制 / 搜索 / 进度条全由 shared.js 注入，**页面不自带骨架**；独有样式与脚本留在各页 `<style>` / `<script>`。
 - shared.css 只定义一份、各行复用：`.fig` / `.fig svg` / `.legend` / `.dot` / `.breakdown` / `pre.code .cm|.kw|.fn` / `table.complexity`；全局保留 `[hidden]{display:none!important}`。
-- json 的 `file` 写 `algorithms/xxx.html`，侧栏高亮比 basename。**顺序 = 首页卡片 = 侧栏 = 上下篇翻页**（看 `groups` 数组顺序，不改 `algorithms` 的绝对位置）。
-- 侧栏分组折叠（2026-10-06）：打开算法页只展开当前所在组、把高亮项滚到可视区正中，其余收起；手动展开的组记 `localStorage['algoNavOpenGroups']` 跨页保持；搜索命中组临时全展开、清空恢复。
-- 页底一个 `nav.pager` 含两个 `.pager-item` 并排（单侧时单卡片靠右），别写成两个 nav（会叠两行）。首页 `#homeNav` 由 shared.js 按 json groups 渲染（`#group-<i>` 锚点 + 序号 / 组名 / 篇数 + scrollspy），保持 `homeNav + home-main` flex 布局，900px 以下隐藏。
+- json 的 `file` 写 `algorithms/xxx.html`，侧栏高亮比 basename。**顺序 = 首页分区 = 侧栏 = 上下篇翻页**（按 categories → groups.cat → algorithms 原顺序铺平；`id` 可用下划线，但磁盘文件名用连字符，以 `file` 字段为准）。
+- 侧栏三级折叠（2026-10-12）：打开算法页只展开当前所在二级组、把高亮项滚到可视区正中，其余收起；搜索命中组临时全展开、清空恢复。
+- 页底一个 `nav.pager` 含两个 `.pager-item` 并排（单侧时单卡片靠右），别写成两个 nav（会叠两行）。首页 `#homeNav` 由 shared.js 按 json 渲染二级树（`#group-<i>` 锚点 + scrollspy），保持 `homeNav + home-main` flex 布局，900px 以下隐藏。算法页顶部多一条 sticky 的 `#catNav`（一级分类），`.sidebar` / `.toc-panel` 的 sticky top 由 `--navh` 让位（≤1180 时 98px）。
 - 本地预览 `./run.sh`（端口 8080）；`file://` 直开会被 CORS 拦。
 
 ## 编排
@@ -29,7 +36,7 @@
 - **转一课不开子智能体**：主循环直接做；「连转 N 课」串行，一课收口干净（json + prompt.md 都更新）再开下一课。
 - **导学课不产页**（PPT 无方法 / 算法，或 `src/classNNN/` 无代码）→ 记 prompt.md「跳过」写原因；**方法论课要产页**（005 对数器 / 007 复杂度 / 019 IO / 020 递归 / 026 容器 / 029 排序总结先例）。
 - **跨会话抢锁防重**（2026-10-07）：开工第一步按 prompt.md 头部脚本抢 `/tmp/algo-course-lock-<课号>`。**凭据是 lockdir 里的 `owner` 文件、不是目录**：`mkdir -p` 建容器，抢锁 = noclobber 下 `printf > owner`（等价 O_EXCL）；抢不到且 owner ≤60 分钟就退出；死锁只看 `find owner -mmin +60`；收口只 `rm -f owner`，**别 rmdir、别删锁目录**。
-- **新组插在「入门」之后**（`splice(1,0,新组)`，同阶段按课号升序），组内也按课号升序、同主题插对应位置不追加组尾；判据 = 主题承接 + 教学序（SCC 组紧贴「双连通分量与圆方树」之前的先例）。老组「高阶数据结构」是历史降序，不重排。组名撞车要避开（`kdtree-of-tree` 已占「树套树」，160 课的新组叫「二维树套树」）。
+- **新二级分类**：插在 `groups` 里对应一级分类的末尾或主题相邻处（同主题插对应位置不追加组尾），`cat` 必填；组内按课号升序。**低号课可能撞已有二级分类**：先扫 json 的 `name`，撞主题就并入已有组或给已有页补一节，不新建重复页。每课通常拆 2~4 页，按「技巧同源」合并（如 167：背包类 / 线性基类 / Trie 类）。
 - **低号课可能撞站内已有页**：先扫 json 的 `title`，撞主题就并入已有组或给已有页补一节，不新建重复页。每课通常拆 2~4 页，按「技巧同源」合并（如 167：背包类 / 线性基类 / Trie 类）。
 
 ## 转课流水线（技能 `.agent/skills/course-site-page`）
@@ -48,7 +55,7 @@
   $N $SKILL/verify_home.js
   ```
 - 必查四项：① 无 JS 错误 ② `figure.fig` 数 == 其中 svg 数 ③ nav/toc/每个 `.viz` 有内容 ④ 每个 svg 用 `getBBox()` 比对 viewBox（bbox = left/top/right/bottom）。`--allow-file-access-from-files` 必带，别加 `--window-size`（隐藏图标 svg 会被判空图）。
-- 全站页列表从 json 生成（zsh 里展开用 `${=PAGES}`）；首页单独 verify_home.js（**无侧栏，`navGroups==0` 正常**）。跑到第 49 页左右偶发超时，脚本已重试，真失败换 `--user-data-dir` 补跑。pager 链最灵敏：非末页 2、末页 1，标题与 json 相邻项一致。拼完先跑杂字扫描与 AI 味 `grep`。
+- 全站页列表从 json 生成（zsh 里展开用 `${=PAGES}`，**传裸文件名**，脚本自己拼 `algorithms/` 前缀）；首页单独 verify_home.js（三层目录版：顶栏一行 + 逐分类核对分区 / 卡片数）。跑到第 49 页左右偶发超时，脚本已重试，真失败换 `--user-data-dir` 补跑。pager 链最灵敏：非末页 2、末页 1，标题与铺平后的 json 相邻项一致。拼完先跑杂字扫描与 AI 味 `grep`。
 
 ## 踩过的坑（通用教训）
 - **`verify_pages.js` PASS ≠ 演示能走到底**：它只抓加载期 JS 错误、**抓不到点击后抛的异常**（067 末帧抛 TypeError → 答案行不渲染、按钮永不 disabled，自检照样 PASS）。末帧答案行与按钮 disabled 一律用 `verify_viz_steps.js` 或自写探针点到底确认（`/tmp/probe2.js` 可先设 `<select>.selectedIndex` 再点到底，穷举下拉组合）；`verify_viz_steps.js` 上限 40 帧，**「跑满 40 帧」不等于失败**（067 二叉树 44 步），要单看 disabled 与答案。
@@ -66,3 +73,6 @@
 - **演示里的模运算一律用 BigInt，别用 Number**（099）：mod 到 1e9 时 `acc * base` 是 1e18，越过 2^53 就悄悄丢精度——快速幂求逆元的演示在小模数（41）上全对，换到 1e9+7 就给出 834560781（应为 1000000）。凡写了 `x * y % MOD` 且 MOD ≥ 1e6 的演示，直接改 BigInt。
 - **自写逐帧探针要按 `selectedIndex` 设下拉，别按 option 的 value**（099）：`e.value = String(下标)` 在 option value 是「13/41/101」或「ok/noinc/self」时会赋成空串，select 静默退回空值，9 组组合实际全跑成同一分支、错误版本一次都没跑到。用 `e.selectedIndex = i` 才稳。
 - **演示复现代码里的错法时，赋值顺序要跟源码一致**（099）：C++ 是「先 `dp[i] = base` 再减」，错法版减到 j=i 时减掉的是刚写进去的 base，整表归零；JS 里若把 base 放局部变量、最后才写表，j=i 读到的是初始 0，错法复现不出来。
+- **复用中断残留前先核对它自写的测量脚本**（103）：`/tmp/cppNNN/rate.cpp` 里同一个计数器 `m5` 给两件事计数、`printf` 的标签还跟函数语义对不上（M4 写着「对称点写 c-i」实际是「扩展串只插一个 #」），照读会得出错结论。复用残留时把 rate/presets 源码过一遍（计数器是否一一对应、标签与函数是否一致），有疑问就重写一份分离版再跑。
+- **「看着像错其实等价」要专门量一遍，0.00% 也是结论**（103）：Manacher 更新 r 写成 `if (i + len >= r)` 与 `>` 完全等价（r 的值不变、只是把中心 c 换成 i，实测答案与整份 p 数组 0.00% 差异）；LC 恢复初始状态的判断写 `>=` 与 `==` 也等价，因为公共前缀长度不可能超过后缀自身长度。这类 0.00% 不是抓取失败，是值得写进正文的结论。
+- **复杂度里的空间数字要按题目上限算，不是按测试用的 n 算**（103）：`char ss[MAXN << 1]` 配 `MAXN = 11000001` 是 2200 万格 = 22 MB，p 同样格数是 88 MB；`int z[20000001]` 单张 80 MB、两张 160 MB。写正文前先回去看数组声明的实际长度。

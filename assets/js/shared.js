@@ -265,64 +265,162 @@
       const algos = data.algorithms || [];
       const current = (location.pathname.split('/').pop() || 'index.html').toLowerCase();
       const LV = { 1:'入门', 2:'进阶', 3:'高阶', 4:'挑战', 5:'硬核' };
-      // 首页三条学习路线：写死专题名，篇数与篇目从索引里算，避免数据变了文案过时
+      const fileName = a => a.file.split('/').pop().toLowerCase();
+      const esc = s => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+      // 首页三条学习路线：写死二级分类名，目录变了也能自动算篇数与篇目
       const ROUTES = [
         { tag:'第 1 站', tone:'', title:'刚上手',
-          desc:'先修的几个。后面很多算法要借这里的手法和代码习惯。', groups:['入门'] },
-        { tag:'第 2 站', tone:'orange', title:'一个数组上的功夫',
-          desc:'反复查询和修改一个数组，三种做法思路不同，复杂度从 O(log n) 到 O(√n)。', groups:['序列与区间','分块专题'] },
+          desc:'先把一个数组摆平：排好序、二分掉、把一段区间的和压成两个前缀之差。后面很多页面都要借这里的手法。',
+          subs:['排序','二分','前缀和与差分'] },
+        { tag:'第 2 站', tone:'orange', title:'一个数据结构管一片',
+          desc:'同一个「区间加、区间求和」的需求，三种做法思路完全不同：常数最小的树状数组、什么都管的线段树、粗糙但够用的分块。',
+          subs:['树状数组','线段树','分块'] },
         { tag:'第 3 站', tone:'gray', title:'往深了走',
-          desc:'多维约束、会变形的树、带环的图，以及一些只能靠重构换复杂度的题。', groups:['高阶数据结构','字符串','图论'] }
+          desc:'换个维度看：询问可以重排就去掉一维，树可以先摊平再统计，以及按时间锯开再各自算的 CDQ 分治。',
+          subs:['莫队算法','树分治','CDQ 分治'] }
       ];
-      const fileName = a => a.file.split('/').pop().toLowerCase();
 
-      const grouped = (data.groups || [])
-        .map(g => Object.assign({}, g, { items: algos.filter(a => a.group === g.name) }))
-        .filter(g => g.items.length);
-      const rest = algos.filter(a => !grouped.some(g => g.items.indexOf(a) >= 0));
-      if (rest.length) grouped.push({ name:'其他', items:rest });
+      // 8-0. 三层目录：一级分类 → 二级分类 → 页面（三级就是页面本身）
+      const byGroup = {};
+      algos.forEach(function(a){ (byGroup[a.group] = byGroup[a.group] || []).push(a); });
+      const tree = (data.categories || [])
+        .map(function(name){
+          return {
+            name: name,
+            subs: (data.groups || [])
+              .filter(function(g){ return g.cat === name && byGroup[g.name] && byGroup[g.name].length; })
+              .map(function(g){ return { name: g.name, desc: g.desc, items: byGroup[g.name] }; })
+          };
+        })
+        .filter(function(c){ return c.subs.length; });
+      const catCount = c => c.subs.reduce((n, s) => n + s.items.length, 0);
+      const subCount = tree.reduce((n, c) => n + c.subs.length, 0);
+      const flat = tree.reduce(function(acc, c){
+        c.subs.forEach(function(s){ s.items.forEach(function(a){ acc.push(a); }); });
+        return acc;
+      }, []);
 
-      // 8a. 侧边栏（分组折叠 + 搜索 + 当前页高亮定位；默认只展开当前算法所在组）
-      if (sidebar) {
-        // 折叠状态分两层：当前算法所在组每次进页强制展开（不持久化）；
-        // 用户手动展开过的组记进 localStorage，跨页保持
-        const OPEN_KEY = 'algoNavOpenGroups';
-        const manualOpen = (function(){
-          try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); }
-          catch(e){ return new Set(); }
-        })();
-        function persistManualOpen(){
-          try { localStorage.setItem(OPEN_KEY, JSON.stringify(Array.from(manualOpen))); }
-          catch(e){ /* 隐私模式等场景忽略 */ }
+      const curAlgo = algos.filter(a => fileName(a) === current)[0];
+      const curSub = curAlgo ? curAlgo.group : null;
+      const curCatName = curAlgo
+        ? ((data.groups || []).filter(g => g.name === curAlgo.group)[0] || {}).cat
+        : null;
+
+      function catIndex(n){ for (let i = 0; i < tree.length; i++) if (tree[i].name === n) return i; return -1; }
+      function subKey(cat, sub){ return cat + '>' + sub; }
+
+      // 8-1. 一级分类顶栏（一行全部显示，空的分类不出现）
+      const catNav = (function(){
+        let el = document.getElementById('catNav');
+        if (el) return el;
+        el = document.createElement('nav');
+        el.className = 'cat-nav';
+        el.id = 'catNav';
+        el.setAttribute('aria-label', '一级分类');
+        const tb = document.querySelector('.topbar');
+        const layout = document.querySelector('.layout');
+        if (tb) tb.parentNode.insertBefore(el, tb.nextSibling);
+        else if (layout) body.insertBefore(el, layout);
+        else body.insertBefore(el, body.firstChild);
+        return el;
+      })();
+
+      catNav.innerHTML = tree.map((c, i) =>
+        '<a class="cat-tab" href="' + ROOT + 'index.html#cat-' + encodeURIComponent(c.name) + '"' +
+        ' data-cat="' + i + '">' + c.name +
+        '<span class="cat-count">' + catCount(c) + '</span></a>'
+      ).join('');
+
+      const isIndex = !!document.getElementById('index-list');
+      let activeCat = -1;
+
+      function markCatTabs(i){
+        activeCat = i;
+        Array.prototype.forEach.call(catNav.querySelectorAll('.cat-tab'), function(t){
+          t.classList.toggle('active', +t.getAttribute('data-cat') === i);
+        });
+      }
+
+      function selectCat(i, writeHash){
+        if (i < 0 || i >= tree.length) return;
+        markCatTabs(i);
+        if (sidebar) renderSidebar(i); else renderHome(i);
+        if (writeHash && history.replaceState) {
+          history.replaceState(null, '', '#cat-' + encodeURIComponent(tree[i].name));
         }
-        const curAlgo = algos.filter(a => fileName(a) === current)[0];
-        const currentGroupName = curAlgo ? curAlgo.group : null;
+      }
 
-        function groupOpen(name){
-          return name === currentGroupName || manualOpen.has(name);
-        }
+      Array.prototype.forEach.call(catNav.querySelectorAll('.cat-tab'), function(t){
+        t.addEventListener('click', function(e){
+          // 算法页：留在当前页，只把左侧目录换成该分类；首页：切换正文内容
+          if (!isIndex || location.pathname.split('/').pop() === 'index.html') e.preventDefault();
+          const i = +t.getAttribute('data-cat');
+          if (isIndex) selectCat(i, true); else selectCat(i);
+        });
+      });
 
+      // 8-2. 二级分类折叠的状态由三样东西决定：三级（页面列表）默认折叠，
+      // 当前页所在的那一组强制展开，其余由用户手动展开并跨页记住
+      const OPEN_KEY = 'algoNavOpenSubs';
+      const manualOpen = (function(){
+        try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); }
+        catch(e){ return new Set(); }
+      })();
+      function persistManualOpen(){
+        try { localStorage.setItem(OPEN_KEY, JSON.stringify(Array.from(manualOpen))); }
+        catch(e){ /* 隐私模式等场景忽略 */ }
+      }
+      function subHtml(cat, s, j){
+        const key = subKey(cat.name, s.name);
+        const open = s.name === curSub || manualOpen.has(key);
+        return '<div class="nav-group' + (open ? '' : ' collapsed') + '" data-sub="' + esc(s.name) + '">' +
+            '<button type="button" class="nav-group-title" aria-expanded="' + open + '">' +
+              '<span class="nav-group-idx">' + (j + 1) + '</span>' +
+              '<span class="nav-group-name">' + s.name + '</span>' +
+              '<span class="nav-group-count">' + s.items.length + '</span>' +
+              ICON.chevron +
+            '</button>' +
+            '<ul class="algo-nav">' +
+              s.items.map(a =>
+                '<li><a class="algo-link' + (fileName(a) === current ? ' active' : '') + '"' +
+                ' href="' + ROOT + a.file + '" data-title="' + esc(a.title) + '"' +
+                ' data-desc="' + esc(a.description) + '">' + a.title + '</a></li>'
+              ).join('') +
+            '</ul>' +
+          '</div>';
+      }
+      function bindSubToggles(host, onToggle){
+        Array.prototype.forEach.call(host.querySelectorAll('.nav-group'), function(ge){
+          const btn = ge.querySelector('.nav-group-title');
+          const name = ge.getAttribute('data-sub');
+          btn.addEventListener('click', function(){
+            const collapsed = ge.classList.toggle('collapsed');
+            btn.setAttribute('aria-expanded', String(!collapsed));
+            const key = subKey(host.getAttribute('data-cat'), name);
+            if (!collapsed) manualOpen.add(key); else manualOpen.delete(key);
+            persistManualOpen();
+            if (onToggle) onToggle();
+          });
+        });
+      }
+
+      // 8-3. 侧边栏：只列当前一级分类下的二级分类
+      function renderSidebar(i){
+        const cat = tree[i];
+        searches.length = 0;
         sidebar.innerHTML =
           '<p class="site-title"><a href="' + ROOT + 'index.html">算法教程</a></p>' +
           '<div id="sidebar-search"></div>' +
-          grouped.map((g, i) =>
-            '<div class="nav-group' + (groupOpen(g.name) ? '' : ' collapsed') + '">' +
-              '<button type="button" class="nav-group-title" aria-expanded="' + groupOpen(g.name) + '">' +
-                '<span class="nav-group-idx">' + (i + 1) + '</span>' +
-                '<span class="nav-group-name">' + g.name + '</span>' +
-                ICON.chevron +
-              '</button>' +
-              '<ul class="algo-nav">' +
-                g.items.map(a =>
-                  '<li><a class="algo-link' + (fileName(a) === current ? ' active' : '') + '" href="' + ROOT + a.file + '"' +
-                  ' data-title="' + a.title + '" data-desc="' + a.description + '">' + a.title + '</a></li>'
-                ).join('') +
-              '</ul>' +
-            '</div>'
-          ).join('');
+          '<p class="sidebar-cat">' + cat.name + ' · ' + cat.subs.length + ' 个专题</p>' +
+          '<div class="sidebar-subs" data-cat="' + esc(cat.name) + '">' +
+            cat.subs.map((s, j) => subHtml(cat, s, j)).join('') +
+          '</div>';
+        sidebar.setAttribute('data-cat', esc(cat.name));
 
         const holder = sidebar.querySelector('#sidebar-search');
-        const box = buildSearch('sidebarSearchInput', '搜索算法', '搜索算法…');
+        const box = buildSearch('sidebarSearchInput', '搜索算法', '搜索 ' + cat.name + '…');
         holder.appendChild(box);
         const hint = document.createElement('p');
         hint.className = 'empty-hint';
@@ -340,36 +438,20 @@
           };
         });
 
-        // 手动展开 / 收起分组
-        Array.prototype.forEach.call(sidebar.querySelectorAll('.nav-group'), function(ge){
-          const btn = ge.querySelector('.nav-group-title');
-          if (!btn) return;
-          btn.addEventListener('click', function(){
-            const collapsed = ge.classList.toggle('collapsed');
-            btn.setAttribute('aria-expanded', String(!collapsed));
-            const name = ge.querySelector('.nav-group-name').textContent;
-            if (!collapsed) manualOpen.add(name); else manualOpen.delete(name);
-            persistManualOpen();
-          });
-        });
-
-        function resetGroupStates(){
+        function resetOpen(){
           domGroups.forEach(function(dg){
-            const name = dg.el.querySelector('.nav-group-name').textContent;
-            const open = groupOpen(name);
+            const key = subKey(cat.name, dg.el.getAttribute('data-sub'));
+            const open = dg.el.getAttribute('data-sub') === curSub || manualOpen.has(key);
             dg.el.classList.toggle('collapsed', !open);
             const btn = dg.el.querySelector('.nav-group-title');
             if (btn) btn.setAttribute('aria-expanded', String(open));
           });
         }
+        bindSubToggles(sidebar.querySelector('.sidebar-subs'), null);
 
-        // 搜索时临时展开命中组，清空后恢复折叠状态
         registerSearch(box, domGroups, hint, null, function(searching){
-          if (searching) {
-            domGroups.forEach(function(dg){ if (!dg.el.hidden) dg.el.classList.remove('collapsed'); });
-          } else {
-            resetGroupStates();
-          }
+          if (searching) domGroups.forEach(function(dg){ if (!dg.el.hidden) dg.el.classList.remove('collapsed'); });
+          else resetOpen();
         });
 
         // 当前算法自动定位：所在组已展开，把高亮项滚动到侧边栏可视区正中间
@@ -384,26 +466,63 @@
         if (titleEl && curAlgo) titleEl.textContent = curAlgo.title;
       }
 
-      // 8b. 首页卡片（组内顺序即推荐学习顺序）
+      // 8-4. 首页：左侧三级目录 + 正文按二级分类铺卡片
       const list = document.getElementById('index-list');
-      if (list) {
-        const wrap = document.createElement('div');
-        wrap.id = 'indexSearch';
-        wrap.appendChild(buildSearch('indexSearchInput', '搜索算法', '搜索算法…（按 / 聚焦）'));
-        list.parentNode.insertBefore(wrap, list);
+      if (list && !document.getElementById('indexSearch')) {
+        const searchWrap = document.createElement('div');
+        searchWrap.id = 'indexSearch';
+        searchWrap.appendChild(buildSearch('indexSearchInput', '搜索算法', '搜索算法…（按 / 聚焦）'));
+        list.parentNode.insertBefore(searchWrap, list);
+        const searchHint = document.createElement('p');
+        searchHint.className = 'empty-hint';
+        searchHint.textContent = '没有匹配的算法，换个关键词试试。';
+        searchHint.hidden = true;
+        list.parentNode.insertBefore(searchHint, list);
+      }
+      let spyGroups = [], spyLinks = [], spyTicking = false;
+      window.addEventListener('scroll', function(){
+        if (!spyLinks.length || spyTicking) return;
+        spyTicking = true;
+        requestAnimationFrame(function(){
+          spyTicking = false;
+          const y = window.scrollY;
+          let cur = -1;
+          for (let i = 0; i < spyGroups.length; i++) {
+            const top = spyGroups[i].getBoundingClientRect().top + y - 76;
+            if (top <= y + 10) cur = i; else break;
+          }
+          spyLinks.forEach(function(l, i){ l.classList.toggle('active', i === cur); });
+        });
+      }, { passive: true });
 
-        const hint = document.createElement('p');
-        hint.className = 'empty-hint';
-        hint.textContent = '没有匹配的算法，换个关键词试试。';
-        hint.hidden = true;
-        list.parentNode.insertBefore(hint, list);
+      function renderHome(i){
+        const cat = tree[i];
+        const homeNav = document.getElementById('homeNav');
+        if (homeNav) {
+          homeNav.innerHTML =
+            '<p class="nav-title">' + cat.name + '</p>' +
+            '<div class="sidebar-subs" data-cat="' + esc(cat.name) + '">' +
+              cat.subs.map((s, j) => subHtml(cat, s, j)).join('') +
+            '</div>';
+          bindSubToggles(homeNav.querySelector('.sidebar-subs'), null);
+        }
 
-        list.innerHTML = grouped.map((g, i) =>
-          '<section class="group" id="group-' + i + '">' +
-            '<h2 class="group-title"><span class="group-idx">' + (i + 1) + '</span>' + g.name + '</h2>' +
-            (g.desc ? '<p class="group-desc">' + g.desc + '</p>' : '') +
+        const section = document.getElementById('catalogTitle');
+        if (section) section.textContent = cat.name;
+        const hintEl = document.getElementById('catalogDesc');
+        if (hintEl) {
+          hintEl.textContent = cat.subs.length + ' 个专题，' + catCount(cat) + ' 篇；'
+            + '左侧展开任意专题可以直接跳到那一篇。';
+        }
+
+        searches.length = 0;
+        list.innerHTML = cat.subs.map((s, j) =>
+          '<section class="group" id="group-' + j + '">' +
+            '<h2 class="group-title"><span class="group-idx">' + (j + 1) + '</span>' + s.name +
+              '<span class="group-count">' + s.items.length + ' 篇</span></h2>' +
+            (s.desc ? '<p class="group-desc">' + s.desc + '</p>' : '') +
             '<div class="cards">' +
-              g.items.map(a => {
+              s.items.map(a => {
                 const lv = a.level || 1;
                 return '<a class="card" href="' + ROOT + a.file + '" data-level="' + lv + '">' +
                   '<div class="card-head"><h3>' + a.title + '</h3>' +
@@ -415,38 +534,8 @@
           '</section>'
         ).join('');
 
-        // 8b-0. 首页左侧专题目录：点击锚点平滑定位到对应分组，滚动时高亮当前分组
-        const homeNav = document.getElementById('homeNav');
-        if (homeNav) {
-          homeNav.innerHTML =
-            '<p class="nav-title">全部专题</p>' +
-            grouped.map((g, i) =>
-              '<a class="home-nav-link' + (i === 0 ? ' active' : '') + '" href="#group-' + i + '">' +
-                '<span class="home-nav-idx">' + (i + 1) + '</span>' +
-                '<span class="home-nav-name">' + g.name + '</span>' +
-                '<span class="home-nav-count">' + g.items.length + '</span>' +
-              '</a>'
-            ).join('');
-          const navLinks = Array.prototype.slice.call(homeNav.querySelectorAll('.home-nav-link'));
-          const groupEls = Array.prototype.slice.call(list.querySelectorAll('.group'));
-          let navTicking = false;
-          const markActive = function(){
-            navTicking = false;
-            const y = window.scrollY;
-            let cur = 0;
-            for (let i = 0; i < groupEls.length; i++) {
-              const anchorTop = groupEls[i].getBoundingClientRect().top + y - 76;
-              if (anchorTop <= y + 10) cur = i; else break;
-            }
-            navLinks.forEach(function(l, i){ l.classList.toggle('active', i === cur); });
-          };
-          window.addEventListener('scroll', function(){
-            if (navTicking) return;
-            navTicking = true;
-            requestAnimationFrame(markActive);
-          }, { passive: true });
-          markActive();
-        }
+        spyGroups = Array.prototype.slice.call(list.querySelectorAll('.group'));
+        spyLinks = homeNav ? Array.prototype.slice.call(homeNav.querySelectorAll('.nav-group-title')) : [];
 
         const domGroups = Array.prototype.map.call(list.querySelectorAll('.group'), function(ge){
           return {
@@ -458,27 +547,20 @@
         });
 
         let levelFilter = 0; // 0 = 全部
+        const wrap = document.getElementById('indexSearch');
+        const hint = wrap && wrap.parentNode.querySelector('.empty-hint');
         const applyIndex = registerSearch(wrap.querySelector('.search-box'), domGroups, hint,
           function(it){ return levelFilter === 0 || it.level === levelFilter; });
 
-        // 8b-1. 顶部统计（数字全部从索引算，不写死）
-        const setText = function(id, v){
-          const el = document.getElementById(id);
-          if (el) el.textContent = v;
-        };
-        const levels = Array.from(new Set(algos.map(a => a.level || 1))).sort(function(x, y){ return x - y; });
-        setText('statTotal', algos.length);
-        setText('statCount', algos.length);
-        setText('statGroups', grouped.length);
-        setText('statGroupCount', grouped.length);
-        setText('statLevelCount', levels.length);
-        setText('statHighCount', algos.filter(a => (a.level || 1) >= 3).length);
-
-        // 8b-2. 难度筛选（点一下过滤下面的卡片，和搜索框是叠加的）
+        // 难度筛选 chips 每次重渲染重建一遍（首页切换一级分类时跟着变）
         const chipsBox = document.getElementById('levelChips');
         if (chipsBox) {
           const counts = {};
-          algos.forEach(a => { const lv = a.level || 1; counts[lv] = (counts[lv] || 0) + 1; });
+          cat.subs.forEach(s => s.items.forEach(a => {
+            const lv = a.level || 1; counts[lv] = (counts[lv] || 0) + 1;
+          }));
+          const all = catCount(cat);
+          chipsBox.innerHTML = '';
           const addChip = function(lv, label, n){
             const b = document.createElement('button');
             b.type = 'button';
@@ -492,34 +574,52 @@
             });
             chipsBox.appendChild(b);
           };
-          addChip(0, '全部', algos.length);
-          levels.forEach(lv => addChip(lv, LV[lv], counts[lv] || 0));
-        }
-
-        // 8b-3. 三条学习路线（篇目与篇数取自索引，点进去是该路线的第一篇）
-        const pathsBox = document.getElementById('routePaths');
-        if (pathsBox) {
-          pathsBox.innerHTML = ROUTES.map(function(r){
-            const items = r.groups.reduce(function(acc, name){
-              const g = grouped.filter(x => x.name === name)[0];
-              return g ? acc.concat(g.items) : acc;
-            }, []);
-            if (!items.length) return '';
-            return '<a class="path-card" href="' + ROOT + items[0].file + '">' +
-                '<span class="path-tag ' + r.tone + '">' + r.tag + '</span>' +
-                '<h3>' + r.title + '</h3>' +
-                '<p class="path-desc">' + r.desc + '</p>' +
-                '<p class="path-list">' + items.slice(0, 4).map(a => '· ' + a.title).join('\n') + '</p>' +
-                '<span class="path-more">' + r.groups.join(' + ') + ' · ' + items.length + ' 篇</span>' +
-              '</a>';
-          }).join('');
+          addChip(0, '全部', all);
+          Object.keys(counts).map(Number).sort((x, y) => x - y)
+            .forEach(lv => addChip(lv, LV[lv], counts[lv]));
         }
       }
 
-      // 8c. 上下篇（按 json 里的整体顺序；两个链接放在同一个 .pager 行内）
+      // 8-5. 顶部统计（数字全部从索引算，不写死）
+      const setText = function(id, v){
+        const el = document.getElementById(id);
+        if (el) el.textContent = v;
+      };
+      setText('statTotal', algos.length);
+      setText('statCount', algos.length);
+      setText('statGroups', tree.length);
+      setText('statGroupCount', subCount);
+      setText('statL1', tree.length);
+      setText('statL2', subCount);
+      setText('statHighCount', algos.filter(a => (a.level || 1) >= 3).length);
+
+      // 8-6. 三条学习路线（二级分类改名后照旧按名取篇目）
+      const pathsBox = document.getElementById('routePaths');
+      if (pathsBox) {
+        pathsBox.innerHTML = ROUTES.map(function(r){
+          const items = r.subs.reduce(function(acc, name){
+            for (let i = 0; i < tree.length; i++) {
+              const s = tree[i].subs.filter(x => x.name === name)[0];
+              if (s) { return acc.concat(s.items); }
+            }
+            return acc;
+          }, []);
+          if (!items.length) return '';
+          return '<a class="path-card" href="' + ROOT + items[0].file + '">' +
+              '<span class="path-tag ' + r.tone + '">' + r.tag + '</span>' +
+              '<h3>' + r.title + '</h3>' +
+              '<p class="path-desc">' + r.desc + '</p>' +
+              '<p class="path-list">' + items.slice(0, 4).map(a => '· ' + a.title).join('\n') + '</p>' +
+              '<span class="path-more">' + r.subs.filter(function(n){
+                return tree.some(c => c.subs.some(s => s.name === n));
+              }).join(' + ') + ' · ' + items.length + ' 篇</span>' +
+            '</a>';
+        }).join('');
+      }
+
+      // 8-7. 上下篇（按三层目录铺平后的顺序；两个链接放在同一个 .pager 行内）
       if (main && sidebar) {
-        const flat = grouped.reduce((acc, g) => acc.concat(g.items), []);
-        const idx = flat.findIndex(a => fileName(a) === current);
+        const idx = curAlgo ? flat.findIndex(a => a.id === curAlgo.id) : -1;
         if (idx >= 0) {
           const nav = document.createElement('nav');
           nav.className = 'pager';
@@ -535,6 +635,17 @@
           if (idx < flat.length - 1) { nextHref = ROOT + flat[idx + 1].file; nav.appendChild(makeItem(flat[idx + 1], 'next')); }
           if (nav.children.length) main.appendChild(nav);
         }
+      }
+
+      // 8-8. 初始选中：算法页看当前页属于哪一类，首页优先看 URL 里的 #cat-<分类名>
+      {
+        const m = decodeURIComponent(location.hash || '').match(/^#cat-(.+)$/);
+        let start = -1;
+        if (m) start = catIndex(m[1]);
+        if (start < 0 && curCatName) start = catIndex(curCatName);
+        if (start < 0) start = Math.max(0, catIndex('算法基础'));
+        if (start < 0) start = 0;
+        if (sidebar || isIndex) selectCat(start, false);
       }
     })
     .catch(err => {

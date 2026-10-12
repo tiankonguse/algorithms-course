@@ -1,4 +1,5 @@
-// 首页单独校验：卡片数 == algorithms.json 条数、组名列表与 json 一致、无 JS 错误
+// 首页单独校验（三层目录版）：顶栏一级分类一行且与非空分类一致，
+// 切换每个一级分类后，正文分区数 / 卡片数与 json 对得上，无 JS 错误
 // 用法（必须与「起 Chrome」写在同一条命令里）：
 //   node verify_home.js            # 期望值直接从 algorithms.json 读
 const fs = require('fs');
@@ -7,17 +8,30 @@ const os = require('os');
 const SITE = (process.env.SITE_DIR || '~/project/github/AIProject/algorithms-course').replace(/^~(?=\/|$)/, os.homedir());
 
 const json = JSON.parse(fs.readFileSync(SITE.replace(/\/$/, '') + '/assets/data/algorithms.json', 'utf8'));
-const expectCards = json.algorithms.length;
-const expectGroups = json.groups.map(g => g.name);
+const byGroup = {};
+json.algorithms.forEach(a => { (byGroup[a.group] = byGroup[a.group] || []).push(a); });
+const TREE = (json.categories || [])
+  .map(name => ({
+    name,
+    subs: json.groups.filter(g => g.cat === name && byGroup[g.name] && byGroup[g.name].length)
+      .map(g => ({ name: g.name, items: byGroup[g.name] }))
+  }))
+  .filter(c => c.subs.length);
+// 与 shared.js 的默认选中一致：优先「算法基础」，否则第一个非空分类
+const DEFAULT_CAT = (TREE.find(c => c.name === '算法基础') || TREE[0]).name;
 
 const CHECK = `(function(){
   var out = {};
   out.ready = document.readyState;
+  out.title = document.getElementById('catalogTitle').textContent;
+  out.tabs = Array.prototype.slice.call(document.querySelectorAll('.cat-tab')).map(function(t){ return t.textContent.replace(/\\s*\\d+\\s*$/, '').trim(); });
+  var tops = Array.prototype.slice.call(document.querySelectorAll('.cat-tab')).map(function(t){ return Math.round(t.getBoundingClientRect().top); });
+  out.oneRow = new Set(tops).size === 1;
   out.cards = document.querySelectorAll('.cards .card').length;
   out.groups = Array.prototype.slice.call(document.querySelectorAll('.group-title'))
-    .map(function(t){ return t.textContent.replace(/^\\s*\\d+/, '').trim(); });
-  out.titles = Array.prototype.slice.call(document.querySelectorAll('.card-head h3')).map(function(h){ return h.textContent.trim(); });
-  out.navGroups = document.querySelectorAll('.sidebar .nav-group').length;
+    .map(function(t){ return t.textContent.replace(/^\\s*\\d+/, '').replace(/\\s*\\d+ 篇\\s*$/, '').trim(); });
+  out.navGroups = document.querySelectorAll('#homeNav .nav-group').length;
+  out.collapsedAll = Array.prototype.slice.call(document.querySelectorAll('#homeNav .nav-group')).every(function(g){ return g.classList.contains('collapsed'); });
   out.bad = [];
   return out;
 })()`;
@@ -73,22 +87,55 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') ||
     m.method === 'Runtime.exceptionThrown');
 
-  const groupsOk = JSON.stringify(v.groups) === JSON.stringify(expectGroups);
-  // 首页本身没有侧边栏（shared.js 不给 index 注入 sidebar），navGroups 为 0 属正常；
-  // 若将来首页也带导航，则必须与组数一致。
-  const navOk = v.navGroups === 0 || v.navGroups === expectGroups.length;
-  const ok = v.cards === expectCards && groupsOk && navOk && errs.length === 0;
-  if (!ok) fails++;
-
-  console.log('--- index.html', ok ? 'PASS' : 'FAIL');
-  console.log('   卡片:', v.cards, '(期望 ' + expectCards + ')  nav 组:', v.navGroups, '(首页无侧栏时为 0)');
-  console.log('   组名:', v.groups.join(' / '));
-  if (!groupsOk) {
-    console.log('   组名不一致，期望:', expectGroups.join(' / '));
+  // 顶栏与非空一级分类一致，且恰好一行
+  const wantTabs = TREE.map(c => c.name);
+  if (JSON.stringify(v.tabs) !== JSON.stringify(wantTabs)) {
+    console.log('   顶栏分类不一致，期望:', wantTabs.join(' / '), '实际:', v.tabs.join(' / '));
     fails++;
   }
-  console.log('   末三张卡片:', v.titles.slice(-3).join(' / '));
-  if (errs.length) { console.log('   JS错误:', errs.slice(0, 3).map(m => m.method).join(',')); }
+  if (!v.oneRow) { console.log('   顶栏没有排成一行'); fails++; }
+
+  // 默认分类的正文
+  const def = TREE.find(c => c.name === v.title);
+  if (!def) { console.log('   默认分类异常:', v.title); fails++; }
+  else {
+    const wantGroups = def.subs.map(s => s.name);
+    const wantCards = def.subs.reduce((n, s) => n + s.items.length, 0);
+    if (JSON.stringify(v.groups) !== JSON.stringify(wantGroups)) {
+      console.log('   分区名不一致，期望:', wantGroups.join(' / '), '实际:', v.groups.join(' / '));
+      fails++;
+    }
+    if (v.cards !== wantCards) { console.log('   卡片数', v.cards, '期望', wantCards); fails++; }
+    if (v.navGroups !== def.subs.length) { console.log('   左侧二级数', v.navGroups, '期望', def.subs.length); fails++; }
+    if (!v.collapsedAll) { console.log('   左侧第三层默认应全部折叠'); fails++; }
+  }
+
+  // 逐个一级分类点一遍，核对分区与卡片数
+  for (let i = 0; i < TREE.length; i++) {
+    const c = TREE[i];
+    await send('Runtime.evaluate', { expression: `document.querySelectorAll('.cat-tab')[${i}].click()`, returnByValue: true }, sessionId);
+    await sleep(300);
+    const r = await send('Runtime.evaluate', {
+      returnByValue: true,
+      expression: `({ title: document.getElementById('catalogTitle').textContent,
+                      groups: document.querySelectorAll('#index-list .group').length,
+                      cards: document.querySelectorAll('#index-list .card').length })`
+    }, sessionId);
+    const got = r.result.value;
+    const wantGroups = c.subs.length;
+    const wantCards = c.subs.reduce((n, s) => n + s.items.length, 0);
+    const catOk = got.title === c.name && got.groups === wantGroups && got.cards === wantCards;
+    if (!catOk) {
+      console.log('   分类「' + c.name + '」不符，实际', JSON.stringify(got), '期望', c.name, wantGroups, wantCards);
+      fails++;
+    }
+  }
+
+  const ok = fails === 0 && errs.length === 0;
+  console.log('--- index.html', ok ? 'PASS' : 'FAIL');
+  console.log('   顶栏:', v.tabs.join(' / '), v.oneRow ? '（一行）' : '（未排成一行！）');
+  console.log('   默认分类:', v.title, '· 分区', v.groups.length, '· 卡片', v.cards);
+  if (errs.length) { console.log('   JS错误:', errs.slice(0, 3).map(m => m.method).join(',')); fails++; }
   await pg.closeTab(sessionId);
   ws.close();
   process.exit(fails ? 1 : 0);
