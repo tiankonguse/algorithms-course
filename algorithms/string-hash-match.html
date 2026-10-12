@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>字符串哈希：滑动窗口下的两个匹配问题</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.card { min-width: 30px; padding: 5px 7px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.bad { background: #fee2e2; border-color: #dc2626; color: #991b1b; }
+.card.empty { background: transparent; border-style: dashed; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+table.freq { border-collapse: collapse; margin: 6px 0 2px; font-size: 13px; }
+table.freq td, table.freq th { border: 1px solid var(--border); padding: 3px 9px; text-align: center; }
+table.freq th { color: var(--text-dim); font-weight: 400; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>字符串哈希：滑动窗口下的两个匹配问题</h1>
+      <p class="intro">两道题都在一个长串上取等长的一段去比。第一道先把 a 拼到够长，再滑一个窗口找 b；第二道要同时比好几段，麻烦在于起点有字数那么多种对齐方式，硬枚举会多乘一个长度。两题都靠「取一段的哈希值是 O(1)」这一步收场。</p>
+
+      <h2>零、两道题</h2>
+      <p>题 4（LeetCode 686）：给两个字符串 a 和 b，问 a 最少重复叠加几次能让 b 成为子串，做不到返回 -1。<code>"abc"</code> 叠加 0 次是空串，1 次是 <code>"abc"</code>，2 次是 <code>"abcabc"</code>。</p>
+      <p>题 5（LeetCode 30）：给字符串 s 和等长的单词表 words，找出 s 里所有「串联子串」的起始下标。串联子串指 words 里每个词各用一次、任意顺序接起来的串。words = {ab, cd, ef} 时，<code>"abcdef"</code>、<code>"cdabef"</code> 算，<code>"acdbef"</code> 不算。</p>
+
+      <h2>一、题 4：先拼到 k+1 份</h2>
+      <p>设 a 的长度是 n，b 的长度是 m，<code>k = ceil(m / n)</code>。b 至少要 k 份 a 才装得下，所以把 a 重复 k+1 份拼成一个长串，在里面滑一个长度 m 的窗口逐个比哈希值。</p>
+      <p>为什么拼 k+1 份就够：k+1 份里都找不到 b，说明这段长串里没有任何一个位置能对上 b。再往后加份数只是把同一张图案接得更长，新的窗口要么是已经看过的，要么跨过更长的一段但它仍然落在这张周期图案里，所以还是对不上。扫完这个长串没命中，答案就是 -1。</p>
+      <p>命中之后回答几份，看窗口右端 <code>r</code> 落在哪：r 小于 <code>n × k</code>，说明这一段整个落在前 k 份里，返回 k；否则这段跨过了 k 份的边界，要 k+1 份。</p>
+      <figure class="fig" id="fig-repeat">
+        <figcaption>图 1　三种结局：命中在前 k 份里返回 k，跨过 kn 边界返回 k+1，扫完没命中返回 -1</figcaption>
+      </figure>
+          <pre class="code"><span class="cm">// 重复叠加 a，最少几次能让 b 成为子串，做不到返回 -1</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 30005;
+
+    <span class="kw">char</span> s[MAXN];
+    <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> pw[MAXN], hs[MAXN];
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n) {
+        pw[0] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            pw[i] = pw[i - 1] * base;
+        }
+        hs[0] = s[0] - 'a' + 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            hs[i] = hs[i - 1] * base + s[i] - 'a' + 1;
+        }
+    }
+
+    <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> <span class="fn">getHash</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> ans = hs[r];
+        <span class="kw">if</span> (l &gt; 0) {
+            ans -= hs[l - 1] * pw[r - l + 1];
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">repeatedStringMatch</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;a, <span class="kw">const</span> <span class="kw">string</span> &amp;b) {
+        <span class="kw">int</span> n = a.size(), m = b.size();
+        <span class="kw">int</span> k = (m + n - 1) / n;          <span class="cm">// m / n 向上取整</span>
+        <span class="kw">int</span> len = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> c = 0; c &lt;= k; c++) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+                s[len++] = a[i];
+            }
+        }
+        build(len);
+        <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> h2 = b[0] - 'a' + 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; m; i++) {
+            h2 = h2 * base + b[i] - 'a' + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> l = 0, r = m - 1; r &lt; len; l++, r++) {
+            <span class="kw">if</span> (getHash(l, r) == h2) {
+                <span class="kw">return</span> r &lt; n * k ? k : (k + 1);
+            }
+        }
+        <span class="kw">return</span> -1;
+    }</pre>
+      <p>这道题只能返回 k 或者 k+1，不存在要更多份的情况：k+1 份已经是周期串的两轮以上，再长也不会生出新图案。反过来，值也不可能是 1 到 k-1，因为 k-1 份的长度还不到 m。</p>
+      <p>三个容易写错的地方：循环写成只拼 k 份，跨边界的那批用例直接找不到；命中之后不看 r 和 <code>n × k</code> 的关系，一律返回 k，同样漏掉 k+1 那批；边界条件写成 <code>r &lt;= n * k</code>，把刚好落在边界上的窗口判成了 k+1。</p>
+      <figure class="fig" id="fig-bad-repeat">
+        <figcaption>图 2　题 4 的三个错法：三种错法都只有几个百分点的出错率，因为需要 k+1 份的用例本来就少</figcaption>
+      </figure>
+      <p>实测这道题很快：|a| = 20、|b| = 9990 的随机数据 0.044 毫秒，|a| = 1、|b| = 9999 拼到一万个字符再扫一遍也只要 0.087 毫秒。</p>
+
+      <h2>二、题 5：同余分组加滑动窗口</h2>
+      <p>朴素的思路是枚举 s 里每个起点，往后取 wordNum 个词，和 words 的词频表比一比。取词是 O(wordNum × 词长)，枚举起点是 O(n)，乘起来是 O(n × m)，在 n = m = 10<sup>4</sup> 的规模上要跑几十毫秒。</p>
+      <p>第一处优化：起点其实只有 词长 种。串联串的第一个词必然从 <code>init + j × 词长</code> 这类位置开始，<code>init</code> 取 0 到 词长−1。以 init 把下标分成 词长 组，每组内部相邻位置正好差一个词长，组内滑窗时窗口的进、出都落在词边界上，不用重新切词。</p>
+      <figure class="fig" id="fig-group">
+        <figcaption>图 3　词长 3 时的三组对齐方式：每种起点都在其中一组里，组内步长恰好是一个词长</figcaption>
+      </figure>
+      <p>第二处优化：窗口每挪一个词长，只出去一个词、进来一个词，词频表可以增量维护。为了不每次都比整张表，用「欠债」记账：</p>
+      <p>1）建第一个窗口时，每放进一个词，<code>win[cur]</code> 加一；如果 <code>win[cur] &lt;= need[cur]</code>，说明这个词是 words 需要的，欠的个数减一。</p>
+      <p>2）窗口挪一格：出去的词 <code>win[out]</code> 减一，减完如果 <code>win[out] &lt; need[out]</code>，说明这个位置空出来了，欠的个数加一；进来的词 <code>win[in]</code> 加一，加完如果 <code>win[in] &lt;= need[in]</code>，欠的个数减一。</p>
+      <p>3）<code>debt == 0</code> 时，窗口里每个词的数量都不多于 words 需要的数量，而窗口总长度又恰好是 words 的总长，两边只能完全相等，这一格就是答案。</p>
+      <figure class="fig" id="fig-debt">
+        <figcaption>图 4　窗口挪一格：左边出去的那个词让欠债回升，右边进来的那个词让欠债下降</figcaption>
+      </figure>
+      <p>窗口里存的是哈希值，不是字符串，所以比较词频就是在比较整数。单个词的哈希值用 <code>hashStr</code> 直接乘出来，不用建数组：</p>
+          <pre class="code"><span class="cm">// 左闭右开版本：getHash(l, r) 返回 s[l...r-1] 的哈希值，和闭区间版本差一格</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 10001;
+
+    <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> pw[MAXN], hs[MAXN];
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;str) {
+        pw[0] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; MAXN; i++) {
+            pw[i] = pw[i - 1] * base;
+        }
+        hs[0] = str[0] - 'a' + 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; str.size(); i++) {
+            hs[i] = hs[i - 1] * base + str[i] - 'a' + 1;
+        }
+    }
+
+    <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> <span class="fn">getHash</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> ans = hs[r - 1];
+        <span class="kw">if</span> (l &gt; 0) {
+            ans -= hs[l - 1] * pw[r - l];
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="cm">// 不借外面任何数组，单独算一个字符串的哈希值</span>
+    <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> <span class="fn">hashStr</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;str) {
+        <span class="kw">if</span> (str.empty()) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> ans = str[0] - 'a' + 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; str.size(); i++) {
+            ans = ans * base + str[i] - 'a' + 1;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>主过程按 init 分组，每组先把第一个窗口装起来，再一格一格挪：</p>
+          <pre class="code"><span class="cm">// 返回 s 中所有串联子串的起始下标</span>
+    vector&lt;<span class="kw">int</span>&gt; <span class="fn">findSubstring</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;s, <span class="kw">const</span> vector&lt;<span class="kw">string</span>&gt; &amp;words) {
+        vector&lt;<span class="kw">int</span>&gt; ans;
+        unordered_map&lt;<span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span>, <span class="kw">int</span>&gt; mp;
+        <span class="kw">for</span> (<span class="kw">const</span> <span class="kw">string</span> &amp;w : words) {
+            mp[hashStr(w)]++;
+        }
+        build(s);
+        <span class="kw">int</span> n = s.size();
+        <span class="kw">int</span> wordLen = words[0].size();
+        <span class="kw">int</span> wordNum = words.size();
+        <span class="kw">int</span> allLen = wordLen * wordNum;
+        unordered_map&lt;<span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span>, <span class="kw">int</span>&gt; win;
+        <span class="kw">for</span> (<span class="kw">int</span> init = 0; init &lt; wordLen &amp;&amp; init + allLen &lt;= n; init++) {   <span class="cm">// 同余分组</span>
+            <span class="kw">int</span> debt = wordNum;
+            <span class="cm">// 第一个窗口：从 init 开始装 wordNum 个词</span>
+            <span class="kw">for</span> (<span class="kw">int</span> l = init, r = init + wordLen, part = 0; part &lt; wordNum;
+                 l += wordLen, r += wordLen, part++) {
+                <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> cur = getHash(l, r);
+                win[cur]++;
+                <span class="kw">if</span> (win[cur] &lt;= mp[cur]) {
+                    debt--;
+                }
+            }
+            <span class="kw">if</span> (debt == 0) {
+                ans.push_back(init);
+            }
+            <span class="cm">// 之后每步窗口进一个、出一个</span>
+            <span class="kw">for</span> (<span class="kw">int</span> l1 = init, r1 = init + wordLen, l2 = init + allLen, r2 = init + allLen + wordLen;
+                 r2 &lt;= n; l1 += wordLen, r1 += wordLen, l2 += wordLen, r2 += wordLen) {
+                <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> out = getHash(l1, r1), in = getHash(l2, r2);
+                win[out]--;
+                <span class="kw">if</span> (win[out] &lt; mp[out]) {
+                    debt++;
+                }
+                win[in]++;
+                <span class="kw">if</span> (win[in] &lt;= mp[in]) {
+                    debt--;
+                }
+                <span class="kw">if</span> (debt == 0) {
+                    ans.push_back(r1);
+                }
+            }
+            win.clear();
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>实测 n = 10000、词长 3、词数 20 的数据，随机串上 0.435 毫秒；把 100 份标准串联埋进去，找到 102 个起手也只要 0.416 毫秒。同样这份数据用「每个起点取词比词频表」的暴力写，35.82 毫秒，哈希版快 84 倍。</p>
+      <figure class="fig" id="fig-perf">
+        <figcaption>图 5　题 5：n = 10000、词长 3、词数 20，暴力枚举起点与哈希滑窗的耗时（对数刻度）</figcaption>
+      </figure>
+      <p>三个易错点：滑动只在 init = 0 这一组做，漏掉另外 词长−1 组，答案会少一批（实测在 n ≤ 24、词长 2 的随机数据上 10.56% 的用例出错）；第一个窗口装完忘了立即判一次 <code>debt == 0</code>，从 0 号位置开始的答案会漏；出去的词减完判断写成 <code>win[out] &lt;= need[out]</code>，多算了一次欠债，这个错法在随机数据上 37.91% 到 60.87% 被抓到。</p>
+      <figure class="fig" id="fig-bad-words">
+        <figcaption>图 6　题 5 的三个错法：抓到多少取决于数据里本来有多少命中</figcaption>
+      </figure>
+
+      <div class="viz" id="viz-repeat">
+        <p class="viz-title">重复叠加：窗口滑一遍</p>
+        <p class="viz-note">把 a 重复 k+1 份拼好，窗口从下标 0 开始一格一格挪。橙色竖线是 k 份与 k+1 份的分界 <span class="mono">n × k</span>，命中的窗口如果压过这条线，答案就是 k+1。</p>
+        <div id="rep-board"></div>
+        <p class="viz-note" id="rep-note"></p>
+        <p class="viz-answer" id="rep-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="rep-case"></select></label>
+          <button id="rep-next" type="button">下一步</button>
+          <button id="rep-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <div class="viz" id="viz-window">
+        <p class="viz-title">同余分组：一格一格挪窗口</p>
+        <p class="viz-note">选一组 init，先把第一个窗口的词戳进词频表，再一格一格地出一个、进一个。看债怎么涨落，以及 <span class="mono">debt == 0</span> 出现在哪几格。</p>
+        <div id="win-board"></div>
+        <p class="viz-note" id="win-note"></p>
+        <p class="viz-answer" id="win-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="win-case"></select></label>
+          <button id="win-next" type="button">下一步</button>
+          <button id="win-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>三、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>题 4　暴力逐次拼接</td><td>每个份数都从头 find 一遍</td><td>O(m<sup>2</sup>/n) 起</td><td>O(m)</td></tr>
+        <tr><td>题 4　哈希滑窗</td><td>拼 k+1 份，再滑一遍</td><td>O(n + m)</td><td>O(n + m)</td></tr>
+        <tr><td>题 5　枚举起点</td><td>每个起点取 wordNum 个词比词频</td><td>O(n × 总词长)</td><td>O(总词长)</td></tr>
+        <tr><td>题 5　同余分组滑窗</td><td>词长 组各自滑到底，每步进出各一次</td><td>O(n + m)</td><td>O(词数)</td></tr>
+      </table>
+      <p class="breakdown">题 4 拼出来的长串长度是 <code>n × (k + 1)</code>，而 k = ceil(m/n)，所以是 O(n + m)；扫描同样是 O(n + m)。题 5 一共要滑 词长 组、每组滑 n / 词长 格，加起来 O(n) 步，每步只做常数次哈希查询与表更新；建 words 词频表是 O(m)，建 s 的哈希数组是 O(n)，总复杂度与单词个数、单词长度都无关。空间上题 4 要开 <code>n × (k+1)</code> 个字符，题 5 的两张表各有不超过 words 种类那么多个键。</p>
+
+      <h2>总结</h2>
+      <p>题 4 的答案是 k 或者 k+1，k = ceil(m/n)；拼到 k+1 份扫一遍，找不到就是 -1。</p>
+      <p>题 5 的起点只有 词长 种对齐方式，按 init 分组之后组内滑窗的进出都落在词边界上。</p>
+      <p>词频表用欠债记账，进一个、出一个各更新一次，<code>debt == 0</code> 就是答案，不必每次比整张表。</p>
+      <p>两题都是 O(n + m)：一题的复杂度和 a、b 的长度成线性，另一题和单词个数、单词长度都无关。哈希在这里换掉的是「切词」和「取词」这两步的代价。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>重复叠加字符串匹配</td><td><a href="https://leetcode.cn/problems/repeated-string-match/" target="_blank">686. 重复叠加字符串匹配</a></td></tr>
+        <tr><td>LeetCode</td><td>串联所有单词的子串</td><td><a href="https://leetcode.cn/problems/substring-with-concatenation-of-all-words/" target="_blank">30. 串联所有单词的子串</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解105【扩展】字符串哈希原理、代码、题目详解</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>字符串哈希</td><td><a href="https://oi-wiki.org/string/hash/" target="_blank">oi-wiki.org/string/hash</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626', GREEN = '#16a34a';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2', FILL_G = '#dcfce7';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:6, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+
+  // ===== 图 1：重复叠加的三种结局 =====
+  (function(){
+    var host = document.getElementById('fig-repeat');
+    if (!host) return;
+    var W = 660, H = 246;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '橙色虚线是 k 份与 k+1 份的分界 n × k', {'font-size':12.5, fill:'#1f2328'}));
+    var rows = [
+      {cap:'a = "abc"，b = "bc"：k = 1，拼 2 份，命中 [1,2] 落在分界左边 → 返回 1', s:'abcabc', kn:3, l:1, m:2, ret:'1', ok:true},
+      {cap:'a = "abcd"，b = "cdabcdab"：k = 2，拼 3 份，命中 [2,9] 压过分界 → 返回 3', s:'abcdabcdabcd', kn:8, l:2, m:8, ret:'3', ok:true},
+      {cap:'a = "abc"，b = "cabx"：k = 2，拼 3 份，扫完没命中 → 返回 −1', s:'abcabcabc', kn:6, l:-1, m:4, ret:'-1', ok:false}
+    ];
+    var cw = 40, x0 = 40;
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r], y = 34 + r * 72;
+      svg.appendChild(txt(16, y + 6, row.cap, {'font-size':11.5, fill:'#6b7280'}));
+      for (var i = 0; i < row.s.length; i++) {
+        var inWin = row.l >= 0 && i >= row.l && i < row.l + row.m;
+        svg.appendChild(box(x0 + i * cw, y + 12, cw - 4, 28, inWin ? FILL_G : '#ffffff', inWin ? GREEN : '#e6e8eb'));
+        svg.appendChild(txt(x0 + i * cw + (cw - 4) / 2, y + 31, row.s[i], {'text-anchor':'middle', 'font-size':13,
+          'font-weight': inWin ? 700 : 400, fill: inWin ? '#166534' : '#9aa0a6'}));
+      }
+      var bx = x0 + row.kn * cw - 2;
+      svg.appendChild(el('line', {x1:bx, y1:y + 6, x2:bx, y2:y + 46, stroke:ORANGE, 'stroke-width':1.6, 'stroke-dasharray':'5 4'}));
+      svg.appendChild(txt(bx + 4, y + 52, 'n × k = ' + row.kn, {'font-size':10.5, fill:ORANGE}));
+      svg.appendChild(txt(600, y + 31, row.ok ? '返回 ' + row.ret : '返回 ' + row.ret, {'font-size':13, 'font-weight':700,
+        fill: row.ok ? GREEN : RED}));
+    }
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：题 4 错法 =====
+  (function(){
+    var host = document.getElementById('fig-bad-repeat');
+    if (!host) return;
+    var W = 660, H = 158;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '题 4：20000 组随机 a、b，返回值与原版不同即算抓到', {'font-size':12, fill:'#1f2328'}));
+    var xs = [24, 292, 372, 452, 530];
+    var head = ['写法', '档一', '档二', '档三', '说明'];
+    for (var c = 0; c < head.length; c++) svg.appendChild(txt(xs[c], 42, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    var rows = [
+      ['只拼 k 份', '5.04%', '2.79%', '3.60%', '跨边界的用例找不到', RED],
+      ['返回值写死 k', '4.65%', '2.65%', '3.63%', '需要 k+1 份时答错', RED],
+      ['边界写 r <= n*k', '2.30%', '2.02%', '2.16%', '压线窗口判成 k+1', ORANGE]
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 64 + r * 26;
+      svg.appendChild(txt(xs[0], y, rows[r][0], {'font-size':11.5, fill:rows[r][5]}));
+      for (var c = 1; c <= 3; c++) svg.appendChild(txt(xs[c], y, rows[r][c], {'font-size':11.5, fill:rows[r][5]}));
+      svg.appendChild(txt(xs[4], y, rows[r][4], {'font-size':10.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(24, 150, '三档：|a|≤6 |b|≤14 表 2、|a|≤3 |b|≤10 表 2、|a|≤5 |b|≤14 表 3。', {'font-size':11, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：同余分组 =====
+  (function(){
+    var host = document.getElementById('fig-group');
+    if (!host) return;
+    var W = 660, H = 216;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '词长 3：15 个下标分进三组，每组相邻两个差 3', {'font-size':12.5, fill:'#1f2328'}));
+    var cw = 40, x0 = 60, N = 15;
+    svg.appendChild(txt(x0 - 10, 52, '下标', {'text-anchor':'end', 'font-size':11, fill:'#6b7280'}));
+    for (var i = 0; i < N; i++) {
+      svg.appendChild(box(x0 + i * cw, 36, cw - 4, 24, '#f6f7f9', '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 4) / 2, 52, String(i), {'text-anchor':'middle', 'font-size':10.5, fill:'#9aa0a6'}));
+    }
+    var names = ['init = 0 组', 'init = 1 组', 'init = 2 组'];
+    for (var g = 0; g < 3; g++) {
+      var y = 74 + g * 34;
+      svg.appendChild(txt(x0 - 10, y + 16, names[g], {'text-anchor':'end', 'font-size':11, fill:BLUE}));
+      for (var i = 0; i < N; i++) {
+        var on = (i % 3 === g);
+        if (!on) continue;
+        svg.appendChild(box(x0 + i * cw, y, cw - 4, 24, FILL_B, BLUE));
+        svg.appendChild(txt(x0 + i * cw + (cw - 4) / 2, y + 16, String(i), {'text-anchor':'middle', 'font-size':11, 'font-weight':700, fill:'#1e3a8a'}));
+      }
+    }
+    svg.appendChild(txt(16, 190, '每个串联串的第一个词，起点必是 0、3、6…这类位置，换个 init 就是另外两类。', {'font-size':11.5, fill:'#6b7280'}));
+    svg.appendChild(txt(16, 206, '组内每挪一格下标加 3，正好一个词长，窗口进出都落在词边界上。', {'font-size':11.5, fill:'#6b7280'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：窗口挪一格的债务变化 =====
+  (function(){
+    var host = document.getElementById('fig-debt');
+    if (!host) return;
+    var W = 660, H = 220;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '窗口装着 3 个词，往右挪一格', {'font-size':12.5, fill:'#1f2328'}));
+    var words = ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7'];
+    var cw = 78, x0 = 40;
+    for (var i = 0; i < words.length; i++) {
+      var inWin = i < 3;
+      svg.appendChild(box(x0 + i * cw, 34, cw - 6, 28, inWin ? FILL_B : '#ffffff', inWin ? BLUE : '#e6e8eb'));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 53, words[i], {'text-anchor':'middle', 'font-size':12,
+        'font-weight': inWin ? 700 : 400, fill: inWin ? '#1e3a8a' : '#9aa0a6'}));
+    }
+    svg.appendChild(el('line', {x1:x0 + cw - 3, y1:28, x2:x0 + cw - 3, y2:70, stroke:ORANGE, 'stroke-width':1.6, 'stroke-dasharray':'5 4'}));
+    svg.appendChild(txt(x0 + cw - 3, 84, '窗口右端', {'text-anchor':'middle', 'font-size':10.5, fill:ORANGE}));
+    svg.appendChild(txt(x0 + 12, 106, '① 出窗 w1', {'font-size':12, fill:RED}));
+    svg.appendChild(txt(x0 + 12, 122, 'win[w1] 减一　→　若 win[w1] < need[w1] 则 debt++', {'font-size':11.5, fill:'#374151'}));
+    svg.appendChild(txt(x0 + 12, 146, '② 进窗 w4', {'font-size':12, fill:GREEN}));
+    svg.appendChild(txt(x0 + 12, 162, 'win[w4] 加一　→　若 win[w4] <= need[w4] 则 debt--', {'font-size':11.5, fill:'#374151'}));
+    svg.appendChild(box(24, 178, 612, 32, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(40, 198, '③ 两步做完看 debt 是不是 0，是就记下这一格的下标', {'font-size':12, 'font-weight':700, fill:'#1f2328'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 5：题 5 性能 =====
+  (function(){
+    var host = document.getElementById('fig-perf');
+    if (!host) return;
+    var W = 660, H = 128;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'n = 10000、词长 3、词数 20，单位毫秒（对数刻度）', {'font-size':12.5, fill:'#1f2328'}));
+    var x0 = 210, w = 330;
+    var lo = Math.log10(0.1), hi = Math.log10(100);
+    function bx(v) { return w * (Math.log10(v) - lo) / (hi - lo); }
+    var rows = [
+      {n:'枚举起点 + 比词频', v:35.82, c:RED, fb:FILL_R},
+      {n:'同余分组 + 滑窗', v:0.426, c:BLUE, fb:FILL_B}
+    ];
+    for (var i = 0; i < rows.length; i++) {
+      var y = 38 + i * 34;
+      svg.appendChild(txt(x0 - 10, y + 13, rows[i].n, {'text-anchor':'end', 'font-size':11.5, fill:'#374151'}));
+      var bw = Math.max(bx(rows[i].v), 3);
+      svg.appendChild(box(x0, y, bw, 16, rows[i].fb, rows[i].c));
+      svg.appendChild(txt(x0 + bw + 8, y + 13, rows[i].v + ' ms', {'font-size':11.5, fill:rows[i].c}));
+    }
+    for (var e = -1; e <= 2; e++) {
+      var gx = x0 + w * (e - lo) / (hi - lo);
+      svg.appendChild(el('line', {x1:gx, y1:30, x2:gx, y2:104, stroke:'#e6e8eb', 'stroke-width':1}));
+      svg.appendChild(txt(gx, 118, (e === -1 ? '0.1' : String(Math.pow(10, e))), {'text-anchor':'middle', 'font-size':10.5, fill:'#9aa0a6'}));
+    }
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 6：题 5 错法 =====
+  (function(){
+    var host = document.getElementById('fig-bad-words');
+    if (!host) return;
+    var W = 660, H = 200;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '题 5：20000 组随机 s 与 words，找出来的起手列表与原版不同即算抓到', {'font-size':12, fill:'#1f2328'}));
+    var xs = [24, 292, 372, 452, 530];
+    var head = ['写法', '档一', '档二', '档三', '说明'];
+    for (var c = 0; c < head.length; c++) svg.appendChild(txt(xs[c], 44, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    var rows = [
+      ['只从 init = 0 滑', '10.56%', '0.15%', '19.44%', '另外几组全漏', RED],
+      ['首窗不判 debt == 0', '24.01%', '9.74%', '19.16%', '漏掉 0 号起手', RED],
+      ['出窗判断写 <=', '37.91%', '26.18%', '60.87%', '多算一次欠债', RED]
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 66 + r * 24;
+      svg.appendChild(txt(xs[0], y, rows[r][0], {'font-size':11.5, fill:rows[r][5]}));
+      for (var c = 1; c <= 3; c++) svg.appendChild(txt(xs[c], y, rows[r][c], {'font-size':11.5, fill:rows[r][5]}));
+      svg.appendChild(txt(xs[4], y, rows[r][4], {'font-size':10.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(24, 152, '三档：n≤24 词长 2 词数 3 表 2、n≤40 词长 3 词数 3 表 3、n≤60 词长 2 词数 4 表 2。', {'font-size':11, fill:'#9aa0a6'}));
+    svg.appendChild(txt(24, 170, '第二档几乎抓不到，因为 s 大多是随机串，随机串上本来就没有几个合法串联。', {'font-size':11, fill:'#9aa0a6'}));
+    svg.appendChild(txt(24, 186, '词数从 3 涨到 4，命中变密，同一个错法的抓取率跟着涨上去。', {'font-size':11, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示：重复叠加 =====
+  (function(){
+    var CASES = [['abc', 'bc'], ['abcd', 'cdabcdab'], ['abc', 'cabx'], ['a', 'aa'], ['abab', 'babab'], ['abcd', 'dabcd']];
+    var B = 499n;
+    var sel = document.getElementById('rep-case');
+    var board = document.getElementById('rep-board');
+    var note = document.getElementById('rep-note');
+    var ansEl = document.getElementById('rep-answer');
+    var btnN = document.getElementById('rep-next');
+    var btnR = document.getElementById('rep-reset');
+    if (!sel || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(i); o.textContent = 'a = "' + CASES[i][0] + '"　b = "' + CASES[i][1] + '"';
+      sel.appendChild(o);
+    }
+    var st = {ci:0, step:0, res:null};
+
+    function run(a, b) {
+      var n = a.length, m = b.length;
+      var k = Math.ceil(m / n);
+      var t = '';
+      for (var c = 0; c <= k; c++) t += a;
+      var pw = [], hs = [];
+      pw[0] = 1n;
+      for (var i = 1; i < t.length; i++) pw[i] = BigInt.asUintN(64, pw[i - 1] * B);
+      hs[0] = BigInt(t.charCodeAt(0) - 96);
+      for (var i = 1; i < t.length; i++) hs[i] = BigInt.asUintN(64, hs[i - 1] * B + BigInt(t.charCodeAt(i) - 96));
+      function getH(l, r) {
+        var v = hs[r];
+        if (l > 0) v = BigInt.asUintN(64, v - hs[l - 1] * pw[r - l + 1]);
+        return v;
+      }
+      var hb = BigInt(b.charCodeAt(0) - 96);
+      for (var i = 1; i < m; i++) hb = BigInt.asUintN(64, hb * B + BigInt(b.charCodeAt(i) - 96));
+      var frames = [];
+      for (var l = 0; l + m <= t.length; l++) {
+        frames.push({l:l, hit:getH(l, l + m - 1) === hb});
+      }
+      var hit = -1;
+      for (var i = 0; i < frames.length; i++) if (frames[i].hit) { hit = frames[i].l; break; }
+      var ret = hit < 0 ? -1 : (hit + m - 1 < n * k ? k : k + 1);
+      return {a:a, b:b, n:n, m:m, k:k, t:t, frames:frames, hit:hit, ret:ret, kn:n * k};
+    }
+    function cards(host, values, cls, pick) {
+      host.innerHTML = '';
+      var wrap = document.createElement('div');
+      wrap.className = 'cards';
+      for (var i = 0; i < values.length; i++) {
+        var d = document.createElement('div');
+        var c = 'card';
+        if (values[i] === null) c += ' empty';
+        if (cls && cls[i]) c += ' ' + cls[i];
+        if (i === pick) c += ' pick';
+        d.className = c;
+        d.innerHTML = (values[i] === null ? '·' : String(values[i])) + '<span class="idx">' + i + '</span>';
+        wrap.appendChild(d);
+      }
+      host.appendChild(wrap);
+    }
+    function render() {
+      var res = st.res;
+      var f = res.frames[st.step];
+      board.innerHTML = '';
+      var p1 = document.createElement('p'); p1.className = 'cap';
+      p1.textContent = '拼好的串（' + res.k + ' 份 a 再多拼一份，共 ' + res.t.length + ' 个字符）';
+      board.appendChild(p1);
+      var d1 = document.createElement('div'); board.appendChild(d1);
+      var vals = [], cls = [];
+      for (var i = 0; i < res.t.length; i++) {
+        var inWin = i >= f.l && i < f.l + res.m;
+        vals[i] = res.t[i];
+        cls[i] = inWin ? (f.hit ? 'ok' : 'bad') : (i >= res.kn ? null : null);
+      }
+      cards(d1, vals, cls, -1);
+      var p2 = document.createElement('p'); p2.className = 'cap';
+      p2.textContent = 'b = "' + res.b + '"';
+      board.appendChild(p2);
+      var d2 = document.createElement('div'); board.appendChild(d2);
+      var bv = [];
+      for (var i = 0; i < res.m; i++) bv[i] = res.b[i];
+      cards(d2, bv, null, -1);
+      note.textContent = '窗口 [' + f.l + ',' + (f.l + res.m - 1) + '] 的哈希值' + (f.hit ? '和 b 相同' : '和 b 不同') +
+        '；n × k = ' + res.n + ' × ' + res.k + ' = ' + res.kn + '，橙色分界线在 ' + res.kn + ' 号格子前。';
+      var last = st.step === res.frames.length - 1;
+      btnN.disabled = last;
+      if (last) {
+        if (res.ret > 0) {
+          ansEl.textContent = '命中在 [' + res.hit + ',' + (res.hit + res.m - 1) + ']，' +
+            (res.hit + res.m - 1 < res.kn ? '右端在前 ' + res.k + ' 份里' : '右端压过了 ' + res.kn + ' 这条分界线') +
+            '，返回 ' + res.ret + ' 份。';
+        } else {
+          ansEl.textContent = '整段扫完没有命中，返回 −1。再往下拼只是同一张图案，也不会有。';
+        }
+      } else {
+        ansEl.textContent = '';
+      }
+      var knEl = document.getElementById('win-kn');
+      if (knEl) knEl.textContent = '';
+    }
+    function rebuild() {
+      st.res = run(CASES[st.ci][0], CASES[st.ci][1]);
+      st.step = 0;
+      render();
+    }
+    sel.addEventListener('change', function() { st.ci = Number(sel.value); rebuild(); });
+    btnN.addEventListener('click', function() { if (st.step < st.res.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function() { st.step = 0; render(); });
+    rebuild();
+  })();
+
+  // ===== 演示：同余分组窗口 =====
+  (function(){
+    var WORDS = [
+      {s:'barfoothefoobarman', w:['foo', 'bar']},
+      {s:'abcdefabefcd', w:['ab', 'cd', 'ef']},
+      {s:'aaaaaa', w:['aa', 'aa']},
+      {s:'wordgoodgoodgoodbestword', w:['word', 'good', 'best', 'word']},
+      {s:'fooobar', w:['foo', 'bar']}
+    ];
+    var B = 499n;
+    var sel = document.getElementById('win-case');
+    var board = document.getElementById('win-board');
+    var note = document.getElementById('win-note');
+    var ansEl = document.getElementById('win-answer');
+    var btnN = document.getElementById('win-next');
+    var btnR = document.getElementById('win-reset');
+    if (!sel || !board) return;
+    for (var i = 0; i < WORDS.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = '"' + WORDS[i].s + '"　{ ' + WORDS[i].w.join(', ') + ' }';
+      sel.appendChild(o);
+    }
+    var st = {ci:0, gi:0, step:0, res:null};
+
+    function hstr(w) {
+      if (!w.length) return '0';
+      var v = BigInt(w.charCodeAt(0) - 96);
+      for (var i = 1; i < w.length; i++) v = BigInt.asUintN(64, v * B + BigInt(w.charCodeAt(i) - 96));
+      return v.toString();
+    }
+    function run(cs) {
+      var s = cs.s, words = cs.w;
+      var wl = words[0].length, wn = words.length, all = wl * wn, n = s.length;
+      var need = {}, i, k;
+      for (i = 0; i < wn; i++) need[hstr(words[i])] = (need[hstr(words[i])] || 0) + 1;
+      var pw = [], hs = [];
+      pw[0] = 1n;
+      for (i = 1; i < n; i++) pw[i] = BigInt.asUintN(64, pw[i - 1] * B);
+      hs[0] = BigInt(s.charCodeAt(0) - 96);
+      for (i = 1; i < n; i++) hs[i] = BigInt.asUintN(64, hs[i - 1] * B + BigInt(s.charCodeAt(i) - 96));
+      function seg(l, r) {                       // 左闭右开
+        var v = hs[r - 1];
+        if (l > 0) v = BigInt.asUintN(64, v - hs[l - 1] * pw[r - l]);
+        return v.toString();
+      }
+      var groups = [];
+      for (var init = 0; init < wl && init + all <= n; init++) {
+        var win = {}, debt = wn, steps = [];
+        for (var l = init, r = init + wl, part = 0; part < wn; l += wl, r += wl, part++) {
+          var cur = seg(l, r);
+          win[cur] = (win[cur] || 0) + 1;
+          if (win[cur] <= (need[cur] || 0)) debt--;
+        }
+        steps.push({kind:'init', at:init, win:win, debt:debt, hit:debt === 0, out:null, in:null});
+        var ans = [];
+        if (debt === 0) ans.push(init);
+        for (var l1 = init, r1 = init + wl, l2 = init + all, r2 = init + all + wl;
+             r2 <= n; l1 += wl, r1 += wl, l2 += wl, r2 += wl) {
+          var out = seg(l1, r1), inn = seg(l2, r2);
+          win[out]--;
+          if (win[out] < (need[out] || 0)) debt++;
+          win[inn] = (win[inn] || 0) + 1;
+          if (win[inn] <= (need[inn] || 0)) debt--;
+          steps.push({kind:'move', at:r1, win:win, debt:debt, hit:debt === 0, out:out, in:inn,
+                      outWord:wordOf(out), inWord:wordOf(inn)});
+          if (debt === 0) ans.push(r1);
+        }
+        groups.push({init:init, steps:steps, ans:ans});
+      }
+      function wordOf(h) {                        // 哈希值反查词，只用于显示
+        for (var i = 0; i < wn; i++) if (hstr(words[i]) === h) return words[i];
+        return '?';
+      }
+      var uniq = [];
+      for (i = 0; i < wn; i++) if (uniq.indexOf(words[i]) < 0) uniq.push(words[i]);
+      return {s:s, words:words, uniq:uniq, wl:wl, wn:wn, all:all, n:n, groups:groups, need:need};
+    }
+    function render() {
+      var res = st.res;
+      board.innerHTML = '';
+      if (!res.groups.length) {
+        note.textContent = 's 比 words 的总长还短，窗口放不下，没有任何起手。';
+        ansEl.textContent = '';
+        btnN.disabled = true;
+        return;
+      }
+      var gi = Math.min(st.gi, res.groups.length - 1);
+      var gr = res.groups[gi];
+      var si = Math.min(st.step, gr.steps.length - 1);
+      var f = gr.steps[si];
+
+      var p0 = document.createElement('p'); p0.className = 'cap';
+      p0.textContent = '第 ' + (gi + 1) + ' / ' + res.groups.length + ' 组（init = ' + gr.init + '），窗口从下标 ' + f.at +
+        ' 起放 ' + res.wn + ' 个词';
+      board.appendChild(p0);
+      var d0 = document.createElement('div'); board.appendChild(d0);
+      var wrap = document.createElement('div'); wrap.className = 'cards';
+      for (var i = 0; i < res.n; i++) {
+        var dd = document.createElement('div');
+        var inWin = i >= f.at && i < f.at + res.all;
+        dd.className = 'card' + (inWin ? ' ok' : (f.kind === 'move' && (i >= f.at - res.wl && i < f.at || i >= f.at + res.all && i < f.at + res.all + res.wl) ? ' pick' : ''));
+        dd.innerHTML = res.s[i] + '<span class="idx">' + i + '</span>';
+        wrap.appendChild(dd);
+      }
+      d0.appendChild(wrap);
+
+      var p1 = document.createElement('p'); p1.className = 'cap';
+      p1.textContent = '窗口词频与 words 的需求（词用哈希值比对）';
+      board.appendChild(p1);
+      var tbl = document.createElement('table'); tbl.className = 'freq';
+      var trh = document.createElement('tr');
+      var th0 = document.createElement('th'); th0.textContent = '词'; trh.appendChild(th0);
+      var trn = document.createElement('tr');
+      var tn0 = document.createElement('td'); tn0.textContent = 'words 要几个'; trn.appendChild(tn0);
+      var trw = document.createElement('tr');
+      var tw0 = document.createElement('td'); tw0.textContent = '窗口里有几个'; trw.appendChild(tw0);
+      for (var k = 0; k < res.uniq.length; k++) {
+        var h = hstr(res.uniq[k]);
+        var th = document.createElement('th'); th.textContent = '"' + res.uniq[k] + '"'; trh.appendChild(th);
+        var td = document.createElement('td'); td.textContent = String(res.need[h] || 0); trn.appendChild(td);
+        var got = f.win[h] || 0;
+        var td2 = document.createElement('td');
+        td2.textContent = String(got);
+        if (got > (res.need[h] || 0)) td2.style.color = '#dc2626';
+        trw.appendChild(td2);
+      }
+      var thx = document.createElement('th'); thx.textContent = 'debt'; trh.appendChild(thx);
+      var tdx = document.createElement('td'); tdx.textContent = '欠债'; trn.appendChild(tdx);
+      var tdx2 = document.createElement('td'); tdx2.textContent = String(f.debt); tdx2.style.fontWeight = '700';
+      tdx2.style.color = f.debt === 0 ? '#16a34a' : '#dc2626';
+      trw.appendChild(tdx2);
+      tbl.appendChild(trh); tbl.appendChild(trn); tbl.appendChild(trw);
+      board.appendChild(tbl);
+
+      if (f.kind === 'init') {
+        note.textContent = '第一个窗口装好（下标 ' + f.at + ' 到 ' + (f.at + res.all - 1) + '），debt = ' + f.debt +
+          (f.hit ? '，欠债清零，' + f.at + ' 是答案。' : '，还欠 ' + f.debt + ' 个词，这一格不是答案。');
+      } else {
+        note.textContent = '窗口往右挪一格：出窗的 "' + f.outWord + '" 减一、进窗的 "' + f.inWord + '" 加一，debt 变成 ' +
+          f.debt + (f.hit ? '，' + f.at + ' 是答案。' : '。');
+      }
+      var lastStep = si === gr.steps.length - 1;
+      var lastGroup = gi === res.groups.length - 1;
+      btnN.disabled = lastStep && lastGroup;
+      if (btnN.disabled) {
+        var all = [];
+        for (var i = 0; i < res.groups.length; i++) all = all.concat(res.groups[i].ans);
+        all.sort(function(x, y) { return x - y; });
+        ansEl.textContent = res.groups.length + ' 组各滑一遍，debt 归零过的起手一共 ' + all.length + ' 个：' +
+          (all.length ? all.join('、') : '没有');
+      } else {
+        ansEl.textContent = '';
+      }
+    }
+    function rebuild() {
+      st.res = run(WORDS[st.ci]);
+      st.gi = 0; st.step = 0;
+      render();
+    }
+    btnN.addEventListener('click', function() {
+      var res = st.res;
+      if (!res.groups.length) return;
+      var gi = st.gi, gr = res.groups[gi];
+      if (st.step < gr.steps.length - 1) st.step++;
+      else if (gi < res.groups.length - 1) { st.gi = gi + 1; st.step = 0; }
+      else return;
+      render();
+    });
+    btnR.addEventListener('click', function() { st.gi = 0; st.step = 0; render(); });
+    sel.addEventListener('change', function() { st.ci = Number(sel.value); rebuild(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>

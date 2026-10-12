@@ -6,7 +6,7 @@
 - json 顶层三键：`categories`（一级分类有序数组）+ `groups`（二级分类 `{name, cat, desc}`，`cat` 指向一级）+ `algorithms`（页面，`group` = 二级分类名）。**第三层就是页面本身**，没有第四层。
 - 一级分类：语言基础 / 算法基础 / 搜索 / 动态规划 / 字符串 / 数学 / 数据结构 / 图论 / 计算几何 / 杂项 / 专题；**没有页面的分类不出现在顶栏**（计算几何、专题暂空）。二级分类名**全局唯一**（重名会串分类）。
 - 新建页面：条目 append 进 `algorithms`（`group` 写目标二级分类名）即可；目标二级分类已存在就不用动 `groups` / `categories`。
-- UI：顶栏是一级分类（一行全部显示，带篇数）；点开一级后，左侧列二级，二级可展开出第三层页面列表，**默认全部折叠**，只自动展开当前页所在的那一组。首页正文也只渲染当前一级分类的内容（`#catalogTitle` + `#index-list`）。
+- UI：顶栏是一级分类（一行全部显示，带篇数）；点开一级后，左侧列二级，二级可展开出第三层页面列表，**默认全部折叠**，只自动展开当前页所在的那一组。目录页（`catalog.html`）正文只渲染当前一级分类的内容（`#catalogTitle` + `#index-list`）。
 - 手动展开状态记 `localStorage['algoNavOpenSubs']`（键是 `一级>二级`）；搜索命中时临时全展开、清空恢复。
 
 ## 内容
@@ -23,12 +23,14 @@
 - 结尾「总结」段（2026-10-04 用户定）：具体要点 + 一句前瞻，禁空谈升华（「标志着 / 意味着」）。范本 tiankonguse.github.io 的 ST-RMQ / DFS序 / LCA / 虚树（要点已提炼进 SKILL.md「范本对齐」块；四篇原文与去 AI 味清单 `humanize.md` 在技能 `references/`，动笔和收口前各过一遍）。
 
 ## 视觉与目录
-- 纯静态无构建：`index.html` + `algorithms/*.html`；`assets/css/shared.css`、`assets/js/shared.js`、`assets/data/algorithms.json`。
+- 纯静态无构建：`index.html`（全站总览）+ `catalog.html`（单分类目录）+ `algorithms/*.html`（文章页）；`assets/css/shared.css`、`assets/js/shared.js`、`assets/data/algorithms.json`。
+- **入口页分两个（2026-10-12 用户定）**：`index.html` 是全站总览（Hero + 全站统计 + 「怎么读」三条路线 + 难度分布 SVG），只回答「这站有什么、怎么读」，**不放目录列表 / 分类全景卡 / 搜索**；`catalog.html` 才是原来那个「按一级分类铺目录」的页面（`#homeNav` 三级目录 + 搜索 + `#levelChips` 难度筛选 + 卡片）。两页都带 `body.page-index`（css 的 `body.page-index` 与 `body:not(.page-index)` 大量依赖它）。两页数字与难度条（`#levelChart` / `#levelChartNote`）全部由 shared.js 从 json 实时算，**不许写死**；加页后顺手同步 meta description 与兜底值。
+- **`#catNav` 点击按页面类型分流**（2026-10-12）：`.cat-tab` 的 href 一律 `catalog.html#cat-<一级分类名>`；页面有 `#index-list`（目录页）→ preventDefault + 原地换正文；有 `#sidebar`（算法页）→ preventDefault + 原地换侧栏；都没有（总览页）→ 不拦截、走 href 跳转。**别再用文件名判断页面类型**（改名前那套 `pop() === 'index.html'` 在首页总览化后已失效）。
 - 页面骨架固定（`.layout` + `aside#sidebar` + `main .algo-section` + `aside.toc-panel ul#toc`），侧栏 / 目录 / 翻页 / 复制 / 搜索 / 进度条全由 shared.js 注入，**页面不自带骨架**；独有样式与脚本留在各页 `<style>` / `<script>`。
 - shared.css 只定义一份、各行复用：`.fig` / `.fig svg` / `.legend` / `.dot` / `.breakdown` / `pre.code .cm|.kw|.fn` / `table.complexity`；全局保留 `[hidden]{display:none!important}`。
-- json 的 `file` 写 `algorithms/xxx.html`，侧栏高亮比 basename。**顺序 = 首页分区 = 侧栏 = 上下篇翻页**（按 categories → groups.cat → algorithms 原顺序铺平；`id` 可用下划线，但磁盘文件名用连字符，以 `file` 字段为准）。
+- json 的 `file` 写 `algorithms/xxx.html`，侧栏高亮比 basename。**顺序 = 目录页分区 = 侧栏 = 上下篇翻页**（按 categories → groups.cat → algorithms 原顺序铺平；`id` 可用下划线，但磁盘文件名用连字符，以 `file` 字段为准）。
 - 侧栏三级折叠（2026-10-12）：打开算法页只展开当前所在二级组、把高亮项滚到可视区正中，其余收起；搜索命中组临时全展开、清空恢复。
-- 页底一个 `nav.pager` 含两个 `.pager-item` 并排（单侧时单卡片靠右），别写成两个 nav（会叠两行）。首页 `#homeNav` 由 shared.js 按 json 渲染二级树（`#group-<i>` 锚点 + scrollspy），保持 `homeNav + home-main` flex 布局，900px 以下隐藏。算法页顶部多一条 sticky 的 `#catNav`（一级分类），`.sidebar` / `.toc-panel` 的 sticky top 由 `--navh` 让位（≤1180 时 98px）。
+- 页底一个 `nav.pager` 含两个 `.pager-item` 并排（单侧时单卡片靠右），别写成两个 nav（会叠两行）。`catalog.html` 的 `#homeNav` 由 shared.js 按 json 渲染二级树（`#group-<i>` 锚点 + scrollspy），保持 `homeNav + home-main` flex 布局，900px 以下隐藏；`index.html` 总览页**没有** `#homeNav`（`.wrap` 单列）。算法页顶部多一条 sticky 的 `#catNav`（一级分类），`.sidebar` / `.toc-panel` 的 sticky top 由 `--navh` 让位（≤1180 时 98px）。
 - 本地预览 `./run.sh`（端口 8080）；`file://` 直开会被 CORS 拦。
 
 ## 编排
@@ -55,7 +57,7 @@
   $N $SKILL/verify_home.js
   ```
 - 必查四项：① 无 JS 错误 ② `figure.fig` 数 == 其中 svg 数 ③ nav/toc/每个 `.viz` 有内容 ④ 每个 svg 用 `getBBox()` 比对 viewBox（bbox = left/top/right/bottom）。`--allow-file-access-from-files` 必带，别加 `--window-size`（隐藏图标 svg 会被判空图）。
-- 全站页列表从 json 生成（zsh 里展开用 `${=PAGES}`，**传裸文件名**，脚本自己拼 `algorithms/` 前缀）；首页单独 verify_home.js（三层目录版：顶栏一行 + 逐分类核对分区 / 卡片数）。跑到第 49 页左右偶发超时，脚本已重试，真失败换 `--user-data-dir` 补跑。pager 链最灵敏：非末页 2、末页 1，标题与铺平后的 json 相邻项一致。拼完先跑杂字扫描与 AI 味 `grep`。
+- 全站页列表从 json 生成（zsh 里展开用 `${=PAGES}`，**传裸文件名**，脚本自己拼 `algorithms/` 前缀）；入口页单独 verify_home.js（2026-10-12 两页版：`catalog.html` 核顶栏一行一级分类 + 逐分类核对分区 / 卡片数，`index.html` 只核统计数字与难度图；取组名要克隆节点后删 `.group-idx` / `.group-count`，**别用正则剥数字——`2-SAT` 会被剥成 `-SAT`**）。跑到第 49 页左右偶发超时，脚本已重试，真失败换 `--user-data-dir` 补跑。pager 链最灵敏：非末页 2、末页 1，标题与铺平后的 json 相邻项一致。拼完先跑杂字扫描与 AI 味 `grep`。
 
 ## 踩过的坑（通用教训）
 - **`verify_pages.js` PASS ≠ 演示能走到底**：它只抓加载期 JS 错误、**抓不到点击后抛的异常**（067 末帧抛 TypeError → 答案行不渲染、按钮永不 disabled，自检照样 PASS）。末帧答案行与按钮 disabled 一律用 `verify_viz_steps.js` 或自写探针点到底确认（`/tmp/probe2.js` 可先设 `<select>.selectedIndex` 再点到底，穷举下拉组合）；`verify_viz_steps.js` 上限 40 帧，**「跑满 40 帧」不等于失败**（067 二叉树 44 步），要单看 disabled 与答案。

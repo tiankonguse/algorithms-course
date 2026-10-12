@@ -328,7 +328,7 @@
       })();
 
       catNav.innerHTML = tree.map((c, i) =>
-        '<a class="cat-tab" href="' + ROOT + 'index.html#cat-' + encodeURIComponent(c.name) + '"' +
+        '<a class="cat-tab" href="' + ROOT + 'catalog.html#cat-' + encodeURIComponent(c.name) + '"' +
         ' data-cat="' + i + '">' + c.name +
         '<span class="cat-count">' + catCount(c) + '</span></a>'
       ).join('');
@@ -354,10 +354,17 @@
 
       Array.prototype.forEach.call(catNav.querySelectorAll('.cat-tab'), function(t){
         t.addEventListener('click', function(e){
-          // 算法页：留在当前页，只把左侧目录换成该分类；首页：切换正文内容
-          if (!isIndex || location.pathname.split('/').pop() === 'index.html') e.preventDefault();
           const i = +t.getAttribute('data-cat');
-          if (isIndex) selectCat(i, true); else selectCat(i);
+          if (isIndex) {
+            // catalog.html：留在当前页切正文，并用 hash 记下当前分类
+            e.preventDefault();
+            selectCat(i, true);
+          } else if (sidebar) {
+            // 算法页：留在当前页，只把左侧目录换成该分类
+            e.preventDefault();
+            selectCat(i);
+          }
+          // 总览首页（既无 #index-list 也无侧栏）：不拦截，按 href 跳到 catalog.html#cat-<分类名>
         });
       });
 
@@ -616,6 +623,57 @@
             '</a>';
         }).join('');
       }
+
+      // 8-6b. 总览页：难度分布横向条形图（档位篇数全部从索引实时算）
+      (function renderLevelChart(){
+        const box = document.getElementById('levelChart');
+        if (!box) return;
+        const LV_COLOR = { 1:'#2563eb', 2:'#ea580c', 3:'#6b7280', 4:'#7c3aed', 5:'#be123c' };
+        const counts = { 1:0, 2:0, 3:0, 4:0, 5:0 };
+        algos.forEach(function(a){
+          const lv = a.level || 1;
+          if (counts[lv] == null) counts[lv] = 0;
+          counts[lv]++;
+        });
+        const levels = [1, 2, 3, 4, 5];
+        // 以篇数最多的那一档为满宽，其余按比例缩，条长与篇数成正比
+        const maxCount = levels.reduce(function(m, lv){ return Math.max(m, counts[lv] || 0); }, 0) || 1;
+
+        const W = 640, rowH = 46, padTop = 22, barH = 24;
+        const labelX = 50, barX = 62, maxBarW = 498, countX = barX + maxBarW + 14;
+        const H = padTop + levels.length * rowH + 6;
+
+        let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg"' +
+          ' role="img" aria-label="五档难度的篇数分布"' +
+          ' font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',sans-serif">';
+        levels.forEach(function(lv, i){
+          const y0 = padTop + i * rowH;
+          const mid = y0 + rowH / 2;
+          const barY = y0 + (rowH - barH) / 2;
+          const n = counts[lv] || 0;
+          const w = Math.round((n / maxCount) * maxBarW);
+          // 底衬：画出满宽轨迹，方便比长短
+          svg += '<rect x="' + barX + '" y="' + barY + '" width="' + maxBarW + '" height="' + barH +
+            '" rx="4" fill="#f0f2f5"/>';
+          if (n > 0) {
+            svg += '<rect x="' + barX + '" y="' + barY + '" width="' + Math.max(w, 3) + '" height="' + barH +
+              '" rx="4" fill="' + LV_COLOR[lv] + '"/>';
+          }
+          svg += '<text x="' + labelX + '" y="' + (mid + 5) + '" text-anchor="end"' +
+            ' font-size="13" font-weight="600" fill="#1f2328">' + LV[lv] + '</text>';
+          svg += '<text x="' + countX + '" y="' + (mid + 5) + '" text-anchor="start"' +
+            ' font-size="13" font-weight="600" fill="' + LV_COLOR[lv] + '"' +
+            ' font-variant-numeric="tabular-nums">' + n + '</text>';
+        });
+        svg += '</svg>';
+        box.innerHTML = svg;
+
+        const noteEl = document.getElementById('levelChartNote');
+        if (noteEl) {
+          noteEl.textContent = '全站 ' + algos.length + ' 篇，其中高阶及以上 ' +
+            algos.filter(a => (a.level || 1) >= 3).length + ' 篇。';
+        }
+      })();
 
       // 8-7. 上下篇（按三层目录铺平后的顺序；两个链接放在同一个 .pager 行内）
       if (main && sidebar) {

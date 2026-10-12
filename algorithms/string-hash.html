@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>字符串哈希：把串变成数</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.card { min-width: 30px; padding: 5px 7px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.wide { font-size: 11px; letter-spacing: -.2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.empty { background: transparent; border-style: dashed; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>字符串哈希：把串变成数</h1>
+      <p class="intro">两个串比相等要按长度付代价，把它们各乘成一个 64 位整数之后，比较就只剩一次整数判断，代价与串长无关。代价是偶尔会撞。这一页先把模板推一遍，再看两个最直接的用法：给一堆字符串去重，以及在长串里找模式串。</p>
+
+      <h2>零、谁更快，取决于串长什么样</h2>
+      <p><code>std::string</code> 的 <code>==</code> 先比长度，长度一样再逐字节比，发现不同就停。两个随机串之间，第一个字符不同的概率是 61/62，比较几乎立刻结束。</p>
+      <p>实测：10000 个长 1500 的随机串扔进 <code>set&lt;string&gt;</code> 去重，5.96 毫秒；换成先把每个串算成一个 64 位整数、再排序去重，21.78 毫秒，慢了三倍多。算哈希要把 1500 个字符全乘一遍，而逐字节比较只看了第一个字节。</p>
+      <p>把数据换成共享 90 个字符前缀的串（日志、URL、DNA 都长这样），名次反过来：100000 个长 100 的串，哈希 18.66 毫秒，<code>set&lt;string&gt;</code> 69.64 毫秒，哈希快 3.7 倍。这时每次比较都要先跳过 90 个相同字符。</p>
+      <figure class="fig" id="fig-cost">
+        <figcaption>图 1　同一件事的两种数据：首个字符就分岔时字符串比较赢，公共前缀很长时哈希赢</figcaption>
+      </figure>
+      <p>所以哈希的价值不在「比较一次」，在于一次比较的代价和串长脱钩。要反复拿同一段去比（滑窗那种），或者要比的段特别长，它才开始划算。</p>
+
+      <h2>一、哈希函数要满足的四条性质</h2>
+      <p>哈希函数的用处是把复杂样本变成数字，以后样本之间的对比就变成数字之间的对比。四条性质：</p>
+      <p>1）输入的可能性是无限的，输出的范围相对有限，这里是 2<sup>64</sup> 个值。</p>
+      <p>2）输入同样的样本一定得到同样的输出，函数里没有任何随机机制。</p>
+      <p>3）输入不同的样本也可能得到同样的输出，这叫哈希碰撞。</p>
+      <p>4）大量不同的输入，得到的输出会几乎均匀地铺满整个输出域。这条最要紧。</p>
+      <p>碰撞理论上躲不掉，输出只有 2<sup>64</sup> 个格子，输入却有无限多个，抽屉原理摆在那里。好的哈希函数能做的是让它低到可以忽略：两个不同的串撞上的概率约 1/2<sup>64</sup>，10000 个串两两比较也只有大约 2.7×10<sup>-12</sup>。</p>
+      <figure class="fig" id="fig-props">
+        <figcaption>图 2　哈希函数的四条性质：无限的输入映射进 2<sup>64</sup> 个格子，碰撞躲不掉，但分布很均匀</figcaption>
+      </figure>
+
+      <h2>二、自然溢出就是对 2<sup>64</sup> 取模</h2>
+      <p><code>unsigned long long</code> 只有 64 位，加减乘的结果超出范围会丢掉高位，标准里写得很清楚：结果等于数学上的真值对 2<sup>64</sup> 取模。</p>
+      <p>要的是「取模」这个动作本身，模数是不是质数无所谓，因为哈希值只用来判相等，不做除法也不求逆元。</p>
+      <p>这里写 <code>unsigned long long</code> 而不是 <code>long long</code>：有符号整数溢出在标准里是未定义行为，编译器有权做任何事；无符号的溢出是明确定义的。两者算出来的位模式其实一样，写 unsigned 是让代码说的是自己想说的话。</p>
+
+      <h2>三、把串当成 499 进制数</h2>
+      <p>每个字符映射成一个正整数当数字，整串看成一个 base 进制数。从左往右用秦九韶法累乘，一位一位接上去：</p>
+      <p class="mono">hs[i] = hs[i-1] * base + 值(s[i])</p>
+      <p>字符映射按数字、大写、小写排开，一共 62 个：<code>'0'</code> 到 <code>'9'</code> 是 1 到 10，<code>'A'</code> 到 <code>'Z'</code> 是 11 到 36，<code>'a'</code> 到 <code>'z'</code> 是 37 到 62。</p>
+      <p>细节一：每一位的值从 1 开始，不从 0 开始。从 0 开始的话前导零不贡献位权，<code>"0"</code> 和 <code>"00"</code> 都会算出 0。在字符表只有「0、1」、串长不超过 12 的随机数据上实测，改成从 0 开始有 58.85% 的用例数出来的不同串个数是错的。</p>
+      <p>细节二：base 要大于映射之后的最大值。这里最大值是 62，所以 base 至少取 63，499 是个常用的质数。base 太小会「进位」撞到低位去：base 取 10、字符表是 62 个字符时有 0.33% 的用例出错；base 取 1 时所有串的哈希退化成各位数字相加，出错率跳到 25.75% 到 81.26%，已经不能用了。</p>
+      <figure class="fig" id="fig-base">
+        <figcaption>图 3　"cabef" 逐位累乘：hs[4] = 186129246005 就是整串的哈希值，pw 是对应的位权</figcaption>
+      </figure>
+
+      <h2>四、pw 与 hs 两个数组</h2>
+      <p>要做到「任意子串的哈希值 O(1) 取出来」，需要两个数组：<code>pw[i]</code> 记 base 的 i 次方，<code>hs[i]</code> 记前缀 s[0..i] 的哈希值。</p>
+      <p>子串 s[l..r] 的哈希值就是把 hs[r] 减掉前 l 个字符贡献的那部分。hs[l-1] 乘上 base 的 (r-l+1) 次方之后，它的每一项刚好和 hs[r] 的前几项对齐，相减只剩中间段：</p>
+      <p class="mono">getHash(l, r) = hs[r] - hs[l-1] * pw[r-l+1]</p>
+      <p>乘的幂次是 <code>r-l+1</code>，也就是子串长度。</p>
+      <figure class="fig" id="fig-substr">
+        <figcaption>图 4　"be" 的哈希值：hs[1] 乘 499<sup>2</sup> 之后与 hs[3] 的前两项逐项对齐，相减只剩 2·499 + 5 = 1003</figcaption>
+      </figure>
+      <p>下面是完整模板。数组开成全局的，多个查询共用一份：</p>
+          <pre class="code"><span class="cm">// 模板：pw 记 base 的各次方，hs 记前缀哈希值，都是 64 位自然溢出</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100005;
+    <span class="kw">const</span> <span class="kw">int</span> base = 499;
+
+    <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> pw[MAXN], hs[MAXN];
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;s) {
+        <span class="kw">int</span> n = s.size();
+        pw[0] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            pw[i] = pw[i - 1] * base;
+        }
+        hs[0] = s[0] - 'a' + 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            hs[i] = hs[i - 1] * base + s[i] - 'a' + 1;
+        }
+    }
+
+    <span class="cm">// 返回 s[l...r] 的哈希值</span>
+    <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> <span class="fn">getHash</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> ans = hs[r];
+        <span class="kw">if</span> (l &gt; 0) {
+            ans -= hs[l - 1] * pw[r - l + 1];
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <h2>五、题 1：统计有多少个不同的字符串</h2>
+      <p>洛谷 P3370，n 个字符串，长度不超过 1500，问有多少个两两不同。做法就是把这套映射用一遍：每个串算一个哈希值塞进数组，排序，数相邻不同的段数，代码里没有第二处技巧。</p>
+          <pre class="code"><span class="cm">// 数字 + 大写 + 小写，一共 62 个字符，映射到 1 到 62</span>
+    <span class="kw">int</span> <span class="fn">v</span>(<span class="kw">char</span> c) {
+        <span class="kw">if</span> (c &gt;= '0' &amp;&amp; c &lt;= '9') {
+            <span class="kw">return</span> c - '0' + 1;
+        } <span class="kw">else</span> <span class="kw">if</span> (c &gt;= 'A' &amp;&amp; c &lt;= 'Z') {
+            <span class="kw">return</span> c - 'A' + 11;
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> c - 'a' + 37;
+        }
+    }
+
+    <span class="cm">// 整个字符串的哈希值</span>
+    <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> <span class="fn">value</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;s) {
+        <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> ans = v(s[0]);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; s.size(); i++) {
+            ans = ans * base + v(s[i]);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="cm">// 把 n 个哈希值排序，再数有几段不同的</span>
+    <span class="kw">int</span> <span class="fn">cnt</span>(<span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> *nums, <span class="kw">int</span> n) {
+        sort(nums, nums + n);
+        <span class="kw">int</span> ans = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            <span class="kw">if</span> (nums[i] != nums[i - 1]) {
+                ans++;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>这题换 <code>set&lt;string&gt;</code> 也能过。两种写法的差距要等规模上去才明显：100 万个长 12、字符表 4 的串，<code>unordered_set&lt;unsigned long long&gt;</code> 563 毫秒，<code>set&lt;string&gt;</code> 1154 毫秒，都数出 970756 个不同串。手工算哈希再排序只比哈希表慢一点，还省掉一次扩容。</p>
+      <p>把映射换成从 0 开始、base 换成 1、哈希值只留低 32 位，分别是什么后果，看图 5。</p>
+      <figure class="fig" id="fig-bad1">
+        <figcaption>图 5　题 1 的四个错法，三档数据的出错比例：字符表 2 与 4 时串长 12、n 不超过 30</figcaption>
+      </figure>
+
+      <h2>六、题 3：用子串哈希替代 KMP</h2>
+      <p>题意是找出模式串在文本串里第一次出现的位置，找不到返回 -1。有了上面的模板，做法只剩三句话：把文本串的 pw 与 hs 建出来，把模式串整串的哈希值算出来，然后从左往右滑一个等长的窗口逐个比。</p>
+          <pre class="code"><span class="cm">// 在 s1 里找 s2 第一次出现的位置，找不到返回 -1</span>
+    <span class="kw">int</span> <span class="fn">strStr</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;s1, <span class="kw">const</span> <span class="kw">string</span> &amp;s2) {
+        <span class="kw">int</span> n = s1.size(), m = s2.size();
+        build(s1);
+        <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> h2 = s2[0] - 'a' + 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; m; i++) {
+            h2 = h2 * base + s2[i] - 'a' + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> l = 0, r = m - 1; r &lt; n; l++, r++) {
+            <span class="kw">if</span> (getHash(l, r) == h2) {
+                <span class="kw">return</span> l;
+            }
+        }
+        <span class="kw">return</span> -1;
+    }</pre>
+      <p>实测 10000 个字符的文本串配 5000 个字符的模式串、保证找不到：哈希版 0.056 毫秒，KMP 0.105 毫秒。把规模加到 200000 与 100000，哈希 0.827 毫秒，KMP 2.095 毫秒。</p>
+      <p>标准库的 <code>string::find</code> 比两者都快（同样规模 0.024 毫秒），它先用 <code>memchr</code> 找模式串首字符出现的位置，大多数位置只看一个字节就跳到下个候选。哈希版的意义是能往两边长：判断回文、求最长公共前缀、随便两段比一比，用的都是同一个 <code>getHash</code>，函数体不用改。</p>
+      <p>两个容易写错的地方：一是相减时乘的幂次写成 <code>pw[r-l]</code>，少了一次方，15% 到 40% 的用例会答错；二是忘了 <code>l &gt; 0</code> 才减 <code>hs[l-1] * pw[...]</code>，直接写成永远减，l = 0 的窗口就全错了。前者是细节写错，后者是边界写错，出错的用例比例差不多。</p>
+      <figure class="fig" id="fig-bad2">
+        <figcaption>图 6　题 3 的三个错法：幂次少一次与忘减 hs[l-1] 出错比例接近，漏扫 l = 0 则小一截</figcaption>
+      </figure>
+
+      <div class="viz" id="viz-hash">
+        <p class="viz-title">哈希计算台</p>
+        <p class="viz-note">每点一步往下算一格 hs：hs[i] = hs[i-1] × 499 + 值(s[i])。整串算完之后，选一段子串看它的哈希值是怎么减出来的。数字都是 64 位自然溢出的真值。</p>
+        <div id="hash-board"></div>
+        <p class="viz-note" id="hash-note"></p>
+        <p class="viz-answer" id="hash-answer"></p>
+        <div class="viz-controls">
+          <label>串 <select id="hash-str"></select></label>
+          <label>子串 <select id="hash-sub"></select></label>
+          <button id="hash-next" type="button">下一步</button>
+          <button id="hash-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>七、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>题 1　统计不同字符串</td><td>每个串乘一遍，再排序数段</td><td>O(总长度 + n log n)</td><td>O(n)</td></tr>
+        <tr><td>题 3　找子串位置</td><td>建两个数组，再滑一遍窗口</td><td>O(n + m)</td><td>O(n + m)</td></tr>
+      </table>
+      <p class="breakdown">题 1 的排序比较的是 8 字节整数，一次比较的代价固定；要是改用哈希表，期望 O(总长度)。题 3 建数组是 O(n)，扫窗口是 O(n) 个窗口各摊一次减法，与模式串长度无关。空间按题目上限开：题 1 的 <code>MAXN</code> 取 10005，题 3 取 100005，两个数组各 8 字节一格，加起来不到 2 MB。注意 <code>pw</code> 与 <code>hs</code> 只依赖被查的那一个串，多个查询共用一份就够。</p>
+
+      <h2>总结</h2>
+      <p>四位映射里第 4 条最要紧，碰撞躲不掉，好的 base 把它压到 2<sup>-64</sup> 量级。</p>
+      <p>自然溢出就是对 2<sup>64</sup> 取模，写 <code>unsigned long long</code>，模数不必是质数。</p>
+      <p>每一位从 1 开始、base 大于映射后的最大值（这里是 62），499 是常用质数。</p>
+      <p>子串公式里乘的是 base 的 <code>r-l+1</code> 次方，也就是子串长度。</p>
+      <p>题 1 是整串哈希加排序去重，题 3 是子串哈希滑窗，把 KMP 干的活接了过来。到这里任意子串的哈希值都能 O(1) 取出来了，后面几道题就是拿这个能力去换东西：换掉一整轮逐位比较，或者换掉一个窗口里的词频表。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>统计有多少个不同的字符串</td><td><a href="https://www.luogu.com.cn/problem/P3370" target="_blank">P3370【模板】字符串哈希</a></td></tr>
+        <tr><td>LeetCode</td><td>找出字符串中第一个匹配项的下标</td><td><a href="https://leetcode.cn/problems/find-the-index-of-the-first-occurrence-in-a-string/" target="_blank">28. 找出字符串中第一个匹配项的下标</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解105【扩展】字符串哈希原理、代码、题目详解</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>字符串哈希</td><td><a href="https://oi-wiki.org/string/hash/" target="_blank">oi-wiki.org/string/hash</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:6, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+
+  // ===== 图 1：两种数据的耗时对照 =====
+  (function(){
+    var host = document.getElementById('fig-cost');
+    if (!host) return;
+    var W = 660, H = 196;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '同样是把串去重，两种数据给出相反的名次（毫秒）', {'font-size':12.5, fill:'#1f2328'}));
+    var x0 = 210, w = 330, mx = 72;
+    function bar(y, name, v, c, fb) {
+      svg.appendChild(txt(x0 - 10, y + 13, name, {'text-anchor':'end', 'font-size':11.5, fill:'#374151'}));
+      var bw = Math.max(w * v / mx, 3);
+      svg.appendChild(box(x0, y, bw, 16, fb, c));
+      svg.appendChild(txt(x0 + bw + 8, y + 13, v.toFixed(2) + ' ms', {'font-size':11.5, fill:c}));
+    }
+    svg.appendChild(txt(16, 44, 'A　10000 个长 1500 的随机串', {'font-size':11.5, fill:'#6b7280'}));
+    bar(54, 'set<string>', 5.96, BLUE, FILL_B);
+    bar(78, '哈希 + 排序', 21.78, ORANGE, FILL_O);
+    svg.appendChild(el('line', {x1:16, y1:106, x2:644, y2:106, stroke:'#e6e8eb', 'stroke-width':1}));
+    svg.appendChild(txt(16, 126, 'B　100000 个长 100、公共前缀 90 的串', {'font-size':11.5, fill:'#6b7280'}));
+    bar(136, '哈希 + 排序', 18.66, ORANGE, FILL_O);
+    bar(160, 'set<string>', 69.64, BLUE, FILL_B);
+    svg.appendChild(txt(16, 192, '逐字节比较在第一处不同就停，哈希要把整串乘完。', {'font-size':11, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：四条性质 =====
+  (function(){
+    var host = document.getElementById('fig-props');
+    if (!host) return;
+    var W = 660, H = 250;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '无限多的输入，映射到 2^64 个格子里', {'font-size':12.5, fill:'#1f2328'}));
+    var dots = [[60,52],[104,52],[60,88],[104,88],[60,124],[104,124],[60,160],[104,160]];
+    var bx = 340, bw = 32, gap = 6, by = 78, bh = 28;
+    for (var i = 0; i < dots.length; i++) {
+      svg.appendChild(el('circle', {cx:dots[i][0], cy:dots[i][1], r:5.5, fill:FILL_B, stroke:BLUE, 'stroke-width':1.3}));
+    }
+    svg.appendChild(txt(82, 184, '输入：无限多', {'text-anchor':'middle', 'font-size':11.5, fill:'#6b7280'}));
+    var targets = [0, 2, 4, 6, 1, 3, 3, 5];
+    for (var i = 0; i < 7; i++) {
+      var x = bx + i * (bw + gap);
+      svg.appendChild(box(x, by, bw, bh, '#ffffff', '#e6e8eb'));
+      svg.appendChild(txt(x + bw / 2, by + 19, String(i), {'text-anchor':'middle', 'font-size':11, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(bx + 190, 60, '输出：2^64 个格子', {'text-anchor':'middle', 'font-size':11.5, fill:'#6b7280'}));
+    for (var i = 0; i < dots.length; i++) {
+      var tx = bx + targets[i] * (bw + gap) + bw / 2;
+      var collide = i === 6;
+      var d = 'M' + (dots[i][0] + 8) + ' ' + dots[i][1] + ' C ' + (dots[i][0] + 90) + ' ' + dots[i][1] +
+              ', ' + (tx - 70) + ' ' + (by + 14) + ', ' + tx + ' ' + (by + 14);
+      svg.appendChild(el('path', {d:d, fill:'none', 'stroke-width':1.2,
+        'stroke-dasharray': collide ? '5 4' : 'none', stroke: collide ? RED : '#c9cdd3'}));
+    }
+    svg.appendChild(box(bx + 3 * (bw + gap) - 4, by - 4, bw + 8, bh + 8, 'none', RED));
+    svg.appendChild(txt(bx + 3 * (bw + gap) + bw / 2, by + bh + 22, '碰撞', {'text-anchor':'middle', 'font-size':11.5, fill:RED}));
+    var lines = ['1）输入的可能是无限的，输出只有 2^64 个',
+                 '2）同样的输入一定得到同样的输出',
+                 '3）不同的输入可能得到同样的输出',
+                 '4）大量不同的输入，输出几乎均匀铺满整个输出域'];
+    for (var i = 0; i < lines.length; i++) {
+      svg.appendChild(txt(16, 204 + i * 15, lines[i], {'font-size':11.5, fill: i === 3 ? '#1f2328' : '#6b7280', 'font-weight': i === 3 ? 700 : 400}));
+    }
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：cabef 逐位累乘 =====
+  (function(){
+    var host = document.getElementById('fig-base');
+    if (!host) return;
+    var W = 660, H = 232;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '串 "cabef"：每格下面两行分别是值、pw 与 hs', {'font-size':12.5, fill:'#1f2328'}));
+    var ch = ['c','a','b','e','f'], val = [3,1,2,5,6];
+    var hs = ['3','1498','747504','373004501','186129246005'];
+    var pw = ['1','499','249001','124251499','62001498001'];
+    var cw = 96, x0 = 130, rows = [
+      {label:'字符', y:40, h:30, data:ch, size:15, bold:true, fill:FILL_O, stroke:ORANGE},
+      {label:'值', y:78, h:26, data:val.map(String), size:13, fill:FILL_B, stroke:BLUE},
+      {label:'pw[i]', y:112, h:26, data:pw, size:10.5, fill:'#f6f7f9', stroke:'#e6e8eb'},
+      {label:'hs[i]', y:146, h:26, data:hs, size:10.5, fill:'#f6f7f9', stroke:'#e6e8eb'}
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      svg.appendChild(txt(x0 - 12, row.y + row.h / 2 + 4, row.label, {'text-anchor':'end', 'font-size':11.5, fill:'#6b7280'}));
+      for (var i = 0; i < 5; i++) {
+        svg.appendChild(box(x0 + i * cw, row.y, cw - 6, row.h, row.fill, row.stroke));
+        svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, row.y + row.h / 2 + 4, row.data[i],
+          {'text-anchor':'middle', 'font-size':row.size, 'font-weight':row.bold ? 700 : 400,
+           fill: row.bold ? '#9a3412' : '#374151'}));
+      }
+    }
+    svg.appendChild(box(24, 184, 612, 40, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(40, 202, 'hs[i] = hs[i-1] × 499 + 值(s[i])　，hs[4] = 373004501 × 499 + 6 = 186129246005', {'font-size':12, fill:'#374151'}));
+    svg.appendChild(txt(40, 218, 'pw[i] 是 499 的 i 次方，只用来在子串公式里补位权', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：子串哈希的减法 =====
+  (function(){
+    var host = document.getElementById('fig-substr');
+    if (!host) return;
+    var W = 660, H = 226;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '串 "cabef" 里取子串 "be"：hs[3] 减掉 hs[1] × 499^2', {'font-size':12.5, fill:'#1f2328'}));
+    var x0 = 214, tw = 78, tg = 6;
+    function terms(y, list, fill, stroke, off) {
+      for (var i = 0; i < list.length; i++) {
+        var x = x0 + (off + i) * (tw + tg);
+        svg.appendChild(box(x, y, tw, 28, fill, stroke));
+        svg.appendChild(txt(x + tw / 2, y + 19, list[i], {'text-anchor':'middle', 'font-size':11.5,
+          fill: stroke === ORANGE ? '#9a3412' : '#1e3a8a'}));
+      }
+    }
+    svg.appendChild(txt(x0 - 14, 58, 'hs[3] =', {'text-anchor':'end', 'font-size':12, fill:'#374151'}));
+    terms(40, ['3·499³', '1·499²', '2·499¹', '5·499⁰'], FILL_B, BLUE, 0);
+    svg.appendChild(txt(568, 58, '= 373004501', {'font-size':11.5, fill:'#6b7280'}));
+    svg.appendChild(txt(x0 - 14, 118, 'hs[1] × 499² =', {'text-anchor':'end', 'font-size':12, fill:'#374151'}));
+    terms(100, ['3·499³', '1·499²'], FILL_O, ORANGE, 0);
+    svg.appendChild(txt(x0 - 14, 178, '相减 =', {'text-anchor':'end', 'font-size':12, fill:'#374151'}));
+    terms(160, ['2·499¹', '5·499⁰'], '#dcfce7', '#16a34a', 2);
+    svg.appendChild(txt(568, 178, '= 1003', {'font-size':12, 'font-weight':700, fill:'#166534'}));
+    svg.appendChild(el('line', {x1:x0, y1:76, x2:x0, y2:196, stroke:'#9aa0a6', 'stroke-dasharray':'4 4', 'stroke-width':1}));
+    svg.appendChild(el('line', {x1:x0 + tw + tg, y1:76, x2:x0 + tw + tg, y2:196, stroke:'#9aa0a6', 'stroke-dasharray':'4 4', 'stroke-width':1}));
+    svg.appendChild(txt(16, 216, '乘的 499^2 正好是子串 "be" 的长度 2，低位的 2·499 + 5 被完整留了下来。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 5：题 1 错法 =====
+  (function(){
+    var host = document.getElementById('fig-bad1');
+    if (!host) return;
+    var W = 660, H = 186;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '题 1：每组 20000 个随机用例，数出来的不同串个数与原版不同即算抓到', {'font-size':12, fill:'#1f2328'}));
+    var xs = [24, 300, 372, 444, 516];
+    var head = ['写法', '表 2', '表 4', '表 62', '说明'];
+    for (var c = 0; c < head.length; c++) svg.appendChild(txt(xs[c], 42, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    var rows = [
+      ['base 取 1', '81.26%', '75.69%', '25.75%', '退化成各位相加', RED],
+      ['每位数从 0 开始', '58.85%', '16.23%', '0.06%', '前导零不贡献位权', RED],
+      ['base 取 10', '0.00%', '0.00%', '0.33%', '值域小还分得开', ORANGE],
+      ['哈希只留低 32 位', '0.00%', '0.00%', '0.00%', '要撞上得先算够长', GREY]
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 64 + r * 26;
+      svg.appendChild(txt(xs[0], y, rows[r][0], {'font-size':11.5, fill:rows[r][5]}));
+      for (var c = 1; c <= 3; c++) svg.appendChild(txt(xs[c], y, rows[r][c], {'font-size':11.5, fill:rows[r][5]}));
+      svg.appendChild(txt(xs[4], y, rows[r][4], {'font-size':11, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(24, 180, '「表 N」是字符表的字符个数，串长都不超过 12，n 不超过 30。', {'font-size':11, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 6：题 3 错法 =====
+  (function(){
+    var host = document.getElementById('fig-bad2');
+    if (!host) return;
+    var W = 660, H = 162;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '题 3：同样 20000 组随机文本串与模式串', {'font-size':12, fill:'#1f2328'}));
+    var xs = [24, 300, 372, 444, 516];
+    var head = ['写法', '档一', '档二', '档三', '说明'];
+    for (var c = 0; c < head.length; c++) svg.appendChild(txt(xs[c], 42, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    var rows = [
+      ['幂次写成 pw[r-l]', '28.50%', '15.53%', '39.67%', '少一次方', RED],
+      ['忘减 hs[l-1]', '28.51%', '15.48%', '38.84%', '前缀没扣掉', RED],
+      ['窗口从 l = 1 开始', '14.48%', '4.87%', '13.15%', '漏掉开头的窗口', ORANGE]
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 64 + r * 26;
+      svg.appendChild(txt(xs[0], y, rows[r][0], {'font-size':11.5, fill:rows[r][5]}));
+      for (var c = 1; c <= 3; c++) svg.appendChild(txt(xs[c], y, rows[r][c], {'font-size':11.5, fill:rows[r][5]}));
+      svg.appendChild(txt(xs[4], y, rows[r][4], {'font-size':11, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(24, 156, '三档分别是 n≤20 m≤8 表 2、n≤40 m≤15 表 3、n≤40 m≤8 表 2。', {'font-size':11, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示：哈希计算台 =====
+  (function(){
+    var CASES = ['cabef', 'abacaba', 'abcabc', 'aabbcc'];
+    var B = 499n;
+    var selS = document.getElementById('hash-str');
+    var selR = document.getElementById('hash-sub');
+    var board = document.getElementById('hash-board');
+    var note = document.getElementById('hash-note');
+    var ansEl = document.getElementById('hash-answer');
+    var btnN = document.getElementById('hash-next');
+    var btnR = document.getElementById('hash-reset');
+    if (!selS || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(i); o.textContent = '"' + CASES[i] + '"';
+      selS.appendChild(o);
+    }
+    var st = {ci:0, sub:0, step:0, res:null, subs:[]};
+
+    function build(s) {
+      var n = s.length, pw = [], hs = [];
+      pw[0] = 1n;
+      for (var i = 1; i < n; i++) pw[i] = BigInt.asUintN(64, pw[i - 1] * B);
+      hs[0] = BigInt(s.charCodeAt(0) - 96);
+      for (var i = 1; i < n; i++) hs[i] = BigInt.asUintN(64, hs[i - 1] * B + BigInt(s.charCodeAt(i) - 96));
+      return {pw:pw, hs:hs, n:n, s:s};
+    }
+    function getHash(res, l, r) {
+      var v = res.hs[r];
+      if (l > 0) v = BigInt.asUintN(64, v - res.hs[l - 1] * res.pw[r - l + 1]);
+      return v;
+    }
+    function direct(s, l, r) {                 // 按位权展开直接算，用来对照
+      var v = 0n;
+      for (var i = l; i <= r; i++) v = BigInt.asUintN(64, v * B + BigInt(s.charCodeAt(i) - 96));
+      return v;
+    }
+    function cards(host, values, cls, pick, wide) {
+      host.innerHTML = '';
+      var wrap = document.createElement('div');
+      wrap.className = 'cards';
+      for (var i = 0; i < values.length; i++) {
+        var d = document.createElement('div');
+        var c = 'card' + (wide ? ' wide' : '');
+        if (values[i] === null) c += ' empty';
+        if (cls && cls[i]) c += ' ' + cls[i];
+        if (i === pick) c += ' pick';
+        d.className = c;
+        d.innerHTML = (values[i] === null ? '·' : String(values[i])) + '<span class="idx">' + i + '</span>';
+        wrap.appendChild(d);
+      }
+      host.appendChild(wrap);
+    }
+    function fillSubs() {
+      var res = st.res;
+      st.subs = [];
+      for (var l = 0; l < res.n; l++) for (var r = l; r < res.n; r++) st.subs.push([l, r]);
+      selR.innerHTML = '';
+      for (var i = 0; i < st.subs.length; i++) {
+        var o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = '"' + res.s.substring(st.subs[i][0], st.subs[i][1] + 1) + '"　[' + st.subs[i][0] + ',' + st.subs[i][1] + ']';
+        selR.appendChild(o);
+      }
+      if (st.sub >= st.subs.length) st.sub = 0;
+      selR.value = String(st.sub);
+    }
+    function render() {
+      var res = st.res, n = res.n;
+      board.innerHTML = '';
+      var p1 = document.createElement('p'); p1.className = 'cap';
+      p1.textContent = '串与每一位的值（' + res.s + '）';
+      board.appendChild(p1);
+      var d1 = document.createElement('div'); board.appendChild(d1);
+      var vals = [], cls = [];
+      for (var i = 0; i < n; i++) { vals[i] = res.s[i]; cls[i] = (i <= st.step) ? 'ok' : null; }
+      cards(d1, vals, cls, -1, false);
+      var p2 = document.createElement('p'); p2.className = 'cap';
+      p2.textContent = 'hs 数组（算到第 ' + st.step + ' 格）';
+      board.appendChild(p2);
+      var d2 = document.createElement('div'); board.appendChild(d2);
+      var hv = [], hc = [];
+      for (var i = 0; i < n; i++) { hv[i] = (i <= st.step) ? res.hs[i].toString() : null; hc[i] = (i <= st.step) ? 'ok' : null; }
+      cards(d2, hv, hc, st.step, true);
+      if (st.step === 0) {
+        note.textContent = 'i = 0：hs[0] = 值(\'' + res.s[0] + '\') = ' + res.hs[0].toString();
+      } else {
+        note.textContent = 'i = ' + st.step + '：hs[' + st.step + '] = ' + res.hs[st.step - 1].toString() +
+          ' × 499 + ' + (res.s.charCodeAt(st.step) - 96) + ' = ' + res.hs[st.step].toString();
+      }
+      var last = st.step === n - 1;
+      btnN.disabled = last;
+      if (last) {
+        var l = st.subs[st.sub][0], r = st.subs[st.sub][1];
+        var sub = res.s.substring(l, r + 1);
+        var got = getHash(res, l, r);
+        var dir = direct(res.s, l, r);
+        ansEl.textContent = '子串 "' + sub + '"（[' + l + ',' + r + ']）的哈希值：hs[' + r + '] − hs[' + (l - 1) + '] × 499^' + (r - l + 1) +
+          ' = ' + got.toString() + '　，直接按位权展开也是 ' + dir.toString() + (got === dir ? '，两边一致' : '，两边不一致');
+      } else {
+        ansEl.textContent = '';
+      }
+    }
+    function rebuild() {
+      st.res = build(CASES[st.ci]);
+      fillSubs();
+      st.step = 0;
+      render();
+    }
+    selS.addEventListener('change', function() { st.ci = Number(selS.value); st.sub = 0; rebuild(); });
+    selR.addEventListener('change', function() { st.sub = Number(selR.value); render(); });
+    btnN.addEventListener('click', function() { if (st.step < st.res.n - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function() { st.step = 0; render(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>

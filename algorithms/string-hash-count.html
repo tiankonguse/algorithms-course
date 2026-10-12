@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>字符串哈希：逐个起点往下看</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cards { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.card { min-width: 30px; padding: 5px 7px; text-align: center; border-radius: 6px; font-size: 14px;
+        background: var(--bg); border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.card .idx { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.card.wide { font-size: 11px; letter-spacing: -.2px; }
+.card.ok { background: #dbeafe; border-color: #2563eb; color: #1e3a8a; }
+.card.pick { background: #ffedd5; border-color: #ea580c; color: #9a3412; font-weight: 600; }
+.card.bad { background: #fee2e2; border-color: #dc2626; color: #991b1b; }
+.card.empty { background: transparent; border-style: dashed; }
+.cap { font-size: 13px; color: var(--text-dim); margin: 10px 0 2px; }
+.breakdown { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+table.freq { border-collapse: collapse; margin: 6px 0 2px; font-size: 13px; }
+table.freq td, table.freq th { border: 1px solid var(--border); padding: 3px 9px; text-align: center; }
+table.freq th { color: var(--text-dim); font-weight: 400; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>字符串哈希：逐个起点往下看</h1>
+      <p class="intro">这两道题都不只是「找一段」。第一道要从每个起点一路往右扩，边扩边看子串里各个数字的个数是不是一样，扩的过程中判据会来回变；第二道允许 k 个位置不同，靠哈希加二分一次跳过整段对得上的部分，把逐位比较压成 k 次二分成。</p>
+
+      <h2>零、两道题</h2>
+      <p>题 2（LeetCode 2168）：s 只由数字组成，长度不超过 1000。数一数 s 里有多少个不同的子串，满足其中每个出现过的数字出现次数都相同。<code>"1212"</code> 的答案是 5，分别是 <code>"1"</code>、<code>"2"</code>、<code>"12"</code>、<code>"21"</code>、<code>"1212"</code>。</p>
+      <p>题 6（洛谷 P3763 DNA）：给长 n 的源串 s（n 不超过 10<sup>5</sup>）、长 m 的模式串 p，还有正数 k（本题固定 k = 3）。定义 s 中一段与 p 匹配是指长度相同且最多 k 个位置字符不同，问有多少段匹配。</p>
+
+      <h2>一、题 2：从每个起点往右扩</h2>
+      <p>枚举起点 i，再从 i 往右一格一格延长 j。延长时只多进来一个数字，所以整段的信息可以增量维护，用三个量就够：</p>
+      <p>1）<code>maxCnt</code>：所有数字里出现次数的最大值。</p>
+      <p>2）<code>allKinds</code>：这段里出现过几种数字。</p>
+      <p>3）<code>maxCntKinds</code>：达到 <code>maxCnt</code> 的数字有几种。</p>
+      <p>判据是 <code>maxCntKinds == allKinds</code>。它成立时，每一种出现过的数字都刚好出现 <code>maxCnt</code> 次，每种和最大值打平，没有谁少。反过来如果某个数字少于 <code>maxCnt</code>，达到最大值的种类数就一定小于种类总数。</p>
+      <p>这里有个反直觉的地方：合法不合法没有单调性。往后多一个字符可能让一段从不合法变合法，也可能从合法变不合法。「1122」里 <code>"11"</code> 合法，加一个 2 变成 <code>"112"</code> 就不合法，再加一个 2 变成 <code>"1122"</code> 又合法了。所以判定不成立时不能停，必须继续往后扩。</p>
+      <figure class="fig" id="fig-uniq">
+        <figcaption>图 1　"1122" 从下标 0 往右扩四步：maxCntKinds 和 allKinds 的关系来回变，合法与否没有单调性</figcaption>
+      </figure>
+      <p>去重要用子串的哈希值。只把「maxCnt、allKinds、长度」这三个数塞进集合是不行的：不同的子串可以是同样的三个数，比如 <code>"12"</code> 和 <code>"21"</code> 都是两个数字各一次，它们是两个不同的子串，要各记一个。</p>
+          <pre class="code"><span class="cm">// 独特子串的数量：子串里每个数字出现的次数都一样才算</span>
+    <span class="kw">int</span> <span class="fn">equalDigitFrequency</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;str) {
+        unordered_set&lt;<span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span>&gt; seen;
+        <span class="kw">int</span> n = str.size();
+        <span class="kw">int</span> cnt[10];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            memset(cnt, 0, <span class="kw">sizeof</span>(cnt));
+            <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> h = 0;
+            <span class="kw">int</span> curVal = 0, maxCnt = 0, maxCntKinds = 0, allKinds = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> j = i; j &lt; n; j++) {
+                curVal = str[j] - '0';
+                h = h * base + curVal + 1;
+                cnt[curVal]++;
+                <span class="kw">if</span> (cnt[curVal] == 1) {
+                    allKinds++;
+                }
+                <span class="kw">if</span> (cnt[curVal] &gt; maxCnt) {
+                    maxCnt = cnt[curVal];
+                    maxCntKinds = 1;
+                } <span class="kw">else</span> <span class="kw">if</span> (cnt[curVal] == maxCnt) {
+                    maxCntKinds++;
+                }
+                <span class="kw">if</span> (maxCntKinds == allKinds) {
+                    seen.insert(h);
+                }
+            }
+        }
+        <span class="kw">return</span> seen.size();
+    }</pre>
+      <p>三个容易写错的地方：哈希值从 0 开始算，前导零不贡献位权，不同子串会塌进同一个哈希值（实测在字符表 2、串长 10 的随机数据上 80.24% 的用例数错）；判据写成 <code>maxCnt × allKinds == len</code>，这其实和原判据完全等价，20000 组随机数据上一处差别都没有；维护 <code>maxCntKinds</code> 时漏掉「等于最大值也要加一」的那一支，只在刷新最大值时重置，漏掉这一支以后 80% 到 96% 的用例都会数错。</p>
+      <figure class="fig" id="fig-uniq-bad">
+        <figcaption>图 2　题 2 的三个错法：中间一行看着像另一种判据，算下来和原版逐组相同</figcaption>
+      </figure>
+
+      <h2>二、题 6：哈希配二分跳段</h2>
+      <p>朴素做法是把每个起点都逐位比一遍，每个起点 O(m)，总共 O(n × m)。n = 10<sup>5</sup>、m = 10<sup>4</sup> 时实测 691 毫秒，交上去过不了。</p>
+      <p>题目只问「不同位置的个数有没有超过 k」，不要求把具体个数数出来。那就没必要逐位看：从头开始，二分找出当前还能对上多长，直接把这一段跳过去，跨过一个不同的位置，再来一次。重复到发现第 k+1 处不同就能判否，或者整段走完都不到 k+1 处就判是。</p>
+      <p>二分能用的原因是前缀相同具有单调性：能对上 5 个字符，那前 4 个也一定对得上。二分的判据交给哈希：<code>same(l1, l2, len)</code> 判断两段长度 len 的区间哈希值是否相等，一次比较 O(1)，与区间长度无关。</p>
+      <figure class="fig" id="fig-jump">
+        <figcaption>图 3　起点 0 一路对上，一次二分就走完；起点 1 首字符就不同，跳一格后再看，第二次就超了 k</figcaption>
+      </figure>
+      <p>建表和取值还是模板那套，只是 s 与 p 各建一份，取值时把数组当参数传进去：</p>
+          <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+
+    <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> pw[MAXN], hs[MAXN], hp[MAXN];
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;s, <span class="kw">const</span> <span class="kw">string</span> &amp;p) {
+        pw[0] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; MAXN; i++) {
+            pw[i] = pw[i - 1] * base;
+        }
+        hs[0] = s[0] - 'a' + 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; s.size(); i++) {
+            hs[i] = hs[i - 1] * base + s[i] - 'a' + 1;
+        }
+        hp[0] = p[0] - 'a' + 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; p.size(); i++) {
+            hp[i] = hp[i - 1] * base + p[i] - 'a' + 1;
+        }
+    }
+
+    <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> <span class="fn">getHash</span>(<span class="kw">const</span> <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> *h, <span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">unsigned</span> <span class="kw">long</span> <span class="kw">long</span> ans = h[r];
+        <span class="kw">if</span> (l &gt; 0) {
+            ans -= h[l - 1] * pw[r - l + 1];
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="cm">// s[l1...l1+len-1] 与 p[l2...l2+len-1] 是不是一模一样</span>
+    <span class="kw">bool</span> <span class="fn">same</span>(<span class="kw">int</span> l1, <span class="kw">int</span> l2, <span class="kw">int</span> len) {
+        <span class="kw">return</span> getHash(hs, l1, l1 + len - 1) == getHash(hp, l2, l2 + len - 1);
+    }</pre>
+      <p>核心是下面这段。跳的时候是 <code>l1 += len + 1</code>，加的那个 1 用来跳过刚刚发现的不同位置；结束条件是 <code>l1 &gt; r1</code> 或者欠的个数超了 k：</p>
+          <pre class="code"><span class="cm">// s[l1...r1] 与 p[0...r1-l1] 这两段上，不同的位置是不是不超过 k 个</span>
+    <span class="kw">bool</span> <span class="fn">check</span>(<span class="kw">int</span> l1, <span class="kw">int</span> r1, <span class="kw">int</span> k) {
+        <span class="kw">int</span> diff = 0;
+        <span class="kw">int</span> l2 = 0;
+        <span class="kw">while</span> (l1 &lt;= r1 &amp;&amp; diff &lt;= k) {
+            <span class="cm">// 二分找出还能对上多少个字符</span>
+            <span class="kw">int</span> l = 1;
+            <span class="kw">int</span> r = r1 - l1 + 1;
+            <span class="kw">int</span> m, len = 0;
+            <span class="kw">while</span> (l &lt;= r) {
+                m = (l + r) / 2;
+                <span class="kw">if</span> (same(l1, l2, m)) {
+                    len = m;
+                    l = m + 1;
+                } <span class="kw">else</span> {
+                    r = m - 1;
+                }
+            }
+            <span class="kw">if</span> (l1 + len &lt;= r1) {
+                diff++;                       <span class="cm">// 相同的前缀后面还压着一个不同的位置</span>
+            }
+            l1 += len + 1;                    <span class="cm">// 跳过这个不同的位置，接着比下一段</span>
+            l2 += len + 1;
+        }
+        <span class="kw">return</span> diff &lt;= k;
+    }</pre>
+          <pre class="code"><span class="cm">// s 中有多少子串改不超过 k 个位置就能变成 p</span>
+    <span class="kw">int</span> <span class="fn">compute</span>(<span class="kw">const</span> <span class="kw">string</span> &amp;s, <span class="kw">const</span> <span class="kw">string</span> &amp;p, <span class="kw">int</span> k) {
+        <span class="kw">int</span> n = s.size(), m = p.size();
+        <span class="kw">if</span> (n &lt; m) {
+            <span class="kw">return</span> 0;
+        }
+        build(s, p);
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt;= n - m; i++) {
+            <span class="kw">if</span> (check(i, i + m - 1, k)) {
+                ans++;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>每个起点最多做 k+1 次二分，每次二分 O(log m)，所以一个起点 O(k log m)，总共 O(n × k × log m)。k 是常数 3，m = 10<sup>4</sup> 时一次二分十四步，一个起点几十次操作。</p>
+      <p>实测 n = 10<sup>5</sup>：m = 100 时哈希版 13.06 毫秒，暴力逐位 8.51 毫秒，暴力反而更快；m = 1000 时变成 19.34 对 76.58；m = 10000 时 24.25 对 691.43。暴力每个起点都要看 m 位，m 一大立刻起飞；哈希版的时间里 log m 涨得很慢，所以 m 越小它越不划算。</p>
+      <figure class="fig" id="fig-cross">
+        <figcaption>图 4　n = 10<sup>5</sup> 时两条曲线在 m = 100 与 1000 之间交叉：m 小的时候哈希加二分的开销反而更贵</figcaption>
+      </figure>
+      <p>两个错法：循环条件写 <code>diff &lt; k</code>，等于要求差异必须少于 k 个，恰好 k 处的那些段全被判掉，在 k = 1 的数据上 77.11% 的用例出错；<code>if (l1 + len &lt;= r1)</code> 写成 <code>&lt;</code>，最后一段整体对上时也会多记一处差异，答案偏大。还有一条不是出错率的问题：把 <code>l1 += len + 1</code> 写成 <code>l1 += len</code>，碰上不同的位置时指针原地不动，程序直接卡死，这种错法不用跑随机数据也能看出来。</p>
+      <figure class="fig" id="fig-dna-bad">
+        <figcaption>图 5　题 6 的两个错法：k = 1 那一档的抓取率最高，因为恰好一处不同的段本来就多</figcaption>
+      </figure>
+
+      <div class="viz" id="viz-uniq">
+        <p class="viz-title">独特子串：一格一格往右扩</p>
+        <p class="viz-note">每点一步 j 往右挪一格，看 cnt 表、三个计数与判据的变化。判定成立时把这个子串的哈希值塞进集合，集合里有多少个元素就是答案的一部分。</p>
+        <div id="uniq-board"></div>
+        <p class="viz-note" id="uniq-note"></p>
+        <p class="viz-answer" id="uniq-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="uniq-case"></select></label>
+          <button id="uniq-next" type="button">下一步</button>
+          <button id="uniq-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <div class="viz" id="viz-binary">
+        <p class="viz-title">二分跳段：一次跳一整段</p>
+        <p class="viz-note">每点一步做一次二分（橙色是二分试的长度，绿色是最后认定的相同前缀），跨过一个不同位置就记一次差异。差异超过 k 这个起点就否掉，整段走完没超就是答案。</p>
+        <div id="bin-board"></div>
+        <p class="viz-note" id="bin-note"></p>
+        <p class="viz-answer" id="bin-answer"></p>
+        <div class="viz-controls">
+          <label>数据 <select id="bin-case"></select></label>
+          <button id="bin-next" type="button">下一步</button>
+          <button id="bin-reset" type="button">重置</button>
+        </div>
+      </div>
+
+      <h2>三、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>做法</th><th>关键操作</th><th>时间</th><th>空间</th></tr>
+        <tr><td>题 2　枚举起点往右扩</td><td>n 个起点各自扩到底，每步 O(1)</td><td>O(n<sup>2</sup>)</td><td>O(n<sup>2</sup>) 个哈希值</td></tr>
+        <tr><td>题 6　逐位比对</td><td>每个起点看 m 位</td><td>O(n × m)</td><td>O(1)</td></tr>
+        <tr><td>题 6　哈希加二分</td><td>每个起点最多 k+1 次二分</td><td>O(n × k × log m)</td><td>O(n + m)</td></tr>
+      </table>
+      <p class="breakdown">题 2 的 n 上限是 1000，子串总数 500500，平方做法足够，实测全同串 2.54 毫秒、随机串 0.96 毫秒。空间上哈希集合里最多装 500500 个 64 位整数，约 4 MB；cnt 只有一个 10 格的数组。题 6 的 n 上限 10<sup>5</sup>，pw、hs、hp 三个数组各 8 字节一格，加起来约 2.4 MB。k 是常数，所以复杂度里真正起作用的是 log m，m 再大也只是把二分多加一步。</p>
+
+      <h2>总结</h2>
+      <p>题 2 的判据是「达到最大值的数字种类数等于出现过的数字种类数」，合法与否没有单调性，判定不成立也要继续往右扩。</p>
+      <p>去重必须用子串的哈希值，判据状态本身会撞车，「12」和「21」的频率统计一模一样但是两个子串。</p>
+      <p>题 6 把「有几个位置不同」换成「什么时候超过 k 个」，配哈希二分的相同前缀判定，每个起点只看 k+1 段。</p>
+      <p>两道题分别用了哈希的两面：题 2 用它给子串发身份证，题 6 用它回答「这两段一模一样吗」。同一个 getHash，一个进集合去重，一个喂给二分当判据。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>独特子串的数量</td><td><a href="https://leetcode.cn/problems/unique-substrings-with-equal-digit-frequency/" target="_blank">2168. 独特子串的数量</a></td></tr>
+        <tr><td>洛谷</td><td>根据匹配定义求匹配子串的数量</td><td><a href="https://www.luogu.com.cn/problem/P3763" target="_blank">P3763 DNA</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解105【扩展】字符串哈希原理、代码、题目详解</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        <tr><td>OI-Wiki</td><td>字符串哈希</td><td><a href="https://oi-wiki.org/string/hash/" target="_blank">oi-wiki.org/string/hash</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function txt(x, y, s, a) {
+    var t = el('text', Object.assign({x:x, y:y, 'font-size':12, fill:'#374151'}, a || {}));
+    t.textContent = s;
+    return t;
+  }
+  var BLUE = '#2563eb', ORANGE = '#ea580c', GREY = '#9aa0a6', RED = '#dc2626', GREEN = '#16a34a';
+  var FILL_B = '#dbeafe', FILL_O = '#ffedd5', FILL_R = '#fee2e2', FILL_G = '#dcfce7';
+  function box(x, y, w, h, fill, stroke) {
+    return el('rect', {x:x, y:y, width:w, height:h, rx:6, fill:fill, stroke:stroke, 'stroke-width':1.3});
+  }
+
+  // ===== 图 1：1122 逐格扩 =====
+  (function(){
+    var host = document.getElementById('fig-uniq');
+    if (!host) return;
+    var W = 660, H = 250;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 's = "1122"，从下标 0 往右扩，只看这一段', {'font-size':12.5, fill:'#1f2328'}));
+    var cw = 62, x0 = 44;
+    var chars = ['1', '1', '2', '2'];
+    for (var i = 0; i < 4; i++) {
+      var isOne = chars[i] === '1';
+      svg.appendChild(box(x0 + i * cw, 32, cw - 6, 30, isOne ? FILL_O : FILL_B, isOne ? ORANGE : BLUE));
+      svg.appendChild(txt(x0 + i * cw + (cw - 6) / 2, 52, chars[i], {'text-anchor':'middle', 'font-size':15,
+        'font-weight':700, fill:isOne ? '#9a3412' : '#1e3a8a'}));
+    }
+    var cols = [
+      {sub:'"1"', cnt:'{1:1}', max:'1', kinds:'1', mk:'1', ok:true},
+      {sub:'"11"', cnt:'{1:2}', max:'2', kinds:'1', mk:'1', ok:true},
+      {sub:'"112"', cnt:'{1:2, 2:1}', max:'2', kinds:'2', mk:'1', ok:false},
+      {sub:'"1122"', cnt:'{1:2, 2:2}', max:'2', kinds:'2', mk:'2', ok:true}
+    ];
+    var rows = [
+      {label:'子串', key:'sub'}, {label:'cnt 表', key:'cnt'}, {label:'maxCnt', key:'max'},
+      {label:'allKinds', key:'kinds'}, {label:'maxCntKinds', key:'mk'}, {label:'判据', key:'ok'}
+    ];
+    var x1 = 92, cw2 = 148;
+    for (var r = 0; r < rows.length; r++) {
+      var y = 84 + r * 26;
+      svg.appendChild(txt(x1 - 6, y, rows[r].label, {'text-anchor':'end', 'font-size':11.5, fill:'#6b7280'}));
+      for (var c = 0; c < 4; c++) {
+        var v = rows[r].key === 'ok' ? (cols[c].ok ? '成立' : '不成立') : cols[c][rows[r].key];
+        var col = rows[r].key === 'ok' ? (cols[c].ok ? GREEN : RED) : '#374151';
+        svg.appendChild(txt(x1 + c * cw2 + 60, y, v, {'text-anchor':'middle', 'font-size':11.5,
+          'font-weight': (rows[r].key === 'ok' || rows[r].key === 'mk') ? 700 : 400, fill:col}));
+      }
+    }
+    svg.appendChild(txt(16, 240, '第三步不成立，第四步又成立：合法与否没有单调性，判定失败不能停。', {'font-size':11.5, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 2：题 2 错法 =====
+  (function(){
+    var host = document.getElementById('fig-uniq-bad');
+    if (!host) return;
+    var W = 660, H = 152;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '题 2：20000 组随机数字串，数出来的不同子串个数与原版不同即算抓到', {'font-size':12, fill:'#1f2328'}));
+    var xs = [24, 292, 372, 452, 530];
+    var head = ['写法', '表 2', '表 3', '表 10', '说明'];
+    for (var c = 0; c < head.length; c++) svg.appendChild(txt(xs[c], 42, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    var rows = [
+      ['哈希从 0 开始', '80.24%', '78.77%', '67.78%', '前导零塌进同一格', RED],
+      ['漏掉等于最大值的计数', '80.35%', '89.33%', '96.00%', '只在刷新最大值时重置', RED],
+      ['判据写 maxCnt×kinds==len', '0.00%', '0.00%', '0.00%', '和原判据等价', GREY]
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 64 + r * 26;
+      svg.appendChild(txt(xs[0], y, rows[r][0], {'font-size':11.5, fill:rows[r][5]}));
+      for (var c = 1; c <= 3; c++) svg.appendChild(txt(xs[c], y, rows[r][c], {'font-size':11.5, fill:rows[r][5]}));
+      svg.appendChild(txt(xs[4], y, rows[r][4], {'font-size':10.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(24, 144, '三档：字符表 2 串长 10、字符表 3 串长 14、字符表 10 串长 30。', {'font-size':11, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 3：二分跳段 =====
+  (function(){
+    var host = document.getElementById('fig-jump');
+    if (!host) return;
+    var W = 660, H = 268;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    var s = 'abababab', p = 'aba';
+    var cw = 46, x0 = 44;
+    function strip(chars, y, marks) {
+      for (var i = 0; i < chars.length; i++) {
+        var mk = marks[i];
+        svg.appendChild(box(x0 + i * cw, y, cw - 4, 28, mk ? mk[0] : '#ffffff', mk ? mk[1] : '#e6e8eb'));
+        svg.appendChild(txt(x0 + i * cw + (cw - 4) / 2, y + 19, chars[i], {'text-anchor':'middle', 'font-size':13,
+          'font-weight': mk ? 700 : 400, fill: mk ? mk[2] : '#9aa0a6'}));
+      }
+    }
+    svg.appendChild(txt(16, 18, 's = "abababab"，p = "aba"，k = 1', {'font-size':12.5, fill:'#1f2328'}));
+    svg.appendChild(txt(16, 42, '起点 0：一次二分就对上整个 p，diff = 0 ≤ k，算一个', {'font-size':11.5, fill:'#6b7280'}));
+    var m0 = [];
+    for (var i = 0; i < 8; i++) m0[i] = i < 3 ? [FILL_G, GREEN, '#166534'] : null;
+    strip(s.split(''), 50, m0);
+    var m1 = [];
+    for (var i = 0; i < 3; i++) m1[i] = [FILL_O, ORANGE, '#9a3412'];
+    strip(p.split(''), 82, m1);
+    svg.appendChild(txt(x0 + 3 * cw + 6, 100, 'len = 3，l1 + len = 3 > r1 = 2，没有多出差异', {'font-size':11, fill:GREEN}));
+    svg.appendChild(el('line', {x1:16, y1:118, x2:644, y2:118, stroke:'#e6e8eb', 'stroke-width':1}));
+    svg.appendChild(txt(16, 140, '起点 1：首字符就对不上，跳一格再看，第二次差异就超了', {'font-size':11.5, fill:'#6b7280'}));
+    var m2 = [];
+    m2[1] = [FILL_R, RED, '#991b1b'];
+    for (var i = 2; i < 4; i++) m2[i] = [FILL_G, GREEN, '#166534'];
+    strip(s.split(''), 148, m2);
+    var m3 = [];
+    for (var i = 0; i < 3; i++) m3[i] = [FILL_O, ORANGE, '#9a3412'];
+    strip(p.split(''), 180, m3);
+    svg.appendChild(txt(x0 + 4 * cw + 6, 198, '第一次：len = 0，diff = 1，l1 跳到 2', {'font-size':11, fill:RED}));
+    svg.appendChild(txt(x0 + 4 * cw + 6, 216, '第二次：len = 0，diff = 2 > k，这个起点否掉', {'font-size':11, fill:RED}));
+    svg.appendChild(box(24, 230, 612, 30, '#f6f7f9', '#e6e8eb'));
+    svg.appendChild(txt(40, 250, '最后一次二分不管多长，都要 l1 += len + 1，那个 1 就是跳过刚发现的不同位置。', {'font-size':11.5, fill:'#374151'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 4：时间交叉 =====
+  (function(){
+    var host = document.getElementById('fig-cross');
+    if (!host) return;
+    var W = 660, H = 172;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, 'n = 100000，k = 3，单位毫秒（对数刻度）', {'font-size':12.5, fill:'#1f2328'}));
+    var x0 = 150, w = 300;
+    var lo = Math.log10(5), hi = Math.log10(1000);
+    function bx(v) { return w * (Math.log10(v) - lo) / (hi - lo); }
+    var data = [
+      {m:'m = 100', h:13.06, b:8.51},
+      {m:'m = 1000', h:19.34, b:76.58},
+      {m:'m = 10000', h:24.25, b:691.43}
+    ];
+    for (var i = 0; i < data.length; i++) {
+      var y = 36 + i * 40;
+      svg.appendChild(txt(x0 - 10, y + 24, data[i].m, {'text-anchor':'end', 'font-size':11.5, fill:'#374151'}));
+      var bh = Math.max(bx(data[i].h), 3), bb = Math.max(bx(data[i].b), 3);
+      svg.appendChild(box(x0, y, bh, 14, FILL_B, BLUE));
+      svg.appendChild(txt(x0 + bh + 8, y + 12, '哈希 ' + data[i].h + ' ms', {'font-size':11, fill:BLUE}));
+      svg.appendChild(box(x0, y + 17, bb, 14, FILL_R, RED));
+      svg.appendChild(txt(x0 + bb + 8, y + 29, '暴力 ' + data[i].b + ' ms', {'font-size':11, fill:RED}));
+    }
+    for (var e = 1; e <= 3; e++) {
+      var gx = x0 + w * (e - lo) / (hi - lo);
+      svg.appendChild(el('line', {x1:gx, y1:28, x2:gx, y2:150, stroke:'#e6e8eb', 'stroke-width':1}));
+      svg.appendChild(txt(gx, 164, String(Math.pow(10, e)), {'text-anchor':'middle', 'font-size':10.5, fill:'#9aa0a6'}));
+    }
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 图 5：题 6 错法 =====
+  (function(){
+    var host = document.getElementById('fig-dna-bad');
+    if (!host) return;
+    var W = 660, H = 152;
+    var svg = el('svg', {width:W, height:H, viewBox:'0 0 '+W+' '+H});
+    svg.appendChild(txt(16, 18, '题 6：20000 组随机 s、p，匹配个数与原版不同即算抓到', {'font-size':12, fill:'#1f2328'}));
+    var xs = [24, 292, 372, 452, 530];
+    var head = ['写法', '档一', '档二', '档三', '说明'];
+    for (var c = 0; c < head.length; c++) svg.appendChild(txt(xs[c], 42, head[c], {'font-size':11.5, fill:'#6b7280'}));
+    var rows = [
+      ['循环条件写 diff < k', '49.60%', '69.14%', '77.11%', '恰好 k 处的段被判掉', RED],
+      ['边界写 l1+len < r1', '38.64%', '21.76%', '41.41%', '整段对上时多记一处', RED]
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      var y = 64 + r * 26;
+      svg.appendChild(txt(xs[0], y, rows[r][0], {'font-size':11.5, fill:rows[r][5]}));
+      for (var c = 1; c <= 3; c++) svg.appendChild(txt(xs[c], y, rows[r][c], {'font-size':11.5, fill:rows[r][5]}));
+      svg.appendChild(txt(xs[4], y, rows[r][4], {'font-size':10.5, fill:'#9aa0a6'}));
+    }
+    svg.appendChild(txt(24, 122, '三档：n≤30 m≤10 k=3 表 2、n≤60 m≤20 k=3 表 4、n≤40 m≤12 k=1 表 2。', {'font-size':11, fill:'#9aa0a6'}));
+    svg.appendChild(txt(24, 140, '把 l1 += len + 1 写成 l1 += len 是死循环，不进这张表。', {'font-size':11, fill:'#9aa0a6'}));
+    host.insertBefore(svg, host.firstChild);
+  })();
+
+  // ===== 演示：独特子串 =====
+  (function(){
+    var CASES = ['1212', '12321', '112233', '11112', '0123456789'];
+    var B = 499n;
+    var sel = document.getElementById('uniq-case');
+    var board = document.getElementById('uniq-board');
+    var note = document.getElementById('uniq-note');
+    var ansEl = document.getElementById('uniq-answer');
+    var btnN = document.getElementById('uniq-next');
+    var btnR = document.getElementById('uniq-reset');
+    if (!sel || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(i); o.textContent = '"' + CASES[i] + '"';
+      sel.appendChild(o);
+    }
+    var st = {ci:0, step:0, res:null};
+
+    function run(s) {
+      var n = s.length, seen = {}, frames = [], total = 0;
+      for (var i = 0; i < n; i++) {
+        var cnt = new Array(10).fill(0);
+        var h = 0n, curVal = 0, maxCnt = 0, mk = 0, allKinds = 0;
+        for (var j = i; j < n; j++) {
+          curVal = s.charCodeAt(j) - 48;
+          h = BigInt.asUintN(64, h * B + BigInt(curVal + 1));
+          cnt[curVal]++;
+          if (cnt[curVal] === 1) allKinds++;
+          if (cnt[curVal] > maxCnt) { maxCnt = cnt[curVal]; mk = 1; }
+          else if (cnt[curVal] === maxCnt) mk++;
+          var ok = mk === allKinds;
+          if (ok) {
+            var key = h.toString();
+            if (!seen[key]) { seen[key] = '"' + s.substring(i, j + 1) + '"'; total++; }
+          }
+          frames.push({i:i, j:j, cnt:cnt.slice(), maxCnt:maxCnt, mk:mk, allKinds:allKinds, ok:ok,
+                       total:total, sub:s.substring(i, j + 1)});
+        }
+      }
+      return {s:s, frames:frames, total:total, seen:seen};
+    }
+    function render() {
+      var res = st.res;
+      var f = res.frames[st.step];
+      board.innerHTML = '';
+      var p0 = document.createElement('p'); p0.className = 'cap';
+      p0.textContent = 's = ' + res.s + '，当前起点 i = ' + f.i + '，右端 j = ' + f.j;
+      board.appendChild(p0);
+      var d0 = document.createElement('div'); board.appendChild(d0);
+      var wrap = document.createElement('div'); wrap.className = 'cards';
+      for (var i = 0; i < res.s.length; i++) {
+        var dd = document.createElement('div');
+        dd.className = 'card' + (i >= f.i && i <= f.j ? (f.ok ? ' ok' : ' bad') : '');
+        dd.innerHTML = res.s[i] + '<span class="idx">' + i + '</span>';
+        wrap.appendChild(dd);
+      }
+      d0.appendChild(wrap);
+      var p1 = document.createElement('p'); p1.className = 'cap';
+      p1.textContent = 'cnt 表（这一段的数字个数）';
+      board.appendChild(p1);
+      var tbl = document.createElement('table'); tbl.className = 'freq';
+      var tr1 = document.createElement('tr'), tr2 = document.createElement('tr');
+      for (var d = 0; d < 10; d++) {
+        var th = document.createElement('th'); th.textContent = String(d); tr1.appendChild(th);
+        var td = document.createElement('td'); td.textContent = String(f.cnt[d]); tr2.appendChild(td);
+      }
+      tbl.appendChild(tr1); tbl.appendChild(tr2);
+      board.appendChild(tbl);
+      var p2 = document.createElement('p'); p2.className = 'cap';
+      p2.textContent = 'maxCnt = ' + f.maxCnt + '　allKinds = ' + f.allKinds + '　maxCntKinds = ' + f.mk +
+        '　判据 maxCntKinds == allKinds ' + (f.ok ? '成立' : '不成立');
+      board.appendChild(p2);
+      note.textContent = f.ok ? ('子串 "' + f.sub + '" 的每一类数字都出现 ' + f.maxCnt + ' 次，合法，哈希值塞进集合，答案计数到 ' + f.total + '。') :
+        ('子串 "' + f.sub + '" 里出现最多的数字有 ' + f.maxCnt + ' 个，而达到这个次数的只有 ' + f.mk + ' 种，不合法；但后面还可能变回来，继续往右扩。');
+      var last = st.step === res.frames.length - 1;
+      btnN.disabled = last;
+      ansEl.textContent = last ? ('全部起点扩完，不同的合法子串一共 ' + res.total + ' 个。') : '';
+    }
+    function rebuild() {
+      st.res = run(CASES[st.ci]);
+      st.step = 0;
+      render();
+    }
+    if (CASES.length) {
+      sel.addEventListener('change', function() { st.ci = Number(sel.value); rebuild(); });
+      btnN.addEventListener('click', function() { if (st.step < st.res.frames.length - 1) { st.step++; render(); } });
+      btnR.addEventListener('click', function() { st.step = 0; render(); });
+      rebuild();
+    }
+  })();
+
+  // ===== 演示：二分跳段 =====
+  (function(){
+    var CASES = [
+      {s:'abababab', p:'aba', k:1},
+      {s:'aabaabaaaa', p:'aaba', k:1},
+      {s:'aaaab', p:'aaab', k:1},
+      {s:'abcabcabd', p:'abcabd', k:1},
+      {s:'abcdef', p:'abc', k:1}
+    ];
+    var B = 499n;
+    var sel = document.getElementById('bin-case');
+    var board = document.getElementById('bin-board');
+    var note = document.getElementById('bin-note');
+    var ansEl = document.getElementById('bin-answer');
+    var btnN = document.getElementById('bin-next');
+    var btnR = document.getElementById('bin-reset');
+    if (!sel || !board) return;
+    for (var i = 0; i < CASES.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = 's = "' + CASES[i].s + '"　p = "' + CASES[i].p + '"　k = ' + CASES[i].k;
+      sel.appendChild(o);
+    }
+    var st = {ci:0, step:0, res:null};
+
+    function run(cs) {
+      var s = cs.s, p = cs.p, k = cs.k, n = s.length, m = p.length, i;
+      var pw = [], hs = [], hp = [];
+      pw[0] = 1n;
+      for (i = 1; i < Math.max(n, m); i++) pw[i] = BigInt.asUintN(64, pw[i - 1] * B);
+      hs[0] = BigInt(s.charCodeAt(0) - 96);
+      for (i = 1; i < n; i++) hs[i] = BigInt.asUintN(64, hs[i - 1] * B + BigInt(s.charCodeAt(i) - 96));
+      hp[0] = BigInt(p.charCodeAt(0) - 96);
+      for (i = 1; i < m; i++) hp[i] = BigInt.asUintN(64, hp[i - 1] * B + BigInt(p.charCodeAt(i) - 96));
+      function g(h, l, r) {
+        var v = h[r];
+        if (l > 0) v = BigInt.asUintN(64, v - h[l - 1] * pw[r - l + 1]);
+        return v;
+      }
+      function same(l1, l2, len) { return g(hs, l1, l1 + len - 1) === g(hp, l2, l2 + len - 1); }
+      var frames = [], count = 0;
+      for (var start = 0; start + m <= n; start++) {
+        var l1 = start, r1 = start + m - 1, l2 = 0, diff = 0, ok;
+        while (l1 <= r1 && diff <= k) {
+          var l = 1, r = r1 - l1 + 1, len = 0;
+          while (l <= r) {
+            var mid = (l + r) >> 1, good = same(l1, l2, mid);
+            frames.push({kind:'mid', start:start, l1:l1, l2:l2, diff:diff, mid:mid, good:good,
+                         len:len, count:count, ok:null, last:false});
+            if (good) { len = mid; l = mid + 1; } else { r = mid - 1; }
+          }
+          var extra = (l1 + len <= r1);
+          frames.push({kind:'jump', start:start, l1:l1, l2:l2, diff:diff, len:len, extra:extra, r1:r1,
+                       afterDiff: diff + (extra ? 1 : 0), nextL1: l1 + len + 1,
+                       count:count, ok:null, last:false});
+          if (extra) diff++;
+          l1 += len + 1; l2 += len + 1;
+        }
+        ok = diff <= k;
+        if (ok) count++;
+        frames.push({kind:'end', start:start, l1:l1, l2:l2, diff:diff, count:count, ok:ok, last:false});
+      }
+      if (frames.length) frames[frames.length - 1].last = true;
+      return {s:s, p:p, k:k, n:n, m:m, frames:frames, total:count};
+    }
+
+    // mark：[from, to, 类] 高亮一段；pickStart：整个窗口的起点（淡橙）
+    function paint(host, chars, mark, pickStart, windowLen) {
+      host.innerHTML = '';
+      var wrap = document.createElement('div'); wrap.className = 'cards';
+      for (var i = 0; i < chars.length; i++) {
+        var dd = document.createElement('div');
+        var cls = '';
+        if (mark && i >= mark[0] && i < mark[1]) cls = ' ' + mark[2];
+        else if (pickStart >= 0 && windowLen && i >= pickStart && i < pickStart + windowLen) cls = ' pick';
+        dd.className = 'card' + cls;
+        dd.innerHTML = chars[i] + '<span class="idx">' + i + '</span>';
+        wrap.appendChild(dd);
+      }
+      host.appendChild(wrap);
+    }
+    function render() {
+      var res = st.res;
+      var f = res.frames[st.step];
+      board.innerHTML = '';
+
+      var p0 = document.createElement('p'); p0.className = 'cap';
+      p0.textContent = 's = ' + res.s + '　p = ' + res.p + '　k = ' + res.k +
+        '（第 ' + (f.start + 1) + ' 个起点，i = ' + f.start + '）';
+      board.appendChild(p0);
+      var d0 = document.createElement('div'); board.appendChild(d0);
+      var sMark = null;
+      if (f.kind === 'mid') sMark = [f.l1, f.l1 + f.mid, f.good ? 'ok' : 'bad'];
+      else if (f.kind === 'jump') sMark = [f.l1, f.l1 + f.len, 'ok'];
+      paint(d0, res.s.split(''), sMark, f.kind === 'end' ? f.start : -1, res.m);
+
+      var p1 = document.createElement('p'); p1.className = 'cap';
+      p1.textContent = 'p 上对应的位置';
+      board.appendChild(p1);
+      var d1 = document.createElement('div'); board.appendChild(d1);
+      var pMark = null;
+      if (f.kind === 'mid') pMark = [f.l2, f.l2 + f.mid, f.good ? 'ok' : 'bad'];
+      else if (f.kind === 'jump') pMark = [f.l2, f.l2 + f.len, 'ok'];
+      paint(d1, res.p.split(''), pMark, -1, 0);
+
+      var head = document.createElement('p'); head.className = 'cap';
+      head.textContent = 'diff = ' + f.diff + '　l1 = ' + f.l1 + '　l2 = ' + f.l2 +
+        (f.kind === 'mid' ? '　二分试 len = ' + f.mid + '：' + (f.good ? '两段哈希相同' : '两段哈希不同') : '');
+      board.appendChild(head);
+
+      if (f.kind === 'mid') {
+        note.textContent = '二分试长度 ' + f.mid + '：' + (f.good ? '两段哈希相同，说明还能对得更长，往右边接着试。'
+                                                                : '两段哈希不同，这一段对不上，往短里试。');
+      } else if (f.kind === 'jump') {
+        note.textContent = '二分出来最长相同前缀 len = ' + f.len + '。' +
+          (f.extra ? '它后面还压着一个不同的位置，diff 变成 ' + f.afterDiff + '，l1 跳到 ' + f.nextL1 + ' 接着比。'
+                   : '这一段一直到 r1 都对上了，不再产生差异，l1 直接走出右端。');
+      } else {
+        note.textContent = f.ok ? ('这个起点差异一共 ' + f.diff + ' 处，不超过 k，算一个。')
+                                : ('这个起点差异累计 ' + f.diff + ' 处，超过 k 了，不算。');
+      }
+      btnN.disabled = f.last;
+      ansEl.textContent = f.last ? ('所有起点看完，与 p 匹配（差异不超过 ' + res.k + ' 处）的子串一共 ' + res.total + ' 个。') : '';
+    }
+    function rebuild() {
+      st.res = run(CASES[st.ci]);
+      st.step = 0;
+      render();
+    }
+    sel.addEventListener('change', function() { st.ci = Number(sel.value); rebuild(); });
+    btnN.addEventListener('click', function() { if (st.step < st.res.frames.length - 1) { st.step++; render(); } });
+    btnR.addEventListener('click', function() { st.step = 0; render(); });
+    rebuild();
+  })();
+})();</script>
+</body>
+</html>
