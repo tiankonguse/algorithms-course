@@ -1,5 +1,12 @@
 # 自动化：提交并推送 git
 
+- 触发时间：2026-10-12 20:08 (GMT+8)
+- 动作：将工作区改动提交并推送到 origin/main。
+- 结果：提交 `6a11122`，12 个文件变更（+2135 / -26），已推送 `1c2f1c3..6a11122`。
+- 范围：新增 3 个字符串哈希页（string-hash / string-hash-match / string-hash-count），新开「字符串哈希」组插在「Manacher 与 Z 算法」之后；分离 catalog.html 目录页，同步 shared.css / shared.js / index.html 与首页导航、algorithms.json 注册 3 页（含新组）、prompt.md 进度、3 个记忆文件。
+- 范围排除：`assets/data/algorithms.json.bak2layer`（旧两层结构备份，保持未跟踪，未提交）。
+- 结论：成功，无冲突，远程已更新；工作树除 bak2layer 备份外干净。
+
 - 触发时间：2026-10-12 18:44 (GMT+8)
 - 动作：将工作区改动提交并推送到 origin/main。
 - 结果：提交 `1c2f1c3`，18 个文件变更（+4301 / -590），已推送 `895921c..1c2f1c3`。
