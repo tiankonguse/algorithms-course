@@ -84,3 +84,5 @@
 - **页面里画出来的示例数据要和图上标出的结论逐格核**（111）：`segtree-binary-search` 第一张图把第 5 格画成「花」而不是「空」，四轮二分的空瓶数就只有两轮对得上（[2,5] 标「正好 3 个」实际 2 个、答案标 5 实际 6）；一格数据的错肉眼看不出来，把每轮区间里的空瓶数重新数一遍立刻露。
 - **`verify_pages.js` 在本机（Chrome 155）对任何页都报全 0**（用户级新版也一样，不是版本偏差），`verify_home.js` 正常。兜底：照仓库 `.agent/skills/course-site-page/scripts/cdp_page.js` 写一份（`PUT /json/new?<url>` 开页 → 连该页自己的 `webSocketDebuggerUrl` → 再 `Page.enable/Runtime.enable` 后 evaluate），检查项照抄 verify_pages 的 CHECK（figs/figSvg/nav/toc/viz/code/pager/bbox 越界）。
 - **「下一课」与 json 末条对不上 = 可能已有失联会话做完**：查该课 id 与页面 mtime；页面与 json 已落盘、只差 prompt.md 的 → 按死锁规则清 owner 重抢锁，**只补记进度、不重写页面**。
+- **绘图 helper 别写成「吃进累积串再返回」**（112）：`function axis(g, y, label){ … g += …; return g; }` 配上调用点 `g += axis(g, …)`，会把之前累积的内容整段复制一遍 —— `figure.fig` 里每个 `text` 都多出一个同坐标同内容的孪生兄弟，叠在一起肉眼完全看不出，只有逐图比 `getBBox()` 才报「100% 自重叠」。helper 只返回自己的片段，调用点保持 `+=`。
+- **标题与紧邻标签的行距按 bbox 量**：SVG 里 `text` 的 bbox 比字面高得多（含升降部余量），标题 `y=20` 与下方标签 `y=30`（字号 13 / 11）的 bbox 会真的叠上 3~5px。把标题上移或把整块内容下移，别只凭「看着还有空」判断；整块平移时画布高度要从同一个变量算出来，别写死。

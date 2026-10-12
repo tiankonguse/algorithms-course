@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线段树：把范围操作拆到边界 · 算法教程</title>
+<meta name="description" content="「这一段有几种雷」和「每个位置各自是多少」都合并不了，硬造一个能合并的量不如把操作拆开：一款雷只动左右两个端点，一个等差数列在差分数组上只动三个位置。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .ansline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.7;}
+  .ansline b{color:var(--full);}
+  .ansline i{color:var(--partial);font-style:normal;}
+  .logline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.8;max-height:120px;overflow:auto;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>线段树：把范围操作拆到边界</h1>
+    <p class="intro">要回答的东西太杂，一个懒标记装不下：一段上有几款不同的雷、每个位置各自的值。这种时候换个方向，让范围操作只落在常数个位置上，剩下的就是最普通的线段树。</p>
+
+    <h2>零、背景</h2>
+    <p>懒标记能成立，前提是「这段怎么样」能用很少几个数表示，而且两个儿子合并起来方便。区间和可以，颜色集合可以（压成掩码），但有两类东西不行。</p>
+    <p>一类是「这段上有多少种不同的东西」。甲段有 3 种、乙段有 3 种，合起来可能是 3 种也可能是 6 种，看它们撞不撞，光靠各自的种类数推不出来。</p>
+    <p>另一类是「每个位置各自是多少」。这类信息压根没有合并的说法，只有叶子才有。</p>
+    <p>但这两道题的操作都很整齐：虽然一次改的是一整段，真正「变了关系」的位置只有常数个。把线段树建在那些位置上，题目就退化成单点修改加区间求和。</p>
+
+    <h2>一、两道题</h2>
+    <ul>
+      <li>贪婪大陆（洛谷 P2184）：n 个格子，开始都没有雷。操作 <code>1 l r</code> 在 [l, r] 上放一款新型地雷，每一款都是全新的，不是替换掉旧雷；操作 <code>2 l r</code> 问 [l, r] 上共有多少款不同的雷。n、m 到 10⁵。</li>
+      <li>无聊的数列（洛谷 P1438）：长度 n 的数组 arr，操作 <code>1 l r k d</code> 把 arr[l..r] 依次加上首项 k、公差 d 的等差数列，操作 <code>2 p</code> 查 arr[p] 的值。n、m 到 10⁵。</li>
+    </ul>
+    <p>第一题的题面给了个例子：先放一款盖住 [3, 6] 的雷（叫它 A），再放一款盖住 [3, 4] 的雷（叫它 B）。这时格子 3、4 上各有 A、B 两款，格子 5、6 上只有 A。查 [4, 5] 返回 2，查 [5, 6] 返回 1。</p>
+
+    <h2>二、贪婪大陆：一款雷只动两个位置</h2>
+    <p>「在 [l, r] 上放一款雷」，如果老老实实记下来，就是往 r − l + 1 个格子上各挂一个编号。n 和 m 都是 10⁵ 时最坏要挂 10¹⁰ 条记录，折 37.3 GB，做不到。</p>
+    <p>换个角度问问题：这一款雷算不算盖在查询区间 [ql, qr] 上？雷的位置由它的左端点 a 和右端点 b 定下来，它和 [ql, qr] 有交集，当且仅当 a ≤ qr 且 b ≥ ql。位置之外的信息一概不需要。</p>
+    <figure class="fig" id="fig-cross"></figure>
+    <p>两个条件分别数一遍：左端点不超过 qr 的雷有多少款，右端点小于 ql 的雷有多少款。后者一定是前者的子集（a ≤ b &lt; ql ≤ qr 推出 a ≤ qr），所以相减剩下的正好是「左端点 ≤ qr 且右端点 ≥ ql」的那些，也就是盖在查询区间上的那些。</p>
+    <p>线段树上就只要两个计数器：每个位置有多少个雷的左端点、多少个雷的右端点。放一款雷是两个单点加，查询是两次区间求和。</p>
+    <figure class="fig" id="fig-count"></figure>
+    <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+
+    <span class="cm">// starts[i]：i 号范围上有多少个雷的左端点</span>
+    <span class="cm">// ends[i]：i 号范围上有多少个雷的右端点</span>
+    <span class="kw">int</span> starts[MAXN &lt;&lt; 2];
+    <span class="kw">int</span> ends[MAXN &lt;&lt; 2];
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        starts[i] = starts[i &lt;&lt; 1] + starts[i &lt;&lt; 1 | 1];
+        ends[i] = ends[i &lt;&lt; 1] + ends[i &lt;&lt; 1 | 1];
+    }
+
+    <span class="cm">// jobt 等于 0 时给左端点记一次，等于 1 时给右端点记一次</span>
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> jobt, <span class="kw">int</span> jobi, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">if</span> (jobt == 0) {
+                starts[i]++;
+            } <span class="kw">else</span> {
+                ends[i]++;
+            }
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                add(jobt, jobi, l, mid, i &lt;&lt; 1);
+            } <span class="kw">else</span> {
+                add(jobt, jobi, mid + 1, r, i &lt;&lt; 1 | 1);
+            }
+            up(i);
+        }
+    }
+
+    <span class="cm">// jobt 等于 0 时数左端点的个数，等于 1 时数右端点的个数</span>
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> jobt, <span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="kw">return</span> jobt == 0 ? starts[i] : ends[i];
+        }
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">if</span> (jobl &lt;= mid) {
+            ans += query(jobt, jobl, jobr, l, mid, i &lt;&lt; 1);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+            ans += query(jobt, jobl, jobr, mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+    <p>题面那个例子走一遍：先放 [3, 6] 再放 [3, 4]，这时位置 3 上有 2 个左端点、位置 4 上有 1 个右端点、位置 6 上有 1 个右端点。查 [4, 5] 时左端点 ≤ 5 的有 2 个，右端点 &lt; 4 的有 0 个，答案 2；查 [5, 6] 时左端点 ≤ 6 的有 2 个，右端点 &lt; 5 的有 1 个，答案 1。都对上了。</p>
+    <pre class="code"><span class="cm">// 新增一款盖住 l..r 的雷：只有两个端点会动</span>
+    <span class="kw">void</span> <span class="fn">addBomb</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> n) {
+        add(0, l, 1, n, 1);
+        add(1, r, 1, n, 1);
+    }
+
+    <span class="cm">// 查询 l..r 上一共有多少款雷</span>
+    <span class="kw">int</span> <span class="fn">askBomb</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> n) {
+        <span class="kw">int</span> s = query(0, 1, r, 1, n, 1);
+        <span class="cm">// l 等于 1 时左边没有格子，不能去查空区间 [1, 0]</span>
+        <span class="kw">int</span> e = l == 1 ? 0 : query(1, 1, l - 1, 1, n, 1);
+        <span class="kw">return</span> s - e;
+    }</pre>
+    <p>这里有个边界要单独写。<code>l</code> 等于 1 的时候第二项应该查 [1, 0]，而线段树不会替你处理空区间：判断 <code>ql &lt;= l &amp;&amp; r &lt;= qr</code> 在叶子 [1, 1] 上永远不成立（要求 r ≤ 0），于是它带着同一组参数反复调用自己。实测把 [1, 0] 直接喂进去，进程段错误退出，就是栈被递归撑爆了。查一次只有 0 个右端点，干脆特判掉。</p>
+    <p>实测：n = m = 16000、每次操作盖住大半段，逐段扫描的暴力 11.36 ms，线段树 3.40 ms。n = m = 10⁵ 时 23.22 ms。</p>
+
+    <div class="viz" id="viz-bomb">
+      <h3>演示：端点计数与相交判定</h3>
+      <p class="viz-hint">每一根横条是一款雷，蓝框是这次查询的范围。下面两行是线段树上真正存的东西：每个位置上有几个左端点、几个右端点。答案就是把第一行「≤ r」的和减去第二行「&lt; l」的和。</p>
+    </div>
+
+    <h2>三、无聊的数列：差分上只有三个位置在动</h2>
+    <p>第二题的操作读起来比第一题还麻烦：区间里每个位置加的数都不一样。但位置之间的差是固定的，第 j 个位置加的是 k + d(j − l)，相邻两项的差只多了 d。换成差分的语言，这就是一次区间加常数。</p>
+    <p>把数组换成差分数组 d[i] = a[i] − a[i−1]，整个操作拆成三句话：</p>
+    <ol>
+      <li>d[l] 加上 k。原来 a[l] 比 a[l−1] 多出来的就是 k，加完还是。</li>
+      <li>d[l+1] 到 d[r] 每个加上 d。这一段内部相邻两项的差都多了 d。</li>
+      <li>d[r+1] 减去末项 k + d(r − l)。r 之后的位置不该受影响，把多出来的那一截减回去。</li>
+    </ol>
+    <figure class="fig" id="fig-diff"></figure>
+    <p>查询 arr[p] 就是 d[1] 一直加到 d[p]：差分数组的前缀和等于原数组。于是线段树建在差分数组上，支持区间加与区间求和，查询变成一次前缀和。</p>
+    <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+
+    <span class="cm">// 线段树建在差分数组上，维护一段差分值之和</span>
+    <span class="kw">int</span> diff[MAXN];
+    <span class="kw">long</span> <span class="kw">long</span> sum[MAXN &lt;&lt; 2];
+    <span class="kw">long</span> <span class="kw">long</span> addv[MAXN &lt;&lt; 2];
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        sum[i] = sum[i &lt;&lt; 1] + sum[i &lt;&lt; 1 | 1];
+    }
+
+    <span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">long</span> <span class="kw">long</span> v, <span class="kw">int</span> n) {
+        addv[i] += v;
+        sum[i] += v * n;
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i, <span class="kw">int</span> ln, <span class="kw">int</span> rn) {
+        <span class="kw">if</span> (addv[i] != 0) {
+            lazy(i &lt;&lt; 1, addv[i], ln);
+            lazy(i &lt;&lt; 1 | 1, addv[i], rn);
+            addv[i] = 0;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) {
+            sum[i] = diff[l];
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            build(l, mid, i &lt;&lt; 1);
+            build(mid + 1, r, i &lt;&lt; 1 | 1);
+            up(i);
+        }
+        addv[i] = 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">long</span> <span class="kw">long</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            lazy(i, jobv, r - l + 1);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            down(i, mid - l + 1, r - mid);
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                add(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                add(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+            }
+            up(i);
+        }
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="kw">return</span> sum[i];
+        }
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        down(i, mid - l + 1, r - mid);
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">if</span> (jobl &lt;= mid) {
+            ans += query(jobl, jobr, l, mid, i &lt;&lt; 1);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+            ans += query(jobl, jobr, mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+    <pre class="code"><span class="cm">// 在 l..r 上依次加上首项 k、公差 d 的等差数列</span>
+    <span class="kw">void</span> <span class="fn">addArith</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">long</span> <span class="kw">long</span> k, <span class="kw">long</span> <span class="kw">long</span> d, <span class="kw">int</span> n) {
+        <span class="kw">long</span> <span class="kw">long</span> e = k + d * (r - l);
+        add(l, l, k, 1, n, 1);
+        <span class="kw">if</span> (l + 1 &lt;= r) {
+            add(l + 1, r, d, 1, n, 1);
+        }
+        <span class="kw">if</span> (r &lt; n) {
+            add(r + 1, r + 1, -e, 1, n, 1);
+        }
+    }
+
+    <span class="cm">// 单点查询：差分数组的前缀和就是原数组</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">askValue</span>(<span class="kw">int</span> p, <span class="kw">int</span> n) {
+        <span class="kw">return</span> query(1, p, 1, n, 1);
+    }</pre>
+    <p>这里有个细节：<code>r</code> 等于 n 时根本就没有 r + 1 号位置，第三步要跳过；<code>l + 1</code> 大于 <code>r</code> 时第二步的区间是空的，也要跳过。这两处不判，下标直接越界。</p>
+    <p>实测：n = m = 16000、每次操作盖住大半段，逐格加等差数列的暴力 19.06 ms，线段树 5.27 ms。n = m = 10⁵ 时 37.38 ms。</p>
+    <p>和上一页那道开关一样，这里的和必须是 64 位。按题目上限构造最坏输入：n = 10⁵，10⁵ 次操作都是「整个数组加首项 1000、公差 100」，最后一个位置的真实值是 1000090000000；换成 int 累加得到 −637379968，符号都翻过来了。</p>
+
+    <div class="viz" id="viz-diff">
+      <h3>演示：差分上的三次改动</h3>
+      <p class="viz-hint">上面一行是原数组，下面一行是线段树真正维护的差分数组。做一次区间加等差数列，看差分里哪三个位置动了；查一个位置时，把差分从头到它加起来。</p>
+    </div>
+
+    <h2>四、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>项</th><th>贪婪大陆</th><th>无聊的数列</th></tr>
+      <tr><td>建树</td><td>O(n)</td><td>O(n)</td></tr>
+      <tr><td>单次修改</td><td>O(log n)，两个单点加</td><td>O(log n)，两个单点加加一次区间加</td></tr>
+      <tr><td>单次查询</td><td>O(log n)，两次区间和</td><td>O(log n)，一次前缀和</td></tr>
+      <tr><td>全程总代价</td><td>O((n + m) log n)</td><td>O((n + m) log n)</td></tr>
+      <tr><td>空间</td><td>O(n)：两个 int 数组</td><td>O(n)：一个 int 存差分、两个 long long 数组</td></tr>
+    </table>
+    <p>按 n = 10⁵ 开四倍空间算，数组长度都是 400004。贪婪大陆两个 int 数组 3.05 MiB；无聊的数列两个 long long 数组 6.10 MiB，再加一个 10⁵ 的 int 差分数组 0.38 MiB。两题都远在限制之内。</p>
+    <figure class="fig" id="fig-cost"></figure>
+
+    <h2>五、几种写错的样子</h2>
+    <p>每档 4000 组随机操作，四档的 n 分别是 4、8、16、64，操作次数 6 到 14 之间。表里的数字是「错版答案与正解不一样」的比例。</p>
+    <table class="complexity">
+      <tr><th>写错的地方</th><th>n = 4</th><th>n = 8</th><th>n = 16</th><th>n = 64</th></tr>
+      <tr><td>贪婪大陆：第二个查询用 l 而不是 l − 1</td><td>65.12%</td><td>51.10%</td><td>34.70%</td><td>10.68%</td></tr>
+      <tr><td>贪婪大陆：左右端点的计数互换</td><td>88.78%</td><td>90.62%</td><td>91.78%</td><td>92.10%</td></tr>
+      <tr><td>无聊的数列：第二个区间加从 l 起</td><td>93.58%</td><td>92.65%</td><td>92.88%</td><td>92.03%</td></tr>
+      <tr><td>无聊的数列：少写尾部那个单点</td><td>67.95%</td><td>75.72%</td><td>77.62%</td><td>80.72%</td></tr>
+      <tr><td>无聊的数列：末项算成 k + d(r − l + 1)</td><td>65.60%</td><td>73.70%</td><td>76.50%</td><td>77.15%</td></tr>
+    </table>
+    <p>第一行随 n 变大越来越难抓，从 65.12% 掉到 10.68%。两种写法只在「恰好有一款雷的右端点落在 l 这个位置上」时才有差别，n 越大这件事越不容易碰上。这类靠边界撞上的错法都有一个通病：值域一宽，抓到的概率就往下掉。</p>
+    <p>第二行反过来，88% 起步而且几乎不随 n 变。它错的是整个式子，跟边界撞不撞没关系，只要数据里有雷就露馅。</p>
+    <p>无聊的数列那三行都在 65% 以上。位置的判定多，n 越大一次操作覆盖的位置越多，少改一处立刻在后续查询里显出来。末项那条从 65.60% 涨到 77.15%，是因为 r 变大时末项更大，减错了更明显。</p>
+
+    <h2>六、总结</h2>
+    <p>两道题的共同点是「范围上的操作最后只落在常数个位置上」。贪婪大陆放一款雷动两个位置：左端点和右端点。无聊的数列加一个等差数列动三个位置：d[l]、d[l+1..r]、d[r+1]。</p>
+    <p>反过来说，这两道题要的东西本身就合并不了。贪婪大陆问的是「有几款不同的雷」，无聊的数列问的是每个位置各自的值，都不是一个「段上的量」。与其硬造一个能合并的东西，不如把操作拆开。</p>
+    <p>差分和端点计数其实是一件事的两种面貌，都在回答「这一步之后，相邻两项的关系变了多少」。下一次遇到范围操作里有「不一样的东西」，先数一数它到底动了哪几个位置。</p>
+
+    <h2>最后</h2>
+    <p>两个坑。一是贪婪大陆里 l 等于 1 时要跳过第二项查询，空区间在线段树里下不了台。二是无聊的数列里 r 等于 n 时没有 r + 1 号位置，那个单点加要跳过；同一处代码里的 l + 1 大于 r 时，那个区间加也要跳过。</p>
+
+    <h2>相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P2184" target="_blank">贪婪大陆</a></td><td>luogu.com.cn/problem/P2184</td></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P1438" target="_blank">无聊的数列</a></td><td>luogu.com.cn/problem/P1438</td></tr>
+    </table>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解112【扩展】线段树专题3-线段树维护更多类型的信息</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = {blue:'#2563eb', blueBg:'#dbeafe', blueLt:'#eef4ff',
+           orange:'#ea580c', orangeBg:'#ffedd5', gray:'#9aa0a6',
+           bg:'#f6f7f9', bd:'#e6e8eb', ink:'#1f2328', dim:'#5c6370'};
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x,y,s,o){
+    o = o || {};
+    return '<text x="'+x+'" y="'+y+'" font-size="'+(o.size||12)+'" fill="'+(o.fill||C.ink)+
+           '" text-anchor="'+(o.anchor||'middle')+'"'+(o.mono?' font-family="ui-monospace,Menlo,monospace"':'')+
+           (o.weight?' font-weight="'+o.weight+'"':'')+'>'+esc(s)+'</text>';
+  }
+  function R(x,y,w,h,fill,stroke){
+    return '<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w)+'" height="'+Math.max(0,h)+
+           '" rx="3" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="1"':'')+'/>';
+  }
+  function mount(id, hh, body, cap){
+    var f = document.getElementById(id);
+    if (!f) return;
+    f.innerHTML = '<svg viewBox="0 0 680 '+hh+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+
+      body + '</svg><figcaption>'+cap+'</figcaption>';
+  }
+
+  // 时间轴：8 个位置，x = X0 + (i-1)*CW，格子宽 CW-6
+  var X0 = 40, CW = 68;
+  function gx(i){ return X0 + (i - 1) * CW; }
+  function bar(l, r, y, h, fill, stroke){
+    return R(gx(l), y, (r - l + 1) * CW - 6, h, fill, stroke);
+  }
+  function axis(y, label){
+    var g = '';
+    for (var i = 1; i <= 8; i++) g += T(gx(i) + (CW - 6) / 2, y, String(i), {size:10, fill:C.dim, mono:true});
+    if (label) g += T(X0, y + 16, label, {size:10.5, fill:C.dim, anchor:'start'});
+    return g;
+  }
+
+  // ---------- 图 1：相交判定 ----------
+  (function(){
+    var g = '';
+    g += T(340, 20, '一款雷盖住 [a, b]，查询区间是 [ql, qr]', {size:13, weight:'600'});
+    var Y = 48;
+    g += R(gx(4), Y - 6, 2 * CW - 6, 76, 'rgba(37,99,235,0.10)', C.blue);
+    g += T(gx(4) + CW - 3, Y - 12, '查询 [4, 5]', {size:11, fill:C.blue, mono:true});
+    g += bar(3, 6, Y + 10, 22, C.orangeBg, C.orange);
+    g += T(gx(3) + 4 * CW - 6 + 8, Y + 25, '雷 A：[3, 6]', {size:11, fill:C.orange, anchor:'start', mono:true});
+    g += T(340, Y + 48, '左端点 3 ≤ 5 成立，右端点 6 ≥ 4 成立 → 算在答案里', {size:12, fill:'#15803d'});
+    var Y2 = Y + 74;
+    g += R(gx(4), Y2 - 6, 2 * CW - 6, 76, 'rgba(37,99,235,0.10)', C.blue);
+    g += T(gx(4) + CW - 3, Y2 - 12, '查询 [4, 5]', {size:11, fill:C.blue, mono:true});
+    g += bar(1, 2, Y2 + 10, 22, C.bg, C.gray);
+    g += T(gx(1) + 2 * CW - 6 + 8, Y2 + 25, '雷 B：[1, 2]', {size:11, fill:C.gray, anchor:'start', mono:true});
+    g += T(340, Y2 + 50, '左端点 1 ≤ 5 成立，右端点 2 ≥ 4 不成立 → 不算', {size:12, fill:C.orange});
+    g += axis(Y2 + 72, '位置');
+    mount('fig-cross', Y2 + 94, g, '一款雷要不要算，只看它的两个端点和查询区间的相对位置，跟它盖了多少格子没关系。');
+  })();
+
+  // ---------- 图 2：两个计数相减 ----------
+  (function(){
+    var g = '';
+    g += T(340, 20, '查询 [4, 6]：左端点 ≤ 6 的有 3 款，右端点 < 4 的有 1 款', {size:12.5, weight:'600'});
+    var bombs = [[1,3],[2,5],[5,8],[7,7]];
+    var Y = 48, i;
+    g += R(gx(4), Y - 8, 3 * CW - 6, 4 * 26, 'rgba(37,99,235,0.10)', C.blue);
+    g += T(gx(4) + 1.5 * CW - 3, Y - 12, '查询 [4, 6]', {size:11, fill:C.blue, mono:true});
+    for (i = 0; i < bombs.length; i++) {
+      var y = Y + i * 26;
+      var inc = bombs[i][1] >= 4 && bombs[i][0] <= 6;
+      g += bar(bombs[i][0], bombs[i][1], y, 20, inc ? C.orangeBg : C.bg, inc ? C.orange : C.gray);
+      g += T(gx(bombs[i][0]) + 6, y + 14, '[' + bombs[i][0] + ',' + bombs[i][1] + ']', {size:10.5,
+             fill:inc ? C.orange : C.gray, anchor:'start', mono:true});
+    }
+    var Y2 = Y + 4 * 26 + 12;
+    g += axis(Y2 + 8, '位置');
+    var lines = [
+      '左端点 ≤ 6 的三款：[1,3]、[2,5]、[5,8]　s = 3',
+      '右端点 < 4 的一款：[1,3]　e = 1',
+      's − e = 2，和直接数出来的两款（[2,5]、[5,8]）一致'
+    ];
+    for (i = 0; i < lines.length; i++) {
+      g += T(340, Y2 + 32 + i * 20, lines[i], {size:11.5,
+             fill:i === 2 ? '#15803d' : (i === 0 ? C.blue : C.orange)});
+    }
+    mount('fig-count', Y2 + 32 + 3 * 20, g, '被减掉的那一款左端点也在查询左边，减法把它去掉；剩下的是「左边够不着、右边兜得住」的那些。');
+  })();
+
+  // ---------- 图 3：差分上的三个改动 ----------
+  (function(){
+    var g = '';
+    g += T(340, 20, '在 [2, 6] 上加首项 3、公差 1 的等差数列', {size:13, weight:'600'});
+    var a0 = [1,2,3,4,5,6,7,8], a1 = [1,5,7,9,11,13,7,8];
+    var d0 = [1,1,1,1,1,1,1,1], d1 = [1,4,2,2,2,2,-6,1];
+    var i;
+    var rows = [
+      {lbl:'原数组 a', top:30, y:38, old:a0, now:a1},
+      {lbl:'差分 d', top:88, y:96, old:d0, now:d1}
+    ];
+    for (var t = 0; t < rows.length; t++) {
+      var rr = rows[t];
+      g += T(X0, rr.top, rr.lbl, {size:11, fill:C.dim, anchor:'start'});
+      for (i = 1; i <= 8; i++) {
+        var ch = rr.old[i - 1] !== rr.now[i - 1];
+        g += R(gx(i), rr.y, CW - 6, 26, ch ? C.orangeBg : C.bg, ch ? C.orange : C.bd);
+        g += T(gx(i) + (CW - 6) / 2, rr.y + 18, String(rr.now[i - 1]), {size:11.5, mono:true,
+               fill:ch ? C.orange : C.ink});
+      }
+    }
+    for (i = 1; i <= 8; i++) g += T(gx(i) + (CW - 6) / 2, 138, String(i), {size:10, fill:C.dim, mono:true});
+    var Y3 = 162;
+    var notes = [
+      '第 1 步：d[2] += 3　（a[2] 比 a[1] 多出来的首项）',
+      '第 2 步：d[3..6] += 1　（这一段内部相邻两项的差都多了 1）',
+      '第 3 步：d[7] −= 7　（末项 3 + 1 × 4 = 7，从 r + 1 处减回去）'
+    ];
+    for (i = 0; i < notes.length; i++) g += T(340, Y3 + i * 20, notes[i], {size:11.5, fill:i === 2 ? C.orange : C.blue});
+    g += T(340, Y3 + 3 * 20 + 14, '原数组一次动了 5 个位置；差分上动了 6 个格子，但只花了 3 次操作', {size:11.5, fill:C.dim});
+    mount('fig-diff', Y3 + 3 * 20 + 32, g, '区间加等差数列在差分里是「两个单点加加一段常数加」，段有多长都不影响操作次数。');
+  })();
+
+  // ---------- 图 4：耗时对比 ----------
+  (function(){
+    var g = '', Y0 = 44;
+    g += T(340, 18, 'n = m = 16000，每次操作盖住大半段', {size:13, weight:'600'});
+    var rows = [
+      {name:'贪婪大陆 逐段扫描', v:11.36, col:C.orange},
+      {name:'贪婪大陆 线段树', v:3.40, col:C.blue},
+      {name:'无聊的数列 逐格暴力', v:19.06, col:C.orange},
+      {name:'无聊的数列 线段树', v:5.27, col:C.blue}
+    ];
+    var maxLog = Math.log10(19.06) + 0.5, BW = 270, BX = 226, TX = 512;
+    for (var i = 0; i < rows.length; i++) {
+      var y = Y0 + i * 34;
+      var lw = Math.max(3, (Math.log10(rows[i].v) + 0.5) / maxLog * BW);
+      g += T(216, y + 17, rows[i].name, {size:11.5, fill:C.dim, anchor:'end'});
+      g += R(BX, y, lw, 22, rows[i].col === C.blue ? C.blueBg : C.orangeBg, rows[i].col);
+      g += T(TX, y + 16, rows[i].v.toFixed(2) + ' ms', {size:11.5, fill:rows[i].col, anchor:'start', mono:true});
+    }
+    g += T(340, Y0 + 4 * 34 + 14, '横轴是对数刻度。两题的加速比都在 3 到 5 倍之间，没有前一页那种十倍以上的差距', {size:11.5, fill:C.dim});
+    mount('fig-cost', Y0 + 4 * 34 + 32, g, '端点计数与差分的操作次数少，线段树的常数开销占了更大比重，加速比自然没那么夸张。');
+  })();
+
+  function bind(id, ev, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
+
+  // ============ 演示 1：贪婪大陆 ============
+  (function(){
+    var PRESETS = [
+      {name:'题面那个例子', ops:[['B',3,6],['B',3,4],['Q',4,5],['Q',5,6]]},
+      {name:'三款雷互相盖住', ops:[['B',1,3],['B',2,5],['B',4,8],['Q',1,8],['Q',3,3],['Q',6,8]]},
+      {name:'单点雷与全段雷', ops:[['B',5,5],['B',1,8],['Q',1,4],['Q',2,7],['Q',1,1]]}
+    ];
+    var host = document.getElementById('viz-bomb');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'bm-data';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'bm-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'bm-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'bm-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'bm-ans';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'bm-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var N = 8;
+    var cur = [], step = -1;
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var segs = [], st = [], en = [], steps = [];
+      function refresh(){
+        st = []; en = [];
+        for (var k = 0; k <= N; k++) { st.push(0); en.push(0); }
+        for (var q = 0; q < segs.length; q++) { st[segs[q][0]]++; en[segs[q][1]]++; }
+      }
+      refresh();
+      for (var k = 0; k < p.ops.length; k++) {
+        var op = p.ops[k], out = '';
+        if (op[0] === 'B') {
+          segs.push([op[1], op[2]]);
+          refresh();
+          out = '放一款雷 [' + op[1] + ',' + op[2] + ']';
+        } else {
+          var l = op[1], r = op[2], s = 0, e = 0, j;
+          for (j = 1; j <= r; j++) s += st[j];
+          for (j = 1; j < l; j++) e += en[j];
+          out = '查 [' + l + ',' + r + ']';
+          steps.push({op:op, out:out, s:s, e:e, segs:JSON.parse(JSON.stringify(segs)),
+                      st:st.slice(), en:en.slice()});
+          continue;
+        }
+        steps.push({op:op, out:out, s:-1, e:-1, segs:JSON.parse(JSON.stringify(segs)),
+                    st:st.slice(), en:en.slice()});
+      }
+      cur = steps; step = -1;
+      render();
+    }
+    function render(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var segs = [], st = [], en = [], out = '未开始';
+      var k;
+      for (k = 0; k <= N; k++) { st.push(0); en.push(0); }
+      if (step >= 0) {
+        var sn = cur[step];
+        segs = sn.segs; st = sn.st; en = sn.en; out = sn.out;
+      }
+      var ql = 0, qr = 0;
+      if (step >= 0 && cur[step].op[0] === 'Q') { ql = cur[step].op[1]; qr = cur[step].op[2]; }
+      var g = '';
+      if (ql) g += R(gx(ql) - 2, 26, (qr - ql + 1) * CW - 2, 118, 'rgba(37,99,235,0.10)', C.blue);
+      for (k = 0; k < segs.length; k++) {
+        var y = 36 + k * 22;
+        var inc = ql ? (segs[k][1] >= ql && segs[k][0] <= qr) : false;
+        g += bar(segs[k][0], segs[k][1], y, 16, inc ? C.orangeBg : C.bg,
+                 ql ? (inc ? C.orange : C.gray) : C.gray);
+        g += T(gx(segs[k][0]) + 6, y + 12, '[' + segs[k][0] + ',' + segs[k][1] + ']', {size:10.5,
+               fill:inc ? C.orange : C.gray, anchor:'start', mono:true});
+      }
+      g += T(gx(1) - 4, 48, '雷', {size:11, fill:C.dim, anchor:'end'});
+      for (k = 1; k <= N; k++) {
+        var x = gx(k), w = CW - 6;
+        var inQ = ql && k >= ql && k <= qr;
+        g += R(x, 148, w, 24, inQ ? 'rgba(37,99,235,0.10)' : C.bg, inQ ? C.blue : C.bd);
+        g += T(x + w / 2, 164, '位置 ' + k, {size:10, fill:inQ ? C.blue : C.dim, mono:true});
+        g += R(x, 184, w, 24, st[k] ? C.blueLt : C.bg, st[k] ? C.blue : C.bd);
+        g += T(x + w / 2, 200, String(st[k]), {size:11.5, mono:true, fill:st[k] ? C.blue : C.gray});
+        g += R(x, 212, w, 24, en[k] ? C.orangeBg : C.bg, en[k] ? C.orange : C.bd);
+        g += T(x + w / 2, 228, String(en[k]), {size:11.5, mono:true, fill:en[k] ? C.orange : C.gray});
+      }
+      g += T(gx(1) - 4, 200, '左端点', {size:10.5, fill:C.blue, anchor:'end'});
+      g += T(gx(1) - 4, 228, '右端点', {size:10.5, fill:C.orange, anchor:'end'});
+      g += T(340, 254, '答案 = 第一行里位置 ≤ r 的和 − 第二行里位置 < l 的和', {size:12, fill:C.ink});
+      stage.innerHTML = '<svg viewBox="0 0 680 268" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var txt = '未开始';
+      if (step >= 0) {
+        var sn = cur[step];
+        if (sn.op[0] === 'B') {
+          txt = esc(sn.out) + '　现在一共放了 <b>' + segs.length + '</b> 款雷';
+        } else {
+          txt = '查 [' + sn.op[1] + ',' + sn.op[2] + ']：左端点 ≤ ' + sn.op[2] + ' 的有 <b>' + sn.s +
+                '</b> 个，右端点 &lt; ' + sn.op[1] + ' 的有 <i>' + sn.e + '</i> 个，<b>' + sn.s + '</b> − ' +
+                '<i>' + sn.e + '</i> = ' + (sn.s - sn.e) + ' 款';
+        }
+      }
+      ans.innerHTML = txt;
+      var lh = '';
+      for (var q = 0; q <= step; q++) lh += '第 ' + (q + 1) + ' 步：' + cur[q].out + '\n';
+      log.textContent = lh;
+      bNext.disabled = step >= cur.length - 1;
+    }
+    bind('bm-next', 'click', function(){ if (step < cur.length - 1) { step++; render(); } });
+    bind('bm-reset', 'click', function(){ step = -1; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+
+  // ============ 演示 2：无聊的数列 ============
+  (function(){
+    var PRESETS = [
+      {name:'在 [2,6] 上加 3, 公差 1', a:[0,1,2,3,4,5,6,7,8], ops:[['A',2,6,3,1],['Q',4]]},
+      {name:'整段加 2, 公差 3', a:[0,1,2,3,4,5,6,7,8], ops:[['A',1,8,2,3],['Q',8]]},
+      {name:'两次区间加', a:[0,1,2,3,4,5,6,7,8], ops:[['A',1,4,5,2],['A',3,8,-1,1],['Q',5],['Q',2]]}
+    ];
+    var host = document.getElementById('viz-diff');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'df-data';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'df-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'df-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'df-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'df-ans';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'df-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var N = 8;
+    function diffOf(a){ var d = [0]; for (var i = 1; i <= N; i++) d.push(a[i] - a[i - 1]); return d; }
+    var cur = [], step = -1;
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var a = p.a.slice(), d = diffOf(a), steps = [];
+      for (var k = 0; k < p.ops.length; k++) {
+        var op = p.ops[k], out = '';
+        var chg = {};
+        if (op[0] === 'A') {
+          var l = op[1], r = op[2], kk = op[3], dd = op[4];
+          for (var j = l; j <= r; j++) a[j] += kk + dd * (j - l);
+          var nd = diffOf(a), q;
+          for (q = 1; q <= N; q++) if (nd[q] !== d[q]) chg[q] = 1;
+          out = '把 [' + l + ',' + r + '] 依次加 ' + kk + ' + ' + dd + '(j − ' + l + ')';
+          d = nd;
+        } else {
+          out = '查位置 ' + op[1] + ' 的值';
+        }
+        steps.push({op:op, out:out, a:a.slice(), d:d.slice(), chg:chg});
+      }
+      cur = steps; step = -1;
+      render();
+    }
+    function render(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var a = p.a.slice(), d = diffOf(a), chg = {}, i;
+      if (step >= 0) { a = cur[step].a.slice(); d = cur[step].d.slice(); chg = cur[step].chg; }
+      var op = step >= 0 ? cur[step].op : null;
+      var g = '';
+      g += T(X0, 14, '原数组 a', {size:11, fill:C.dim, anchor:'start'});
+      g += T(X0, 68, '差分 d', {size:11, fill:C.dim, anchor:'start'});
+      for (i = 1; i <= N; i++) {
+        var x = gx(i), w = CW - 6;
+        var inOp = op && op[0] === 'A' && i >= op[1] && i <= op[2];
+        g += R(x, 20, w, 26, inOp ? C.orangeBg : C.bg, inOp ? C.orange : C.bd);
+        g += T(x + w / 2, 38, String(a[i]), {size:11.5, mono:true, fill:inOp ? C.orange : C.ink});
+        var hit = chg[i] || inOp;
+        g += R(x, 74, w, 26, hit ? C.orangeBg : C.bg, hit ? C.orange : C.bd);
+        g += T(x + w / 2, 92, String(d[i]), {size:11.5, mono:true, fill:hit ? C.orange : C.ink});
+        g += T(x + w / 2, 116, String(i), {size:10, fill:C.dim, mono:true});
+      }
+      var txt = '未开始', line2 = '';
+      if (step >= 0) {
+        if (op[0] === 'A') {
+          txt = esc(cur[step].out) + '　橙框是这一步动到的位置';
+          var parts = [];
+          for (i = 1; i <= N; i++) if (chg[i]) parts.push('d[' + i + '] = ' + d[i]);
+          line2 = '差分上真正动过的格子：' + parts.join('，');
+        } else {
+          var pp = op[1], s = 0, terms = [];
+          for (i = 1; i <= pp; i++) { s += d[i]; terms.push(String(d[i])); }
+          txt = '差分的前 ' + pp + ' 项加起来：' + terms.join(' + ') + ' = <b>' + s + '</b>';
+          line2 = '和原数组里的 a[' + pp + '] = ' + a[pp] + ' 一致';
+        }
+      }
+      g += T(340, 136, '线段树建在下面这一行上，支持区间加和区间求和；查 a[p] 就是求 d[1] + … + d[p]', {size:11.5, fill:C.dim});
+      stage.innerHTML = '<svg viewBox="0 0 680 150" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      ans.innerHTML = txt + (line2 ? '<br>' + esc(line2) : '');
+      var lh = '';
+      for (var q = 0; q <= step; q++) lh += '第 ' + (q + 1) + ' 步：' + cur[q].out + '\n';
+      log.textContent = lh;
+      bNext.disabled = step >= cur.length - 1;
+    }
+    bind('df-next', 'click', function(){ if (step < cur.length - 1) { step++; render(); } });
+    bind('df-reset', 'click', function(){ step = -1; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+})();
+</script>
+</body>
+</html>
