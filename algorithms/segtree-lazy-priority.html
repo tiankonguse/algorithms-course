@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线段树：重置与加同时存在 · 算法教程</title>
+<meta name="description" content="一棵树上同时挂两种修改，节点上就有两套懒信息。重置会彻底取消之前欠的加，加只在重置的基础上叠加，所以下发的顺序只能是先重置后加。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .had{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--text-dim);margin-top:10px;}
+  .had i{display:inline-block;width:30px;height:16px;border-radius:4px;font-style:normal;text-align:center;line-height:16px;font-size:11px;margin-right:6px;vertical-align:-3px;}
+  .had i.a{background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent);}
+  .had i.s{background:var(--partial-bg);color:var(--partial);border:1px solid var(--partial);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>线段树：重置与加同时存在</h1>
+    <p class="intro">一棵树上同时开着两种修改，节点上就有两套懒信息。重置会彻底取消之前欠的加，而加只在重置的基础上叠加，所以下发的顺序只能是先重置、后加。</p>
+
+    <h2>零、背景</h2>
+    <p>两种修改的优先级并不对称。同一段上先加 3 再重置成 5，前面那次加连痕迹都不留，结果就是 5；反过来先重置成 5 再加 3，得到的是 8，两笔账都得记住。</p>
+    <p>所以当节点上同时压着一条重置和一条加，重置一定是更早的那条，否则它早就把加清掉了。下发的时候按这个顺序来，节点上的信息才对得上。</p>
+
+    <h2>一、问题</h2>
+    <p>长度为 n 的数组 a，三种操作交替出现。</p>
+    <ul>
+      <li>修改一：区间 [l, r] 里每个数重置成 v。</li>
+      <li>修改二：区间 [l, r] 里每个数加上 v。</li>
+      <li>查询：区间 [l, r] 的累加和，或者最大值。</li>
+    </ul>
+    <p>洛谷 P1253「扶苏的问题」就是最大值版本：区间赋值、区间加、区间求最大，n、m 到 2 × 10⁶，答案要用 64 位整数装。</p>
+
+    <h2>二、节点上同时挂着两套懒信息</h2>
+    <p>前两页把加和重置分开看，各自只要一组数组。现在两者并存，节点上就要同时放：一份查询信息（和或最大值），一份加法的账 add，一份重置的值 change，外加 change 的开关 update。</p>
+    <p>加法的账和重置的账互不干扰，谁也不用去改另一方的数据结构，唯一的交叉点是那句「重置要把 add 清掉」。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>同样两次操作，顺序不同留下的懒信息完全不同：前一种只剩重置，后一种两笔账并存</figcaption>
+    </figure>
+
+    <h2>三、重置要顺手把加法的账撕掉</h2>
+    <p>整段重置成 v 的那一刻，这段范围上每个数的最终值就定了，前面欠的加再补发下去只会把事情弄坏。所以重置落到节点上时，除了写自己的 change 和开关，还要把 add[i] 清零。</p>
+    <p>这一行是全课最贵的一行。漏掉它之后，节点上「整段是 v」和「整段还欠着 +3」会同时成立，下一步 down 就会把那笔早就作废的加补到儿子身上去。</p>
+
+    <pre class="code"><span class="cm">// 两种懒信息同时挂在节点上: change/update 管重置, add 管整段加</span>
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+      sum[i] = sum[i &lt;&lt; 1] + sum[i &lt;&lt; 1 | 1];
+    }
+
+    <span class="cm">// 重置任务盖到当前范围: 整段变成 v，之前欠的加全部作废</span>
+    <span class="kw">void</span> <span class="fn">updateLazy</span>(<span class="kw">int</span> i, <span class="kw">ll</span> v, <span class="kw">int</span> len) {
+      sum[i] = v * len;
+      add[i] = 0;
+      change[i] = v;
+      update[i] = <span class="kw">true</span>;
+    }
+
+    <span class="cm">// 加任务盖到当前范围: 在已有的懒信息之上再记一笔</span>
+    <span class="kw">void</span> <span class="fn">addLazy</span>(<span class="kw">int</span> i, <span class="kw">ll</span> v, <span class="kw">int</span> len) {
+      sum[i] += v * len;
+      add[i] += v;
+    }
+
+    <span class="cm">// 父范围的懒信息往下发，两趟: 先重置，后加</span>
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i, <span class="kw">int</span> ln, <span class="kw">int</span> rn) {
+      <span class="kw">if</span> (update[i]) {
+        updateLazy(i &lt;&lt; 1, change[i], ln);
+        updateLazy(i &lt;&lt; 1 | 1, change[i], rn);
+        update[i] = <span class="kw">false</span>;
+      }
+      <span class="kw">if</span> (add[i] != 0) {
+        addLazy(i &lt;&lt; 1, add[i], ln);
+        addLazy(i &lt;&lt; 1 | 1, add[i], rn);
+        add[i] = 0;
+      }
+    }
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (l == r) {
+        sum[i] = arr[l];
+      } <span class="kw">else</span> {
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        build(l, mid, i &lt;&lt; 1);
+        build(mid + 1, r, i &lt;&lt; 1 | 1);
+        up(i);
+      }
+      add[i] = 0;
+      change[i] = 0;
+      update[i] = <span class="kw">false</span>;
+    }
+
+    <span class="kw">void</span> <span class="fn">rangeUpdate</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">ll</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+        updateLazy(i, jobv, r - l + 1);
+      } <span class="kw">else</span> {
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        down(i, mid - l + 1, r - mid);
+        <span class="kw">if</span> (jobl &lt;= mid) {
+          rangeUpdate(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+          rangeUpdate(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        up(i);
+      }
+    }
+
+    <span class="kw">void</span> <span class="fn">rangeAdd</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">ll</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+        addLazy(i, jobv, r - l + 1);
+      } <span class="kw">else</span> {
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        down(i, mid - l + 1, r - mid);
+        <span class="kw">if</span> (jobl &lt;= mid) {
+          rangeAdd(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+          rangeAdd(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        up(i);
+      }
+    }
+
+    <span class="kw">ll</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+        <span class="kw">return</span> sum[i];
+      }
+      <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+      down(i, mid - l + 1, r - mid);
+      <span class="kw">ll</span> ans = 0;
+      <span class="kw">if</span> (jobl &lt;= mid) {
+        ans += query(jobl, jobr, l, mid, i &lt;&lt; 1);
+      }
+      <span class="kw">if</span> (jobr &gt; mid) {
+        ans += query(jobl, jobr, mid + 1, r, i &lt;&lt; 1 | 1);
+      }
+      <span class="kw">return</span> ans;
+    }</pre>
+
+    <p>反过来，加落到节点上时不去动 change：change 记的是「整段被重置成了什么」，后面叠加的加是另一笔账，两个字段各管一层。这也正是优先级不对称在代码里的样子。</p>
+
+    <h2>四、down 分两趟走</h2>
+    <p>父节点的懒信息往下发一层，要先发重置、再发加。顺序颠倒过来，发出去的重置会盖掉刚补发的加，儿子手里的数字就少了这一部分。</p>
+    <p>两趟都发完，父节点的两套账一起清空。</p>
+
+    <pre class="code"><span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i, <span class="kw">int</span> ln, <span class="kw">int</span> rn) {
+  <span class="kw">if</span> (update[i]) {
+    updateLazy(i &lt;&lt; 1, change[i], ln);
+    updateLazy(i &lt;&lt; 1 | 1, change[i], rn);
+    update[i] = <span class="kw">false</span>;
+  }
+  <span class="kw">if</span> (add[i] != 0) {
+    addLazy(i &lt;&lt; 1, add[i], ln);
+    addLazy(i &lt;&lt; 1 | 1, add[i], rn);
+    add[i] = 0;
+  }
+}</pre>
+
+    <div class="viz">
+      <div class="viz-title">演示 ①　重置与加交替上来</div>
+      <div id="viz1"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>操作序列</label>
+          <select id="v1sel">
+            <option value="0">先整段加再重置中间</option>
+            <option value="1">先重置再叠加加</option>
+            <option value="2">加、重置、再加、再重置</option>
+          </select>
+        </div>
+        <button type="button" id="v1next">下一步</button>
+        <button type="button" id="v1reset">重置</button>
+      </div>
+      <div class="breakdown" id="v1bd"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>完全覆盖（懒住或直接取值）</span>
+        <span><span class="dot partial"></span>部分相交（要先 down 再往下走）</span>
+        <span><span class="dot skip"></span>这一步没碰</span>
+      </div>
+      <div class="had">
+        <span><i class="a">+v</i>节点上欠的加</span>
+        <span><i class="s">=v</i>节点上留的重置值（灰字表示开关已关）</span>
+      </div>
+    </div>
+
+    <h2>五、两份代码只差一个符号</h2>
+    <p>把查询信息换成最大值，改动和前面几页一样：up 用 max，两个 lazy 去掉长度参数，rangeAdd 里的 v 乘 len 变成 v。</p>
+    <p>P1253 就是这一版，数据范围大，读入要用快一点的写法。</p>
+
+    <pre class="code"><span class="cm">// 最大值版本: 两套懒信息都不用长度参数</span>
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+      mx[i] = max(mx[i &lt;&lt; 1], mx[i &lt;&lt; 1 | 1]);
+    }
+
+    <span class="cm">// 整段重置成 v，最大值就是 v</span>
+    <span class="cm">// 关键一句是 add[i] = 0: 重置把之前欠下的加作废</span>
+    <span class="kw">void</span> <span class="fn">updateLazy</span>(<span class="kw">int</span> i, <span class="kw">ll</span> v) {
+      mx[i] = v;
+      add[i] = 0;
+      change[i] = v;
+      update[i] = <span class="kw">true</span>;
+    }
+
+    <span class="cm">// 整段加 v，最大值加 v</span>
+    <span class="kw">void</span> <span class="fn">addLazy</span>(<span class="kw">int</span> i, <span class="kw">ll</span> v) {
+      mx[i] += v;
+      add[i] += v;
+    }
+
+    <span class="cm">// 先发重置、后发加</span>
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+      <span class="kw">if</span> (update[i]) {
+        updateLazy(i &lt;&lt; 1, change[i]);
+        updateLazy(i &lt;&lt; 1 | 1, change[i]);
+        update[i] = <span class="kw">false</span>;
+      }
+      <span class="kw">if</span> (add[i] != 0) {
+        addLazy(i &lt;&lt; 1, add[i]);
+        addLazy(i &lt;&lt; 1 | 1, add[i]);
+        add[i] = 0;
+      }
+    }
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (l == r) {
+        mx[i] = arr[l];
+      } <span class="kw">else</span> {
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        build(l, mid, i &lt;&lt; 1);
+        build(mid + 1, r, i &lt;&lt; 1 | 1);
+        up(i);
+      }
+      add[i] = 0;
+      change[i] = 0;
+      update[i] = <span class="kw">false</span>;
+    }
+
+    <span class="kw">void</span> <span class="fn">rangeUpdate</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">ll</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+        updateLazy(i, jobv);
+      } <span class="kw">else</span> {
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        down(i);
+        <span class="kw">if</span> (jobl &lt;= mid) {
+          rangeUpdate(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+          rangeUpdate(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        up(i);
+      }
+    }
+
+    <span class="kw">void</span> <span class="fn">rangeAdd</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">ll</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+        addLazy(i, jobv);
+      } <span class="kw">else</span> {
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        down(i);
+        <span class="kw">if</span> (jobl &lt;= mid) {
+          rangeAdd(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+          rangeAdd(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        up(i);
+      }
+    }
+
+    <span class="kw">ll</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+        <span class="kw">return</span> mx[i];
+      }
+      <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+      down(i);
+      <span class="kw">ll</span> ans = LLONG_MIN;
+      <span class="kw">if</span> (jobl &lt;= mid) {
+        ans = max(ans, query(jobl, jobr, l, mid, i &lt;&lt; 1));
+      }
+      <span class="kw">if</span> (jobr &gt; mid) {
+        ans = max(ans, query(jobl, jobr, mid + 1, r, i &lt;&lt; 1 | 1));
+      }
+      <span class="kw">return</span> ans;
+    }</pre>
+
+    <h2>六、错一行会怎样</h2>
+    <p>这四种改法都只动一句，跑「重置 + 加 + 查求和」，3000 组随机用例里统计答案出过错的比例。</p>
+    <table class="complexity">
+      <tr><th>随机用例规模</th><th>重置时不清 add</th><th>down 里先发加</th><th>change 写成累加</th><th>正解</th></tr>
+      <tr><td>n ≤ 8，值 ≤ 5</td><td>4.23%</td><td>4.03%</td><td>6.13%</td><td>0.00%</td></tr>
+      <tr><td>n ≤ 20，值 ≤ 10</td><td>15.33%</td><td>14.07%</td><td>20.70%</td><td>0.00%</td></tr>
+      <tr><td>n ≤ 60，值 ≤ 1000</td><td>32.67%</td><td>29.13%</td><td>36.00%</td><td>0.00%</td></tr>
+      <tr><td>n ≤ 200，值 ≤ 10⁵</td><td>49.33%</td><td>44.33%</td><td>50.43%</td><td>0.00%</td></tr>
+    </table>
+    <p>小数据上这三处错几乎抓不到，n ≤ 8 时都在 6% 以下。原因是它们需要「同一段先被重置、又被加」或者反过来的形状，序列太短撞不上。规模放到 200，才涨到四五成。</p>
+    <p>值域不起作用。把 n 固定成 20、值域从 ±2 拉到 ±10⁵，三处的抓取率是 32.77%、32.63%、34.20%、33.13%，四个数字挤在 1.5 个百分点的区间里。</p>
+
+    <figure class="fig">
+      <div id="fig3"></div>
+      <figcaption>三处错法在四档规模下的抓取率，小数据上全都抓不到，规模放开才现形</figcaption>
+    </figure>
+
+    <h2>七、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>操作</th><th>时间</th><th>空间</th></tr>
+      <tr><td>建树 build</td><td>O(n)</td><td>查询信息 + add + change + update，各 4n</td></tr>
+      <tr><td>范围重置</td><td>O(log n)</td><td>递归栈 O(log n)</td></tr>
+      <tr><td>范围加</td><td>O(log n)</td><td>递归栈 O(log n)</td></tr>
+      <tr><td>范围查询</td><td>O(log n)</td><td>递归栈 O(log n)</td></tr>
+      <tr><td>整体</td><td>O((n + m) log n)</td><td>O(n)</td></tr>
+    </table>
+    <p>实测 n = m = 10⁶ 的混合操作：求和版 725.26 ms，最大值版 724.17 ms。同一规模下只跑一种修改的版本是 0.61 秒到 0.63 秒，多出的一成来自 down 里多出来的那一趟判断。</p>
+
+    <h2>八、总结</h2>
+    <p>两种修改并存时的全部要点，就是一条时间关系：节点上同时留着重置和加时，重置一定更早，所以 down 先发重置再发加，而重置落到节点上时要顺手把 add 清零。</p>
+    <p>到这里线段树的模板已经能覆盖「区间加、区间赋值、区间求和、区间求最大」这四种常见组合。再往上走的信息就不是一两个数了，比如区间里最长的一段连续 1，那种信息父范围不能只靠左右儿子的答案拼出来，还得知道边界的形态。</p>
+
+    <h2 id="prob-links">相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td>扶苏的问题</td><td><a href="https://www.luogu.com.cn/problem/P1253" target="_blank">www.luogu.com.cn/problem/P1253</a></td></tr>
+      <tr><td>—</td><td>范围重置 + 范围加 + 区间求和</td><td>对数器验证，无测试链接</td></tr>
+    </table>
+
+    <h2 id="refs">参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解110【扩展】线段树专题1-线段树原理和代码详解</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  const BLUE = '#2563eb', BLUE_BG = '#dbeafe', ORANGE = '#ea580c', ORANGE_BG = '#ffedd5';
+  const GREY = '#9aa0a6', SOFT = '#f6f7f9', BORDER = '#e6e8eb', DARK = '#1f2328', MID = '#6b7280';
+
+  /* ---------- 图一：顺序决定留下什么 ---------- */
+  (function(){
+    const el = document.getElementById('fig1');
+    if (!el) return;
+    const CW = 680, CH = 240;
+    let s = '<svg viewBox="0 0 ' + CW + ' ' + CH + '" role="img" aria-label="两种顺序留下的懒信息">';
+    function col(x, title, lines, tail, color, bg){
+      s += '<rect x="' + x + '" y="16" width="300" height="180" rx="10" fill="' + bg + '" stroke="' + color + '"/>';
+      s += '<text x="' + (x + 16) + '" y="42" font-size="13" font-weight="700" fill="' + color + '">' + title + '</text>';
+      for (let i = 0; i < lines.length; i++) {
+        s += '<text x="' + (x + 16) + '" y="' + (70 + i * 22) + '" font-size="12" fill="' + DARK + '">' + lines[i] + '</text>';
+      }
+      s += '<text x="' + (x + 16) + '" y="168" font-size="12" font-weight="600" fill="' + color + '">' + tail + '</text>';
+    }
+    col(24, '[1,8] 加 3，然后重置成 5', [
+      'down 前：add[1] = 3',
+      '重置落到根：change[1] = 5，add[1] 清零',
+      '下发出去的是 5，那 3 不存在了'
+    ], '节点上只有一条重置', ORANGE, ORANGE_BG);
+    col(356, '[1,8] 重置成 5，然后加 3', [
+      '重置落到根：change[1] = 5、update[1] = 开',
+      '加落到根：add[1] = 3，不动 change',
+      '下发要两趟：先发 5，再发 3'
+    ], '节点上重置与加并存', BLUE, '#eef4ff');
+    s += '<text x="24" y="' + (CH - 14) + '" font-size="12" fill="' + MID + '">节点上同时有两套账时，重置一定是更早的那次；拿不准顺序就把它当成「重置先发生」来推</text>';
+    s += '</svg>';
+    el.innerHTML = s;
+  })();
+
+  /* ---------- 图三：抓取率 ---------- */
+  (function(){
+    const el = document.getElementById('fig3');
+    if (!el) return;
+    const CW = 680, CH = 300, X0 = 110, Y0 = 46, PW = 500, PH = 194;
+    const data = [
+      {lab: 'n ≤ 8', g: 4.23, h: 4.03, i: 6.13},
+      {lab: 'n ≤ 20', g: 15.33, h: 14.07, i: 20.70},
+      {lab: 'n ≤ 60', g: 32.67, h: 29.13, i: 36.00},
+      {lab: 'n ≤ 200', g: 49.33, h: 44.33, i: 50.43}
+    ];
+    let s = '<svg viewBox="0 0 ' + CW + ' ' + CH + '" role="img" aria-label="三处错法在四档规模下的抓取率">';
+    for (let v = 0; v <= 50; v += 10) {
+      const y = Y0 + PH - PH * v / 50;
+      s += '<line x1="' + X0 + '" y1="' + y + '" x2="' + (X0 + PW) + '" y2="' + y + '" stroke="' + BORDER + '" stroke-width="1"/>';
+      s += '<text x="' + (X0 - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="10" fill="' + GREY + '">' + v + '%</text>';
+    }
+    const gw = PW / data.length, bw = 22;
+    for (let i = 0; i < data.length; i++) {
+      const gx = X0 + i * gw + 12;
+      const bars = [[data[i].g, BLUE], [data[i].h, ORANGE], [data[i].i, '#9aa0a6']];
+      for (let b = 0; b < 3; b++) {
+        const h = PH * bars[b][0] / 50;
+        const x = gx + b * (bw + 8);
+        s += '<rect x="' + x + '" y="' + (Y0 + PH - h) + '" width="' + bw + '" height="' + h + '" rx="3" fill="' + bars[b][1] + '"/>';
+        s += '<text x="' + (x + bw / 2) + '" y="' + (Y0 + PH - h - 5) + '" text-anchor="middle" font-size="10" fill="' + bars[b][1] + '">' + bars[b][0].toFixed(1) + '</text>';
+      }
+      s += '<text x="' + (gx + (3 * bw + 16) / 2) + '" y="' + (Y0 + PH + 20) + '" text-anchor="middle" font-size="11" fill="' + DARK + '">' + data[i].lab + '</text>';
+    }
+    s += '<rect x="' + (X0 + PW - 250) + '" y="14" width="12" height="12" rx="3" fill="' + BLUE + '"/>';
+    s += '<text x="' + (X0 + PW - 232) + '" y="25" font-size="11" fill="' + DARK + '">重置不清加</text>';
+    s += '<rect x="' + (X0 + PW - 145) + '" y="14" width="12" height="12" rx="3" fill="' + ORANGE + '"/>';
+    s += '<text x="' + (X0 + PW - 127) + '" y="25" font-size="11" fill="' + DARK + '">先发加</text>';
+    s += '<rect x="' + (X0 + PW - 62) + '" y="14" width="12" height="12" rx="3" fill="#9aa0a6"/>';
+    s += '<text x="' + (X0 + PW - 44) + '" y="25" font-size="11" fill="' + DARK + '">值累加</text>';
+    s += '<text x="16" y="' + (CH - 10) + '" font-size="12" fill="' + MID + '">纵轴是 3000 组随机用例里答案出过错的比例，四档规模各跑一批</text>';
+    s += '</svg>';
+    el.innerHTML = s;
+  })();
+
+  /* ---------- 演示：重置与加交替 ---------- */
+  (function(){
+    const el = document.getElementById('viz1'), bd = document.getElementById('v1bd'), sel = document.getElementById('v1sel');
+    if (!el) return;
+    const N = 8, A0 = [3, 1, 4, 1, 5, 9, 2, 6];
+    const SETS = [
+      [{t:'add',l:1,r:8,v:3}, {t:'set',l:3,r:6,v:2}, {t:'ask',l:1,r:8}, {t:'add',l:5,r:8,v:4}, {t:'ask',l:3,r:8}],
+      [{t:'set',l:1,r:8,v:5}, {t:'add',l:3,r:6,v:2}, {t:'ask',l:3,r:6}, {t:'set',l:2,r:4,v:1}, {t:'ask',l:1,r:8}],
+      [{t:'add',l:2,r:5,v:4}, {t:'set',l:1,r:3,v:0}, {t:'add',l:1,r:8,v:1}, {t:'ask',l:2,r:4}, {t:'set',l:7,r:8,v:6}, {t:'ask',l:1,r:8}]
+    ];
+    const LV = [[1], [2,3], [4,5,6,7], [8,9,10,11,12,13,14,15]];
+    const RANGE = [];
+    (function(){
+      const st = [[1, N, 1]];
+      while (st.length) {
+        const p = st.pop();
+        RANGE[p[2]] = [p[0], p[1]];
+        if (p[0] < p[1]) {
+          const mid = (p[0] + p[1]) >> 1;
+          st.push([p[0], mid, p[2] * 2]); st.push([mid + 1, p[1], p[2] * 2 + 1]);
+        }
+      }
+    })();
+
+    function buildSteps(k){
+      const sum = new Array(16).fill(0), mx = new Array(16).fill(0);
+      const add = new Array(16).fill(0), chg = new Array(16).fill(0), upd = new Array(16).fill(false);
+      function up(i){ sum[i] = sum[i*2] + sum[i*2+1]; mx[i] = Math.max(mx[i*2], mx[i*2+1]); }
+      function setLazy(i, v, len){ sum[i] = v * len; mx[i] = v; add[i] = 0; chg[i] = v; upd[i] = true; }
+      function addLazy(i, v, len){ sum[i] += v * len; mx[i] += v; add[i] += v; }
+      function down(i, ln, rn){
+        if (upd[i]) { setLazy(i*2, chg[i], ln); setLazy(i*2+1, chg[i], rn); upd[i] = false; }
+        if (add[i]) { addLazy(i*2, add[i], ln); addLazy(i*2+1, add[i], rn); add[i] = 0; }
+      }
+      function build(l, r, i){
+        if (l === r) { sum[i] = mx[i] = A0[l-1]; }
+        else {
+          const mid = (l + r) >> 1;
+          build(l, mid, i*2); build(mid+1, r, i*2+1); up(i);
+        }
+        add[i] = 0; chg[i] = 0; upd[i] = false;
+      }
+      build(1, N, 1);
+      const steps = [{sum: sum.slice(), mx: mx.slice(), add: add.slice(), chg: chg.slice(), upd: upd.slice(), full: [], part: [], note: '初始状态：每个叶子是自己，内部节点是左右孩子的和与最大'}];
+      SETS[k].forEach(function(op){
+        const full = [], part = [];
+        let res = null;
+        function setJob(jl, jr, v, l, r, i){
+          if (jl <= l && r <= jr) { setLazy(i, v, r - l + 1); full.push(i); return; }
+          part.push(i);
+          const mid = (l + r) >> 1;
+          down(i, mid - l + 1, r - mid);
+          if (jl <= mid) setJob(jl, jr, v, l, mid, i*2);
+          if (jr > mid) setJob(jl, jr, v, mid+1, r, i*2+1);
+          up(i);
+        }
+        function addJob(jl, jr, v, l, r, i){
+          if (jl <= l && r <= jr) { addLazy(i, v, r - l + 1); full.push(i); return; }
+          part.push(i);
+          const mid = (l + r) >> 1;
+          down(i, mid - l + 1, r - mid);
+          if (jl <= mid) addJob(jl, jr, v, l, mid, i*2);
+          if (jr > mid) addJob(jl, jr, v, mid+1, r, i*2+1);
+          up(i);
+        }
+        function ask(jl, jr, l, r, i){
+          if (jl <= l && r <= jr) { full.push(i); return [sum[i], mx[i]]; }
+          part.push(i);
+          const mid = (l + r) >> 1;
+          down(i, mid - l + 1, r - mid);
+          let s = 0, m = -Infinity;
+          if (jl <= mid) { const a = ask(jl, jr, l, mid, i*2); s += a[0]; m = Math.max(m, a[1]); }
+          if (jr > mid) { const b = ask(jl, jr, mid+1, r, i*2+1); s += b[0]; m = Math.max(m, b[1]); }
+          return [s, m];
+        }
+        let note;
+        if (op.t === 'set') {
+          setJob(op.l, op.r, op.v, 1, N, 1);
+          note = '区间 [' + op.l + ', ' + op.r + '] 重置成 ' + op.v;
+        } else if (op.t === 'add') {
+          addJob(op.l, op.r, op.v, 1, N, 1);
+          note = '区间 [' + op.l + ', ' + op.r + '] 每个数加 ' + op.v;
+        } else {
+          res = ask(op.l, op.r, 1, N, 1);
+          note = '查询 [' + op.l + ', ' + op.r + ']';
+        }
+        steps.push({sum: sum.slice(), mx: mx.slice(), add: add.slice(), chg: chg.slice(), upd: upd.slice(), full: full, part: part, note: note, res: res});
+      });
+      return steps;
+    }
+
+    function renderTree(st){
+      const CW = 680, CH = 412, TOPY = 34, GAPY = 92, BH = 62;
+      const BW = []; BW[0] = 112; BW[1] = 96; BW[2] = 76; BW[3] = 64;
+      function cx(d, k){ return (CW / 2) * (2 * k + 1) / LV[d].length; }
+      let s = '<svg viewBox="0 0 ' + CW + ' ' + CH + '" role="img" aria-label="重置与加交替的逐步演示">';
+      for (let d = 0; d + 1 < LV.length; d++) {
+        for (let k = 0; k < LV[d].length; k++) {
+          const x = cx(d, k), y1 = TOPY + d * GAPY + BH, y2 = TOPY + (d + 1) * GAPY;
+          for (let c = 0; c < 2; c++) {
+            s += '<line x1="' + x + '" y1="' + y1 + '" x2="' + cx(d + 1, 2 * k + c) + '" y2="' + y2 + '" stroke="' + BORDER + '" stroke-width="1.5"/>';
+          }
+        }
+      }
+      for (let d = 0; d < LV.length; d++) {
+        for (let k = 0; k < LV[d].length; k++) {
+          const i = LV[d][k];
+          const isFull = st.full.indexOf(i) >= 0, isPart = st.part.indexOf(i) >= 0;
+          const x = cx(d, k) - BW[d] / 2, y = TOPY + d * GAPY;
+          s += '<rect x="' + x + '" y="' + y + '" width="' + BW[d] + '" height="' + BH + '" rx="6" fill="' + (isFull ? BLUE_BG : (isPart ? ORANGE_BG : SOFT)) + '" stroke="' + (isFull ? BLUE : (isPart ? ORANGE : BORDER)) + '" stroke-width="' + ((isFull || isPart) ? 2 : 1) + '"/>';
+          s += '<text x="' + cx(d, k) + '" y="' + (y + 15) + '" text-anchor="middle" font-size="10" fill="' + MID + '">[' + RANGE[i][0] + ',' + RANGE[i][1] + ']</text>';
+          s += '<text x="' + cx(d, k) + '" y="' + (y + 34) + '" text-anchor="middle" font-size="12" fill="' + (isFull ? BLUE : DARK) + '">和 ' + st.sum[i] + '</text>';
+          s += '<text x="' + cx(d, k) + '" y="' + (y + 54) + '" text-anchor="middle" font-size="12" fill="' + (isFull ? BLUE : DARK) + '">最大 ' + st.mx[i] + '</text>';
+          let bx = x + BW[d] - 36;
+          if (st.add[i]) {
+            s += '<rect x="' + (bx - 38) + '" y="' + (y - 11) + '" width="36" height="17" rx="4" fill="' + '#eef4ff' + '" stroke="' + BLUE + '"/>';
+            s += '<text x="' + (bx - 20) + '" y="' + (y + 2) + '" text-anchor="middle" font-size="10" fill="' + BLUE + '">+' + st.add[i] + '</text>';
+          }
+          if (st.chg[i] !== 0 || st.upd[i]) {
+            const on = st.upd[i];
+            s += '<rect x="' + bx + '" y="' + (y - 11) + '" width="36" height="17" rx="4" fill="' + (on ? ORANGE_BG : SOFT) + '" stroke="' + (on ? ORANGE : BORDER) + '"/>';
+            s += '<text x="' + (bx + 18) + '" y="' + (y + 2) + '" text-anchor="middle" font-size="10" fill="' + (on ? ORANGE : GREY) + '">=' + st.chg[i] + '</text>';
+          }
+        }
+      }
+      s += '<text x="16" y="' + (CH - 12) + '" font-size="12" fill="' + MID + '">一个节点可以同时挂着 +v 和 =v；重置落到节点上时会把 +v 那格擦掉</text>';
+      s += '</svg>';
+      return s;
+    }
+
+    let cur = [], pos = 0;
+    function render(){
+      const st = cur[pos];
+      el.innerHTML = renderTree(st);
+      let txt = '第 ' + pos + ' / ' + (cur.length - 1) + ' 步　' + st.note;
+      txt += '<div class="row">这一步懒住 ' + st.full.length + ' 个节点，递归经过 ' + st.part.length + ' 个部分相交的节点</div>';
+      if (st.res) txt += '<div class="row">答案：和 = <b>' + st.res[0] + '</b>，最大值 = <b>' + st.res[1] + '</b></div>';
+      bd.innerHTML = txt;
+      nextBtn.disabled = pos >= cur.length - 1;
+    }
+    const nextBtn = document.getElementById('v1next');
+    function reset(){ cur = buildSteps(parseInt(sel.value, 10)); pos = 0; render(); }
+    nextBtn.addEventListener('click', function(){
+      if (pos < cur.length - 1) { pos++; render(); }
+    });
+    document.getElementById('v1reset').addEventListener('click', reset);
+    sel.addEventListener('change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

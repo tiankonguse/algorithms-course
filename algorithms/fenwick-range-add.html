@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>树状数组：范围加与范围查 · 算法教程</title>
+<meta name="description" content="把整段一起加变成差分上的两个单点修改；再加一张表，范围求和也能做。附树状数组与线段树的实测对比。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.grid-row{display:flex;align-items:center;gap:6px;margin:4px 0;}
+.grid-tag{width:52px;flex:0 0 52px;font-size:12px;color:var(--text-dim);font-weight:600;text-align:right;}
+.grid-cells{display:flex;gap:4px;}
+.grid-cells .gcell{flex:0 0 auto;}
+.gcell{
+  width:46px;height:34px;display:flex;align-items:center;justify-content:center;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+  font-size:14px;font-variant-numeric:tabular-nums;
+}
+.gcell.blue{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.gcell.orange{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+.gcell.dim{opacity:.4;}
+.gidx{width:46px;flex:0 0 46px;height:14px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-dim);}
+@media(max-width:760px){
+  .gcell{width:36px;height:30px;font-size:12px;}
+  .gidx{width:36px;flex:0 0 36px;}
+  .grid-tag{width:40px;flex:0 0 40px;font-size:11px;}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>树状数组：范围加与范围查</h1>
+    <p class="intro">整段一起加，在差分数组上就是两个单点修改；再加一张记 (i−1)·d[i] 的表，整段求和也能顺手做掉。两种扩展的单次代价都是 O(log n)。</p>
+
+    <h2>零、背景</h2>
+    <p>树状数组最基础的用法是单点加、范围查：改一个位置 O(log n)，查一段的和 O(log n)。题目稍微变一变，要的是「把 [l, r] 里每个数都加上 v」，一次改一整段。</p>
+    <p>树状数组本身一行都不用改，换掉被维护的对象就行：从原数组 a 换成它的差分 d。整段加变成两个单点加，查单点值变成查前缀和，全落在已经会做的那两件事上。</p>
+    <p>再往下走一步，整段加的同时还要整段求和，那就得多记一张表。这一节把这两步都推一遍，顺带把树状数组的能力边界量出来。</p>
+
+    <h2>一、树状数组能维护什么</h2>
+    <p>树状数组给的答案是前缀信息，区间答案靠两次前缀相减。能相减的信息才玩得转，比如累加和，prefix[r] − prefix[l−1] 一步就出来。异或和也可以，它自己就是自己的逆运算。</p>
+    <p>最大值不行。知道 [1, 8] 的最大值和 [1, 3] 的最大值，推不出 [4, 8] 的最大值，减不掉。</p>
+    <p>硬要用树状数组维护最大值，得接受一条规矩：数值只能往大改。某个位置一旦改小，所有管着它的节点都可能还挂着那个旧的最大值，只能整棵重建。实测 n = 10⁵、10⁵ 次操作里约一半是改小：树状数组重建了 50205 次、累计刷掉 50.2 亿个位置，耗时 37116.87 ms；同一件事交给线段树，7.81 ms。差了 4750 倍。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>改小一个位置，树状数组只能整棵重建：n = 10⁵ 时一次重建就是 10⁵ 个位置</figcaption>
+    </figure>
+
+    <p>所以最大值、最小值这类信息直接上线段树。可差分的交给树状数组，理由也很实在：同一个「范围加 + 范围查」，两者开销差一个量级。</p>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>n = 10⁶、10⁶ 次操作（范围加与范围查各半）：树状数组 81.23 ms / 15.3 MB，线段树 351.09 ms / 61.0 MB</figcaption>
+    </figure>
+
+    <p>两份代码跑出来的答案逐位一致。线段树能维护的信息更多、想起来也更直白，代价是四倍空间和四倍多的时间。</p>
+
+    <h2>二、范围加、单点查</h2>
+    <p>一维差分的老套路：d[i] = a[i] − a[i−1]，于是 a[i] = d[1] + … + d[i]。给 [l, r] 每个数加 v，在 d 上只有两个位置动。</p>
+    <pre class="code">d[l] += v;  d[r + 1] -= v;</pre>
+    <p>前面这一串只有 l 之后才生效，后面那一串把 r + 1 之后的增量抵消掉，中间正好是 [l, r]。查 a[i] 就是查 d 的前缀和。</p>
+
+    <figure class="fig">
+      <div id="fig3"></div>
+      <figcaption>给 [3, 6] 加 5：d 上只改 3 号和 7 号两个位置，a 上 3 到 6 号各加 5</figcaption>
+    </figure>
+
+    <p>树状数组维护的是 d 而不是 a，修改就退化成两个单点加，查询退化成一次前缀和。初始化也照这个规矩来：第 i 个初值当成「给 [i, i] 加 a[i]」，也就是 add(i, a[i]) 与 add(i + 1, −a[i]) 成对写。</p>
+    <p>这里有个细节：r = n 时那个 −v 要打在 n + 1 上，所以树状数组得开到 n + 1，否则这次修改会静默丢掉。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ①　范围加、单点查</div>
+      <div id="viz1"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>数据</label>
+          <select id="v1sel">
+            <option value="0">样例：加两段再查两次</option>
+            <option value="1">样例：末端到 n 的整段加</option>
+            <option value="2">随机</option>
+          </select>
+        </div>
+        <button type="button" id="v1next">下一步</button>
+        <button type="button" id="v1reset">重置</button>
+      </div>
+      <div class="breakdown" id="v1bd"></div>
+      <div class="legend">
+        <span><span class="dot partial"></span>本步改到的树状数组格子</span>
+        <span><span class="dot full"></span>本步影响到的原数组位置</span>
+      </div>
+    </div>
+
+    <p>速度上的差别不用估算，直接量：n = 10⁵、10⁵ 次范围加（区间平均长度 5 万，逐格加总共要碰 50 亿个元素），树状数组 3.013 ms，逐格加 379.463 ms，126 倍。</p>
+    <p>这一问最容易写错的地方是那两个端点。各跑 2 万组随机序列、每组 20 个操作实测：漏掉 add(r + 1, −v) 的有 87.48% 被抓出来，写成 add(r, −v) 的有 97.79% 被抓出来。前者那 12.5% 为什么溜掉？因为只在 l 之后查过、且没查过区间外的点时，答案恰好都对。</p>
+
+    <h2>三、范围加、范围查</h2>
+    <p>还想要整段的和。记 D(x) = d[1] + … + d[x]，那么前缀和</p>
+    <pre class="code">S(x) = a[1] + … + a[x]
+     = d[1]·x + d[2]·(x−1) + … + d[x]·1
+     = Σ d[i]·(x − i + 1)
+     = (x + 1)·D(x) − Σ i·d[i]</pre>
+    <p>最后那一项 Σ i·d[i] 也得能查，于是再开一张表。巧的是我们不必真的记 i·d[i]，记 (i − 1)·d[i] 就行：</p>
+    <pre class="code">Σ (i−1)·d[i] = Σ i·d[i] − D(x)
+S(x) = (x + 1)·D(x) − ( Σ(i−1)·d[i] + D(x) ) = x·D(x) − Σ (i−1)·d[i]</pre>
+    <p>第二张表里存 (i − 1)·d[i]，写起来就是给 info2 打 (l − 1)·v 和 −r·v，跟 info1 那两个点一一对应。以 x = 5 为例，两种写法算的是同一堆东西。</p>
+
+    <figure class="fig">
+      <div id="fig4"></div>
+      <figcaption>x = 5 时每一项 d[i] 的权重是 (5 − i + 1)，把权重拆开就得到两张表的写法</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">演示 ②　范围加、范围查：两张表</div>
+      <div id="viz2"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>数据</label>
+          <select id="v2sel">
+            <option value="0">样例：加两段再查两次</option>
+            <option value="1">样例：只查整段</option>
+            <option value="2">随机</option>
+          </select>
+        </div>
+        <button type="button" id="v2next">下一步</button>
+        <button type="button" id="v2reset">重置</button>
+      </div>
+      <div class="breakdown" id="v2bd"></div>
+      <div class="legend">
+        <span><span class="dot partial"></span>本步改到的格子</span>
+        <span><span class="dot full"></span>被查询的原数组区间</span>
+      </div>
+    </div>
+
+    <p>n = 10⁶ 时的吞吐：1 次范围加要动 4 个树状数组位置，10⁶ 次下来 105.03 ms；范围查要 4 次前缀和，10⁶ 次 38.23 ms。只用一张表的范围加单点查，10⁶ 次修改 49.50 ms。</p>
+    <p>这一问的错法集中在第二张表上，同样是 2 万组随机序列：info2 写成 l·v（末尾不减 1 那一项也跟着错）99.97% 会被抓，只维护 info1 拿 sum·x 当区间和 91.42%，末端写成 −(r + 1)·v 89.67%。三档都在九成上下，说明随机数据足够把它们揪出来。</p>
+
+    <h2>四、代码</h2>
+    <p>范围加、单点查，一份树状数组就够。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500002;
+    <span class="kw">long</span> <span class="kw">long</span> tree[MAXN];
+    <span class="kw">int</span> n;
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &amp; -i;
+    }
+
+    <span class="cm">// i 位置增加 v</span>
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">long</span> <span class="kw">long</span> v) {
+        <span class="kw">while</span> (i &lt;= n) {
+            tree[i] += v;
+            i += lowbit(i);
+        }
+    }
+
+    <span class="cm">// 1~i 范围的累加和</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">sum</span>(<span class="kw">int</span> i) {
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">while</span> (i &gt; 0) {
+            ans += tree[i];
+            i -= lowbit(i);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="cm">// 原数组 [l..r] 每个数增加 v：只动差分的两端</span>
+    <span class="kw">void</span> <span class="fn">rangeAdd</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">long</span> <span class="kw">long</span> v) {
+        add(l, v);
+        add(r + 1, -v);
+    }
+
+    <span class="cm">// 原数组 i 位置的值：差分的前缀和</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">query</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> sum(i);
+    }</pre>
+    <p>范围加、范围查，两张表共用同一套 add / sum，多传一个数组参数。</p>
+    <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXN = 100002;
+    <span class="kw">long</span> <span class="kw">long</span> info1[MAXN], info2[MAXN];
+    <span class="kw">int</span> n;
+
+    <span class="kw">int</span> <span class="fn">lowbit</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> i &amp; -i;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">long</span> <span class="kw">long</span> tree[], <span class="kw">int</span> i, <span class="kw">long</span> <span class="kw">long</span> v) {
+        <span class="kw">while</span> (i &lt;= n) {
+            tree[i] += v;
+            i += lowbit(i);
+        }
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">sum</span>(<span class="kw">long</span> <span class="kw">long</span> tree[], <span class="kw">int</span> i) {
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">while</span> (i &gt; 0) {
+            ans += tree[i];
+            i -= lowbit(i);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="cm">// 原数组 [l..r] 每个数增加 v</span>
+    <span class="kw">void</span> <span class="fn">rangeAdd</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">long</span> <span class="kw">long</span> v) {
+        add(info1, l, v);
+        add(info1, r + 1, -v);
+        add(info2, l, (<span class="kw">long</span> <span class="kw">long</span>)(l - 1) * v);
+        add(info2, r + 1, -(<span class="kw">long</span> <span class="kw">long</span>)r * v);
+    }
+
+    <span class="cm">// 原数组 1~x 范围的累加和</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">prefixSum</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> sum(info1, x) * x - sum(info2, x);
+    }
+
+    <span class="cm">// 原数组 [l..r] 范围的累加和</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">rangeSum</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">return</span> prefixSum(r) - prefixSum(l - 1);
+    }</pre>
+
+    <h2>五、复杂度分析</h2>
+    <p>两种扩展都是常数次树状数组操作，所以单次还是 O(log n)。把每步跳多少格量出来更直观：n = 2²⁰ 时，前缀查询平均跳 10 次（= log₂n / 2，跳的次数就是 i 的二进制里 1 的个数），单点修改平均跳 11 次；最坏的是 add(1)，21 次，而 sum(n) 只要 1 次。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>用法</th><th>范围加</th><th>查询</th><th>空间</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>单点加、范围查</td><td><code class="inline">O(log n)</code></td><td><code class="inline">O(log n)</code></td><td><code class="inline">O(n)</code>，一张表</td></tr>
+        <tr><td>范围加、单点查</td><td><code class="inline">O(log n)</code></td><td><code class="inline">O(log n)</code></td><td><code class="inline">O(n)</code>，一张表（开到 n + 1）</td></tr>
+        <tr><td>范围加、范围查</td><td><code class="inline">O(log n)</code></td><td><code class="inline">O(log n)</code></td><td><code class="inline">O(n)</code>，两张表</td></tr>
+      </tbody>
+    </table>
+    <p>建树按初始值逐对打标记是 n 次范围加，O(n log n)；直接按 d[i] = a[i] − a[i−1] 填好再 O(n) 建树更快，两种写法结果一样。</p>
+
+    <h2>六、总结</h2>
+    <p>范围加这一问，树状数组靠换维护对象（原数组换成差分）就解决了，查询从「查区间」变回「查前缀」。范围查再往下走一步，是给 Σ i·d[i] 单独开一张表，靠 (i − 1)·d[i] 这个写法把公式化简成 x·D(x) − Σ(i−1)·d[i]。</p>
+    <p>几个容易翻车的点：树状数组要开到 n + 1，r = n 时的 −v 才有地方落；第二张表末端写的是 −r·v，与首端的 (l − 1)·v 差一个 1，写反会全体偏一个 D(x)；可差分这条边界要记牢，最大值往上加还行，改小就得重建。</p>
+    <p>一维上的花样就这些。把同样的思路放到二维，单点加变矩形加，一次操作要跳的是两个维度。</p>
+
+    <h2>相关题目</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>洛谷</td><td>【模板】树状数组 1（单点加、范围查）</td><td><a href="https://www.luogu.com.cn/problem/P3374" target="_blank">P3374</a></td></tr>
+        <tr><td>洛谷</td><td>【模板】树状数组 2（范围加、单点查）</td><td><a href="https://www.luogu.com.cn/problem/P3368" target="_blank">P3368</a></td></tr>
+        <tr><td>洛谷</td><td>【模板】线段树 1（范围加、范围查）</td><td><a href="https://www.luogu.com.cn/problem/P3372" target="_blank">P3372</a></td></tr>
+      </tbody>
+    </table>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>左程云</td><td>算法讲解108【扩展】树状数组原理、扩展、代码详解</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </tbody>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel">
+    <p class="toc-title">目录</p>
+    <ul class="toc-list" id="toc"></ul>
+  </aside>
+</div>
+
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  const BLUE = '#2563eb', BLUE_BG = '#dbeafe', ORANGE = '#ea580c', ORANGE_BG = '#ffedd5';
+  const GREY = '#9aa0a6', SOFT = '#f6f7f9', BORDER = '#e6e8eb', DARK = '#1f2328';
+  function lowbit(x){ return x & (-x); }
+
+  /* ---------- 图一：改小一个位置就要重建 ---------- */
+  (function(){
+    const el = document.getElementById('fig1');
+    if (!el) return;
+    const X0 = 16, STEP = 62, CW = 56, H = 32;
+    function cells(y, hit, bg, bd, fg){
+      let s = '';
+      for (let i = 1; i <= 8; i++) {
+        const x = X0 + (i - 1) * STEP;
+        const on = hit.indexOf(i) >= 0;
+        s += '<rect x="' + x + '" y="' + y + '" width="' + CW + '" height="' + H + '" rx="5" fill="' + (on ? bg : SOFT) + '" stroke="' + (on ? bd : BORDER) + '"/>';
+        s += '<text x="' + (x + CW / 2) + '" y="' + (y + H / 2 + 4) + '" text-anchor="middle" font-size="12" font-weight="' + (on ? '600' : '400') + '" fill="' + (on ? fg : GREY) + '">' + i + '</text>';
+      }
+      return s;
+    }
+    let s = '<svg viewBox="0 0 680 244" role="img" aria-label="树状数组维护最大值时改小要重建">';
+    s += '<defs><marker id="ar1" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="' + BLUE + '"/></marker></defs>';
+    s += '<text x="16" y="16" font-size="12" fill="' + DARK + '">只往大改：顺着 i += lowbit(i) 往上走，一路取最大值</text>';
+    s += cells(26, [3, 4, 8], BLUE_BG, BLUE, BLUE);
+    s += '<text x="340" y="80" text-anchor="middle" font-size="12" fill="#6b7280">改 a[3]：只碰 3、4、8 三个格子，O(log n)</text>';
+    s += '<text x="16" y="110" font-size="12" fill="' + DARK + '">改小同一个位置：旧的最大值可能还挂在上面，谁都不敢确定</text>';
+    s += cells(120, [3], ORANGE_BG, ORANGE, ORANGE);
+    s += '<path d="M 340 156 L 340 168" stroke="' + ORANGE + '" stroke-width="1.5" marker-end="url(#ar1)"/>';
+    s += cells(172, [1, 2, 3, 4, 5, 6, 7, 8], ORANGE_BG, ORANGE, ORANGE);
+    s += '<text x="340" y="228" text-anchor="middle" font-size="12" fill="#6b7280">只能全部重刷：n = 10⁵ 时一次就是 10⁵ 个格子，10⁵ 次操作里一半改小累计刷掉 50.2 亿个位置</text>';
+    s += '</svg>';
+    el.innerHTML = s;
+  })();
+
+  /* ---------- 图二：树状数组 vs 线段树 ---------- */
+  (function(){
+    const el = document.getElementById('fig2');
+    if (!el) return;
+    function panel(ox, title, unit, items, maxV){
+      let s = '';
+      s += '<text x="' + ox + '" y="16" text-anchor="middle" font-size="13" font-weight="600" fill="' + DARK + '">' + title + '</text>';
+      s += '<line x1="' + (ox - 130) + '" y1="150" x2="' + (ox + 130) + '" y2="150" stroke="' + BORDER + '"/>';
+      items.forEach(function(it, k){
+        const h = 100 * it.v / maxV;
+        const x = ox - 90 + k * 110, y = 150 - h;
+        s += '<rect x="' + x + '" y="' + y + '" width="72" height="' + h + '" rx="4" fill="' + it.c + '"/>';
+        s += '<text x="' + (x + 36) + '" y="' + (y - 6) + '" text-anchor="middle" font-size="12" font-weight="600" fill="' + DARK + '">' + it.label + '</text>';
+        s += '<text x="' + (x + 36) + '" y="166" text-anchor="middle" font-size="11" fill="#6b7280">' + it.name + '</text>';
+      });
+      s += '<text x="' + ox + '" y="188" text-anchor="middle" font-size="11" fill="' + GREY + '">单位：' + unit + '</text>';
+      return s;
+    }
+    let s = '<svg viewBox="0 0 680 216" role="img" aria-label="树状数组与线段树的耗时与空间对比">';
+    s += panel(170, '10⁶ 次操作耗时', '毫秒',
+      [{name: '树状数组', v: 81.23, label: '81.23', c: BLUE_BG}, {name: '线段树', v: 351.09, label: '351.09', c: ORANGE_BG}], 380);
+    s += panel(510, '占用空间', 'MB',
+      [{name: '树状数组', v: 15.3, label: '15.3', c: BLUE_BG}, {name: '线段树', v: 61.0, label: '61.0', c: ORANGE_BG}], 68);
+    s += '<text x="340" y="212" text-anchor="middle" font-size="11" fill="#6b7280">范围加 + 范围查，n = 10⁶，两份代码跑出来的答案逐位一致</text>';
+    s += '</svg>';
+    el.innerHTML = s;
+  })();
+
+  /* ---------- 图三：一维差分上的范围加 ---------- */
+  (function(){
+    const el = document.getElementById('fig3');
+    if (!el) return;
+    const a0 = [3, 1, 4, 1, 5, 9, 2, 6];
+    const d0 = [];
+    for (let i = 0; i < 8; i++) d0.push(a0[i] - (i ? a0[i - 1] : 0));
+    const d1 = d0.slice(); d1[2] += 5; d1[6] -= 5;
+    const a1 = a0.slice(); for (let i = 2; i < 6; i++) a1[i] += 5;
+    const X0 = 108, STEP = 58, CW = 54, H = 32;
+    const cx = function(i){ return X0 + (i - 1) * STEP + CW / 2; };
+    function row(y, label, vals, hi){
+      let s = '<text x="96" y="' + (y + H / 2 + 4) + '" text-anchor="end" font-size="12" font-weight="600" fill="#6b7280">' + label + '</text>';
+      for (let i = 1; i <= 8; i++) {
+        const x = X0 + (i - 1) * STEP;
+        const on = hi && hi.has(i);
+        s += '<rect x="' + x + '" y="' + y + '" width="' + CW + '" height="' + H + '" rx="5" fill="' + (on ? (hi.c || BLUE_BG) : SOFT) + '" stroke="' + (on ? (hi.s || BLUE) : BORDER) + '"/>';
+        s += '<text x="' + cx(i) + '" y="' + (y + H / 2 + 4) + '" text-anchor="middle" font-size="12" font-weight="' + (on ? '600' : '400') + '" fill="' + (on ? (hi.s || BLUE) : DARK) + '">' + vals[i - 1] + '</text>';
+      }
+      return s;
+    }
+    let s = '<svg viewBox="0 0 680 268" role="img" aria-label="一维差分与范围加的对应关系">';
+    for (let i = 1; i <= 8; i++) s += '<text x="' + cx(i) + '" y="14" text-anchor="middle" font-size="10" fill="' + GREY + '">' + i + '</text>';
+    s += row(22, 'a 原', a0, null);
+    s += row(62, 'd 原', d0, null);
+    s += '<path d="M 340 98 L 340 118" stroke="' + ORANGE + '" stroke-width="1.5" marker-end="url(#ar2)"/>';
+    s += '<defs><marker id="ar2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="' + ORANGE + '"/></marker></defs>';
+    s += '<text x="352" y="114" font-size="12" fill="' + ORANGE + '">[3, 6] 每个数 +5</text>';
+    s += row(126, 'd 后', d1, {has: function(i){ return i === 3 || i === 7; }, c: ORANGE_BG, s: ORANGE});
+    s += row(166, 'a 后', a1, {has: function(i){ return i >= 3 && i <= 6; }, c: BLUE_BG, s: BLUE});
+    s += '<text x="340" y="222" text-anchor="middle" font-size="13" fill="' + DARK + '">d 上只动了两个位置：d[3] += 5，d[7] -= 5</text>';
+    s += '<text x="340" y="246" text-anchor="middle" font-size="12" fill="#6b7280">中间那段同时被 +5 托起来，7 号之后又被 −5 压回去，正好抵消</text>';
+    s += '</svg>';
+    el.innerHTML = s;
+  })();
+
+  /* ---------- 图四：x = 5 时两种写法 ---------- */
+  (function(){
+    const el = document.getElementById('fig4');
+    if (!el) return;
+    const d = [3, -2, 8, -3, 4];             // 给 [3,6] 加 5 之后，d 的前 5 项
+    const w = [5, 4, 3, 2, 1];
+    const X0 = 40, STEP = 76, CW = 70, H = 34;
+    const cx = function(i){ return X0 + (i - 1) * STEP + CW / 2; };
+    let s = '<svg viewBox="0 0 680 268" role="img" aria-label="前缀和拆成两张表的写法">';
+    s += '<text x="16" y="16" font-size="12" fill="' + DARK + '">a[1..5] = 3, 1, 9, 6, 10（已经给 [3,6] 加过 5）。按 d 展开，每项 d[i] 的权重是 (5 − i + 1)</text>';
+    for (let i = 1; i <= 5; i++) {
+      const x = X0 + (i - 1) * STEP;
+      s += '<rect x="' + x + '" y="28" width="' + CW + '" height="' + H + '" rx="5" fill="' + BLUE_BG + '" stroke="' + BLUE + '"/>';
+      s += '<text x="' + cx(i) + '" y="49" text-anchor="middle" font-size="12" font-weight="600" fill="' + BLUE + '">d[' + i + ']=' + d[i - 1] + '</text>';
+      s += '<text x="' + cx(i) + '" y="78" text-anchor="middle" font-size="11" fill="' + GREY + '">权重 ' + w[i - 1] + '</text>';
+    }
+    s += '<text x="16" y="108" font-size="13" fill="' + DARK + '">S(5) = 3·5 + (−2)·4 + 8·3 + (−3)·2 + 4·1 = 15 − 8 + 24 − 6 + 4 = <tspan font-weight="600">29</tspan></text>';
+    s += '<text x="16" y="140" font-size="12" fill="' + DARK + '">权重 (6 − i) 随 i 变，没法一个前缀和算完，把 6 和 i 拆开：</text>';
+    s += '<rect x="16" y="152" width="648" height="62" rx="6" fill="' + SOFT + '" stroke="' + BORDER + '"/>';
+    s += '<text x="34" y="176" font-size="13" fill="' + DARK + '">S(x) = (x + 1)·Σ d[i] − Σ i·d[i]</text>';
+    s += '<text x="34" y="202" font-size="13" fill="' + DARK + '">第二张表改记 (i−1)·d[i]，于是 <tspan fill="' + ORANGE + '" font-weight="600">S(x) = x·D(x) − Σ (i−1)·d[i]</tspan></text>';
+    s += '<text x="16" y="238" font-size="12" fill="#6b7280">x = 5：D(5) = 3 − 2 + 8 − 3 + 4 = 10，Σ(i−1)·d[i] = 0 − 2 + 16 − 9 + 16 = 21</text>';
+    s += '<text x="16" y="260" font-size="12" fill="' + DARK + '">5 × 10 − 21 = <tspan font-weight="600">29</tspan>，和逐项展开算出来的一样</text>';
+    s += '</svg>';
+    el.innerHTML = s;
+  })();
+
+  /* ---------- 演示一：范围加、单点查 ---------- */
+  const N = 8, M = 9;                      // 树状数组开到 n + 1 = 9
+  const A0 = [3, 1, 4, 1, 5, 9, 2, 6];
+
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), a | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function curA(d){
+    let s = 0; const a = [];
+    for (let i = 1; i <= N; i++) { s += d[i]; a.push(s); }
+    return a;
+  }
+
+  function buildOps(kind){
+    if (kind === 0) return [{t: 'add', l: 3, r: 6, v: 5}, {t: 'q', i: 4}, {t: 'add', l: 1, r: 2, v: -3}, {t: 'q', i: 5}];
+    if (kind === 1) return [{t: 'add', l: 5, r: 8, v: 4}, {t: 'q', i: 8}, {t: 'q', i: 4}];
+    const rnd = mulberry32(20261012);
+    const ops = [];
+    for (let k = 0; k < 4; k++) {
+      const l = 1 + Math.floor(rnd() * N), r = l + Math.floor(rnd() * (N - l + 1));
+      ops.push({t: 'add', l: l, r: r, v: 1 + Math.floor(rnd() * 9)});
+      ops.push({t: 'q', i: 1 + Math.floor(rnd() * N)});
+    }
+    return ops;
+  }
+
+  function buildSteps1(kind){
+    const ops = buildOps(kind);
+    const d = new Array(M + 2).fill(0);
+    for (let i = 1; i <= N; i++) d[i] = A0[i - 1] - (i > 1 ? A0[i - 2] : 0);
+    const tree = new Array(M + 2).fill(0);
+    for (let i = 1; i <= N; i++) for (let x = i; x <= M; x += lowbit(x)) tree[x] += d[i];
+    const steps = [];
+    steps.push({kind: 'init', note: '初始：树状数组维护的是差分 d，查 a[i] 就是查 d 的前缀和', d: d.slice(), tree: tree.slice()});
+    function doAdd(i, v, note, hi){
+      for (let x = i; x <= M; x += lowbit(x)) tree[x] += v;
+      d[i] += v;
+      const path = [];
+      for (let x = i; x <= M; x += lowbit(x)) path.push(x);
+      steps.push({kind: 'add', note: note, d: d.slice(), tree: tree.slice(), hi: hi, path: path, at: i});
+    }
+    ops.forEach(function(op){
+      if (op.t === 'add') {
+        doAdd(op.l, op.v, 'd[' + op.l + '] += ' + op.v + '，沿 i += lowbit(i) 向上更新', 'l');
+        if (op.r + 1 <= M) doAdd(op.r + 1, -op.v, 'd[' + (op.r + 1) + '] -= ' + op.v + '，把 r 之后的增量抵消掉', 'r');
+        const hi = []; for (let i = op.l; i <= op.r; i++) hi.push(i);
+        steps.push({kind: 'sync', note: 'a[' + op.l + ' .. ' + op.r + '] 每个数都加了 ' + op.v + '，差分上只动了两个位置', d: d.slice(), tree: tree.slice(), rng: hi});
+      } else {
+        let acc = 0, x = op.i;
+        while (x > 0) {
+          acc += tree[x];
+          steps.push({kind: 'q', note: '查 a[' + op.i + ']：累加到 tree[' + x + '] = ' + tree[x] + '，累计 ' + acc, d: d.slice(), tree: tree.slice(), path: [x], at: op.i, qIdx: op.i});
+          x -= lowbit(x);
+        }
+        steps.push({kind: 'ans', note: 'a[' + op.i + '] = ' + acc + '（一路减 lowbit 跳到 0）', d: d.slice(), tree: tree.slice(), ans: acc, qIdx: op.i});
+      }
+    });
+    return steps;
+  }
+
+  function grid1(st){
+    const a = curA(st.d);
+    let h = '<div class="grid-row"><span class="grid-tag">a</span><div class="grid-cells">';
+    for (let i = 1; i <= N; i++) {
+      let cls = 'gcell';
+      if (st.rng && st.rng.indexOf(i) >= 0) cls += ' blue';
+      else if (st.qIdx === i) cls += ' blue';
+      h += '<div class="' + cls + '">' + a[i - 1] + '</div>';
+    }
+    h += '</div></div><div class="grid-row"><span class="grid-tag"></span><div class="grid-cells">';
+    for (let i = 1; i <= N; i++) h += '<div class="gidx">' + i + '</div>';
+    h += '</div></div>';
+    h += '<div class="grid-row"><span class="grid-tag">d</span><div class="grid-cells">';
+    for (let i = 1; i <= M; i++) {
+      let cls = 'gcell';
+      if (st.kind === 'add' && st.at === i) cls += ' orange';
+      h += '<div class="' + cls + '">' + st.d[i] + '</div>';
+    }
+    h += '</div></div>';
+    h += '<div class="grid-row"><span class="grid-tag">tree</span><div class="grid-cells">';
+    for (let i = 1; i <= M; i++) {
+      let cls = 'gcell';
+      if (st.path && st.path.indexOf(i) >= 0) cls += ' orange';
+      h += '<div class="' + cls + '">' + st.tree[i] + '</div>';
+    }
+    h += '</div></div>';
+    if (st.ans !== undefined) {
+      h += '<div class="grid-row"><span class="grid-tag">答案</span><span style="font-size:15px;font-weight:600;color:' + BLUE + '">' + st.ans + '</span></div>';
+    }
+    return h;
+  }
+
+  const v1el = document.getElementById('viz1'), v1bd = document.getElementById('v1bd');
+  const v1sel = document.getElementById('v1sel');
+  let st1 = [], p1 = 0;
+  function render1(){
+    const st = st1[p1];
+    v1el.innerHTML = grid1(st);
+    const last = st.kind === 'ans' || st.kind === 'sync';
+    v1bd.innerHTML =
+      '<div class="row">第 ' + (p1 + 1) + ' / ' + st1.length + ' 步　' + st.note + '</div>' +
+      (last ? '' : '<div class="row" style="color:var(--text-dim)">点「下一步」继续</div>');
+  }
+  function reset1(){
+    st1 = buildSteps1(parseInt(v1sel.value, 10)); p1 = 0; render1();
+  }
+  document.getElementById('v1next').addEventListener('click', function(){
+    if (p1 < st1.length - 1) { p1++; render1(); }
+  });
+  document.getElementById('v1reset').addEventListener('click', reset1);
+  v1sel.addEventListener('change', reset1);
+  reset1();
+
+  /* ---------- 演示二：范围加、范围查 ---------- */
+  function buildOps2(kind){
+    if (kind === 0) return [{t: 'add', l: 3, r: 6, v: 5}, {t: 'q', l: 2, r: 5}, {t: 'add', l: 1, r: 4, v: -2}, {t: 'q', l: 1, r: 8}];
+    if (kind === 1) return [{t: 'add', l: 2, r: 7, v: 3}, {t: 'q', l: 1, r: 8}];
+    const rnd = mulberry32(20261012);
+    const ops = [];
+    for (let k = 0; k < 3; k++) {
+      const l = 1 + Math.floor(rnd() * N), r = l + Math.floor(rnd() * (N - l + 1));
+      ops.push({t: 'add', l: l, r: r, v: 1 + Math.floor(rnd() * 9)});
+      const ql = 1 + Math.floor(rnd() * N), qr = ql + Math.floor(rnd() * (N - ql + 1));
+      ops.push({t: 'q', l: ql, r: qr});
+    }
+    return ops;
+  }
+
+  function buildSteps2(kind){
+    const ops = buildOps2(kind);
+    const d = new Array(M + 2).fill(0);
+    for (let i = 1; i <= N; i++) d[i] = A0[i - 1] - (i > 1 ? A0[i - 2] : 0);
+    const t1 = new Array(M + 2).fill(0), t2 = new Array(M + 2).fill(0);
+    for (let i = 1; i <= N; i++) {
+      for (let x = i; x <= M; x += lowbit(x)) { t1[x] += d[i]; t2[x] += (i - 1) * d[i]; }
+    }
+    const steps = [];
+    steps.push({kind: 'init', note: 'info1 记 d[i]，info2 记 (i−1)·d[i]；S(x) = x·sum(info1, x) − sum(info2, x)', d: d.slice(), t1: t1.slice(), t2: t2.slice()});
+    function pt(t, i, v){
+      const path = [];
+      for (let x = i; x <= M; x += lowbit(x)) { t[x] += v; path.push(x); }
+      return path;
+    }
+    ops.forEach(function(op){
+      if (op.t === 'add') {
+        const p = [];
+        const pa = pt(t1, op.l, op.v), pb = pt(t1, op.r + 1, -op.v);
+        d[op.l] += op.v; d[op.r + 1] -= op.v;
+        pa.concat(pb).forEach(function(x){ if (p.indexOf(x) < 0) p.push(x); });
+        steps.push({kind: 'add1', note: 'info1：d[' + op.l + '] += ' + op.v + '、d[' + (op.r + 1) + '] -= ' + op.v, d: d.slice(), t1: t1.slice(), t2: t2.slice(), path: p});
+        const q = [];
+        const qa = pt(t2, op.l, (op.l - 1) * op.v), qb = pt(t2, op.r + 1, -op.r * op.v);
+        qa.concat(qb).forEach(function(x){ if (q.indexOf(x) < 0) q.push(x); });
+        steps.push({kind: 'add2', note: 'info2：打 (l−1)·v = ' + ((op.l - 1) * op.v) + ' 与 −r·v = ' + (-op.r * op.v), d: d.slice(), t1: t1.slice(), t2: t2.slice(), path: q});
+        const rng = []; for (let i = op.l; i <= op.r; i++) rng.push(i);
+        steps.push({kind: 'sync', note: '[' + op.l + ', ' + op.r + '] 每个数加了 ' + op.v + '，两张表各动了两个位置', d: d.slice(), t1: t1.slice(), t2: t2.slice(), rng: rng});
+      } else {
+        function S(x){
+          let s1 = 0, s2 = 0;
+          for (let i = x; i > 0; i -= lowbit(i)) { s1 += t1[i]; s2 += t2[i]; }
+          return {v: x * s1 - s2, s1: s1, s2: s2};
+        }
+        const A = S(op.r);
+        steps.push({kind: 'qa', note: 'S(' + op.r + ') = ' + op.r + ' × D(' + op.r + ') − E(' + op.r + ') = ' + op.r + ' × ' + A.s1 + ' − ' + A.s2 + ' = ' + A.v, d: d.slice(), t1: t1.slice(), t2: t2.slice(), rng: [], qx: op.r});
+        const B = S(op.l - 1);
+        const ans = A.v - B.v;
+        const rng = []; for (let i = op.l; i <= op.r; i++) rng.push(i);
+        steps.push({kind: 'qb', note: 'S(' + (op.l - 1) + ') = ' + (op.l - 1) + ' × ' + B.s1 + ' − ' + B.s2 + ' = ' + B.v + '，答案 = ' + A.v + ' − ' + B.v + ' = ' + ans, d: d.slice(), t1: t1.slice(), t2: t2.slice(), rng: rng, ans: ans});
+      }
+    });
+    return steps;
+  }
+
+  function grid2(st){
+    const a = curA(st.d);
+    let h = '<div class="grid-row"><span class="grid-tag">a</span><div class="grid-cells">';
+    for (let i = 1; i <= N; i++) {
+      let cls = 'gcell';
+      if (st.rng && st.rng.indexOf(i) >= 0) cls += ' blue';
+      h += '<div class="' + cls + '">' + a[i - 1] + '</div>';
+    }
+    h += '</div></div><div class="grid-row"><span class="grid-tag"></span><div class="grid-cells">';
+    for (let i = 1; i <= N; i++) h += '<div class="gidx">' + i + '</div>';
+    h += '</div></div>';
+    h += '<div class="grid-row"><span class="grid-tag">info1</span><div class="grid-cells">';
+    for (let i = 1; i <= M; i++) {
+      let cls = 'gcell';
+      if (st.kind === 'add1' && st.path.indexOf(i) >= 0) cls += ' orange';
+      h += '<div class="' + cls + '">' + st.t1[i] + '</div>';
+    }
+    h += '</div></div>';
+    h += '<div class="grid-row"><span class="grid-tag">info2</span><div class="grid-cells">';
+    for (let i = 1; i <= M; i++) {
+      let cls = 'gcell';
+      if (st.kind === 'add2' && st.path.indexOf(i) >= 0) cls += ' orange';
+      h += '<div class="' + cls + '">' + st.t2[i] + '</div>';
+    }
+    h += '</div></div>';
+    if (st.ans !== undefined) {
+      h += '<div class="grid-row"><span class="grid-tag">答案</span><span style="font-size:15px;font-weight:600;color:' + BLUE + '">' + st.ans + '</span></div>';
+    }
+    return h;
+  }
+
+  const v2el = document.getElementById('viz2'), v2bd = document.getElementById('v2bd');
+  const v2sel = document.getElementById('v2sel');
+  let st2 = [], p2 = 0;
+  function render2(){
+    const st = st2[p2];
+    v2el.innerHTML = grid2(st);
+    v2bd.innerHTML = '<div class="row">第 ' + (p2 + 1) + ' / ' + st2.length + ' 步　' + st.note + '</div>';
+  }
+  function reset2(){
+    st2 = buildSteps2(parseInt(v2sel.value, 10)); p2 = 0; render2();
+  }
+  document.getElementById('v2next').addEventListener('click', function(){
+    if (p2 < st2.length - 1) { p2++; render2(); }
+  });
+  document.getElementById('v2reset').addEventListener('click', reset2);
+  v2sel.addEventListener('change', reset2);
+  reset2();
+})();
+</script>
+</body>
+</html>

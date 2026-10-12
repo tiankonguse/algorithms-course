@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线段树：区间加与懒更新 · 算法教程</title>
+<meta name="description" content="区间加不落到每个叶子，而是在完全覆盖的节点上记一笔 add，真要用到时再补发；同一套形状维护和与最大值，差别只在 up 的合并和 lazy 的加工。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .twocol{display:flex;gap:20px;flex-wrap:wrap;margin:14px 0;}
+  .panel{flex:1;min-width:240px;border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--bg-soft);}
+  .panel h4{margin:0 0 8px;font-size:14px;}
+  .panel .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.8;}
+  .panel .blue{color:var(--full);font-weight:600;}
+  .panel .orange{color:var(--partial);font-weight:600;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>线段树：区间加与懒更新</h1>
+    <p class="intro">区间加不落到每个叶子上，而是在完全覆盖的节点上记一笔 add，等真正要往下走时再补发。同一套形状既能维护和也能维护最大值，差别只在 up 怎么合并、lazy 怎么加工。</p>
+
+    <h2>零、背景</h2>
+    <p>先问一个比「线段树长什么样」更接近成本的问题：一次区间加，线段树到底碰了几个节点？</p>
+    <p>n = 10⁶、操作 10⁶ 次，实测平均每次 75.87 次记账加 35.90 次回填，合起来不到 112 个节点。换成逐叶修改，一次就要动 n / 3 个位置，也就是三十多万次。</p>
+    <p>省下来的这一大截，全靠一个很小的动作：整段覆盖时不停下，只在节点上欠一笔账。</p>
+
+    <h2>一、问题</h2>
+    <p>长度为 n 的数组 a，两种操作交替出现，一共 m 次。</p>
+    <ul>
+      <li>修改：区间 [l, r] 里每个数都加 v。</li>
+      <li>查询：区间 [l, r] 的累加和。</li>
+    </ul>
+    <p>洛谷 P3372 就是这个问法，n、m 到 10⁵，数组里的数和 v 都在 ±10⁵ 以内。</p>
+    <p>区间加是被树状数组挡住的第一道坎。树状数组的 c[i] 管 [i − lowbit(i) + 1, i] 这么一段固定范围，形状由下标说了算，想整段整体地改一次，只能一个点一个点地改。</p>
+    <p>暴力做也不是不能过小数据。拿同一个随机序列跑 n = m = 10⁵：</p>
+    <table class="complexity">
+      <tr><th>做法</th><th>耗时</th><th>备注</th></tr>
+      <tr><td>逐点修改 + 逐点求和</td><td>427.1 ms</td><td>每次操作平均扫 n / 3 个位置，约 3.3 × 10⁹ 次加法</td></tr>
+      <tr><td>线段树</td><td>31.3 ms</td><td>同一批操作，答案逐条一致</td></tr>
+    </table>
+    <p>10⁵ 上只差 13 倍，看着还能忍。但暴力的代价是 n 乘 m，n 和 m 各自再乘 10，乘出来是 100 倍；线段树这边是 n log n 的量级，加一个数量级只是线性地涨。</p>
+
+    <h2>二、信息数组要开 4n</h2>
+    <p>节点不用指针，躺在数组里：父范围的信息写在 sum[i]，左范围写 sum[2i]，右范围写 sum[2i + 1]，根是 1 号。范围 [l, r] 与下标 i 的对应关系由递归参数维护，不需要额外记录。</p>
+    <p>那么 1 到 n 的线段树，数组开多大才够？满二叉树的层数上界是 log₂n + 2，这一层的节点数达到 2 的 log₂n + 2 次方，也就是 4n。所以 4n 是安全边界。</p>
+
+    <figure class="fig">
+      <div id="fig1"></div>
+      <figcaption>n = 8 时树有 4 层，最后一层编号 8 到 15；按满二叉树估上界是 2 的 log₂8 + 2 次方 = 32 = 4n</figcaption>
+    </figure>
+
+    <p>这个上界偏宽松。把范围 1 到 200000 全扫一遍，实际出现的最大编号与 n 的比值最大是 3.9844（n = 131328 时需要 523265 个位置），四点几倍的情况一次都没出现过。</p>
+
+        <pre class="code"><span class="cm">// 范围 1~n 的线段树，信息数组要开多大？</span>
+    <span class="cm">// 返回递归展开过程中出现过的最大下标</span>
+    <span class="kw">int</span> <span class="fn">maxi</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (l == r) {
+        <span class="kw">return</span> i;
+      }
+      <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+      <span class="kw">return</span> max(maxi(l, mid, i &lt;&lt; 1), maxi(mid + 1, r, i &lt;&lt; 1 | 1));
+    }
+
+    <span class="cm">// 把 1 到 200000 全扫一遍，看最大倍数落在哪</span>
+    <span class="kw">void</span> <span class="fn">scanSpace</span>() {
+      <span class="kw">int</span> bestN = 0, bestSpace = 0;
+      <span class="kw">double</span> best = 0;
+      <span class="kw">for</span> (<span class="kw">int</span> n = 1; n &lt;= 200000; n++) {
+        <span class="kw">int</span> space = maxi(1, n, 1);
+        <span class="kw">double</span> times = (<span class="kw">double</span>)space / n;
+        <span class="kw">if</span> (times &gt; best) {
+          best = times;
+          bestN = n;
+          bestSpace = space;
+        }
+      }
+      printf("最大倍数: n = %d 需要 %d 个位置, %.4f 倍\n", bestN, bestSpace, best);
+    }</pre>
+
+    <p>4n 是行业里最通行的开法，多出来的那点空间换来「不用算」。</p>
+
+    <h2>三、懒信息是一笔欠账</h2>
+    <p>整段加 v 之后，节点上要维护的信息能不能 O(1) 算出来？这是决定能不能用懒标记的判据。</p>
+    <ul>
+      <li>累加和：整段加 v，和就加了 v 乘元素个数，一步到位。</li>
+      <li>最大值：整段加 v，最大值也就是加了 v，一步到位。</li>
+      <li>出现次数最多的数：整段加 v 之后谁最多，跟原来的众数没有关系，加工不出来。</li>
+    </ul>
+    <p>能满足这个判据的信息，就可以只改当前节点、不动儿子，然后在节点上记一笔「这段每个数还欠 v」。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">ll</span> v, <span class="kw">int</span> len) {
+  sum[i] += v * len;
+  add[i] += v;
+}</pre>
+    <p>add 数组就是账本。两次重叠的区间加落在同一个节点上，账本上是 add[i] = 3 再变成 add[i] = 5，累加即可，不需要关心中间经过了几次。</p>
+
+    <h2>四、down 与 up</h2>
+    <p>有了账本，一次区间加只有三步。</p>
+    <ol>
+      <li>任务范围把当前范围整个包住，就懒住：改 sum、记 add，不再往下。</li>
+      <li>包不住，就把当前节点积压的账往下发一层，这一步是 down。发完清空自己的账本。</li>
+      <li>看任务落在左半边还是右半边，分别递归。递归回来用左右儿子的信息把当前节点的 sum 重算一遍，这一步是 up。</li>
+    </ol>
+    <p>被发下去的账，时间一定早于父节点的其它账。同理，查询也要走 down：不完全包含时先把账还清，再去问儿子，否则儿子手里的数字是旧的。</p>
+        <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    typedef <span class="kw">long</span> <span class="kw">long</span> <span class="kw">ll</span>;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+
+    <span class="kw">int</span> n;
+    <span class="kw">ll</span> arr[MAXN];
+    <span class="kw">ll</span> sum[MAXN &lt;&lt; 2];
+    <span class="kw">ll</span> add[MAXN &lt;&lt; 2];
+
+    <span class="cm">// 查询信息的汇总: 父范围的和 = 左范围和 + 右范围和</span>
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+      sum[i] = sum[i &lt;&lt; 1] + sum[i &lt;&lt; 1 | 1];
+    }
+
+    <span class="cm">// 当前范围收到「整段每个数加 v」的懒更新，len 是元素个数</span>
+    <span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">ll</span> v, <span class="kw">int</span> len) {
+      sum[i] += v * len;
+      add[i] += v;
+    }
+
+    <span class="cm">// 父范围的懒信息往下只发一层</span>
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i, <span class="kw">int</span> ln, <span class="kw">int</span> rn) {
+      <span class="kw">if</span> (add[i] != 0) {
+        lazy(i &lt;&lt; 1, add[i], ln);
+        lazy(i &lt;&lt; 1 | 1, add[i], rn);
+        add[i] = 0;
+      }
+    }
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (l == r) {
+        sum[i] = arr[l];
+      } <span class="kw">else</span> {
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        build(l, mid, i &lt;&lt; 1);
+        build(mid + 1, r, i &lt;&lt; 1 | 1);
+        up(i);
+      }
+      add[i] = 0;
+    }
+
+    <span class="cm">// [jobl, jobr] 上每个数加 jobv</span>
+    <span class="kw">void</span> <span class="fn">rangeAdd</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">ll</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+        lazy(i, jobv, r - l + 1);
+      } <span class="kw">else</span> {
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        down(i, mid - l + 1, r - mid);
+        <span class="kw">if</span> (jobl &lt;= mid) {
+          rangeAdd(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+          rangeAdd(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        up(i);
+      }
+    }
+
+    <span class="cm">// [jobl, jobr] 的累加和</span>
+    <span class="kw">ll</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+        <span class="kw">return</span> sum[i];
+      }
+      <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+      down(i, mid - l + 1, r - mid);
+      <span class="kw">ll</span> ans = 0;
+      <span class="kw">if</span> (jobl &lt;= mid) {
+        ans += query(jobl, jobr, l, mid, i &lt;&lt; 1);
+      }
+      <span class="kw">if</span> (jobr &gt; mid) {
+        ans += query(jobl, jobr, mid + 1, r, i &lt;&lt; 1 | 1);
+      }
+      <span class="kw">return</span> ans;
+    }</pre>
+    <p>拿 n = 8、a = [3, 1, 4, 1, 5, 9, 2, 6] 走一次 [2, 6] 加 4，看每个节点上的账本。</p>
+
+    <div class="viz">
+      <div class="viz-title">演示 ①　一次区间加走过哪些节点</div>
+      <div id="viz1"></div>
+      <div class="viz-controls">
+        <div class="ctl">
+          <label>操作序列</label>
+          <select id="v1sel">
+            <option value="0">先加一段再查两次</option>
+            <option value="1">两段重叠的加</option>
+            <option value="2">单点加与小区间</option>
+          </select>
+        </div>
+        <button type="button" id="v1next">下一步</button>
+        <button type="button" id="v1reset">重置</button>
+      </div>
+      <div class="breakdown" id="v1bd"></div>
+      <div class="legend">
+        <span><span class="dot full"></span>完全覆盖（懒住或直接取值）</span>
+        <span><span class="dot partial"></span>部分相交（要先 down 再往下走）</span>
+        <span><span class="dot skip"></span>这一步没碰</span>
+      </div>
+    </div>
+    <p class="viz-hint">每个节点上排是和，下排是最大值，右上角的橙色小字是节点上欠的 add。</p>
+
+    <h2>五、把信息换成最大值</h2>
+    <p>区间加这一段骨架不用改，只把两处换掉。</p>
+    <p>up 从求和改成取最大。lazy 里那句 v 乘 len 要去掉：和是整个范围加起来的总量，得乘元素个数；最大值是这个范围里最大的那一个数，加 v 就是加 v，跟范围有多长没关系。down 也就跟着少传两个参数。</p>
+
+    <figure class="fig">
+      <div id="fig2"></div>
+      <figcaption>同一个节点 [3, 4]，a = [4, 1] 加 4：和维护 5 → 13，要乘长度；最大值维护 4 → 8，不乘</figcaption>
+    </figure>
+
+        <pre class="code"><span class="cm">// 查询信息换成最大值: 父范围的最大值 = max(左, 右)</span>
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+      mx[i] = max(mx[i &lt;&lt; 1], mx[i &lt;&lt; 1 | 1]);
+    }
+
+    <span class="cm">// 整段每个数加 v，最大值也就加了 v</span>
+    <span class="cm">// 这里不需要 len: 最大值是这个范围里最大的那一个数</span>
+    <span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">ll</span> v) {
+      mx[i] += v;
+      add[i] += v;
+    }
+
+    <span class="cm">// 最大值版本没有长度参数要传</span>
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+      <span class="kw">if</span> (add[i] != 0) {
+        lazy(i &lt;&lt; 1, add[i]);
+        lazy(i &lt;&lt; 1 | 1, add[i]);
+        add[i] = 0;
+      }
+    }
+
+    <span class="kw">void</span> <span class="fn">rangeAdd</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">ll</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+        lazy(i, jobv);
+      } <span class="kw">else</span> {
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        down(i);
+        <span class="kw">if</span> (jobl &lt;= mid) {
+          rangeAdd(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+          rangeAdd(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        up(i);
+      }
+    }
+
+    <span class="kw">ll</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+      <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+        <span class="kw">return</span> mx[i];
+      }
+      <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+      down(i);
+      <span class="kw">ll</span> ans = LLONG_MIN;
+      <span class="kw">if</span> (jobl &lt;= mid) {
+        ans = max(ans, query(jobl, jobr, l, mid, i &lt;&lt; 1));
+      }
+      <span class="kw">if</span> (jobr &gt; mid) {
+        ans = max(ans, query(jobl, jobr, mid + 1, r, i &lt;&lt; 1 | 1));
+      }
+      <span class="kw">return</span> ans;
+    }</pre>
+
+    <h2>六、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>操作</th><th>时间</th><th>空间</th></tr>
+      <tr><td>建树 build</td><td>O(n)</td><td>两个 4n 数组</td></tr>
+      <tr><td>区间加</td><td>O(log n)</td><td>递归栈 O(log n)</td></tr>
+      <tr><td>区间查询</td><td>O(log n)</td><td>递归栈 O(log n)</td></tr>
+      <tr><td>整体</td><td>O((n + m) log n)</td><td>O(n)</td></tr>
+    </table>
+    <p>O(log n) 说的是量级，常数值得单独记一笔：n = m = 10⁶ 时六种模板各自跑完是 0.61 秒到 0.73 秒；建树 n = 10⁶ 只要 7.12 ms。区间加的访问节点数在平均 112 个左右，比 2 log n 的 40 大，因为部分相交的节点要两侧都递归下去。</p>
+
+    <h2>七、总结</h2>
+    <p>懒标记的全部机制就是一本存欠账的 add 数组：整段覆盖时只记账不往下走，真正要访问儿子时再补发一层，回程重算父节点。区间加能这么做，是因为「整段加 v」对累加和与最大值都能 O(1) 加工出来；换成区间众数这类信息，同一套骨架就撑不住了。</p>
+    <p>同一个骨架里换掉 up 的合并方式和 lazy 的加工方式，就能换一种查询信息，这是线段树最值得先摸熟的灵活性。下一步把修改从「加」换成「重置」，lazy 的含义就从一笔可以累加的账变成一个具体的值，账本还得再配一位开关。</p>
+
+    <h2 id="prob-links">相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td>线段树 1</td><td><a href="https://www.luogu.com.cn/problem/P3372" target="_blank">www.luogu.com.cn/problem/P3372</a></td></tr>
+      <tr><td>—</td><td>区间加 + 区间最大值</td><td>对数器验证，无测试链接</td></tr>
+    </table>
+
+    <h2 id="refs">参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解110【扩展】线段树专题1-线段树原理和代码详解</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  const BLUE = '#2563eb', BLUE_BG = '#dbeafe', ORANGE = '#ea580c', ORANGE_BG = '#ffedd5';
+  const GREY = '#9aa0a6', SOFT = '#f6f7f9', BORDER = '#e6e8eb', DARK = '#1f2328', MID = '#6b7280';
+
+  /* ---------- 图一：4n 的来历 ---------- */
+  (function(){
+    const el = document.getElementById('fig1');
+    if (!el) return;
+    const CW = 680, CH = 320;
+    const LV = [[1], [2,3], [4,5,6,7], [8,9,10,11,12,13,14,15]];
+    const BW = [120, 96, 74, 62], BH = 34, TOP = 34, GAPY = 64;
+    function cx(d, k){ return CW * (k + 0.5) / LV[d].length; }
+    let s = '<svg viewBox="0 0 ' + CW + ' ' + CH + '" role="img" aria-label="n 等于 8 的线段树，四层编号">';
+    // 连线
+    for (let d = 0; d + 1 < LV.length; d++) {
+      for (let k = 0; k < LV[d].length; k++) {
+        const y1 = TOP + d * GAPY + BH, y2 = TOP + (d + 1) * GAPY;
+        for (let c = 0; c < 2; c++) {
+          s += '<line x1="' + cx(d, k) + '" y1="' + y1 + '" x2="' + cx(d + 1, 2 * k + c) + '" y2="' + y2 + '" stroke="' + BORDER + '" stroke-width="1.5"/>';
+        }
+      }
+    }
+    const RG = ['[1,8]', '[1,4]|[5,8]', '[1,2]|[3,4]|[5,6]|[7,8]', '[1,1]|[2,2]|[3,3]|[4,4]|[5,5]|[6,6]|[7,7]|[8,8]'];
+    for (let d = 0; d < LV.length; d++) {
+      const labels = RG[d].split('|');
+      for (let k = 0; k < LV[d].length; k++) {
+        const x = cx(d, k) - BW[d] / 2, y = TOP + d * GAPY;
+        s += '<rect x="' + x + '" y="' + y + '" width="' + BW[d] + '" height="' + BH + '" rx="6" fill="' + (d === 3 ? BLUE_BG : SOFT) + '" stroke="' + (d === 3 ? BLUE : BORDER) + '"/>';
+        s += '<text x="' + cx(d, k) + '" y="' + (y + 15) + '" text-anchor="middle" font-size="10" fill="' + GREY + '">节点 ' + LV[d][k] + '</text>';
+        s += '<text x="' + cx(d, k) + '" y="' + (y + 28) + '" text-anchor="middle" font-size="10" fill="' + (d === 3 ? BLUE : DARK) + '">' + labels[k] + '</text>';
+      }
+    }
+    s += '<text x="16" y="' + (CH - 46) + '" font-size="12" fill="' + MID + '">最后一层管单个元素，编号从 8 到 15；再往下不需要了</text>';
+    s += '<text x="16" y="' + (CH - 26) + '" font-size="12" fill="' + ORANGE + '">层数上界 log₂n + 2 = 5，满二叉树在这一层编号能到 2⁵ = 32 = 4n，所以数组开 4n</text>';
+    s += '</svg>';
+    el.innerHTML = s;
+  })();
+
+  /* ---------- 图二：同一个节点，两种信息 ---------- */
+  (function(){
+    const el = document.getElementById('fig2');
+    if (!el) return;
+    const CW = 680, CH = 240;
+    let s = '<svg viewBox="0 0 ' + CW + ' ' + CH + '" role="img" aria-label="同一个节点在两种信息下的加工方式">';
+    function card(x, title, rows, color, bg){
+      s += '<rect x="' + x + '" y="20" width="300" height="190" rx="10" fill="' + bg + '" stroke="' + color + '"/>';
+      s += '<text x="' + (x + 16) + '" y="46" font-size="13" font-weight="700" fill="' + color + '">' + title + '</text>';
+      for (let i = 0; i < rows.length; i++) {
+        s += '<text x="' + (x + 16) + '" y="' + (76 + i * 24) + '" font-size="12" fill="' + DARK + '">' + rows[i] + '</text>';
+      }
+    }
+    card(24, '维护累加和', [
+      '节点 [3, 4]，a = [4, 1]，长度 len = 2',
+      'sum = 5',
+      '整段加 4 后：sum = 4 × 2 + 5 = 13',
+      'lazy：sum[i] += v * len',
+      'add 记一笔 4'
+    ], BLUE, '#eef4ff');
+    card(356, '维护最大值', [
+      '节点 [3, 4]，a = [4, 1]，长度 len = 2',
+      'max = 4',
+      '整段加 4 后：max = 4 + 4 = 8',
+      'lazy：max[i] += v',
+      'add 记一笔 4'
+    ], ORANGE, ORANGE_BG);
+    s += '<text x="24" y="' + (CH - 12) + '" font-size="12" fill="' + MID + '">同一个 add，两边的记账方式差一个区间长度；up 那边一个用加号，一个用 max</text>';
+    s += '</svg>';
+    el.innerHTML = s;
+  })();
+
+  /* ---------- 演示：逐步走区间加 ---------- */
+  (function(){
+    const el = document.getElementById('viz1'), bd = document.getElementById('v1bd'), sel = document.getElementById('v1sel');
+    if (!el) return;
+    const N = 8, A0 = [3, 1, 4, 1, 5, 9, 2, 6];
+    const SETS = [
+      [{t:'add',l:2,r:6,v:4}, {t:'ask',l:1,r:4}, {t:'add',l:1,r:8,v:1}, {t:'ask',l:1,r:8}],
+      [{t:'add',l:1,r:8,v:3}, {t:'add',l:3,r:5,v:2}, {t:'ask',l:2,r:7}, {t:'add',l:5,r:8,v:1}, {t:'ask',l:1,r:8}],
+      [{t:'add',l:4,r:4,v:7}, {t:'add',l:1,r:3,v:1}, {t:'ask',l:1,r:8}, {t:'add',l:2,r:2,v:5}, {t:'ask',l:4,r:6}]
+    ];
+    const LV = [[1], [2,3], [4,5,6,7], [8,9,10,11,12,13,14,15]];
+    const RANGE = [], DEPTH = [];
+    (function(){
+      const st = [[1, N, 1]];
+      while (st.length) {
+        const p = st.pop();
+        RANGE[p[2]] = [p[0], p[1]]; DEPTH[p[2]] = 0;
+        if (p[0] < p[1]) {
+          const mid = (p[0] + p[1]) >> 1;
+          st.push([p[0], mid, p[2] * 2]); st.push([mid + 1, p[1], p[2] * 2 + 1]);
+        }
+      }
+      for (let d = 0; d < LV.length; d++) for (let k = 0; k < LV[d].length; k++) DEPTH[LV[d][k]] = d;
+    })();
+
+    function buildSteps(k){
+      const sum = new Array(16).fill(0), mx = new Array(16).fill(0), add = new Array(16).fill(0);
+      function up(i){ sum[i] = sum[i*2] + sum[i*2+1]; mx[i] = Math.max(mx[i*2], mx[i*2+1]); }
+      function lazy(i, v, len){ sum[i] += v * len; mx[i] += v; add[i] += v; }
+      function down(i, ln, rn){ if (add[i]) { lazy(i*2, add[i], ln); lazy(i*2+1, add[i], rn); add[i] = 0; } }
+      function build(l, r, i){
+        if (l === r) { sum[i] = mx[i] = A0[l-1]; }
+        else {
+          const mid = (l + r) >> 1;
+          build(l, mid, i*2); build(mid+1, r, i*2+1); up(i);
+        }
+        add[i] = 0;
+      }
+      build(1, N, 1);
+      const steps = [{sum: sum.slice(), mx: mx.slice(), add: add.slice(), full: [], part: [], note: '初始状态：每个叶子是自己，内部节点是左右孩子的和与最大'}];
+      SETS[k].forEach(function(op){
+        const full = [], part = [];
+        let res = null;
+        function addJob(jl, jr, v, l, r, i){
+          if (jl <= l && r <= jr) { lazy(i, v, r - l + 1); full.push(i); return; }
+          part.push(i);
+          const mid = (l + r) >> 1;
+          down(i, mid - l + 1, r - mid);
+          if (jl <= mid) addJob(jl, jr, v, l, mid, i*2);
+          if (jr > mid) addJob(jl, jr, v, mid+1, r, i*2+1);
+          up(i);
+        }
+        function ask(jl, jr, l, r, i){
+          if (jl <= l && r <= jr) { full.push(i); return [sum[i], mx[i]]; }
+          part.push(i);
+          const mid = (l + r) >> 1;
+          down(i, mid - l + 1, r - mid);
+          let s = 0, m = -Infinity;
+          if (jl <= mid) { const a = ask(jl, jr, l, mid, i*2); s += a[0]; m = Math.max(m, a[1]); }
+          if (jr > mid) { const b = ask(jl, jr, mid+1, r, i*2+1); s += b[0]; m = Math.max(m, b[1]); }
+          return [s, m];
+        }
+        let note;
+        if (op.t === 'add') {
+          addJob(op.l, op.r, op.v, 1, N, 1);
+          note = '区间 [' + op.l + ', ' + op.r + '] 每个数加 ' + op.v;
+        } else {
+          res = ask(op.l, op.r, 1, N, 1);
+          note = '查询 [' + op.l + ', ' + op.r + ']';
+        }
+        steps.push({sum: sum.slice(), mx: mx.slice(), add: add.slice(), full: full, part: part, note: note, res: res, op: op});
+      });
+      return steps;
+    }
+
+    function renderTree(st){
+      const CW = 680, CH = 412, TOPY = 34, GAPY = 92, BH = 62;
+      const BW = []; BW[0] = 110; BW[1] = 92; BW[2] = 72; BW[3] = 60;
+      function cx(d, k){ return (CW / 2) * (2 * k + 1) / LV[d].length; }
+      let s = '<svg viewBox="0 0 ' + CW + ' ' + CH + '" role="img" aria-label="线段树逐步演示">';
+      for (let d = 0; d + 1 < LV.length; d++) {
+        for (let k = 0; k < LV[d].length; k++) {
+          const x = cx(d, k), y1 = TOPY + d * GAPY + BH, y2 = TOPY + (d + 1) * GAPY;
+          for (let c = 0; c < 2; c++) {
+            s += '<line x1="' + x + '" y1="' + y1 + '" x2="' + cx(d + 1, 2 * k + c) + '" y2="' + y2 + '" stroke="' + BORDER + '" stroke-width="1.5"/>';
+          }
+        }
+      }
+      for (let d = 0; d < LV.length; d++) {
+        for (let k = 0; k < LV[d].length; k++) {
+          const i = LV[d][k];
+          const isFull = st.full.indexOf(i) >= 0, isPart = st.part.indexOf(i) >= 0;
+          const x = cx(d, k) - BW[d] / 2, y = TOPY + d * GAPY;
+          s += '<rect x="' + x + '" y="' + y + '" width="' + BW[d] + '" height="' + BH + '" rx="6" fill="' + (isFull ? BLUE_BG : (isPart ? ORANGE_BG : SOFT)) + '" stroke="' + (isFull ? BLUE : (isPart ? ORANGE : BORDER)) + '" stroke-width="' + ((isFull || isPart) ? 2 : 1) + '"/>';
+          s += '<text x="' + cx(d, k) + '" y="' + (y + 15) + '" text-anchor="middle" font-size="10" fill="' + MID + '">[' + RANGE[i][0] + ',' + RANGE[i][1] + ']</text>';
+          s += '<text x="' + cx(d, k) + '" y="' + (y + 34) + '" text-anchor="middle" font-size="12" fill="' + (isFull ? BLUE : DARK) + '">和 ' + st.sum[i] + '</text>';
+          s += '<text x="' + cx(d, k) + '" y="' + (y + 54) + '" text-anchor="middle" font-size="12" fill="' + (isFull ? BLUE : DARK) + '">最大 ' + st.mx[i] + '</text>';
+          if (st.add[i]) {
+            s += '<rect x="' + (x + BW[d] - 30) + '" y="' + (y - 11) + '" width="34" height="17" rx="4" fill="' + ORANGE_BG + '" stroke="' + ORANGE + '"/>';
+            s += '<text x="' + (x + BW[d] - 13) + '" y="' + (y + 2) + '" text-anchor="middle" font-size="10" fill="' + ORANGE + '">+' + st.add[i] + '</text>';
+          }
+        }
+      }
+      s += '<text x="16" y="' + (CH - 12) + '" font-size="12" fill="' + MID + '">完全覆盖的节点上只改自己和 add，不再往下；回程再把父节点的和与最大值重算</text>';
+      s += '</svg>';
+      return s;
+    }
+
+    let cur = [], pos = 0;
+    function render(){
+      const st = cur[pos];
+      el.innerHTML = renderTree(st);
+      let txt = '第 ' + pos + ' / ' + (cur.length - 1) + ' 步　' + st.note;
+      txt += '<div class="row">这一步懒住 ' + st.full.length + ' 个节点，递归经过 ' + st.part.length + ' 个部分相交的节点</div>';
+      if (st.res) txt += '<div class="row">答案：和 = <b>' + st.res[0] + '</b>，最大值 = <b>' + st.res[1] + '</b></div>';
+      bd.innerHTML = txt;
+      nextBtn.disabled = pos >= cur.length - 1;
+    }
+    const nextBtn = document.getElementById('v1next');
+    function reset(){ cur = buildSteps(parseInt(sel.value, 10)); pos = 0; render(); }
+    nextBtn.addEventListener('click', function(){
+      if (pos < cur.length - 1) { pos++; render(); }
+    });
+    document.getElementById('v1reset').addEventListener('click', reset);
+    sel.addEventListener('change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

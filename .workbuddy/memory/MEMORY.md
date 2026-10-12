@@ -63,10 +63,14 @@
 - **自检 PASS ≠ 演示能走到底**：`verify_pages.js` 抓不到点击后抛的异常，末帧答案与按钮 disabled 要自写探针点到底；`verify_viz_steps.js` 的「下一步」按 `.viz-controls button` 兜底匹配，按钮语义特殊时会点错，**用 id 显式点击**。
 - **探针设下拉用 `selectedIndex`**（`.value = String(下标)` 在 option value 非纯下标时赋成空串，多组组合实际跑成同一分支）；**要断言数值不只断言文本**（107 的 SpaceSaving 口径写反就是这么漏的）。
 - **`verify_home.js` 有版本偏差**：仓库 `.agent/skills/course-site-page/scripts/` 那份是旧快照（报 `tabs` undefined），两入口页版在用户级 `~/.workbuddy/skills/course-site-page/scripts/`。
+- **页面 JS 别用 `var el` 循环挂 handler**（109）：闭包共享同一变量，循环结束后 `el` 停在最后一个控件（常是按钮），`el.value` 恒为空串 → 取预设数组抛异常、演示整块空白。统一写 `bind(id, ev, fn)` 并在处理函数里用 `this.value`。改 handler 时按行替换容易把 `if (el) …` 的 `)` 一起删掉留下 `};`，整段脚本 SyntaxError，改完要用 CDP 抓 `Runtime.exceptionThrown` 的 `exception.description` 确认。
+- **自写 probe 的「空 viz」判据别按 `.viz` 的 innerHTML 长度**（标题 + 控件 + 图例本来就有几百字符），按 `v.querySelectorAll('svg,.rowline,.cell,.pcell').length === 0` 才抓得到「演示脚本抛异常、body 全空」。
 - **页面 JS 别拿单个大写字母当维度变量**：`var W=660,H=300` 的 `H` 撞哈希函数 `H()` 会抛 `TypeError`（图全空、`verify_pages` 照样 PASS）。画布高写 `HH`。
 - **改格子间距必须同步框宽**（箭头画缝里时缝留 16~20px，画布高度重算）。对数轴刻度别用固定长度上标数组（渲染出字面量 `10undefined`）。
 - **演示里的模运算用 BigInt**（`x * y % MOD` 且 MOD ≥ 1e6 时越过 2^53 静默丢精度）；**复现错法时赋值顺序要跟源码一致**（否则错法复现不出来）。
 - **控制按钮容器统一 `class="viz-controls"`**（`shot_element.js` 按它索引点击）；纯 HTML 演示的标签溢出 / 重叠要逐图比 `getBBox()`。
+- **占位符别套 `<pre class="code">`**（110）：写成 `<pre class="code">@@name@@</pre>` 时替换脚本只认内层 `@@`，替换后残留真嵌套 `</pre></pre>`，代码块渲染错乱；正确写法是 `@@name@@` 单独一行。
+- **演示控制按钮要同步 `disabled`**（110）：`verify_viz_steps.js` 靠按钮 disabled 判断到底，漏加会一直点到 40 帧上限；render 里 `nextBtn.disabled = pos >= cur.length - 1;`。演示 SVG 画布高要给底部说明留位（线段树演示 `CH` 390→412 才不压最底层节点框）。
 - **课程代码 ≠ 题面直觉**：先随机小用例确认代码真实语义再写暴力，别改代码迁就直觉；强制在线题要交互编码（暴力输出用 `endl`）。
 - 本机**没有 `bits/stdc++.h`**：自建 shim `/tmp/cppNNN/inc/bits/stdc++.h`，编译加 `-I inc -std=c++17`；对拍看 `grep -E 'OK|MISMATCH'`。
 - 缩字母表做对数器时字母表常数要一起改；树状数组上界写成 `n` 的题随机数据要限 ≤ n，否则假 MISMATCH，**先怀疑数据再怀疑代码**；连续覆盖类题要合并区间看能否接上。

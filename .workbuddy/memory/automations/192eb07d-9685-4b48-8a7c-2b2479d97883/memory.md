@@ -1,5 +1,14 @@
 # 自动化运行记录：转换下一课
 
+## 2026-10-13 00:22
+- 任务：转换下一课 → prompt.md「下一课 109（树状数组相关题目）」，抢锁成功，主循环直做。
+- 执行：产出 4 页并入已有「树状数组」组（追加在 fenwick-2d-range 之后）：fenwick-inversion（逆序对 + 升序三元组）、fenwick-lis-count（LIS 个数）、fenwick-distinct-query（HH 的项链）、fenwick-palindrome（回文串最少交换）。
+  - 6 题 Java 手改 C++（低号课无「C++ 塞注释」版），/tmp/cpp109 五种对拍全绿（回文题用 BFS 在相邻交换的串空间上搜最短路）；全部正文数字实测（归并 73.56ms vs 树状数组 76.61ms、LIS dp 8802.73ms vs BIT 13.87ms、项链 68.52ms vs 暴力外推 175 秒、五组错法抓取率随值域变化）。
+  - 10 张 SVG + 8 个演示；/tmp/br109.js 把 113 组 select 组合逐帧点到末帧，末帧与页内独立暴力逐项一致，0 FAIL、0 JS 异常。
+  - 自检：自写 probe109 四页 PASS、ovl085 逐图 bbox CLEAN、verify_home 394 卡片 PASS、杂字/AI 味扫描 CLEAN。json 390 → 394（六字段全齐），锁已释放。
+- 环境备忘：verify_pages.js 在本环境对任何页仍全 0，继续用自写 CDP 脚本；node 路径 `~/.workbuddy/binaries/node/versions/22.22.2-6/bin/node`。新增两条通用教训已写进 MEMORY.md（`var el` 闭包挂 handler 会让演示白屏；自写 probe 的「空 viz」判据要按 `.viz` 内元素计数）。
+- 无遗留问题。下一课 110。
+
 ## 2026-10-12 00:55
 - 任务：转换下一课 → prompt.md「下一课 099（逆元和除法同余、容斥原理）」，抢锁成功，主循环直做。
 - 执行：产出 3 页并**新开「逆元与容斥」组**（插在「快速幂与矩阵快速幂」之后、「序列与区间」之前）：`mod-inverse` / `inclusion-exclusion-table` / `inclusion-exclusion-formula`。

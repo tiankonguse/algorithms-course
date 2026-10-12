@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HH 的项链：离线查询与树状数组 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.cell{
+  width:36px;height:32px;display:flex;align-items:center;justify-content:center;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:6px;
+  font-size:14px;font-variant-numeric:tabular-nums;
+}
+.cell.blue{background:var(--full-bg);border-color:var(--full);color:var(--full);font-weight:600;}
+.cell.orange{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+.cell.dim{opacity:.4;}
+.cell.now{border-width:2px;box-shadow:0 0 0 2px rgba(37,99,235,.18);}
+.cell.zero{color:#c9ced4;}
+.rowline{display:flex;align-items:center;gap:8px;margin:5px 0;flex-wrap:wrap;}
+.tag{width:74px;flex:0 0 74px;font-size:12px;color:var(--text-dim);font-weight:600;}
+.cells{display:flex;gap:4px;flex-wrap:wrap;}
+.qbox{
+  padding:3px 9px;border:1px solid var(--border);border-radius:6px;
+  font-size:12px;font-variant-numeric:tabular-nums;background:var(--bg-soft);
+}
+.qbox.done{background:var(--full-bg);border-color:var(--full);color:var(--full);}
+.qbox.now{background:var(--partial-bg);border-color:var(--partial);color:var(--partial);font-weight:600;}
+.note{font-size:13px;color:var(--text-dim);font-variant-numeric:tabular-nums;}
+@media(max-width:760px){
+  .cell{width:30px;height:28px;font-size:12px;}
+  .tag{width:62px;flex:0 0 62px;}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>HH 的项链：离线查询与树状数组</h1>
+    <p class="intro">区间里有多少种不同颜色，等价于区间里有几个位置是「这种颜色最后一次出现」。把后者标成 1、其余标成 0，答案就变成一次区间和。</p>
+
+    <h2>零、背景</h2>
+    <p>一共有 n 个位置，每个位置一种颜色，m 条查询，每条问 arr[l..r] 上有多少种不同颜色。n 和 m 都到 10⁶。</p>
+    <p>这个规模下，每条查询单独扫一遍是不行的。实测 n = m = 2000 的暴力要 0.70 ms，两边的规模各放大 500 倍，照 O(n · m) 外推是 175 秒左右。而下面这个做法在 n = m = 10⁶ 上实测 68.52 ms。</p>
+
+    <h2>一、问题</h2>
+    <pre class="code">arr = [1, 2, 1, 3, 2, 1]    查询 [2, 5]</pre>
+    <p>区间 [2, 5] 是 [2, 1, 3, 2]，出现过 1、2、3，答案是 3 种。</p>
+    <p>颜色种类这个量不能直接做减法。知道 [1, 5] 有 3 种、[1, 1] 有 1 种，推不出 [2, 5] 有几种，因为减掉的那种可能还在右边出现。这是它跟「区间和」最不一样的地方。</p>
+
+    <h2>二、关键观察：只认最后一次出现</h2>
+    <p>换个数法。在一段区间里，每种颜色可能出现很多次，但只在它最后一次出现的位置上计一次数，总数还是颜色种数。</p>
+    <p>于是给每个位置定一个标记：如果这个位置的颜色，在「从 1 到当前右端点」这一段里是最后一次出现，就标 1，否则标 0。区间 [l, r] 上的标记之和，恰好就是这段里的颜色种数。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 250" role="img" aria-label="只在每种颜色最后一次出现的位置标 1">
+        <text x="16" y="18" font-size="12" fill="#6b7280">以右端点 r = 5 为准，每种颜色只留最靠右的那一次</text>
+        <text x="16" y="48" font-size="12" fill="#6b7280">颜色</text>
+        <g>
+          <g><rect x="70" y="32" width="36" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="88" y="50" font-size="12" fill="#1f2328" text-anchor="middle">1</text></g>
+          <g><rect x="110" y="32" width="36" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="128" y="50" font-size="12" fill="#1f2328" text-anchor="middle">2</text></g>
+          <g><rect x="150" y="32" width="36" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="168" y="50" font-size="12" fill="#1f2328" text-anchor="middle">1</text></g>
+          <g><rect x="190" y="32" width="36" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="208" y="50" font-size="12" fill="#1f2328" text-anchor="middle">3</text></g>
+          <g><rect x="230" y="32" width="36" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="248" y="50" font-size="12" fill="#1f2328" text-anchor="middle">2</text></g>
+          <g><rect x="270" y="32" width="36" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="288" y="50" font-size="12" fill="#c9ced4" text-anchor="middle">1</text></g>
+          <text x="88" y="70" font-size="10" fill="#9aa0a6" text-anchor="middle">1</text>
+          <text x="128" y="70" font-size="10" fill="#9aa0a6" text-anchor="middle">2</text>
+          <text x="168" y="70" font-size="10" fill="#9aa0a6" text-anchor="middle">3</text>
+          <text x="208" y="70" font-size="10" fill="#9aa0a6" text-anchor="middle">4</text>
+          <text x="248" y="70" font-size="10" fill="#9aa0a6" text-anchor="middle">5</text>
+          <text x="288" y="70" font-size="10" fill="#9aa0a6" text-anchor="middle">6</text>
+        </g>
+        <line x1="264" y1="26" x2="264" y2="200" stroke="#c9ced4" stroke-dasharray="4 3"/>
+        <text x="300" y="50" font-size="11" fill="#6b7280">r = 5，位置 6 还没进视野</text>
+        <text x="16" y="102" font-size="12" fill="#6b7280">标记</text>
+        <g>
+          <g><rect x="70" y="86" width="36" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="88" y="104" font-size="12" fill="#c9ced4" text-anchor="middle">0</text></g>
+          <g><rect x="110" y="86" width="36" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="128" y="104" font-size="12" fill="#c9ced4" text-anchor="middle">0</text></g>
+          <g><rect x="150" y="86" width="36" height="26" rx="5" fill="#ffedd5" stroke="#ea580c"/><text x="168" y="104" font-size="12" fill="#ea580c" text-anchor="middle">1</text></g>
+          <g><rect x="190" y="86" width="36" height="26" rx="5" fill="#ffedd5" stroke="#ea580c"/><text x="208" y="104" font-size="12" fill="#ea580c" text-anchor="middle">1</text></g>
+          <g><rect x="230" y="86" width="36" height="26" rx="5" fill="#ffedd5" stroke="#ea580c"/><text x="248" y="104" font-size="12" fill="#ea580c" text-anchor="middle">1</text></g>
+          <g><rect x="270" y="86" width="36" height="26" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="288" y="104" font-size="12" fill="#c9ced4" text-anchor="middle">0</text></g>
+        </g>
+        <rect x="106" y="126" width="160" height="4" rx="2" fill="#2563eb"/>
+        <text x="112" y="146" font-size="11" fill="#2563eb">查询 [2, 5]</text>
+        <rect x="150" y="152" width="116" height="22" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+        <text x="208" y="167" font-size="12" fill="#2563eb" text-anchor="middle">和为 3</text>
+        <text x="300" y="120" font-size="11" fill="#1f2328">颜色 1 最后一次在 3</text>
+        <text x="300" y="140" font-size="11" fill="#1f2328">颜色 2 最后一次在 5</text>
+        <text x="300" y="160" font-size="11" fill="#1f2328">颜色 3 最后一次在 4</text>
+        <text x="300" y="186" font-size="11" fill="#ea580c">r 一变，标 1 的位置就会跟着挪</text>
+        <rect x="16" y="212" width="648" height="28" rx="5" fill="#eef4ff" stroke="#2563eb"/>
+        <text x="30" y="231" font-size="12" fill="#1f2328">标记数组是区间可加的，于是「数颜色」变成了「区间求和」，树状数组直接接手</text>
+      </svg>
+      <figcaption>标记 1 的位置每种颜色恰好一个，求和就得到颜色种数</figcaption>
+    </figure>
+
+    <p>标记依赖右端点：r 往右挪一格，新进来的那种颜色会把上一次的标记抢走。所以每条查询必须配它自己的 r。</p>
+
+    <h2>三、离线：把查询按右端点排序</h2>
+    <p>所有查询一起处理，按 r 从小到大排。指针 s 从 1 出发只往右走，走到 r 时，标记数组正好是「右端点为 r」时该有的样子，此时求一次 [l, r] 的区间和就是这条查询的答案。</p>
+    <p>维护标记只需要一个 last 数组：last[c] 记颜色 c 当前最靠右的位置。s 走到新位置时，把旧位置的标记减 1、新位置的标记加 1。</p>
+
+        <pre class="code"><span class="kw">void</span> <span class="fn">Add</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+    	<span class="kw">while</span> (i &lt;= n) {
+    		tree[i] += v;
+    		i += Lowbit(i);
+    	}
+    }
+
+    <span class="kw">int</span> <span class="fn">Sum</span>(<span class="kw">int</span> i) {
+    	<span class="kw">int</span> ans = 0;
+    	<span class="kw">while</span> (i &gt; 0) {
+    		ans += tree[i];
+    		i -= Lowbit(i);
+    	}
+    	<span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">Range</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+    	<span class="kw">return</span> Sum(r) - Sum(l - 1);
+    }</pre>
+
+        <pre class="code"><span class="cm">// 查询按右端点从小到大排序，s 指针只往右走</span>
+    <span class="kw">void</span> <span class="fn">Compute</span>() {
+    	sort(query.begin() + 1, query.end(), [](<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; a, <span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; b) {
+    		<span class="kw">return</span> a[1] &lt; b[1];
+    	});
+    	<span class="kw">for</span> (<span class="kw">int</span> s = 1, q = 1, l, r, id; q &lt;= m; q++) {
+    		r = query[q][1];
+    		<span class="kw">for</span> (; s &lt;= r; s++) {
+    			<span class="kw">int</span> color = arr[s];
+    			<span class="kw">if</span> (last[color] != 0) {
+    				<span class="cm">// 这种颜色上一次出现的位置作废</span>
+    				Add(last[color], -1);
+    			}
+    			<span class="cm">// 最新一次出现的位置生效</span>
+    			Add(s, 1);
+    			last[color] = s;
+    		}
+    		l = query[q][0];
+    		id = query[q][2];
+    		ans[id] = Range(l, r);
+    	}
+    }</pre>
+
+    <figure class="fig">
+      <svg viewBox="0 0 680 260" role="img" aria-label="按右端点排序后指针只往右走">
+        <text x="16" y="18" font-size="12" fill="#6b7280">arr = [1, 2, 1, 3, 2, 1]，三条查询按 r 排序后依次回答</text>
+        <text x="16" y="46" font-size="11" fill="#6b7280">s</text>
+        <g>
+          <rect x="70" y="30" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="88" y="47" font-size="12" fill="#1f2328" text-anchor="middle">1</text>
+          <rect x="110" y="30" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="128" y="47" font-size="12" fill="#1f2328" text-anchor="middle">2</text>
+          <rect x="150" y="30" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="168" y="47" font-size="12" fill="#1f2328" text-anchor="middle">1</text>
+          <rect x="190" y="30" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="208" y="47" font-size="12" fill="#c9ced4" text-anchor="middle">3</text>
+          <rect x="230" y="30" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="248" y="47" font-size="12" fill="#c9ced4" text-anchor="middle">2</text>
+          <rect x="270" y="30" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="288" y="47" font-size="12" fill="#c9ced4" text-anchor="middle">1</text>
+        </g>
+        <text x="320" y="47" font-size="11" fill="#2563eb">第 1 条查询 [1, 3]，s 停在 3</text>
+        <text x="16" y="76" font-size="11" fill="#6b7280">标记</text>
+        <g>
+          <rect x="70" y="60" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="88" y="77" font-size="12" fill="#c9ced4" text-anchor="middle">0</text>
+          <rect x="110" y="60" width="36" height="24" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="128" y="77" font-size="12" fill="#2563eb" text-anchor="middle">1</text>
+          <rect x="150" y="60" width="36" height="24" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="168" y="77" font-size="12" fill="#2563eb" text-anchor="middle">1</text>
+          <rect x="190" y="60" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="208" y="77" font-size="12" fill="#c9ced4" text-anchor="middle">0</text>
+          <rect x="230" y="60" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="248" y="77" font-size="12" fill="#c9ced4" text-anchor="middle">0</text>
+          <rect x="270" y="60" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="288" y="77" font-size="12" fill="#c9ced4" text-anchor="middle">0</text>
+          <text x="320" y="77" font-size="11" fill="#1f2328">区间和 2，颜色 1 和 2</text>
+        </g>
+        <text x="16" y="112" font-size="11" fill="#6b7280">标记</text>
+        <g>
+          <rect x="70" y="96" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="88" y="113" font-size="12" fill="#c9ced4" text-anchor="middle">0</text>
+          <rect x="110" y="96" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="128" y="113" font-size="12" fill="#c9ced4" text-anchor="middle">0</text>
+          <rect x="150" y="96" width="36" height="24" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="168" y="113" font-size="12" fill="#2563eb" text-anchor="middle">1</text>
+          <rect x="190" y="96" width="36" height="24" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="208" y="113" font-size="12" fill="#2563eb" text-anchor="middle">1</text>
+          <rect x="230" y="96" width="36" height="24" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="248" y="113" font-size="12" fill="#2563eb" text-anchor="middle">1</text>
+          <rect x="270" y="96" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="288" y="113" font-size="12" fill="#c9ced4" text-anchor="middle">0</text>
+          <text x="320" y="113" font-size="11" fill="#1f2328">s 走到 5，第 2 条 [2, 5] 的区间和是 3</text>
+        </g>
+        <text x="16" y="148" font-size="11" fill="#6b7280">标记</text>
+        <g>
+          <rect x="70" y="132" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="88" y="149" font-size="12" fill="#c9ced4" text-anchor="middle">0</text>
+          <rect x="110" y="132" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="128" y="149" font-size="12" fill="#c9ced4" text-anchor="middle">0</text>
+          <rect x="150" y="132" width="36" height="24" rx="5" fill="#f6f7f9" stroke="#e6e8eb"/><text x="168" y="149" font-size="12" fill="#c9ced4" text-anchor="middle">0</text>
+          <rect x="190" y="132" width="36" height="24" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="208" y="149" font-size="12" fill="#2563eb" text-anchor="middle">1</text>
+          <rect x="230" y="132" width="36" height="24" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="248" y="149" font-size="12" fill="#2563eb" text-anchor="middle">1</text>
+          <rect x="270" y="132" width="36" height="24" rx="5" fill="#dbeafe" stroke="#2563eb"/><text x="288" y="149" font-size="12" fill="#2563eb" text-anchor="middle">1</text>
+          <text x="320" y="149" font-size="11" fill="#1f2328">s 走到 6，颜色 1 的标记从 3 挪到 6，第 3 条 [1, 6] 的区间和是 3</text>
+        </g>
+        <rect x="16" y="172" width="648" height="28" rx="5" fill="#ffedd5" stroke="#ea580c"/>
+        <text x="30" y="191" font-size="12" fill="#1f2328">s 一共只走了 n 步：每条查询把 s 推到自己的 r，而 r 是不下降的</text>
+        <text x="16" y="222" font-size="12" fill="#6b7280">如果按左端点排序，r 会忽大忽小，s 就得来回走，标记数组反而没法维护</text>
+        <text x="16" y="244" font-size="11" fill="#9aa0a6">离线排序不改变答案，只改变处理顺序，这是它跟在线数据结构的分界</text>
+      </svg>
+      <figcaption>三条查询共用一次从左到右的扫描，s 从不回退</figcaption>
+    </figure>
+
+    <h2>四、容易写漏的两处</h2>
+    <p>第一处是「减去旧标记」那一行。只加不减的话，标记数组全是 1，回答的就变成区间长度。随机 2000 组数据实测，75.00% 的查询会答错。</p>
+    <p>第二处是 last 数组的开法。它按颜色值域开，题目里 arr[i] 到 10⁶，所以是 10⁶ 个 int，约 4 MB。颜色值域大于 n 的题要先离散化，或者直接换成哈希表。</p>
+    <p>还有个写法上的坑：排序比较器要按 a[1] &lt; b[1] 写，别写成相减，相减在右端点接近 int 边界时会溢出。同时每条查询要带上自己的原始编号，答案按编号回填。</p>
+
+    <div class="viz">
+      <p class="viz-title">演示一：三条查询，一次扫描</p>
+      <div id="neckBody"></div>
+      <p class="breakdown" id="neckInfo"></p>
+      <div class="viz-controls">
+        <label>数据
+          <select id="neckPreset">
+            <option value="0">arr = [1, 2, 1, 3, 2, 1]，查询 [1,3] [2,5] [1,6]</option>
+            <option value="1">arr = [3, 1, 2, 3, 1]，查询 [1,5] [2,4] [3,3]</option>
+            <option value="2">arr = [2, 2, 2, 2]，查询 [1,4] [2,3]</option>
+            <option value="rand">随机（固定种子）</option>
+          </select>
+        </label>
+        <button id="neckPrev" type="button">上一步</button>
+        <button id="neckNext" type="button">下一步</button>
+        <button id="neckReset" type="button">重置</button>
+      </div>
+      <div class="legend">
+        <span><i class="dot full"></i>标记为 1</span>
+        <span><i class="dot skip"></i>标记为 0</span>
+        <span><i class="dot partial"></i>正在处理的查询</span>
+      </div>
+    </div>
+
+    <div class="viz">
+      <p class="viz-title">演示二：右端点挪一格，标记怎么跟着挪</p>
+      <div id="neck2Body"></div>
+      <p class="breakdown" id="neck2Info"></p>
+      <div class="viz-controls">
+        <label>右端点 r
+          <select id="neck2R"></select>
+        </label>
+        <label>左端点 l
+          <select id="neck2L"></select>
+        </label>
+        <label>做法
+          <select id="neck2Mode">
+            <option value="ok">只留最后一次出现</option>
+            <option value="bad">每个位置都标 1</option>
+          </select>
+        </label>
+        <button id="neck2Reset" type="button">重置</button>
+      </div>
+      <div class="legend">
+        <span><i class="dot full"></i>查询区间内</span>
+        <span><i class="dot partial"></i>被标 1 的位置</span>
+      </div>
+    </div>
+
+    <h2>复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>项目</th><th>时间</th><th>空间</th></tr>
+      <tr><td>查询排序</td><td>O(m log m)</td><td>O(m)</td></tr>
+      <tr><td>指针 s 的移动</td><td>一共 n 步</td><td>—</td></tr>
+      <tr><td>每步两次树状数组更新</td><td>O(log n)</td><td>—</td></tr>
+      <tr><td>每条查询一次区间和</td><td>O(log n)</td><td>—</td></tr>
+      <tr><td>合计</td><td>O((n + m) log n)</td><td>O(n) 树 + O(值域) last + O(m) 查询</td></tr>
+    </table>
+    <p>n = m = 10⁶ 时实测 68.52 ms，其中排序 46.26 ms、扫描 22.26 ms。空间上树状数组和 last 各约 4 MB，查询数组三条 int 一组约 12 MB。</p>
+
+    <h2>总结</h2>
+    <p>这题的分水岭在「标记」这一步。直接数颜色做不了减法，改成数「每种颜色的最后一次出现」之后，标记数组是区间可加的，剩下的就是区间求和。</p>
+    <p>标记依赖右端点，所以查询必须按 r 排序、指针只能往右走。这是离线处理最常见的形态：不改变答案，只重排处理顺序，换来一次线性扫描。last 数组是维护标记的全部，旧位置减 1、新位置加 1，漏掉减 1 那行，答案会退化成区间长度。</p>
+    <p>同样的思路还能用在「区间内出现恰好一次的数」「区间内不同数字的和」这类题上，差别只在标记 1 换成标记什么、以及条件从「最后一次」换成什么。</p>
+
+    <h2 id="prob-links">相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td>HH的项链</td><td><a href="https://www.luogu.com.cn/problem/P1972" target="_blank">www.luogu.com.cn/problem/P1972</a></td></tr>
+    </table>
+
+    <h2 id="refs">参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解109【扩展】树状数组相关题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+    </table>
+</section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  function Mulberry32(a){
+    return function(){
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function lowbit(i){ return i & -i; }
+
+  /* ===== 演示一 ===== */
+  var P = [
+    { arr: [1, 2, 1, 3, 2, 1], qs: [[1, 3], [2, 5], [1, 6]] },
+    { arr: [3, 1, 2, 3, 1], qs: [[1, 5], [2, 4], [3, 3]] },
+    { arr: [2, 2, 2, 2], qs: [[1, 4], [2, 3]] }
+  ];
+  var d1 = { preset: '0', step: 0 };
+
+  function data1(){
+    if (d1.preset === 'rand'){
+      var r = Mulberry32(1972);
+      var n = 8, arr = [];
+      for (var i = 0; i < n; i++) arr.push(1 + Math.floor(r() * 4));
+      var qn = 4, qs = [];
+      for (var q = 0; q < qn; q++){
+        var l = 1 + Math.floor(r() * n), rr = l + Math.floor(r() * (n - l + 1));
+        qs.push([l, rr]);
+      }
+      return { arr: arr, qs: qs };
+    }
+    var p = P[parseInt(d1.preset, 10)];
+    return { arr: p.arr.slice(), qs: p.qs.map(function(x){ return x.slice(); }) };
+  }
+
+  function build1(){
+    var src = data1();
+    var arr = src.arr, n = arr.length;
+    var qs = src.qs.map(function(x, i){ return { l: x[0], r: x[1], id: i }; });
+    var order = qs.slice().sort(function(a, b){ return a.r - b.r; });
+    var mark = new Array(n + 1).fill(0);
+    var last = {};
+    var steps = [];
+    var s = 1;
+    var ans = new Array(qs.length).fill(0);
+    for (var qi = 0; qi < order.length; qi++){
+      var cur = order[qi];
+      while (s <= cur.r){
+        var c = arr[s - 1];
+        if (last[c]) mark[last[c]] = 0;
+        mark[s] = 1;
+        last[c] = s;
+        steps.push({ kind: 'move', s: s, c: c, mark: mark.slice(), moved: last[c], qi: qi, cleared: last[c] && last[c] !== s ? last[c] : 0 });
+        s++;
+      }
+      var sumv = 0;
+      for (var i = cur.l; i <= cur.r; i++) sumv += mark[i];
+      ans[cur.id] = sumv;
+      steps.push({ kind: 'ask', q: cur, sumv: sumv, mark: mark.slice(), ans: ans.slice(), done: qi + 1 });
+    }
+    d1.arr = arr;
+    d1.qs = qs;
+    d1.order = order;
+    d1.steps = steps;
+    d1.ans = ans;
+    d1.truth = qs.map(function(x){
+      var st = {};
+      for (var i = x.l; i <= x.r; i++) st[arr[i - 1]] = 1;
+      return Object.keys(st).length;
+    });
+    if (d1.step >= steps.length) d1.step = steps.length - 1;
+    if (d1.step < 0) d1.step = 0;
+  }
+
+  function render1(){
+    var body = document.getElementById('neckBody');
+    var info = document.getElementById('neckInfo');
+    if (!body) return;
+    var st = d1.steps[d1.step];
+    if (!st){ body.innerHTML = ''; return; }
+    var n = d1.arr.length, h = '', i;
+    h += '<div class="rowline"><span class="tag">颜色</span><div class="cells">';
+    for (i = 1; i <= n; i++){
+      var c = '';
+      if (st.kind === 'move'){
+        if (i === st.s) c = 'orange now';
+        else if (i <= st.s) c = 'blue';
+        else c = 'dim';
+      } else {
+        if (i >= st.q.l && i <= st.q.r) c = 'blue'; else c = 'dim';
+      }
+      h += '<div class="cell ' + c + '">' + d1.arr[i - 1] + '</div>';
+    }
+    h += '</div></div>';
+    h += '<div class="rowline"><span class="tag">标记</span><div class="cells">';
+    for (i = 1; i <= n; i++){
+      var c2 = st.mark[i] ? 'blue' : '';
+      if (st.kind === 'move' && i === st.s) c2 = 'orange now';
+      if (st.kind === 'ask' && i >= st.q.l && i <= st.q.r && st.mark[i]) c2 = 'orange';
+      h += '<div class="cell ' + (c2 || 'zero') + '">' + st.mark[i] + '</div>';
+    }
+    h += '</div></div>';
+    h += '<div class="rowline"><span class="tag">查询</span><div class="cells">';
+    for (i = 0; i < d1.order.length; i++){
+      var q = d1.order[i];
+      var cls = '';
+      var doneCount = st.kind === 'ask' ? st.done : (st.qi || 0);
+      if (i < doneCount) cls = 'done';
+      if (st.kind === 'ask' && i === st.qi) cls = 'qbox now';
+      h += '<span class="qbox ' + cls + '">[' + q.l + ', ' + q.r + '] → ' + (i < doneCount || (st.kind === 'ask' && i === st.qi) ? d1.ans[q.id] : '?') + '</span>';
+    }
+    h += '</div></div>';
+    if (st.kind === 'move'){
+      h += '<p class="note">s 走到 ' + st.s + '，颜色 ' + st.c + '：' +
+           (st.cleared ? '位置 ' + st.cleared + ' 的标记清 0，' : '') + '位置 ' + st.s + ' 标 1</p>';
+      info.innerHTML = '第 ' + (d1.step + 1) + ' / ' + d1.steps.length + ' 步：向右推进扫描指针';
+    } else {
+      h += '<p class="note">查询 [' + st.q.l + ', ' + st.q.r + ']：区间内标记之和 = ' + st.sumv + '</p>';
+      info.innerHTML = '第 ' + (d1.step + 1) + ' / ' + d1.steps.length + ' 步：回答第 ' + (st.q.id + 1) + ' 条查询，答案 ' + st.sumv;
+    }
+    if (d1.step === d1.steps.length - 1){
+      info.innerHTML += '　·　<strong>全部答案 [' + d1.ans.join(', ') + ']，正确答案 [' + d1.truth.join(', ') + ']</strong>';
+    }
+    body.innerHTML = h;
+  }
+
+  /* ===== 演示二 ===== */
+  var d2 = { arr: [1, 2, 1, 3, 2, 1], l: 1, r: 5, mode: 'ok' };
+  function initSelects(){
+    var sr = document.getElementById('neck2R');
+    var sl = document.getElementById('neck2L');
+    if (!sr || !sl) return;
+    var n = d2.arr.length, i, o;
+    for (i = 1; i <= n; i++){ o = document.createElement('option'); o.value = String(i); o.textContent = String(i); sr.appendChild(o); }
+    for (i = 1; i <= n; i++){ o = document.createElement('option'); o.value = String(i); o.textContent = String(i); sl.appendChild(o); }
+    sr.selectedIndex = d2.r - 1;
+    sl.selectedIndex = d2.l - 1;
+  }
+  function render2(){
+    var body = document.getElementById('neck2Body');
+    var info = document.getElementById('neck2Info');
+    if (!body) return;
+    var n = d2.arr.length, mark = new Array(n + 1).fill(0), last = {}, i;
+    if (d2.mode === 'ok'){
+      for (i = 1; i <= d2.r; i++){ last[d2.arr[i - 1]] = i; }
+      for (var c in last) mark[last[c]] = 1;
+    } else {
+      for (i = 1; i <= d2.r; i++) mark[i] = 1;
+    }
+    var lo = Math.min(d2.l, d2.r), hi = Math.max(d2.l, d2.r);
+    var sumv = 0;
+    for (i = lo; i <= hi; i++) sumv += mark[i];
+    var truth = 0, st = {};
+    for (i = lo; i <= hi; i++) st[d2.arr[i - 1]] = 1;
+    truth = Object.keys(st).length;
+    var h = '';
+    h += '<div class="rowline"><span class="tag">颜色</span><div class="cells">';
+    for (i = 1; i <= n; i++){
+      var cls = (i >= lo && i <= hi) ? 'blue' : (i <= d2.r ? '' : 'dim');
+      h += '<div class="cell ' + cls + '">' + d2.arr[i - 1] + '</div>';
+    }
+    h += '</div></div>';
+    h += '<div class="rowline"><span class="tag">标记</span><div class="cells">';
+    for (i = 1; i <= n; i++){
+      var c2 = mark[i] ? 'orange' : 'zero';
+      if (i >= lo && i <= hi && mark[i]) c2 = 'orange now';
+      h += '<div class="cell ' + c2 + '">' + mark[i] + '</div>';
+    }
+    h += '</div></div>';
+    h += '<p class="note">右端点 r = ' + d2.r + '（' + (d2.mode === 'ok' ? '每种颜色只留最后一次出现' : '每个位置都标 1') +
+         '），区间 [' + lo + ', ' + hi + '] 的标记和 = ' + sumv + '</p>';
+    body.innerHTML = h;
+    info.innerHTML = '正确答案是 ' + truth + ' 种颜色，当前做法算出 ' + sumv + (sumv === truth ? '，一致' : '，不一致');
+  }
+
+  function bind(id, ev, fn){
+    var e = document.getElementById(id);
+    if (e) e[ev] = fn;
+  }
+  bind('neckPreset', 'onchange', function(){ d1.preset = this.value; d1.step = 0; build1(); render1(); });
+  bind('neckPrev', 'onclick', function(){ if (d1.step > 0){ d1.step--; render1(); } });
+  bind('neckNext', 'onclick', function(){ if (d1.step < d1.steps.length - 1){ d1.step++; render1(); } });
+  bind('neckReset', 'onclick', function(){ d1.step = 0; render1(); });
+  bind('neck2R', 'onchange', function(){ d2.r = parseInt(this.value, 10); render2(); });
+  bind('neck2L', 'onchange', function(){ d2.l = parseInt(this.value, 10); render2(); });
+  bind('neck2Mode', 'onchange', function(){ d2.mode = this.value; render2(); });
+  bind('neck2Reset', 'onclick', function(){ d2.l = 1; d2.r = 5; d2.mode = 'ok';
+    document.getElementById('neck2L').selectedIndex = 0;
+    document.getElementById('neck2R').selectedIndex = 4;
+    document.getElementById('neck2Mode').selectedIndex = 0;
+    render2(); });
+
+  build1(); render1();
+  initSelects(); render2();
+})();
+</script>
+</body>
+</html>
