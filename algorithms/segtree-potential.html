@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线段树：势能分析与剪枝 · 算法教程</title>
+<meta name="description" content="开方和取模都没法用懒标记，只能下到叶子。但一个数开方六次就变成 1、取模一次至少减半，整段的势能掉得飞快，拿区间最大值挡一道就能把 O(nm) 剪到 O(n log n log V)。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .ansline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.7;}
+  .ansline b{color:var(--full);}
+  .ansline i{color:var(--partial);font-style:normal;}
+  .logline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.8;max-height:120px;overflow:auto;}
+  .twocol{display:flex;gap:16px;flex-wrap:wrap;margin:14px 0;}
+  .panel{flex:1;min-width:250px;border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--bg-soft);}
+  .panel h4{margin:0 0 8px;font-size:14px;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>线段树：势能分析与剪枝</h1>
+    <p class="intro">开方和取模这两个操作，都没法用懒标记表示：知道一段的和，推不出每个数开方之后的和。只能下到叶子一个一个算。好在两个操作都在飞快地缩小数值：一个数开方六次就变成 1，取模一次至少减半。拿区间最大值挡一道，整段都不用下。</p>
+
+    <h2>零、背景</h2>
+    <p>先说清楚难在哪。区间加能懒，是因为「整段加 v」对和的影响是确定的：v 乘段长。开方不行，√(a+b) ≠ √a + √b，知道和不知道每个数各自是多少，就没法算出开方后的和。取模同理。</p>
+    <p>所以这两题的修改操作，只能一路走到叶子。区间长度 10⁵、操作 10⁵ 次，一次改一个区间就是 10⁵ 个叶子，总共 10¹⁰，做不完。</p>
+    <p>能救场的是：绝大部分修改其实什么都没改。</p>
+
+    <h2>一、题目</h2>
+    <p>两个题，形状几乎一样。</p>
+    <ul>
+      <li>开平方：长度 n 的数组，操作 0 把 [l, r] 每个数开平方向下取整，操作 1 查 [l, r] 的累加和。n、m 到 10⁵，arr[i] 到 10¹²。数据里可能出现 l &gt; r，遇到要交换。</li>
+      <li>取模：长度 n 的数组，操作 1 查 [l, r] 累加和，操作 2 把 [l, r] 每个数对 x 取模，操作 3 把 arr[k] 改成 x。n、m 到 10⁵，和可能超过 int。</li>
+    </ul>
+
+    <h2>二、一个数能开方几次</h2>
+    <p>10¹² 一路开方下去：10¹² → 10⁶ → 1000 → 31 → 5 → 2 → 1，一共六次。到 1 之后 √1 还是 1，再开一百次也是 1。</p>
+    <figure class="fig" id="fig-sqrt"></figure>
+    <p>arr[i] 的上限是 10¹²，所以任何一个位置，真正改变过它的开方操作最多六次。之后那个位置就再也不需要下去了。</p>
+    <p>这就是势能分析的说法：把一个数离 1 还有多远看成它的势能，每次有效开方把势能砍掉一大截，势能总量一开始最多 n × 6，每次操作真正花钱的地方都是势能下降的地方。</p>
+
+    <h2>三、拿最大值挡一道</h2>
+    <p>实现上只需要一件事：每个节点除了 sum 再维护一个 max。往下走之前先看一眼，整段最大值 ≤ 1 就不用去了。</p>
+    <pre class="code"><span class="cm">// 没有懒更新，也不需要 down</span>
+    <span class="cm">// 唯一的加速是：整段最大值 &lt;= 1 时，开方等于没开，直接不去</span>
+    <span class="kw">void</span> <span class="fn">doSqrt</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">long</span> <span class="kw">long</span> v = (<span class="kw">long</span> <span class="kw">long</span>)sqrt((<span class="kw">long</span> <span class="kw">double</span>)maxv[i]);
+            sum[i] = v;
+            maxv[i] = v;
+            <span class="kw">return</span>;
+        }
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">if</span> (jobl &lt;= mid &amp;&amp; maxv[i &lt;&lt; 1] &gt; 1)
+            doSqrt(jobl, jobr, l, mid, i &lt;&lt; 1);
+        <span class="kw">if</span> (jobr &gt; mid &amp;&amp; maxv[i &lt;&lt; 1 | 1] &gt; 1)
+            doSqrt(jobl, jobr, mid + 1, r, i &lt;&lt; 1 | 1);
+        up(i);
+    }</pre>
+    <p>没有懒标记，也就不需要 <code>down</code>。唯一的加速就是那两个 <code>&gt; 1</code>。</p>
+    <p>挡掉的有多少？n = m = 10⁵，全程只做开方，实测有剪枝时一共只访问了 499980 个叶子，6.9 ms；去掉剪枝，叶子访问 3331864720 个，26919.4 ms。差 3912 倍。</p>
+
+    <div class="viz" id="viz-sqrt">
+      <h3>演示：开方时哪些段被剪掉</h3>
+      <p class="viz-hint">树里写的是每段的 max。灰色的段是 max ≤ 1、直接跳过的；橙色的段是真的下去改了。连点几次，灰色会越来越多。</p>
+    </div>
+
+    <figure class="fig" id="fig-prune"></figure>
+
+    <h2>四、取模减得更快</h2>
+    <p>取模的缩小速度也能量出来。x ≤ v 时，v % x 一定小于 v 的一半：x ≤ v/2 时余数小于 x 也就小于 v/2；x &gt; v/2 时余数就是 v − x，还是小于 v/2。<code>v</code> 从 1 到 2000、<code>x</code> 从 1 到 v 全部枚举一遍，2 × (v % x) 超过 v 的情况一次都没有。</p>
+    <figure class="fig" id="fig-mod"></figure>
+    <p>所以每次「真的把数改小了」的取模，至少把它砍掉一半。int 范围内最多砍 31 次：2147483647 每次对 ⌊v/2⌋ + 1 取模，31 次到 0。</p>
+    <p>挡的条件也跟着是最大值：x 比整段最大值还大，这一段每个数取模都等于自己，整段跳过。</p>
+    <pre class="code"><span class="cm">// x 比整段最大值还大时，每个数取模都等于自己，整段不用动</span>
+    <span class="kw">void</span> <span class="fn">doMod</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">long</span> <span class="kw">long</span> x, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (x &gt; maxv[i]) <span class="kw">return</span>;
+        <span class="kw">if</span> (l == r) {
+            sum[i] %= x;
+            maxv[i] = sum[i];
+            <span class="kw">return</span>;
+        }
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">if</span> (jobl &lt;= mid) doMod(jobl, jobr, x, l, mid, i &lt;&lt; 1);
+        <span class="kw">if</span> (jobr &gt; mid)  doMod(jobl, jobr, x, mid + 1, r, i &lt;&lt; 1 | 1);
+        up(i);
+    }</pre>
+    <p>同样的 n = m = 10⁵，全程只做取模，有剪枝访问 459654 个叶子、9.7 ms；无剪枝 3340159801 个、26807.3 ms，差 2772 倍。</p>
+
+    <h2>五、单点修改会把势能加回来</h2>
+    <p>取模这题还多一个操作 3：把某个位置直接赋成 x。这会把那个位置的势能从「接近 1」拉回 log x。</p>
+    <p>好在这个操作是单点的。势能一次只涨 log x，沿着一条到根的路径把 max 刷一遍是 O(log n)，所以一次赋值带来的额外代价是 O(log x × log n)。m 次操作最多涨 m 次，总账还是 O((n + m) log V log n) 这个量级。</p>
+    <div class="viz" id="viz-mod">
+      <h3>演示：取模与势能回涨</h3>
+      <p class="viz-hint">x 大于整段 max 时整段变灰。预设里有一步单点赋值，赋值之后那一条到根的路径上 max 会重新涨起来，后面的取模就又能下去了。</p>
+    </div>
+
+    <p>这里有个细节：赋值之后必须一路 <code>up</code> 把祖先的 max 刷新。max 偏大只会少剪一些枝，答案还是对的；可要是赋值把数改小、max 却停在旧值，那也是白花时间。反过来如果哪个写法让 max 偏小，就会剪掉本该下去的分支，答案直接错。</p>
+
+    <h2>六、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>项</th><th>开平方</th><th>取模</th></tr>
+      <tr><td>单次操作最坏</td><td>O(n)</td><td>O(n)</td></tr>
+      <tr><td>单次查询</td><td>O(log n)</td><td>O(log n)</td></tr>
+      <tr><td>修改的摊还代价</td><td>O(6 log n) 每位置</td><td>O(log V log n) 每位置</td></tr>
+      <tr><td>全程总代价</td><td>O((n + m) log n log V)</td><td>O((n + m) log n log V)</td></tr>
+      <tr><td>空间</td><td>O(n)：sum 与 max 各一个 long long 数组</td><td>O(n)：sum 长整型、max 整型</td></tr>
+    </table>
+    <p>开平方的 log V 实际就是 6，取模的 log V 是 31 上下。n = 10⁵ 时 sum 数组四倍开是 3.2 MB，max 数组再来一份。</p>
+    <p>两题的实测：n = m = 10⁵，开平方加查询混合 11.78 ms，三种操作混合的取模题 24.77 ms。</p>
+
+    <h2>七、几种写错的样子</h2>
+    <p>每组 20000 个随机输入。开平方的四档是「n / m / 初值上限」= 4 / 4 / 20、10 / 10 / 1000、30 / 20 / 10⁵、60 / 40 / 10¹²；取模的四档是 4 / 4 / 10、10 / 10 / 100、30 / 20 / 10⁴、60 / 40 / 10⁶。</p>
+    <table class="complexity">
+      <tr><th>写错的地方</th><th>档 1</th><th>档 2</th><th>档 3</th><th>档 4</th></tr>
+      <tr><td>开平方：剪枝阈值写成 &gt; 2</td><td>12.64%</td><td>32.48%</td><td>73.39%</td><td>85.00%</td></tr>
+      <tr><td>开平方：剪枝阈值写成 &gt; 0</td><td>0.00%</td><td>0.00%</td><td>0.00%</td><td>0.00%</td></tr>
+      <tr><td>开平方：漏掉范围判断</td><td>50.95%</td><td>97.63%</td><td>99.97%</td><td>100.00%</td></tr>
+      <tr><td>开平方：忘了 up</td><td>44.63%</td><td>95.06%</td><td>100.00%</td><td>100.00%</td></tr>
+      <tr><td>取模：剪枝写成 x ≥ max</td><td>6.41%</td><td>5.66%</td><td>0.36%</td><td>0.01%</td></tr>
+      <tr><td>取模：干脆不剪枝</td><td>0.00%</td><td>0.00%</td><td>0.00%</td><td>0.00%</td></tr>
+      <tr><td>取模：叶子上不刷新 max</td><td>0.00%</td><td>0.00%</td><td>0.00%</td><td>0.00%</td></tr>
+      <tr><td>取模：忘了 up</td><td>15.29%</td><td>62.30%</td><td>98.16%</td><td>100.00%</td></tr>
+    </table>
+    <p>三行 0.00% 值得单独说一下，它们都是「看着像优化、实际只是变慢」的那一类：</p>
+    <p>开平方的阈值写成 <code>&gt; 0</code>，max 等于 1 时还是会下去，到叶子算 √1 = 1，等于白跑一趟。答案一点没变，只是把剪枝带来的 3912 倍全丢了。取模不剪枝同理。</p>
+    <p>取模叶子上不刷新 max 更有意思：max 停在旧的高值，<code>x &gt; max</code> 这个条件更难成立，于是剪枝变弱、多做一些无用功，但因为从没「该下去却没下去」，答案照样对。方向反过来的写法才会出错，就是上面 <code>x ≥ max</code> 那一行。</p>
+    <p><code>x ≥ max</code> 为什么错：x 正好等于 max 时，那个最大值取模的结果应该是 0，提前返回就把它留在那了。随机数据下 x 恰好撞上区间最大值不常见，值域一大就更罕见，所以这一行从 6.41% 一路掉到 0.01%。</p>
+
+    <h2>八、总结</h2>
+    <p>懒标记解决不了的操作，还能靠「这个操作多半什么都没改」来省。做法是给节点多维护一个能判断「整段是否值得下去」的量，这两题都是最大值。</p>
+    <p>势能分析给的是摊还账：不看单次操作，看全程一共有多少次「真的改到了东西」。开平方每个位置最多六次，取模每次砍一半，所以总量是 O(n log V) 次有效下潜，每次下潜 O(log n)。单点赋值会把某个位置的势能加回来，但一次只加 log V × log n，不影响总账。</p>
+    <p>剪枝的正确性方向是单向的：判断条件放宽（多下去）只会慢，不会错；判断条件收紧（少下去）就会漏改。写的时候宁可多跑一趟，也别把阈值往上提。</p>
+
+    <h2>最后</h2>
+    <p>两个实现上的坑。一是这两题都没有 <code>down</code>，别忘了顺手把 <code>down</code> 调用删掉，留着不会报错，只是每多一次函数调用。二是开平方那题的数据里 l 可能大于 r，读进来先交换，否则区间查询会拿着一个左大右小的范围往下走，什么也算不出来。</p>
+
+    <h2>相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P4145" target="_blank">范围上开平方并求累加和</a></td><td>luogu.com.cn/problem/P4145</td></tr>
+      <tr><td>洛谷 / Codeforces</td><td><a href="https://www.luogu.com.cn/problem/CF438D" target="_blank">包含取模操作的线段树</a></td><td>luogu.com.cn/problem/CF438D</td></tr>
+    </table>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解111【扩展】线段树专题2-线段树的离散化、二分搜索、特别修改</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = {blue:'#2563eb', blueBg:'#dbeafe', blueLt:'#eef4ff',
+           orange:'#ea580c', orangeBg:'#ffedd5', gray:'#9aa0a6',
+           bg:'#f6f7f9', bd:'#e6e8eb', ink:'#1f2328', dim:'#5c6370'};
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x,y,s,o){
+    o = o || {};
+    return '<text x="'+x+'" y="'+y+'" font-size="'+(o.size||12)+'" fill="'+(o.fill||C.ink)+
+           '" text-anchor="'+(o.anchor||'middle')+'"'+(o.mono?' font-family="ui-monospace,Menlo,monospace"':'')+
+           (o.weight?' font-weight="'+o.weight+'"':'')+'>'+esc(s)+'</text>';
+  }
+  function R(x,y,w,h,fill,stroke){
+    return '<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w)+'" height="'+Math.max(0,h)+
+           '" rx="3" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="1"':'')+'/>';
+  }
+  function mount(id, hh, body, cap){
+    var f = document.getElementById(id);
+    if (!f) return;
+    f.innerHTML = '<svg viewBox="0 0 680 '+hh+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+
+      body + '</svg><figcaption>'+cap+'</figcaption>';
+  }
+
+  // ---------- 图 1：开方链 ----------
+  (function(){
+    var g = '', chain = ['10¹²','10⁶','1000','31','5','2','1'];
+    g += T(340, 16, '10¹² 反复开平方，六步到 1', {size:13, weight:'600'});
+    for (var i = 0; i < chain.length; i++) {
+      var x = 40 + i * 92;
+      g += R(x, 36, 80, 40, i === chain.length - 1 ? '#dcfce7' : C.blueBg, i === chain.length - 1 ? '#16a34a' : C.blue);
+      g += T(x + 40, 61, chain[i], {size:13, fill:i === chain.length - 1 ? '#16a34a' : C.blue, mono:true});
+      if (i < chain.length - 1) g += T(x + 88, 61, '→', {size:14, fill:C.dim});
+    }
+    g += T(40, 96, '第 1 次', {size:10.5, fill:C.dim, anchor:'start'});
+    g += T(40 + 6 * 92 + 40, 96, '第 6 次', {size:10.5, fill:C.dim});
+    g += T(340, 122, '各量级需要的次数：10 → 2 次，100 → 3 次，1000 → 4 次，10⁶ → 5 次，10⁹ → 5 次，10¹² → 6 次', {size:11.5, fill:C.dim});
+    g += T(340, 144, '到 1 之后 √1 还是 1，这个位置从此再也不用下去', {size:12, fill:'#15803d'});
+    mount('fig-sqrt', 162, g, '任何一个数被「真的改小」的次数有个很小的上限，这是剪枝能生效的全部依据。');
+  })();
+
+  // ---------- 图 2：取模至少减半 ----------
+  (function(){
+    var g = '', X0 = 60, W = 520, Y0 = 50;
+    g += T(340, 16, 'x ≤ v 时，v % x 一定小于 v 的一半', {size:13, weight:'600'});
+    // v = 11 的例子
+    var v = 11;
+    g += T(X0, Y0 + 8, 'v = 11', {size:12, anchor:'start', fill:C.dim, mono:true});
+    g += R(X0 + 60, Y0 - 6, W - 60, 22, C.blueLt, C.blue);
+    g += T(X0 + 60 + (W - 60) / 2, Y0 + 10, '余数最大也不到 5.5，即 < v/2', {size:11.5, fill:C.blue});
+    var xs = [1,2,3,4,5,6,7,8,9,10,11];
+    for (var i = 0; i < xs.length; i++) {
+      var r = v % xs[i];
+      var x = X0 + 60 + i * 44;
+      var half = Math.min(r / v, 0.5) * 100;
+      g += R(x, Y0 + 30, 40, 18, r * 2 >= v ? C.orangeBg : C.bg, r * 2 >= v ? C.orange : C.bd);
+      g += T(x + 20, Y0 + 43, r + '', {size:11, fill:r * 2 >= v ? C.orange : C.dim, mono:true});
+      g += T(x + 20, Y0 + 60, 'x=' + xs[i], {size:9.5, fill:C.dim, mono:true});
+    }
+    g += T(340, Y0 + 84, 'v 从 1 到 2000、x 从 1 到 v 全枚举：2 × (v % x) ≥ v 的情况 0 次', {size:11.5, fill:C.dim});
+    g += T(340, Y0 + 108, '每次有效取模至少减半 → 最多减 31 次', {size:12.5, fill:'#15803d', weight:'600'});
+    var lg = [[1000,9],[1000000,19],[1000000000,29],[2147483647,31]];
+    for (var i = 0; i < lg.length; i++) {
+      var x = 60 + i * 150;
+      g += R(x, Y0 + 122, 138, 26, C.bg, C.bd);
+      g += T(x + 69, Y0 + 139, lg[i][0] + ' → ' + lg[i][1] + ' 次', {size:11, fill:C.dim, mono:true});
+    }
+    mount('fig-mod', Y0 + 166, g, '取模的下降速度比开平方还稳：一次至少砍掉一半，所以挡一道的收益同样惊人。');
+  })();
+
+  // ---------- 图 3：剪枝收益 ----------
+  (function(){
+    var g = '', Y0 = 40;
+    g += T(340, 16, 'n = m = 10⁵，全程只做修改：访问的叶子数', {size:13, weight:'600'});
+    var rows = [
+      {name:'开平方 有剪枝', v:499980, t:'6.9 ms', col:C.blue},
+      {name:'开平方 无剪枝', v:3331864720, t:'26919.4 ms', col:C.orange},
+      {name:'取模 有剪枝', v:459654, t:'9.7 ms', col:C.blue},
+      {name:'取模 无剪枝', v:3340159801, t:'26807.3 ms', col:C.orange}
+    ];
+    var maxLog = Math.log10(3331864720) + 1;
+    var BW = 300, BX = 186, TX = 500;
+    for (var i = 0; i < rows.length; i++) {
+      var y = Y0 + i * 40;
+      var lw = Math.max(2, (Math.log10(rows[i].v) + 1) / maxLog * BW);
+      g += T(176, y + 18, rows[i].name, {size:11.5, fill:C.dim, anchor:'end'});
+      g += R(BX, y, lw, 24, rows[i].col === C.blue ? C.blueBg : C.orangeBg, rows[i].col);
+      g += T(TX, y + 17, rows[i].v.toLocaleString('en-US') + ' / ' + rows[i].t,
+             {size:11, fill:rows[i].col, anchor:'start', mono:true});
+    }
+    g += T(340, Y0 + 4 * 40 + 16, '横轴是对数刻度，差 3912 倍（开平方）和 2772 倍（取模）', {size:11.5, fill:C.dim});
+    mount('fig-prune', Y0 + 4 * 40 + 34, g, '剪枝把每次操作「碰到的叶子数」从区间长度压成「还有多少位置真会被改小」。');
+  })();
+
+  // ---------- 通用小线段树（8 叶） ----------
+  function makeTree(){
+    return {n:8, sum:new Array(64).fill(0), mx:new Array(64).fill(0)};
+  }
+  function up(t, i){ t.sum[i] = t.sum[i << 1] + t.sum[i << 1 | 1]; t.mx[i] = Math.max(t.mx[i << 1], t.mx[i << 1 | 1]); }
+  function treeBuild(t, l, r, i, a){
+    if (l === r) { t.sum[i] = t.mx[i] = a[l]; return; }
+    var mid = (l + r) >> 1;
+    treeBuild(t, l, mid, i << 1, a); treeBuild(t, mid + 1, r, i << 1 | 1, a); up(t, i);
+  }
+  function isqrt(v){ return Math.floor(Math.sqrt(v)); }
+  // 返回本次访问到的节点列表 {i,l,r,mxBefore,pruned}
+  function visitSqrt(t, jl, jr, l, r, i, ev){
+    if (l === r) {
+      ev.push({i:i, l:l, r:r, before:t.mx[i], pruned:false});
+      var v = isqrt(t.mx[i]); t.sum[i] = v; t.mx[i] = v; return;
+    }
+    var mid = (l + r) >> 1;
+    var touched = (jl <= mid) || (jr > mid);
+    if (touched) ev.push({i:i, l:l, r:r, before:t.mx[i], pruned:false});
+    if (jl <= mid) {
+      if (t.mx[i << 1] > 1) visitSqrt(t, jl, jr, l, mid, i << 1, ev);
+      else ev.push({i:i << 1, l:l, r:mid, before:t.mx[i << 1], pruned:true});
+    }
+    if (jr > mid) {
+      if (t.mx[i << 1 | 1] > 1) visitSqrt(t, jl, jr, mid + 1, r, i << 1 | 1, ev);
+      else ev.push({i:i << 1 | 1, l:mid + 1, r:r, before:t.mx[i << 1 | 1], pruned:true});
+    }
+    if (touched) up(t, i);
+  }
+  function visitMod(t, jl, jr, x, l, r, i, ev){
+    if (t.mx[i] < x) { ev.push({i:i, l:l, r:r, before:t.mx[i], pruned:true}); return; }
+    if (l === r) {
+      ev.push({i:i, l:l, r:r, before:t.mx[i], pruned:false});
+      t.sum[i] = t.sum[i] % x; t.mx[i] = t.sum[i]; return;
+    }
+    ev.push({i:i, l:l, r:r, before:t.mx[i], pruned:false});
+    var mid = (l + r) >> 1;
+    if (jl <= mid) visitMod(t, jl, jr, x, l, mid, i << 1, ev);
+    if (jr > mid)  visitMod(t, jl, jr, x, mid + 1, r, i << 1 | 1, ev);
+    up(t, i);
+  }
+  function query(t, jl, jr, l, r, i){
+    if (jl <= l && r <= jr) return t.sum[i];
+    var mid = (l + r) >> 1, a = 0;
+    if (jl <= mid) a += query(t, jl, jr, l, mid, i << 1);
+    if (jr > mid) a += query(t, jl, jr, mid + 1, r, i << 1 | 1);
+    return a;
+  }
+  function setPoint(t, p, v, l, r, i){
+    if (l === r) { t.sum[i] = t.mx[i] = v; return; }
+    var mid = (l + r) >> 1;
+    if (p <= mid) setPoint(t, p, v, l, mid, i << 1); else setPoint(t, p, v, mid + 1, r, i << 1 | 1);
+    up(t, i);
+  }
+
+  var NODEX = {}, NODEW = {};
+  (function(){
+    // 预计算 8 叶满二叉树各节点的位置（1 = 根）
+    var leaves = 8, W = 640, X0 = 20;
+    var lw = W / leaves;
+    for (var i = 0; i < leaves; i++) { NODEX[leaves + i] = X0 + i * lw + lw / 2; NODEW[leaves + i] = lw - 6; }
+    for (var lvl = 2; lvl >= 0; lvl--) {
+      var cnt = 1 << lvl, base = 1 << lvl;
+      for (var k = 0; k < cnt; k++) {
+        var idx = base + k;
+        NODEX[idx] = (NODEX[idx << 1] + NODEX[idx << 1 | 1]) / 2;
+        NODEW[idx] = (NODEW[idx << 1] + NODEW[idx << 1 | 1]) * 0.62;
+      }
+    }
+  })();
+  var NODEY = {1:34, 2:86, 3:86, 4:138, 5:138, 6:138, 7:138, 8:190, 9:190, 10:190, 11:190, 12:190, 13:190, 14:190, 15:190};
+  function drawTree(t, ev, kind){
+    var g = '', edges = [[1,2],[1,3],[2,4],[2,5],[3,6],[3,7],[4,8],[4,9],[5,10],[5,11],[6,12],[6,13],[7,14],[7,15]];
+    var hot = {};
+    for (var k = 0; k < ev.length; k++) hot[ev[k].i] = ev[k];
+    for (var k = 0; k < edges.length; k++) {
+      var a = edges[k][0], b = edges[k][1];
+      var on = hot[a] && hot[b] && !hot[a].pruned && !hot[b].pruned;
+      g += '<line x1="'+NODEX[a]+'" y1="'+(NODEY[a] + 16)+'" x2="'+NODEX[b]+'" y2="'+NODEY[b]+
+           '" stroke="'+(on ? C.orange : C.bd)+'" stroke-width="'+(on ? 2.5 : 1)+'"/>';
+    }
+    for (var i = 1; i <= 15; i++) {
+      var h = hot[i];
+      var fill = C.bg, stroke = C.bd, tc = C.dim;
+      if (h && h.pruned) { fill = '#f1f2f4'; stroke = C.gray; tc = C.gray; }
+      else if (h) { fill = C.orangeBg; stroke = C.orange; tc = C.orange; }
+      g += R(NODEX[i] - NODEW[i] / 2, NODEY[i], NODEW[i], 30, fill, stroke);
+      g += T(NODEX[i], NODEY[i] + 20, String(t.mx[i]), {size:11, fill:tc, mono:true});
+    }
+    g += T(340, 224, '节点里的数是这一段的 max　灰 = 被剪掉　橙 = 真的下去了', {size:11.5, fill:C.dim});
+    return g;
+  }
+
+  // ============ 演示 1：开平方 ============
+  (function(){
+    var PRESETS = [
+      {name:'[16, 1, 100, 4, 9, 1, 25, 2] 改 [1,8]', a:[0,16,1,100,4,9,1,25,2], ops:[[0,1,8],[0,1,8],[0,1,8],[0,1,8],[0,3,6],[0,1,8],[0,1,8]]},
+      {name:'[10⁶, 3, 7, 1, 1, 8, 2, 9] 改 [1,4]', a:[0,1000000,3,7,1,1,8,2,9], ops:[[0,1,4],[0,1,4],[0,1,4],[0,1,4],[0,1,4],[0,5,8],[0,1,4]]},
+      {name:'[2,2,2,2,2,2,2,2] 改 [1,8]', a:[0,2,2,2,2,2,2,2,2], ops:[[0,1,8],[0,1,8],[0,1,8]]},
+      {name:'[81, 5, 1, 1, 36, 7, 1, 1] 改 [2,7]', a:[0,81,5,1,1,36,7,1,1], ops:[[0,2,7],[0,2,7],[0,2,7],[0,1,8],[0,2,7]]}
+    ];
+    var host = document.getElementById('viz-sqrt');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'sq-data';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一次开方'; bNext.id = 'sq-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'sq-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'sq-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'sq-ans';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'sq-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var cur = [], step = -1;
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var t = makeTree();
+      treeBuild(t, 1, 8, 1, p.a);
+      var steps = [];
+      for (var k = 0; k < p.ops.length; k++) {
+        var ev = [];
+        visitSqrt(t, p.ops[k][1], p.ops[k][2], 1, 8, 1, ev);
+        var snap = {sum:t.sum.slice(), mx:t.mx.slice()};
+        var pruned = 0, went = 0;
+        for (var q = 0; q < ev.length; q++) { if (ev[q].pruned) pruned++; else went++; }
+        steps.push({ev:ev, snap:snap, pruned:pruned, went:went, op:p.ops[k]});
+      }
+      cur = steps; step = -1;
+      render();
+    }
+    function render(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var t = makeTree();
+      if (step >= 0) { t.sum = cur[step].snap.sum.slice(); t.mx = cur[step].snap.mx.slice(); }
+      else treeBuild(t, 1, 8, 1, p.a);
+      var ev = step >= 0 ? cur[step].ev : [];
+      var g = drawTree(t, ev, 'sqrt');
+      var HH = 292;
+      var arr = [];
+      for (var i = 1; i <= 8; i++) arr.push(step >= 0 ? t.sum[getLeaf(i)] : p.a[i]);
+      g += T(340, 246, '数组：[ ' + arr.join(', ') + ' ]', {size:11.5, fill:C.dim, mono:true});
+      var msg = step >= 0 ? ('第 ' + (step + 1) + ' 次：[l,r] = [' + cur[step].op[1] + ',' + cur[step].op[2] + ']') : '点「下一次开方」开始';
+      g += T(340, 268, msg, {size:12, fill:C.ink});
+      stage.innerHTML = '<svg viewBox="0 0 680 '+HH+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var last = cur.length - 1;
+      ans.innerHTML = step >= 0
+        ? ('下去 <b>' + cur[step].went + '</b> 个节点，剪掉 <b>' + cur[step].pruned + '</b> 段　数组和 <b>' +
+           (function(){ var s = 0; for (var i = 1; i <= 8; i++) s += t.sum[getLeaf(i)]; return s; })() + '</b>')
+        : '未开始';
+      var lh = '';
+      for (var i = 0; i <= step; i++) lh += '第 ' + (i + 1) + ' 次：下去 ' + cur[i].went + ' 个、剪掉 ' + cur[i].pruned + ' 段\n';
+      log.textContent = lh;
+      bNext.disabled = step >= last;
+    }
+    function getLeaf(p){ return 8 + p - 1; }
+    function bind(id, ev2, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev2, fn); }
+    bind('sq-next', 'click', function(){ if (step < cur.length - 1) { step++; render(); } });
+    bind('sq-reset', 'click', function(){ step = -1; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+
+  // ============ 演示 2：取模 ============
+  (function(){
+    var PRESETS = [
+      {name:'[17, 5, 23, 8, 11, 3, 19, 7] 对 6 取模 [1,8]', a:[0,17,5,23,8,11,3,19,7], ops:[[2,1,8,6],[2,1,8,6],[2,1,8,3],[2,1,8,2],[2,3,6,4]]},
+      {name:'[100, 7, 55, 30, 2, 9, 40, 13] 对 8 取模 [2,7]', a:[0,100,7,55,30,2,9,40,13], ops:[[2,2,7,8],[2,2,7,8],[2,2,7,4],[3,5,97],[2,2,7,8],[2,2,7,64]]},
+      {name:'[6,6,6,6,6,6,6,6] 对 6 取模 [1,8]', a:[0,6,6,6,6,6,6,6,6], ops:[[2,1,8,6],[2,1,8,6]]}
+    ];
+    var host = document.getElementById('viz-mod');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'md-data';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'md-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'md-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'md-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'md-ans';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'md-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var cur = [], step = -1;
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var t = makeTree();
+      treeBuild(t, 1, 8, 1, p.a);
+      var steps = [];
+      for (var k = 0; k < p.ops.length; k++) {
+        var op = p.ops[k], ev = [];
+        if (op[0] === 2) visitMod(t, op[1], op[2], op[3], 1, 8, 1, ev);
+        else { setPoint(t, op[1], op[2], 1, 8, 1); ev.push({i:8 + op[1] - 1, l:op[1], r:op[1], before:op[2], pruned:false}); }
+        var pruned = 0, went = 0;
+        for (var q = 0; q < ev.length; q++) { if (ev[q].pruned) pruned++; else went++; }
+        steps.push({ev:ev, snap:{sum:t.sum.slice(), mx:t.mx.slice()}, pruned:pruned, went:went, op:op});
+      }
+      cur = steps; step = -1;
+      render();
+    }
+    function render(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var t = makeTree();
+      if (step >= 0) { t.sum = cur[step].snap.sum.slice(); t.mx = cur[step].snap.mx.slice(); }
+      else treeBuild(t, 1, 8, 1, p.a);
+      var ev = step >= 0 ? cur[step].ev : [];
+      var g = drawTree(t, ev, 'mod');
+      var arr = [];
+      for (var i = 1; i <= 8; i++) arr.push(step >= 0 ? t.sum[8 + i - 1] : p.a[i]);
+      g += T(340, 246, '数组：[ ' + arr.join(', ') + ' ]', {size:11.5, fill:C.dim, mono:true});
+      var msg = '点「下一步」开始';
+      if (step >= 0) {
+        var op = cur[step].op;
+        msg = '第 ' + (step + 1) + ' 次：' + (op[0] === 2
+          ? ('[' + op[1] + ',' + op[2] + '] 对 ' + op[3] + ' 取模')
+          : ('把位置 ' + op[1] + ' 赋成 ' + op[2] + '（势能加回来了）'));
+      }
+      g += T(340, 268, msg, {size:12, fill:C.ink});
+      stage.innerHTML = '<svg viewBox="0 0 680 292" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var last = cur.length - 1;
+      var tot = 0;
+      for (var i = 1; i <= 8; i++) tot += step >= 0 ? t.sum[8 + i - 1] : p.a[i];
+      ans.innerHTML = step >= 0
+        ? ('下去 <b>' + cur[step].went + '</b> 个节点，剪掉 <b>' + cur[step].pruned + '</b> 段　数组和 <b>' + tot + '</b>')
+        : '未开始';
+      var lh = '';
+      for (var i = 0; i <= step; i++) {
+        var op = cur[i].op;
+        lh += '第 ' + (i + 1) + ' 次 ' + (op[0] === 2 ? ('%' + op[3]) : ('set ' + op[1] + '=' + op[2])) +
+              '：下去 ' + cur[i].went + ' 个、剪掉 ' + cur[i].pruned + ' 段\n';
+      }
+      log.textContent = lh;
+      bNext.disabled = step >= last;
+    }
+    function bind(id, ev2, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev2, fn); }
+    bind('md-next', 'click', function(){ if (step < cur.length - 1) { step++; render(); } });
+    bind('md-reset', 'click', function(){ step = -1; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+})();
+</script>
+</body>
+</html>

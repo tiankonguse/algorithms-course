@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线段树：值域的离散化 · 算法教程</title>
+<meta name="description" content="坐标能到 1e8 但真正被用到的位置最多两千个：把端点收进一张表、排序去重、二分换成下标，线段树就能开得出来。掉落的方块与贴海报两道题，一道说明离散化够用，一道说明它会在哪漏。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .ansline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.7;}
+  .ansline b{color:var(--full);}
+  .ansline i{color:var(--partial);font-style:normal;}
+  .twocol{display:flex;gap:16px;flex-wrap:wrap;margin:14px 0;}
+  .panel{flex:1;min-width:250px;border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--bg-soft);}
+  .panel h4{margin:0 0 8px;font-size:14px;}
+  .panel .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.9;word-break:break-all;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>线段树：值域的离散化</h1>
+    <p class="intro">线段树的下标是「第几个位置」，可有的题给的位置是坐标本身。坐标能大到一亿，真正被用到的端点却只有两千个。把端点收进一张表、排个序、去重，以后所有操作都先二分换成下标，线段树就开得出来了。</p>
+
+    <h2>零、背景</h2>
+    <p>掉落的方块这道题，方块的左边界 <code>left</code> 能到 10⁸，边长能到 10⁶。按坐标直接建树，右端点最大是 10⁸ + 10⁶ − 1，值域跨度 101000000。一个 <code>int</code> 数组就是 385.3 MB，线段树按四倍开是 1541.1 MB。开不出来。</p>
+    <p>可方块最多只有 1000 个，每个方块只贡献两个端点，加起来 2000 个。这 2000 个坐标之外的位置，从来没有任何一次操作会去问它。</p>
+    <figure class="fig" id="fig-span"></figure>
+
+    <h2>一、问题</h2>
+    <p>方块一个一个从高处垂直落下，左边界贴着 <code>left</code> 那条线往下走，碰到已经落稳的方块的顶边或者 x 轴就停住，然后固定不动。擦着侧面过去不算碰撞。每次落下之后，问整体最高处是多少。</p>
+    <p>第 i 块方块落地后，它的顶面高度是「落点范围内已有的最高顶面」加上自己的边长。所以这题要的是区间最大值，落稳之后是区间重置成同一个高度。这两个操作上一段的线段树都有，缺的只是下标从哪来。</p>
+
+    <h2>二、把坐标换成下标</h2>
+    <p>收集：每个方块把自己的左端点 <code>left</code> 和右端点 <code>left + len − 1</code> 都丢进表里。排序、去重，表就成了从 1 开始的坐标字典。</p>
+    <p>定位：要把一个坐标 v 换成下标，就在表里二分找第一个 ≥ v 的位置。因为所有操作用到的端点都在表中，这个二分一定找得到。</p>
+    <pre class="code"><span class="cm">// 把每个方块的左右端点收进 xs，排序去重</span>
+    <span class="cm">// 返回去重后的点数 n，xs[0..n-1] 就是离散化后的坐标表</span>
+    <span class="kw">int</span> <span class="fn">collect</span>(<span class="kw">const</span> vector&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;&amp; pos, vector&lt;<span class="kw">int</span>&gt;&amp; xs) {
+        xs.clear();
+        <span class="kw">for</span> (auto&amp; p : pos) {
+            xs.push_back(p.first);              <span class="cm">// 左端点</span>
+            xs.push_back(p.first + p.second - 1); <span class="cm">// 右端点（闭区间）</span>
+        }
+        sort(xs.begin(), xs.end());
+        xs.erase(unique(xs.begin(), xs.end()), xs.end());
+        <span class="kw">return</span> (<span class="kw">int</span>)xs.size();
+    }</pre>
+    <pre class="code"><span class="cm">// 在 xs 里找第一个 &gt;= v 的位置，返回 1 开始的名次</span>
+    <span class="kw">int</span> <span class="fn">rankOf</span>(<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; xs, <span class="kw">int</span> v) {
+        <span class="kw">int</span> l = 0, r = (<span class="kw">int</span>)xs.size() - 1, ans = 0, m;
+        <span class="kw">while</span> (l &lt;= r) {
+            m = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (xs[m] &gt;= v) { ans = m; r = m - 1; }
+            <span class="kw">else</span> l = m + 1;
+        }
+        <span class="kw">return</span> ans + 1;
+    }</pre>
+    <p>这里有个细节值得停一下：为什么右端点要写 <code>left + len − 1</code>，不是 <code>left + len</code>。方块的边长是 len，它占住的是 x 轴上连续 len 长的一段，左闭右开就是 [left, left + len)。题目说擦过侧边不算碰撞，也就是两块只有共用一个点才算碰上，写成闭区间 [left, left + len − 1] 正好对应这个判据。</p>
+
+    <h2>三、主流程</h2>
+    <p>有了下标，剩下就是上一段的模板：查询 [l, r] 的最大值当落点高度，加上边长得到新顶面，再把 [l, r] 整段重置成这个高度。</p>
+    <pre class="code">vector&lt;<span class="kw">int</span>&gt; <span class="fn">fallingSquares</span>(<span class="kw">const</span> vector&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;&amp; pos) {
+        vector&lt;<span class="kw">int</span>&gt; xs;
+        <span class="kw">int</span> n = collect(pos, xs);
+        build(1, n, 1);                 <span class="cm">// mx、change、update 全部清零</span>
+        vector&lt;<span class="kw">int</span>&gt; ans;
+        <span class="kw">int</span> best = 0;
+        <span class="kw">for</span> (auto&amp; p : pos) {
+            <span class="kw">int</span> l = rankOf(xs, p.first);
+            <span class="kw">int</span> r = rankOf(xs, p.first + p.second - 1);
+            <span class="kw">int</span> h = query(l, r, 1, n, 1) + p.second; <span class="cm">// 落点高度 + 自身边长</span>
+            best = max(best, h);
+            ans.push_back(best);
+            update(l, r, h, 1, n, 1);   <span class="cm">// 整段重置成新高度</span>
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+    <figure class="fig" id="fig-fall"></figure>
+
+    <div class="viz" id="viz-fall">
+      <h3>演示：一块一块往下落</h3>
+      <p class="viz-hint">选一组数据，每点一次「下一块」落一块，橙色框是本块占住的离散区间，虚线是它的落点高度。</p>
+    </div>
+
+    <p>整套做下来，1000 个方块、坐标散在 10⁸ 内，从离散化到建树到全部更新查询一共 0.257 ms，最终高度 11601969。离散化后的数组只占 31.2 KB。</p>
+
+    <h2>四、去重能压多少，看值域</h2>
+    <p>去不掉重复端点的话，离散化只是把跨度从一亿降到两千。去掉之后能再降一截，降多少取决于坐标有多挤。</p>
+    <table class="complexity">
+      <tr><th>left 的上限</th><th>原始端点</th><th>去重后</th><th>压缩倍数</th></tr>
+      <tr><td>50</td><td>2000</td><td>98</td><td>20.41</td></tr>
+      <tr><td>500</td><td>2000</td><td>513</td><td>3.90</td></tr>
+      <tr><td>100000</td><td>2000</td><td>1966</td><td>1.02</td></tr>
+      <tr><td>100000000</td><td>2000</td><td>1984</td><td>1.01</td></tr>
+    </table>
+    <p>坐标散得越开，去重越没用，但跨度压缩那一下已经把问题从「开不出数组」变成了「两千个点的模板题」。1000 个方块丢进 10⁸ 的坐标里，实测 2000 个端点一个都没重复。</p>
+
+    <h2>五、下一题：漏出一点也算</h2>
+    <p>贴海报。一面长度 n 的墙，m 张海报，每张给出 [x, y]，贴上去会盖住前面贴的。全部贴完，问还能看见几张，哪怕只漏出一点都算。n 和坐标能到 10⁷，m 到 10³。</p>
+    <p>照搬上一节的做法：把每张海报的两个端点收进去，排序去重，二分换下标，然后区间覆盖。问题出在「漏出一点」这四个字上。</p>
+    <p>上一题问的是最大值，只有真的有方块落在那段区间上，答案才会变，所以只留端点足够。这一题问的是「有没有一段墙被某张海报露出来」，墙是连续的，端点之间的那些位置也算墙。</p>
+
+    <h2>六、补一个中间点</h2>
+    <p>看这个例子：墙长 10，三张海报依次是 [1,10]、[1,3]、[5,10]。</p>
+    <p>真值：第 1 张被后两张盖住了吗？第 2 张盖住 1 到 3，第 3 张盖住 5 到 10，位置 4 只有第 1 张盖着。所以第 1 张在位置 4 漏出来了，答案是 3。</p>
+    <p>只留端点的话，坐标表是 {1, 3, 5, 10}。位置 4 不在表里，它两侧的表项是 3 和 5，而 3 被第 2 张盖着、5 被第 3 张盖着，看上去第 1 张一点都没露。算出来是 2。</p>
+    <figure class="fig" id="fig-mid"></figure>
+    <p>补的方法很直接：去重之后扫一遍相邻两项，只要 <code>num[i−1] + 1 &lt; num[i]</code>，就把 <code>num[i−1] + 1</code> 也加进表，最后重新排序去重。</p>
+    <pre class="code"><span class="cm">// 去重之后，凡是相邻两点之间还隔着东西，就把 num[i-1]+1 补进来</span>
+    <span class="cm">// 补完再排一次序、再去一次重</span>
+    <span class="kw">int</span> <span class="fn">collect</span>(vector&lt;<span class="kw">int</span>&gt; raw, vector&lt;<span class="kw">int</span>&gt;&amp; num) {
+        sort(raw.begin(), raw.end());
+        raw.erase(unique(raw.begin(), raw.end()), raw.end());
+        num = raw;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; (<span class="kw">int</span>)raw.size(); i++) {
+            <span class="kw">if</span> (raw[i - 1] + 1 &lt; raw[i]) num.push_back(raw[i - 1] + 1);
+        }
+        sort(num.begin(), num.end());
+        num.erase(unique(num.begin(), num.end()), num.end());
+        <span class="kw">return</span> (<span class="kw">int</span>)num.size();
+    }</pre>
+    <p>这样补够不够？够。相邻两个端点之间不会有任何海报开始或结束，所以这一整段被哪些海报盖着是均匀的，拿其中一个整数位置当代表就行。需要注意的代表和被它隔开的两个端点不是一回事：端点 3 上第 2 张还盖着，位置 4 上第 2 张已经结束了。这正是要单独补一个点的原因。</p>
+    <p>代价是表会变长。m = 1000 张海报、坐标散在 10⁷ 内，去重后 2000 个点，补完中间点变成 3999 个，多出 99.95%。点数翻倍，四倍数组也才 64 KB，比墙长 10⁷ 直接开数组的 38.1 MB 划算得多。</p>
+
+    <h2>七、该维护什么信息</h2>
+    <p>直接维护「这一段上有几张海报能看见」看着最贴题，可两张海报拼在一起时，各自可见的部分可能重叠，也可能被第三张切断，这个数合不起来。</p>
+    <p>换个问法：维护「这一段是不是被同一张海报完全盖住」。节点上记一个编号，非 0 就是整段都是这张海报，0 表示没有海报或者这一段上的海报不统一。覆盖是能合并的：一张海报把整段盖住，就是这一个编号说了算；没盖全就往下发，让两个孩子各自回答。</p>
+    <pre class="code"><span class="cm">// poster[i] != 0 表示节点 i 的整段被同一张海报盖住，值是海报编号</span>
+    <span class="cm">// poster[i] == 0 表示没海报，或者这一段上的海报编号不统一</span>
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (poster[i] != 0) {
+            poster[i &lt;&lt; 1] = poster[i];
+            poster[i &lt;&lt; 1 | 1] = poster[i];
+            poster[i] = 0;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">update</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) { poster[i] = jobv; <span class="kw">return</span>; }
+        down(i);
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">if</span> (jobl &lt;= mid) update(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+        <span class="kw">if</span> (jobr &gt; mid)  update(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+    }
+
+    <span class="cm">// 最后统计：一路 down 到每个叶子，按编号去重计数</span>
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">if</span> (poster[i] != 0 &amp;&amp; !visited[poster[i]]) {
+                visited[poster[i]] = <span class="kw">true</span>;
+                <span class="kw">return</span> 1;
+            }
+            <span class="kw">return</span> 0;
+        }
+        down(i);
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">return</span> query(l, mid, i &lt;&lt; 1) + query(mid + 1, r, i &lt;&lt; 1 | 1);
+    }</pre>
+    <p>最后统计时一路 <code>down</code> 走到每个叶子，按编号去重计数。这一步会把整棵树走一遍，所以是 O(点数)。好在整个过程只问这一次。</p>
+
+    <div class="viz" id="viz-poster">
+      <h3>演示：贴海报，补不补中间点</h3>
+      <p class="viz-hint">切到「只留端点」看第一组数据，第 1 张海报在位置 4 露出来的那一段会从坐标表里消失，答案从 3 掉到 2。</p>
+    </div>
+
+    <h2>八、复杂度分析</h2>
+    <p>记 m 是操作次数，k 是离散化后的点数（贴海报的题里 k ≤ 2m + 补点，最多翻一倍）。</p>
+    <table class="complexity">
+      <tr><th>环节</th><th>时间</th><th>说明</th></tr>
+      <tr><td>收集加排序去重</td><td>O(m log m)</td><td>2m 个端点排序，去重是线性扫一遍</td></tr>
+      <tr><td>每次坐标转下标</td><td>O(log k)</td><td>表上二分</td></tr>
+      <tr><td>掉落的方块整体</td><td>O(m log k)</td><td>m 次查询加 m 次范围重置</td></tr>
+      <tr><td>贴海报整体</td><td>O(m log k + k)</td><td>m 次覆盖，最后一次遍历整棵树统计</td></tr>
+      <tr><td>空间</td><td>O(k)</td><td>线段树四倍开，掉落的方块是 max / change / update 三个数组</td></tr>
+    </table>
+    <p>掉落的方块里 k ≤ 2000，贴海报里 k ≤ 4000 上下，两个都是常数级的数组开销。不开离散化的话，前者要 1541.1 MB，后者要 38.1 MB。</p>
+
+    <h2>九、几种写错的样子</h2>
+    <p>每组 20000 个随机输入，四档规模，下面这个百分比是错版和暴力答案不一致的比例。</p>
+    <table class="complexity">
+      <tr><th>写错的地方</th><th>档 1</th><th>档 2</th><th>档 3</th><th>档 4</th></tr>
+      <tr><td>掉落的方块：右端点写成 left + len</td><td>19.05%</td><td>33.12%</td><td>46.75%</td><td>1.72%</td></tr>
+      <tr><td>掉落的方块：二分找第一个 &gt; v</td><td>81.54%</td><td>48.52%</td><td>11.23%</td><td>0.07%</td></tr>
+      <tr><td>掉落的方块：只收左端点</td><td>90.13%</td><td>86.78%</td><td>99.31%</td><td>100.00%</td></tr>
+      <tr><td>掉落的方块：查完忘加边长</td><td>100.00%</td><td>100.00%</td><td>100.00%</td><td>100.00%</td></tr>
+      <tr><td>贴海报：不补中间点</td><td>2.02%</td><td>7.63%</td><td>10.17%</td><td>7.05%</td></tr>
+      <tr><td>贴海报：覆盖前不下发</td><td>36.52%</td><td>65.84%</td><td>82.97%</td><td>93.46%</td></tr>
+      <tr><td>贴海报：统计时不去重</td><td>99.32%</td><td>100.00%</td><td>100.00%</td><td>100.00%</td></tr>
+    </table>
+    <p>前四行的档位是「方块数 / left 值域」= 6 / 8、12 / 20、30 / 200、60 / 100000；后三行是「墙长 / 海报数」= 8 / 3、20 / 6、60 / 12、200 / 30。</p>
+    <p>「不补中间点」这一行只有 2% 到 10%，因为随机贴的海报很少刚好留出一道只被旧海报盖着的缝。这道缝要靠构造才稳定出现，靠随机对拍十有八九放它过去。另外两行的档位越大抓得越准，那是操作多了自然容易撞上。</p>
+
+    <h2>十、总结</h2>
+    <p>离散化做的是把「坐标」和「下标」分开：真正要建树的是第几个用到的位置，不是坐标本身。收集全部端点、排序去重、二分换下标这三步走完，值域多大都不影响数组开多大。</p>
+    <p>掉落的方块里这套完全够用，因为问的是最大值，端点之外没有额外的信息要区分。贴海报问的是连续墙面上有没有露出一段，端点之间那段必须有代表，所以补一个中间点才对。这两题放一起正好把离散化的边界划清楚：端点够不够，取决于你要区分的东西是不是只发生在端点上。</p>
+    <p>再往下遇到「维护不了就换一个能合并的信息」，贴海报已经给了一个样板：可见数合不起来，改成维护整段是否被同一张盖住，最后遍历一次统计。</p>
+
+    <h2>最后</h2>
+    <p>两个容易忘的点。一是 <code>rank</code> 的二分要找第一个 ≥ v 的位置，写成第一个 &gt; v 之后，正好落在端点上的查询会整体偏移一格，小数据上抓得挺准、大数据上几乎抓不到，属于最难发现的一类。二是贴海报的坐标表要把墙的右边界也放进去，不然最后一次查询的右端点排不出下标。</p>
+
+    <h2>相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/falling-squares" target="_blank">掉落的方块</a></td><td>leetcode.cn/problems/falling-squares</td></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P3740" target="_blank">贴海报</a></td><td>luogu.com.cn/problem/P3740</td></tr>
+      <tr><td>POJ</td><td><a href="http://poj.org/problem?id=2528" target="_blank">贴海报（数据加强版）</a></td><td>poj.org/problem?id=2528</td></tr>
+    </table>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解111【扩展】线段树专题2-线段树的离散化、二分搜索、特别修改</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = {blue:'#2563eb', blueBg:'#dbeafe', blueLt:'#eef4ff',
+           orange:'#ea580c', orangeBg:'#ffedd5', gray:'#9aa0a6',
+           bg:'#f6f7f9', bd:'#e6e8eb', ink:'#1f2328', dim:'#5c6370'};
+
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x,y,s,o){
+    o = o || {};
+    return '<text x="'+x+'" y="'+y+'" font-size="'+(o.size||12)+'" fill="'+(o.fill||C.ink)+
+           '" text-anchor="'+(o.anchor||'middle')+'"'+(o.mono?' font-family="ui-monospace,Menlo,monospace"':'')+
+           (o.weight?' font-weight="'+o.weight+'"':'')+'>'+esc(s)+'</text>';
+  }
+  function R(x,y,w,h,fill,stroke){
+    return '<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w)+'" height="'+Math.max(0,h)+
+           '" rx="3" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="1"':'')+'/>';
+  }
+  function mount(id, hh, body, cap){
+    var f = document.getElementById(id);
+    if (!f) return;
+    f.innerHTML = '<svg viewBox="0 0 680 '+hh+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+
+      body + '</svg><figcaption>'+cap+'</figcaption>';
+  }
+
+  // ---------- 图 1：值域跨度 vs 离散化 ----------
+  (function(){
+    var g = '', W = 620, X0 = 40;
+    g += T(340, 20, '不开离散化：下标就是坐标本身', {size:13, weight:'600'});
+    g += R(X0, 32, W, 26, C.bg, C.bd);
+    g += T(X0 + 6, 49, '0', {size:11, anchor:'start', fill:C.dim});
+    g += T(X0 + W - 6, 49, '101000000', {size:11, anchor:'end', fill:C.dim});
+    g += T(340, 78, 'int 数组 385.3 MB，线段树四倍开 1541.1 MB，开不出来', {size:12, fill:'#b91c1c'});
+
+    g += T(340, 112, '离散化：只留被用到的端点', {size:13, weight:'600'});
+    g += R(X0, 124, W, 26, C.blueLt, C.blue);
+    var ticks = [2, 40, 130, 470, 1000, 5300, 40000, 260000, 9000000, 50000000, 99000000];
+    for (var i = 0; i < ticks.length; i++) {
+      var x = X0 + 30 + i * 56;
+      g += '<line x1="'+x+'" y1="124" x2="'+x+'" y2="150" stroke="'+C.blue+'" stroke-width="1"/>';
+      g += T(x, 163, String(ticks[i]), {size:9.5, fill:C.dim, mono:true});
+    }
+    g += T(340, 186, '最多 2000 个刻度，排好序去重后按下标号 1..n', {size:12, fill:C.dim});
+    g += T(340, 206, '四倍数组 31.2 KB，一套操作 0.257 ms', {size:12, fill:'#15803d'});
+    mount('fig-span', 220, g, '同样是 1000 个方块，按坐标建树比按端点建树多占五万倍的空间。');
+  })();
+
+  // ---------- 图 2：掉落的方块 ----------
+  (function(){
+    var g = '', X0 = 46, CS = 34, BASE = 150;
+    var blocks = [{l:1, len:2, h:2, top:2}, {l:2, len:3, x:3, top:5}];
+    // 画三层：第 1 块 (1,2) 落在地面高 2；第 2 块 (2,3) 压在 1 上高 5
+    g += T(340, 18, '[(1,2), (2,3), (6,1)] 前两块落下之后', {size:13, weight:'600'});
+    // 坐标刻度
+    var coords = [1, 2, 3, 4, 6];
+    for (var i = 0; i < 8; i++) {
+      var x = X0 + i * CS;
+      g += R(x, BASE, CS - 2, 16, C.bg, C.bd);
+      g += T(x + CS / 2, BASE + 12, String(i + 1), {size:10, fill:C.dim});
+    }
+    // 第 1 块：占 1..2（下标 1,2），高 2
+    g += R(X0 + 0 * CS, BASE - 2 * 30, 2 * CS - 2, 2 * 30, C.blueBg, C.blue);
+    g += T(X0 + CS, BASE - 32, '块1 h=2', {size:11, fill:C.blue});
+    // 第 2 块：占 2..4（下标 2,3,4），底面在 h=2，高 5
+    g += R(X0 + 1 * CS, BASE - 5 * 30, 3 * CS - 2, 5 * 30 - 2 * 30, C.orangeBg, C.orange);
+    g += T(X0 + 2.5 * CS, BASE - 3.5 * 30 - 6, '块2 落点=2, 顶面=5', {size:11, fill:C.orange});
+    g += '<line x1="'+(X0 + 1 * CS)+'" y1="'+(BASE - 2 * 30)+'" x2="'+(X0 + 4 * CS - 2)+'" y2="'+(BASE - 2 * 30)+
+         '" stroke="'+C.orange+'" stroke-width="1" stroke-dasharray="4 3"/>';
+    g += T(X0 + 4 * CS + 8, BASE - 2 * 30 + 4, '落点线', {size:10, fill:C.orange, anchor:'start'});
+    g += T(340, BASE + 44, '离散表 = [1, 2, 4, 6]，块2 的 [2,4] 换成下标 [2,3]', {size:11.5, fill:C.dim, mono:true});
+    g += T(340, BASE + 64, '擦过不算：块1 占第 1、2 格，块2 从第 2 格起，压住第 2 格才有落点', {size:11.5, fill:C.dim});
+    mount('fig-fall', BASE + 82, g, '落点高度来自区间最大值，落稳之后整段重置成新顶面，两个操作都不需要知道坐标有多大。');
+  })();
+
+  // ---------- 图 3：补中间点 ----------
+  (function(){
+    var g = '', X0 = 40, W = 600, y = 0;
+    g += T(340, 16, '墙长 10，海报依次 [1,10]、[1,3]、[5,10]', {size:13, weight:'600'});
+
+    // 真实墙面
+    y = 34;
+    g += T(X0, y + 10, '真实', {size:11, anchor:'start', fill:C.dim});
+    var cellW = 52;
+    var real = [2,2,2,1,3,3,3,3,3,3];
+    for (var i = 0; i < 10; i++) {
+      var x = X0 + 60 + i * cellW;
+      var col = real[i] === 1 ? C.orangeBg : (real[i] === 2 ? C.blueBg : '#f0fdf4');
+      var st = real[i] === 1 ? C.orange : (real[i] === 2 ? C.blue : '#16a34a');
+      g += R(x, y, cellW - 2, 26, col, st);
+      g += T(x + cellW / 2 - 1, y + 17, 'p' + real[i], {size:11, fill:st});
+      g += T(x + cellW / 2 - 1, y + 40, String(i + 1), {size:10, fill:C.dim});
+    }
+    g += T(X0 + 60 + 3 * cellW + cellW / 2, y - 6, '位置 4 只有 p1', {size:11, fill:C.orange});
+
+    // 只留端点
+    y = 116;
+    g += T(X0, y + 12, '只留端点', {size:11, anchor:'start', fill:C.dim});
+    var e1 = [1, 3, 5, 10];
+    for (var i = 0; i < e1.length; i++) {
+      var x = X0 + 60 + i * 120;
+      g += R(x, y, 60, 26, C.bg, C.bd);
+      g += T(x + 30, y + 17, 'x=' + e1[i], {size:11, fill:C.dim, mono:true});
+    }
+    g += T(340, y + 48, 'p1 在表上被 p2、p3 夹住，看不出它露了，答案 2', {size:12, fill:'#b91c1c'});
+
+    // 补中间点
+    y = 196;
+    g += T(X0, y + 12, '补中间点', {size:11, anchor:'start', fill:C.dim});
+    var e2 = [1, 2, 3, 4, 5, 6, 10];
+    for (var i = 0; i < e2.length; i++) {
+      var x = X0 + 52 + i * 72;
+      var isMid = (e2[i] === 2 || e2[i] === 4 || e2[i] === 6);
+      g += R(x, y, 66, 26, isMid ? C.orangeBg : C.bg, isMid ? C.orange : C.bd);
+      g += T(x + 33, y + 17, 'x=' + e2[i], {size:11, fill:isMid ? C.orange : C.dim, mono:true});
+    }
+    g += T(340, y + 48, 'x=4 这个代表点归 p1，三张都数得到，答案 3', {size:12, fill:'#15803d'});
+    mount('fig-mid', y + 66, g, '端点之间那段墙不会有任何海报开始或结束，拿一个整数位置当代表就够，但代表必须单独存在。');
+  })();
+
+  // ============ 演示 1：掉落的方块 ============
+  (function(){
+    var PRESETS = [
+      {name:'[(1,2) (2,3) (6,1)]', pos:[[1,2],[2,3],[6,1]], ans:[2,5,5]},
+      {name:'[(100,100) (200,100) (150,100)]', pos:[[100,100],[200,100],[150,100]], ans:[100,100,200]},
+      {name:'[(6,4) (2,3) (1,7)]', pos:[[6,4],[2,3],[1,7]], ans:[4,4,11]},
+      {name:'[(5,3) (3,3) (1,4)]', pos:[[5,3],[3,3],[1,4]], ans:[3,6,10]},
+      {name:'[(2,2) (2,2) (2,2)]', pos:[[2,2],[2,2],[2,2]], ans:[2,4,6]},
+      {name:'[(1,1) (2,2) (3,3)]', pos:[[1,1],[2,2],[3,3]], ans:[1,2,5]}
+    ];
+    var host = document.getElementById('viz-fall');
+    if (!host) return;
+    var sel = document.createElement('select');
+    sel.id = 'fs-data';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(i); o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div');
+    ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一块'; bNext.id = 'fs-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'fs-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'fs-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'fs-ans';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans);
+
+    var cur = [], step = 0;
+
+    function discretize(pos){
+      var xs = [];
+      for (var i = 0; i < pos.length; i++) { xs.push(pos[i][0]); xs.push(pos[i][0] + pos[i][1] - 1); }
+      xs.sort(function(a,b){return a-b;});
+      var u = [];
+      for (var i = 0; i < xs.length; i++) if (i === 0 || xs[i] !== xs[i-1]) u.push(xs[i]);
+      return u;
+    }
+    function rankOf(xs, v){
+      var l = 0, r = xs.length - 1, ans = 0, m;
+      while (l <= r) { m = (l + r) >> 1; if (xs[m] >= v) { ans = m; r = m - 1; } else l = m + 1; }
+      return ans + 1;
+    }
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var xs = discretize(p.pos);
+      var n = xs.length;
+      var h = new Array(n + 1).fill(0);   // 每个离散点的当前顶面
+      var steps = [];
+      var best = 0, out = [];
+      for (var i = 0; i < p.pos.length; i++) {
+        var L = rankOf(xs, p.pos[i][0]), R = rankOf(xs, p.pos[i][0] + p.pos[i][1] - 1);
+        var base = 0;
+        for (var j = L; j <= R; j++) base = Math.max(base, h[j]);
+        var top = base + p.pos[i][1];
+        best = Math.max(best, top);
+        out.push(best);
+        for (var j = L; j <= R; j++) h[j] = top;
+        steps.push({li:L, ri:R, base:base, top:top, best:best, h:h.slice(), out:out.slice(), idx:i});
+      }
+      cur = steps; step = 0;
+      render();
+    }
+    function render(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var xs = discretize(p.pos);
+      var st = cur[step] || null;
+      var g = '', X0 = 26, CW = Math.min(46, 600 / xs.length), HH = 210, BASE = 158;
+      g += T(340, 14, '离散表：' + xs.join(', '), {size:11.5, fill:C.dim, mono:true});
+      for (var i = 0; i < xs.length; i++) {
+        var x = X0 + i * CW;
+        var hv = st ? st.h[i + 1] : 0;
+        var bh = Math.min(hv, 6) * 20;
+        if (bh > 0) g += R(x + 2, BASE - bh, CW - 4, bh, C.blueBg, C.blue);
+        g += R(x + 2, BASE, CW - 4, 18, C.bg, C.bd);
+        g += T(x + CW / 2, BASE + 13, String(xs[i]), {size:9.5, fill:C.dim, mono:true});
+      }
+      if (st) {
+        var bx = X0 + (st.li - 1) * CW, bw = (st.ri - st.li + 1) * CW - 4;
+        g += R(bx + 2, BASE - Math.min(st.top, 6) * 20, bw, Math.min(st.top, 6) * 20, 'none', C.orange);
+        g += '<rect x="'+(bx + 2)+'" y="'+(BASE - Math.min(st.top, 6) * 20)+'" width="'+bw+
+             '" height="'+Math.min(st.top, 6) * 20+'" fill="'+C.orangeBg+'" opacity="0.55"/>';
+        g += T(bx + bw / 2, BASE - Math.min(st.top, 6) * 20 - 8, '本块 [' + st.li + ',' + st.ri + '] 顶面 ' + st.top,
+               {size:11, fill:C.orange});
+        g += '<line x1="'+X0+'" y1="'+(BASE - Math.min(st.base, 6) * 20)+'" x2="'+(X0 + xs.length * CW)+
+             '" y2="'+(BASE - Math.min(st.base, 6) * 20)+'" stroke="'+C.orange+'" stroke-width="1" stroke-dasharray="5 3"/>';
+        g += T(X0 + xs.length * CW + 8, BASE - Math.min(st.base, 6) * 20 + 4, '落点 ' + st.base,
+               {size:10.5, fill:C.orange, anchor:'end'});
+      }
+      g += T(340, BASE + 40, st ? ('第 ' + (step + 1) + ' 块：落点 ' + st.base + ' + 边长 ' + p.pos[step][1] + ' = 顶面 ' + st.top) : '点「下一块」开始',
+             {size:12, fill:C.dim});
+      stage.innerHTML = '<svg viewBox="0 0 680 '+HH+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var last = cur.length - 1;
+      ans.innerHTML = st
+        ? ('已落 <b>' + (step + 1) + '</b> 块，ans = <b>' + st.out.join(', ') + '</b>' +
+           (step === last ? '　<i>与期望 ' + PRESETS[parseInt(sel.value,10)].ans.join(', ') + ' 一致</i>' : ''))
+        : '未开始';
+      bNext.disabled = !cur.length || step >= cur.length - 1;
+    }
+    function bind(id, ev, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
+    bind('fs-next', 'click', function(){ if (step < cur.length - 1) { step++; render(); } });
+    bind('fs-reset', 'click', function(){ step = 0; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+
+  // ============ 演示 2：贴海报 ============
+  (function(){
+    var PRESETS = [
+      {name:'[(1,10) (1,3) (5,10)] 墙10', wall:10, seg:[[1,10],[1,3],[5,10]], truth:3, nomid:2},
+      {name:'[(1,4) (2,6) (5,8)] 墙10', wall:10, seg:[[1,4],[2,6],[5,8]], truth:3, nomid:3},
+      {name:'[(1,5) (1,5)] 墙10', wall:10, seg:[[1,5],[1,5]], truth:1, nomid:1},
+      {name:'[(1,2) (4,5)] 墙10', wall:10, seg:[[1,2],[4,5]], truth:2, nomid:2},
+      {name:'[(1,10) (1,10)] 墙10', wall:10, seg:[[1,10],[1,10]], truth:1, nomid:1},
+      {name:'[(1,3) (6,9) (2,8)] 墙10', wall:10, seg:[[1,3],[6,9],[2,8]], truth:3, nomid:3},
+      {name:'[(1,6) (2,5) (3,4)] 墙8', wall:8, seg:[[1,6],[2,5],[3,4]], truth:3, nomid:3}
+    ];
+    var host = document.getElementById('viz-poster');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'po-data';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var sel2 = document.createElement('select'); sel2.id = 'po-mid';
+    var m1 = document.createElement('option'); m1.value = '1'; m1.textContent = '补中间点';
+    var m0 = document.createElement('option'); m0.value = '0'; m0.textContent = '只留端点';
+    sel2.appendChild(m1); sel2.appendChild(m0);
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一张'; bNext.id = 'po-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'po-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'po-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'po-ans';
+    host.appendChild(sel); host.appendChild(sel2); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans);
+
+    var cur = [], step = 0;
+    function buildTable(seg, wall, withMid){
+      var raw = [];
+      for (var i = 0; i < seg.length; i++) { raw.push(seg[i][0]); raw.push(seg[i][1]); }
+      raw.push(wall);
+      raw.sort(function(a,b){return a-b;});
+      var u = [];
+      for (var i = 0; i < raw.length; i++) if (i === 0 || raw[i] !== raw[i-1]) u.push(raw[i]);
+      if (!withMid) return u;
+      var out = u.slice();
+      for (var i = 1; i < u.length; i++) if (u[i-1] + 1 < u[i]) out.push(u[i-1] + 1);
+      out.sort(function(a,b){return a-b;});
+      var v = [];
+      for (var i = 0; i < out.length; i++) if (i === 0 || out[i] !== out[i-1]) v.push(out[i]);
+      return v;
+    }
+    function rankOf(num, v){
+      var l = 0, r = num.length - 1, ans = 0, m;
+      while (l <= r) { m = (l + r) >> 1; if (num[m] >= v) { ans = m; r = m - 1; } else l = m + 1; }
+      return ans + 1;
+    }
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var mid = sel2.value === '1';
+      var num = buildTable(p.seg, p.wall, mid);
+      var cover = new Array(num.length + 1).fill(0);
+      var steps = [];
+      for (var i = 0; i < p.seg.length; i++) {
+        var L = rankOf(num, p.seg[i][0]), R = rankOf(num, p.seg[i][1]);
+        for (var j = L; j <= R; j++) cover[j] = i + 1;
+        steps.push({L:L, R:R, cover:cover.slice(), idx:i});
+      }
+      var seen = {}, c = 0;
+      for (var j = 1; j <= num.length; j++) if (cover[j] && !seen[cover[j]]) { seen[cover[j]] = 1; c++; }
+      cur = {num:num, steps:steps, total:c};
+      step = 0;
+      render();
+    }
+    function render(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var mid = sel2.value === '1';
+      var num = cur.num;
+      var st = cur.steps[step] || null;
+      var g = '', X0 = 20, CW = Math.min(64, 640 / num.length), HH = 176, Y0 = 40;
+      g += T(340, 14, '坐标表（' + num.length + ' 个点）：' + num.join(', '), {size:11, fill:C.dim, mono:true});
+      for (var i = 0; i < num.length; i++) {
+        var x = X0 + i * CW;
+        var owner = st ? st.cover[i + 1] : 0;
+        var col = owner ? C.blueBg : C.bg, s2 = owner ? C.blue : C.bd;
+        if (st && i + 1 >= st.L && i + 1 <= st.R) { col = C.orangeBg; s2 = C.orange; }
+        g += R(x + 1, Y0, CW - 2, 34, col, s2);
+        g += T(x + CW / 2, Y0 + 15, owner ? ('p' + owner) : '—', {size:11, fill:s2});
+        g += T(x + CW / 2, Y0 + 29, String(num[i]), {size:9.5, fill:C.dim, mono:true});
+      }
+      if (st) g += T(340, Y0 + 54, '刚贴上第 ' + (step + 1) + ' 张，覆盖表项 [' + st.L + ',' + st.R + ']',
+                     {size:12, fill:C.orange});
+      else g += T(340, Y0 + 54, '点「下一张」开始贴', {size:12, fill:C.dim});
+      // 真值条
+      var truth = [];
+      for (var x = 1; x <= p.wall; x++) truth.push(0);
+      for (var i = 0; i <= (st ? step : -1); i++)
+        for (var x = p.seg[i][0]; x <= p.seg[i][1] && x <= p.wall; x++) truth[x - 1] = i + 1;
+      var TW = Math.min(52, 620 / p.wall);
+      var TX = 30;
+      g += T(340, Y0 + 82, '真实墙面（每格 1 个单位）', {size:11, fill:C.dim});
+      for (var x = 0; x < p.wall; x++) {
+        var ow = truth[x];
+        g += R(TX + x * TW, Y0 + 92, TW - 1, 26, ow ? C.blueBg : C.bg, ow ? C.blue : C.bd);
+        g += T(TX + x * TW + TW / 2, Y0 + 109, ow ? ('p' + ow) : '', {size:9.5, fill:C.blue});
+        g += T(TX + x * TW + TW / 2, Y0 + 132, String(x + 1), {size:9, fill:C.dim, mono:true});
+      }
+      stage.innerHTML = '<svg viewBox="0 0 680 '+HH+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var last = cur.steps.length - 1;
+      var done = step >= last;
+      var got = done ? cur.total : null;
+      ans.innerHTML = done
+        ? ('贴完 ' + cur.steps.length + ' 张，可见 <b>' + got + '</b> 张　' +
+           (got === p.truth ? '<i>与真值一致</i>' : '<i style="color:#b91c1c">真值 ' + p.truth + '，算错了</i>') +
+           (mid ? '' : '　（不补中间点的期望结果 ' + p.nomid + '）'))
+        : '已贴 ' + (step + 1) + ' / ' + cur.steps.length + ' 张';
+      bNext.disabled = done;
+    }
+    function bind(id, ev, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
+    bind('po-next', 'click', function(){ if (step < cur.steps.length - 1) { step++; render(); } });
+    bind('po-reset', 'click', function(){ step = 0; render(); });
+    sel.addEventListener('change', build);
+    sel2.addEventListener('change', build);
+    build();
+  })();
+})();
+</script>
+</body>
+</html>

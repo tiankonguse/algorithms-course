@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线段树：在答案上二分 · 算法教程</title>
+<meta name="description" content="线段树能给出任意区间的和，于是「第 k 个空位在哪」可以拿区间和当判据去二分。外层二分是 log 的平方，树上直接往下走是 log，实测差 6 到 15 倍，前者够用、后者更好写。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .ansline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.7;}
+  .ansline b{color:var(--full);}
+  .ansline i{color:var(--partial);font-style:normal;}
+  .logline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.8;max-height:132px;overflow:auto;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>线段树：在答案上二分</h1>
+    <p class="intro">「第 k 个空瓶在哪个位置」这种问法，线段树没有一个操作能直接答。但线段树能给出任意区间的和，而「[s, mid] 里的空瓶数够不够 k 个」恰好是一个随 mid 单调的判据。判据单调，就能二分。</p>
+
+    <h2>零、背景</h2>
+    <p>n 个瓶子排成一排，编号 0 到 n−1，一开始全是空的，每个瓶子最多插一朵花。两种操作：</p>
+    <ul>
+      <li>操作 1 from flower：从 from 开始往右插，有花的瓶子跳过，插满 flower 朵或者到头就停。返回这次插的头尾两个位置；一个都没插上就打印 <code>Can not put any one.</code></li>
+      <li>操作 2 left right：把 [left, right] 清空，返回清掉的花的数量。</li>
+    </ul>
+    <p>瓶子只有空和满两态，[l, r] 上有花的瓶子数就是区间和。区间和线段树是最好写的那一种：懒标记是「整段赋值」，<code>lazy(i, v, len)</code> 把 sum 直接写成 v × len。</p>
+    <p>麻烦全在操作 1 上。它要的是两个具体位置，不是一个数。</p>
+
+    <h2>一、先数出够不够</h2>
+    <p><code>from..n−1</code> 这一段里还有多少个空瓶，是 <code>(n − from) − query(from, n)</code>。这个数等于 0 就一个都插不进去，直接打印那句话。</p>
+    <p>剩下的花可能比空瓶多，实际能插的是 <code>min(zeros, flowers)</code> 朵。于是问题变成：找 <code>from..n−1</code> 上的第 1 个空瓶，和第 min(zeros, flowers) 个空瓶。</p>
+
+    <h2>二、拿区间和当判据去二分</h2>
+    <p>固定起点 s，看 [s, mid] 这一段。mid 往右挪，这段里的空瓶数只会增加不会减少。所以要找「空瓶数 ≥ k 的最靠左的 mid」，标准的二分答案。</p>
+    <pre class="code"><span class="cm">// s..n 上第 k 个空瓶的位置，没有就返回 0</span>
+    <span class="cm">// 判据带等号：要的是「满足 &gt;= k 的最靠左的那个」</span>
+    <span class="kw">int</span> <span class="fn">findZero</span>(<span class="kw">int</span> s, <span class="kw">int</span> k) {
+        <span class="kw">int</span> lo = s, hi = n, ans = 0, mid;
+        <span class="kw">while</span> (lo &lt;= hi) {
+            mid = (lo + hi) &gt;&gt; 1;
+            <span class="kw">if</span> (mid - s + 1 - query(s, mid, 1, n, 1) &gt;= k) {
+                ans = mid;
+                hi = mid - 1;
+            } <span class="kw">else</span> {
+                lo = mid + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+    <p>判据里那个等号不能省。要的是最靠左的那一个满足 ≥ k 的位置，写成 &gt; k 就会在正好相等时继续往右，找到的就不是第一个。</p>
+    <figure class="fig" id="fig-bs"></figure>
+
+    <h2>三、主流程</h2>
+    <pre class="code"><span class="cm">// 题目给的 from 从 0 开始，线段树从 1 开始，进出各加减一次</span>
+    pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt; <span class="fn">insertFlower</span>(<span class="kw">int</span> from, <span class="kw">int</span> flowers) {
+        from++;
+        <span class="kw">int</span> start, end;
+        <span class="kw">int</span> zeros = n - from + 1 - query(from, n, 1, n, 1); <span class="cm">// from..n 还有几个空瓶</span>
+        <span class="kw">if</span> (zeros == 0) {
+            start = 0;
+            end = 0;
+        } <span class="kw">else</span> {
+            start = findZero(from, 1);                       <span class="cm">// 第一个空瓶</span>
+            end = findZero(from, min(zeros, flowers));        <span class="cm">// 第 min 个空瓶</span>
+            update(start, end, 1, 1, n, 1);
+        }
+        <span class="kw">return</span> {start - 1, end - 1};
+    }</pre>
+    <p>两次二分各自 O(log n) 轮，每轮一次 O(log n) 的区间查询，合起来是 O(log²n)。n = 50000 时实测 <code>findZero</code> 平均调用 14.12 次区间查询，log₂50000 是 15.61。</p>
+    <p>下标换算这一步也容易错：题目给的 from 从 0 开始，线段树从 1 开始，进函数时加 1、出函数时减 1，两边都要做。</p>
+
+    <div class="viz" id="viz-vase">
+      <h3>演示：二分找到第 k 个空瓶</h3>
+      <p class="viz-hint">每一步是一次二分探查，橙色区间就是被查询的 [from, mid]。「跑到本操作结束」直接跳到本次操作落定。</p>
+    </div>
+
+    <h2>四、直接顺着树往下走</h2>
+    <p>外层二分把树当成一个只会回答区间和的黑盒，每次都从根重新走一遍。其实判据要的那个数在树上是可以边走边攒的：到了某个节点，先看左半边里落在查询范围内的空瓶够不够 k 个，够就往左，不够就往右并把 k 减掉这一段的量。</p>
+    <pre class="code"><span class="cm">// 在树上直接往下走：左半边空瓶够就往左，不够就往右并把 k 减掉</span>
+    <span class="kw">int</span> <span class="fn">findZeroOnTree</span>(<span class="kw">int</span> s, <span class="kw">int</span> k, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) <span class="kw">return</span> l;
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        down(i, mid - l + 1, r - mid);
+        <span class="kw">int</span> leftZero = 0;
+        <span class="kw">if</span> (s &lt;= mid) {
+            <span class="kw">int</span> used = query(s, mid, l, mid, i &lt;&lt; 1);
+            leftZero = (mid - max(s, l) + 1) - used;
+        }
+        <span class="kw">if</span> (leftZero &gt;= k) <span class="kw">return</span> findZeroOnTree(s, k, l, mid, i &lt;&lt; 1);
+        <span class="kw">return</span> findZeroOnTree(max(s, mid + 1), k - leftZero, mid + 1, r, i &lt;&lt; 1 | 1);
+    }</pre>
+    <p>这样一次只走树高，是 O(log n)。代价是代码里要自己算「左孩子在 [s, mid] 范围内的长度」，比外层二分的四行判据啰嗦。</p>
+    <figure class="fig" id="fig-tree"></figure>
+    <table class="complexity">
+      <tr><th>n</th><th>外层二分</th><th>树上二分</th><th>快多少</th></tr>
+      <tr><td>1000</td><td>88.7 ms</td><td>7.4 ms</td><td>12.0 倍</td></tr>
+      <tr><td>10000</td><td>189.0 ms</td><td>13.9 ms</td><td>13.6 倍</td></tr>
+      <tr><td>50000</td><td>249.1 ms</td><td>24.7 ms</td><td>10.1 倍</td></tr>
+      <tr><td>100000</td><td>291.6 ms</td><td>44.7 ms</td><td>6.5 倍</td></tr>
+    </table>
+    <p>同样二十万次 <code>findZero</code>。n 越大比值反而越小，因为树上二分每次要多算一次左孩子的长度，这个常数在 n 小的时候占比更明显。</p>
+    <p>要不要换？n = 50000、m = 50000 的混合操作实测 76.37 ms，外层二分完全够。真要卡常再换树上二分，别一上来就写那个要手算长度的版本。</p>
+
+    <h2>五、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>操作</th><th>外层二分</th><th>树上二分</th><th>说明</th></tr>
+      <tr><td>建树</td><td>O(n)</td><td>O(n)</td><td>全空，只需要把 sum 和懒标记清零</td></tr>
+      <tr><td>插入一次</td><td>O(log²n)</td><td>O(log n)</td><td>两次 findZero，各含若干次区间查询</td></tr>
+      <tr><td>清空一次</td><td>O(log n)</td><td>O(log n)</td><td>一次区间查询加一次区间赋值</td></tr>
+      <tr><td>空间</td><td>O(n)</td><td>O(n)</td><td>sum、change 两个 int 数组加一个 bool 标记，四倍开</td></tr>
+    </table>
+    <p>int 够用：瓶子数 ≤ 50000，区间和最大就是 n。四个字节一个数组，四倍开是 0.8 MB。</p>
+
+    <h2>六、几种写错的样子</h2>
+    <p>每组 20000 个随机输入，四档是「瓶数 / 操作数」= 5 / 4、12 / 8、30 / 20、80 / 50。百分比是和暴力模拟逐行不一致的比例。</p>
+    <table class="complexity">
+      <tr><th>写错的地方</th><th>档 1</th><th>档 2</th><th>档 3</th><th>档 4</th></tr>
+      <tr><td>判据写成 &gt; k</td><td>93.67%</td><td>99.59%</td><td>100.00%</td><td>100.00%</td></tr>
+      <tr><td>from 忘加减 1</td><td>81.27%</td><td>97.79%</td><td>100.00%</td><td>100.00%</td></tr>
+      <tr><td>zeros 忘了减区间和</td><td>26.09%</td><td>67.47%</td><td>98.49%</td><td>100.00%</td></tr>
+      <tr><td>end 不取 min(zeros, flowers)</td><td>60.74%</td><td>89.81%</td><td>99.84%</td><td>100.00%</td></tr>
+      <tr><td>清空时先改后查</td><td>57.76%</td><td>92.45%</td><td>99.97%</td><td>100.00%</td></tr>
+    </table>
+    <p>「zeros 忘了减区间和」这一行在小数据上只有 26%，因为瓶子少的时候 from 后面往往整段是空的，减不减都一样。瓶子一多，前面插过的花就会让这两个数分道扬镳。</p>
+    <p>「清空时先改后查」是个挺典型的顺序错：先赋值成 0 再查，查到的永远是 0。返回的是清掉的数量，顺序反了就归零。</p>
+
+    <h2>七、总结</h2>
+    <p>线段树不能直接答「第 k 个是誰」，但区间和随手可得，而「前 mid 个里够不够 k 个」随 mid 单调。把树当黑盒、在外面二分答案，是把一个不会做的查询拆成一串会做的查询的通用路子。</p>
+    <p>外层二分的代价是 log 的平方，实测比树上二分慢 6 到 15 倍，但 n = 50000 时也就 76 ms，先写它。要提速就顺着树往下走，边走边攒左半边的量，一次只走树高。</p>
+    <p>这个「在答案上二分」的形状后面还会见到：判据换成前缀和、换成最大值、换成某个计数，只要它单调，套的就是同一层壳。</p>
+
+    <h2>最后</h2>
+    <p>三件容易翻车的小事。一是判据的等号，找最靠左的满足位置必须用 ≥，用 &gt; 会整体右移一位。二是下标基准，题目 0 起、线段树 1 起，进和出各换一次，只换一边就全错。三是 <code>findZero</code> 在 k 超过实际空瓶数时返回 0，调用方要么先算 zeros 挡一道，要么拿到 0 时按「一个都插不进」处理，别直接拿 0 去 update。</p>
+
+    <h2>相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>HDU</td><td><a href="https://acm.hdu.edu.cn/showproblem.php?pid=4614" target="_blank">瓶子里的花朵</a></td><td>acm.hdu.edu.cn/showproblem.php?pid=4614</td></tr>
+    </table>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解111【扩展】线段树专题2-线段树的离散化、二分搜索、特别修改</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = {blue:'#2563eb', blueBg:'#dbeafe', blueLt:'#eef4ff',
+           orange:'#ea580c', orangeBg:'#ffedd5', gray:'#9aa0a6',
+           bg:'#f6f7f9', bd:'#e6e8eb', ink:'#1f2328', dim:'#5c6370'};
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x,y,s,o){
+    o = o || {};
+    return '<text x="'+x+'" y="'+y+'" font-size="'+(o.size||12)+'" fill="'+(o.fill||C.ink)+
+           '" text-anchor="'+(o.anchor||'middle')+'"'+(o.mono?' font-family="ui-monospace,Menlo,monospace"':'')+
+           (o.weight?' font-weight="'+o.weight+'"':'')+'>'+esc(s)+'</text>';
+  }
+  function R(x,y,w,h,fill,stroke){
+    return '<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w)+'" height="'+Math.max(0,h)+
+           '" rx="3" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="1"':'')+'/>';
+  }
+  function mount(id, hh, body, cap){
+    var f = document.getElementById(id);
+    if (!f) return;
+    f.innerHTML = '<svg viewBox="0 0 680 '+hh+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+
+      body + '</svg><figcaption>'+cap+'</figcaption>';
+  }
+
+  // ---------- 图 1：外层二分的过程 ----------
+  (function(){
+    var g = '', X0 = 40, CW = 52, Y0 = 58;
+    // 瓶子：1 表示有花
+    var a = [1,0,0,1,0,0,0,0,0,1,0];
+    g += T(340, 16, 's = 2（0 起），找第 k = 3 个空瓶', {size:13, weight:'600'});
+    for (var i = 0; i < a.length; i++) {
+      var x = X0 + i * CW;
+      g += R(x, Y0, CW - 3, 32, a[i] ? C.blueBg : C.bg, a[i] ? C.blue : C.bd);
+      g += T(x + (CW - 3) / 2, Y0 + 20, a[i] ? '花' : '空', {size:11, fill:a[i] ? C.blue : C.dim});
+      g += T(x + (CW - 3) / 2, Y0 + 47, String(i), {size:10, fill:C.dim, mono:true});
+    }
+    // 二分三轮：[2,10] mid=6 → 空瓶 4个≥3；[2,6] mid=4 → 2个<3；[5,6] mid=5 → 3个≥3
+    var rounds = [
+      {lo:2, hi:10, mid:6, z:4, ok:true, note:'[2,6] 有 4 个空瓶 ≥ 3，答案在左边'},
+      {lo:2, hi:5,  mid:3, z:1, ok:false, note:'[2,3] 只有 1 个空瓶 < 3，往右'},
+      {lo:4, hi:5,  mid:4, z:2, ok:false, note:'[2,4] 有 2 个 < 3，往右'},
+      {lo:5, hi:5,  mid:5, z:3, ok:true,  note:'[2,5] 正好 3 个，收下 5'}
+    ];
+    var y = Y0 + 74;
+    for (var i = 0; i < rounds.length; i++) {
+      var r = rounds[i];
+      var x1 = X0 + r.lo * CW, x2 = X0 + (r.mid + 1) * CW - 3;
+      g += R(x1, y, x2 - x1, 20, r.ok ? C.orangeBg : '#f1f2f4', r.ok ? C.orange : C.bd);
+      g += '<line x1="'+(X0 + (r.mid + 1) * CW - 3)+'" y1="'+(y - 6)+'" x2="'+(X0 + (r.mid + 1) * CW - 3)+
+           '" y2="'+(y + 26)+'" stroke="'+(r.ok ? C.orange : C.gray)+'" stroke-width="2"/>';
+      g += T(X0 + (r.mid + 1) * CW - 3, y - 10, 'mid=' + r.mid, {size:10.5, fill:r.ok ? C.orange : C.gray, mono:true});
+      g += T(660, y + 14, r.z + ' 个 ' + (r.ok ? '≥' : '<') + ' 3', {size:11, fill:r.ok ? C.orange : C.dim, anchor:'end'});
+      g += T(340, y + 40, (i + 1) + ') ' + r.note, {size:11.5, fill:C.dim});
+      y += 62;
+    }
+    g += T(340, y + 6, '答案：位置 5（0 起）。每一轮都要问一次 [s, mid] 的区间和。', {size:12.5, fill:'#15803d', weight:'600'});
+    mount('fig-bs', y + 26, g, '四轮二分，每轮一次区间查询；mid 落在哪就把左右边界收到哪一侧。');
+  })();
+
+  // ---------- 图 2：树上二分 ----------
+  (function(){
+    var g = '';
+    g += T(340, 16, '同一个问题，顺着树往下走', {size:13, weight:'600'});
+    // 画一棵 8 叶的树，标出走的路径
+    var NW = 74, LV = [58, 118, 178];
+    var nodes = [
+      {x:340, y:LV[0], w:520, lab:'[1,8]', on:true, note:''},
+      {x:190, y:LV[1], w:250, lab:'[1,4]', on:true, note:'左半边空瓶 3 个'},
+      {x:490, y:LV[1], w:250, lab:'[5,8]', on:false, note:''},
+      {x:120, y:LV[2], w:118, lab:'[1,2]', on:false, note:''},
+      {x:262, y:LV[2], w:118, lab:'[3,4]', on:true, note:'够 3 个，往左'},
+      {x:422, y:LV[2], w:118, lab:'[5,6]', on:false, note:''},
+      {x:562, y:LV[2], w:118, lab:'[7,8]', on:false, note:''}
+    ];
+    var edges = [[0,1],[0,2],[1,3],[1,4],[2,5],[2,6]];
+    for (var i = 0; i < edges.length; i++) {
+      var a = nodes[edges[i][0]], b = nodes[edges[i][1]];
+      var on = a.on && b.on;
+      g += '<line x1="'+a.x+'" y1="'+(a.y + 18)+'" x2="'+b.x+'" y2="'+b.y+
+           '" stroke="'+(on ? C.orange : C.bd)+'" stroke-width="'+(on ? 2.5 : 1)+'"/>';
+    }
+    for (var i = 0; i < nodes.length; i++) {
+      var nd = nodes[i];
+      g += R(nd.x - nd.w / 2, nd.y, nd.w, 34, nd.on ? C.orangeBg : C.bg, nd.on ? C.orange : C.bd);
+      g += T(nd.x, nd.y + 22, nd.lab, {size:12, fill:nd.on ? C.orange : C.dim, mono:true});
+    }
+    g += T(262, LV[2] + 54, '在 [3,4] 里继续往下，两步到叶子', {size:11.5, fill:C.orange});
+    g += T(340, LV[2] + 92, '外层二分：log n 轮 × 每轮 O(log n) = O(log² n)', {size:12.5, fill:C.dim});
+    g += T(340, LV[2] + 114, '树上二分：一次走到底 = O(log n)，但要自己算左半边的有效长度', {size:12.5, fill:C.blue});
+    mount('fig-tree', LV[2] + 136, g, '树上二分把「每轮重新从根走一遍」省成一次下行，代价是判据要边走边攒。');
+  })();
+
+  // ============ 演示：瓶子里的花朵 ============
+  (function(){
+    var PRESETS = [
+      {name:'n=10，5 次操作', n:10, ops:[[1,2,3],[2,4,6],[1,0,4],[1,8,5],[2,0,9]]},
+      {name:'n=8，6 次操作', n:8, ops:[[1,0,3],[1,3,10],[2,1,4],[1,0,2],[1,7,1],[2,0,7]]},
+      {name:'n=12，6 次操作', n:12, ops:[[1,5,4],[1,0,6],[2,2,9],[1,10,3],[1,0,20],[2,0,11]]},
+      {name:'n=6，4 次操作（全满）', n:6, ops:[[1,0,3],[1,0,3],[1,0,1],[1,2,5]]}
+    ];
+    var host = document.getElementById('viz-vase');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'va-data';
+    for (var i = 0; i < PRESETS.length; i++) {
+      var o = document.createElement('option'); o.value = String(i); o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'va-next';
+    var bRun = document.createElement('button'); bRun.textContent = '跑到本操作结束'; bRun.id = 'va-run';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'va-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bRun); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'va-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'va-ans';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'va-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var cur = [], step = 0, outLines = [];
+
+    function sumOf(a, l, r){ var s = 0; for (var i = l; i <= r; i++) s += a[i]; return s; }
+
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var n = p.n;
+      var a = new Array(n).fill(0);
+      var steps = [], outs = [];
+      for (var i = 0; i < p.ops.length; i++) {
+        var op = p.ops[i];
+        if (op[0] === 1) {
+          var from = op[1], flowers = op[2];
+          var zeros = (n - from) - sumOf(a, from, n - 1);
+          if (zeros === 0) {
+            steps.push({kind:'none', from:from, a:a.slice(), op:i});
+            outs.push('Can not put any one.');
+          } else {
+            var k1 = 1, k2 = Math.min(zeros, flowers);
+            var targets = [k1, k2], found = [];
+            for (var t = 0; t < 2; t++) {
+              var k = targets[t], lo = from, hi = n - 1, bestAns = -1;
+              while (lo <= hi) {
+                var mid = (lo + hi) >> 1;
+                var z = (mid - from + 1) - sumOf(a, from, mid);
+                var ok = z >= k;
+                steps.push({kind:'probe', from:from, k:k, lo:lo, hi:hi, mid:mid, z:z, ok:ok, a:a.slice(), op:i, which:t});
+                if (ok) { bestAns = mid; hi = mid - 1; } else lo = mid + 1;
+              }
+              found.push(bestAns);
+            }
+            var s0 = found[0], e0 = found[1];
+            for (var j = s0; j <= e0; j++) a[j] = 1;
+            steps.push({kind:'apply', from:from, s:s0, e:e0, a:a.slice(), op:i});
+            outs.push(s0 + ' ' + e0);
+          }
+        } else {
+          var l = op[1], r = op[2];
+          var c = sumOf(a, l, r);
+          for (var j = l; j <= r; j++) a[j] = 0;
+          steps.push({kind:'clear', l:l, r:r, cnt:c, a:a.slice(), op:i});
+          outs.push(String(c));
+        }
+      }
+      cur = steps; step = 0; outLines = outs;
+      render();
+    }
+
+    function render(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var n = p.n;
+      var st = cur[step] || null;
+      var g = '', X0 = 22, CW = Math.min(56, 636 / n), HH = 168, Y0 = 48;
+      var a = st ? st.a : new Array(n).fill(0);
+      g += T(340, 14, '瓶子 0 .. ' + (n - 1) + '（蓝底 = 有花）', {size:11.5, fill:C.dim});
+      for (var i = 0; i < n; i++) {
+        var x = X0 + i * CW;
+        var fill = a[i] ? C.blueBg : C.bg, s2 = a[i] ? C.blue : C.bd;
+        if (st && st.kind === 'probe' && i >= st.from && i <= st.mid) { fill = C.orangeBg; s2 = C.orange; }
+        if (st && st.kind === 'apply' && i >= st.s && i <= st.e) { fill = C.orangeBg; s2 = C.orange; }
+        if (st && st.kind === 'clear' && i >= st.l && i <= st.r) { fill = C.orangeBg; s2 = C.orange; }
+        g += R(x + 1, Y0, CW - 3, 32, fill, s2);
+        g += T(x + (CW - 3) / 2, Y0 + 21, a[i] ? '花' : '空', {size:11, fill:s2});
+        g += T(x + (CW - 3) / 2, Y0 + 47, String(i), {size:10, fill:C.dim, mono:true});
+      }
+      var msg = '点「下一步」开始';
+      if (st) {
+        if (st.kind === 'probe') {
+          g += '<line x1="'+(X0 + (st.mid + 1) * CW - 2)+'" y1="'+(Y0 - 8)+'" x2="'+(X0 + (st.mid + 1) * CW - 2)+
+               '" y2="'+(Y0 + 40)+'" stroke="'+C.orange+'" stroke-width="2"/>';
+          g += T(X0 + (st.mid + 1) * CW - 2, Y0 - 12, 'mid=' + st.mid, {size:10.5, fill:C.orange, mono:true});
+          msg = '操作 ' + (st.op + 1) + '（找第 ' + st.k + ' 个空瓶）：lo=' + st.lo + '  hi=' + st.hi +
+                '  mid=' + st.mid + '  → [' + st.from + ',' + st.mid + '] 里有 ' + st.z + ' 个空瓶 ' +
+                (st.ok ? '≥ ' + st.k + '，收下并往左' : '< ' + st.k + '，往右');
+        } else if (st.kind === 'apply') {
+          msg = '操作 ' + (st.op + 1) + '：插进 ' + st.s + ' 到 ' + st.e + '，共 ' + (st.e - st.s + 1) + ' 朵';
+        } else if (st.kind === 'clear') {
+          msg = '操作 ' + (st.op + 1) + '：清空 ' + st.l + ' 到 ' + st.r + '，清掉 ' + st.cnt + ' 朵';
+        } else if (st.kind === 'none') {
+          msg = '操作 ' + (st.op + 1) + '：' + st.from + ' 后面没有空瓶了';
+        }
+      }
+      g += T(340, Y0 + 74, msg, {size:12, fill:C.ink});
+      g += T(340, Y0 + 96, '已输出：' + outLines.slice(0, st ? st.op : 0).join(' | '), {size:11, fill:C.dim, mono:true});
+      stage.innerHTML = '<svg viewBox="0 0 680 '+HH+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var last = cur.length - 1;
+      ans.innerHTML = st
+        ? ('第 <b>' + (step + 1) + '</b> / ' + cur.length + ' 步　' + (step === last ? '<i>全部输出：' + outLines.join(' | ') + '</i>' : '进行中'))
+        : '未开始';
+      var lh = '';
+      for (var i = 0; i <= step && i < cur.length; i++) {
+        var c = cur[i];
+        if (c.kind === 'probe') lh += '探 k=' + c.k + ' mid=' + c.mid + ' z=' + c.z + (c.ok ? ' ✓' : ' ✗') + '\n';
+        else if (c.kind === 'apply') lh += '插 [' + c.s + ',' + c.e + ']\n';
+        else if (c.kind === 'clear') lh += '清 [' + c.l + ',' + c.r + '] 掉 ' + c.cnt + '\n';
+        else lh += '无空瓶\n';
+      }
+      log.textContent = lh;
+      bNext.disabled = !cur.length || step >= last;
+      bRun.disabled = !cur.length || step >= last;
+    }
+    function bind(id, ev, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
+    bind('va-next', 'click', function(){ if (step < cur.length - 1) { step++; render(); } });
+    bind('va-run', 'click', function(){
+      if (step >= cur.length - 1) return;
+      var op = cur[step].op;
+      while (step < cur.length - 1 && cur[step + 1].op === op) step++;
+      if (step < cur.length - 1) step++;
+      render();
+    });
+    bind('va-reset', 'click', function(){ step = 0; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+})();
+</script>
+</body>
+</html>

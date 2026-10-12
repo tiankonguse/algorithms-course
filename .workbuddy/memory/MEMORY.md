@@ -81,4 +81,6 @@
 - **方向性结论必须实测钉死**（107）：SpaceSaving **偏大**（Misra-Gries 才偏小）、上界 N/k、最大高估量 = 表里最小计数器；「估计 / 真实」这种混合口径的列要么统一口径要么拆成召回 / 精度两列。`ts << 64` 是 UB；宏 `#define data gData` 会误伤 `buf.data()`。
 - **统计量要给分布不只要给均值**（107）：标准差用二项式 √(np(1−p))，别用泊松近似。
 - **开工先探残留**：`ls -dt /tmp/cppNNN /tmp/hlNNN` + `find algorithms -newermt '<半小时前>'`；写 json 前 `cp` 备份 + 重读确认。
+- **页面里画出来的示例数据要和图上标出的结论逐格核**（111）：`segtree-binary-search` 第一张图把第 5 格画成「花」而不是「空」，四轮二分的空瓶数就只有两轮对得上（[2,5] 标「正好 3 个」实际 2 个、答案标 5 实际 6）；一格数据的错肉眼看不出来，把每轮区间里的空瓶数重新数一遍立刻露。
+- **`verify_pages.js` 在本机（Chrome 155）对任何页都报全 0**（用户级新版也一样，不是版本偏差），`verify_home.js` 正常。兜底：照仓库 `.agent/skills/course-site-page/scripts/cdp_page.js` 写一份（`PUT /json/new?<url>` 开页 → 连该页自己的 `webSocketDebuggerUrl` → 再 `Page.enable/Runtime.enable` 后 evaluate），检查项照抄 verify_pages 的 CHECK（figs/figSvg/nav/toc/viz/code/pager/bbox 越界）。
 - **「下一课」与 json 末条对不上 = 可能已有失联会话做完**：查该课 id 与页面 mtime；页面与 json 已落盘、只差 prompt.md 的 → 按死锁规则清 owner 重抢锁，**只补记进度、不重写页面**。
