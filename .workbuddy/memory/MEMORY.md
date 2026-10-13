@@ -45,7 +45,7 @@
 - 站点根 `~/project/github/AIProject/algorithms-course`，课件根 `~/.../algorithm-journey`。**用户目录一律写 `~/`**，禁写 `/Users/<用户名>/...`；node 用 `~/.workbuddy/binaries/node/versions/$(cat .../current)/bin/node`。
 - 材料：`ppt/算法讲解0NN【难度】标题.pptx`（zipfile + ElementTree 遍历 `ppt/slides/slideN.xml` 拼 `a:t`）+ `src/classNNN/`。**低号课只有一份 Java**（文件名是题目名、无 `Code0X_`、无 C++ 版），要自己改写成 C++ 再对拍；**中高号偶数 java 里藏着 C++**：`awk '/^\/\/#include/{f=1} f&&/^\/\//{sub(/^\/\//,"");print;next} f{print}' X.java > X.cpp`。
 - 拼页先 Write 带 `@@片段名@@` 的占位版，再用 `apply_placeholders.py` 替换（占位名 = 片段文件名，只含 `[A-Za-z0-9_]`，**占位符别套 `<pre class="code">`**，要单独一行）。省上下文：PPT 抽到 `/tmp/pptNNN.txt` 后按段取，**别把新页面 HTML 读回来**。
-- **技能装两份**（仓库 `.agent/skills/` + 用户级 `~/.workbuddy/skills/`）：改完必须 cp 同步 + `diff -rq` 确认，否则下次会话可能命中旧版。CDP 类脚本依赖同目录 `cdp_page.js`。
+- **技能装两个物理副本**：仓库 `.agent/skills/course-site-page/` + 用户级 `~/.workbuddy/skills/course-site-page/`，改完必须 cp 同步 + `diff -rq` 确认，否则下次会话可能命中旧版。**`~/.agents/skills/course-site-page/` 不是第三份**：它与 `~/.workbuddy` 那份共享同一批 inode（文件级硬链接，一边改另一边立刻可见），所以只需同步一次。CDP 类脚本依赖同目录 `cdp_page.js`。
 
 ## 自检（全自动，别只靠截图）
 - **「起 Chrome + 跑 node」写在同一条命令里**（Chrome 随 Bash 结束被回收）；端口读 `CDP_PORT`（默认 9333，换端口两处都改）；**并发会话别 `pkill` 别人的 Chrome**，用空闲端口 + 独立 `--user-data-dir`。

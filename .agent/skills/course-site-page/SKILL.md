@@ -296,11 +296,27 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 - 收口时 verify_home.js 可能因别人的中间态报 FAIL（某组还没页、组名对不上）→ 先看差异是不是自己那组，不是就放过并在 memory 记一笔。
 - 写 nav 的安全纪律（cp 备份、最小改动、核条数、别用 `git diff HEAD`）见七节。**收口必须 `python3 tools/build_nav.py` 重新生成并把生成物一起提交**，否则线上不生效；别人的中间态可能让 `--check` 报 FAIL，只看自己那组。
 
-## 十三、技能自身装两份，改完要同步
+## 十三、技能自身装多处，改完要同步
 
-本技能同时装在**仓库 `.agent/skills/course-site-page/`** 与**用户级 `~/.workbuddy/skills/course-site-page/`**，调用时命中哪份不一定。改了 SKILL.md 或 scripts，**两份都要落**（`cp` 过去再 `diff -q` 确认），否则下次会话可能读到旧版，按已废弃的流程手改 json 或跑旧的自检脚本。
+本技能有**两个物理副本**，调用时命中哪份不一定：
 
-同步完顺手确认：`diff -rq <仓库>/.agent/skills/course-site-page ~/.workbuddy/skills/course-site-page` 应无输出；CDP 类脚本（verify_pages / verify_viz_steps / shot_* / check_branch / example_controls_check）依赖同目录的 `cdp_page.js`，复制时别漏。
+| 副本 | 路径 |
+|---|---|
+| 仓库版（随 git 走） | `~/project/github/AIProject/algorithms-course/.agent/skills/course-site-page/` |
+| 用户级 | `~/.workbuddy/skills/course-site-page/` |
+
+**`~/.agents/skills/course-site-page/` 不是第三份**——它与 `~/.workbuddy/skills/course-site-page/` 共享同一批 inode（每个文件都是硬链接，在其中一边新建/改文件，另一边立刻可见）。所以真正要同步的只有「仓库版 ↔ 用户级」这一次 `cp`；同步完 `~/.agents` 自动跟着一致，不用再管。
+
+改了 SKILL.md 或 scripts，**两份都要落**（`cp` 过去再 `diff -rq` 确认），否则下次会话可能读到旧版，按已废弃的流程手改 json 或跑旧的自检脚本。
+
+```bash
+R=~/project/github/AIProject/algorithms-course/.agent/skills/course-site-page
+U=~/.workbuddy/skills/course-site-page
+cp $R/SKILL.md $U/SKILL.md            # 改哪个文件 cp 哪个
+diff -rq $R $U                         # 应只剩 .DS_Store
+```
+
+CDP 类脚本（verify_pages / verify_viz_steps / shot_* / check_branch / example_controls_check）依赖同目录的 `cdp_page.js`，复制时别漏。**不知道当前会话加载的是哪份时**：`grep -n 'tools/build_nav.py' <路径>/SKILL.md` 有 7 处命中就是 nav 版。
 
 ## 附：详细坑录索引
 
