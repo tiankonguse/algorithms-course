@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>历史最值：给每个格子记一本到过的最高点 · 算法教程</title>
+<meta name="description" content="每做一次操作就把 B[i] 更新成 max(B[i], A[i])，然后问 B 在区间上的最大值。懒标记下不去的时候，历史峰值也得跟着标记一起挂：除了当前的增量，还要记一路上的增量到过多少。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .ansline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.7;}
+  .ansline b{color:var(--full);}
+  .logline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.8;max-height:130px;overflow:auto;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>历史最值：给每个格子记一本「到过的最高点」</h1>
+    <p class="intro">两个数组 A 和 B 一开始完全一样，每做完一次操作就把 B[i] 更新成 max(B[i], A[i])。于是 B 里存的是每个格子到过的最大值，A 一路涨跌，B 只涨不跌。麻烦在于 A 是懒更新的，任务挂在结点上不往下走，B 就看不到那一段经历过什么。解法是给懒标记再配一个「这一路到过多高」。</p>
+
+    <h2>零、背景</h2>
+    <p>先想一个朴素做法：拿一个数组 B，每次操作之后扫一遍把 B 更新掉，再对 B 建一棵线段树查最大值。一次操作 O(n)，m 次操作 O(nm)，n 和 m 都是 5×10⁵ 的时候是 2.5×10¹¹，跑不完。</p>
+    <p>再想一步：B 的更新其实也能懒更新。一段里所有格子都加了 v，那么这段的 B 最大值也跟着抬高 v，一个标记就够了。问题出在「取 min」上：一段里只有最大值那一批掉下去，B 不动（B 只涨不跌），其他格子也不动，于是 B 的标记得区分「最大值的历史」和「其他数字的历史」。</p>
+    <p>所以每个结点除了累加和、最大值、最大值个数、严格次大值，还要再配三个历史量：这一段上 B 的历史最大值 <code>maxHistory</code>，以及两路增量各自到过的最高点 <code>maxAddTop</code> 和 <code>otherAddTop</code>。</p>
+
+    <h2>一、题目</h2>
+    <p>两个长度都是 n 的数组 A 和 B，一开始完全一样。任何操作做完都更新 B，<code>B[i] = max(B[i], A[i])</code>。一共调用 m 次操作：</p>
+    <ul>
+      <li>操作 <code>1 l r v</code>：A 在 l 到 r 上每个数加 v</li>
+      <li>操作 <code>2 l r v</code>：A 在 l 到 r 上每个数变成 min(A[i], v)</li>
+      <li>操作 <code>3 l r</code>：返回 A 在 l 到 r 上的累加和</li>
+      <li>操作 <code>4 l r</code>：返回 A 在 l 到 r 上的最大值</li>
+      <li>操作 <code>5 l r</code>：返回 B 在 l 到 r 上的最大值</li>
+    </ul>
+    <p>其中 n 和 m 都不超过 5×10⁵。</p>
+
+    <h2>二、六个量怎么分工</h2>
+    <p>「现在」这一组是四个数加两条通道：累加和、最大值、最大值个数、严格次大值，外加 <code>maxAdd</code> 和 <code>otherAdd</code> 两条增量通道。</p>
+    <p>「历史」这一组是新增的三个。<code>maxHistory</code> 就是这一段上 B 的最大值，<code>up</code> 的时候两个孩子取 max 合并。另外两个是标记的峰值：<code>maxAddTop</code> 记 <code>maxAdd</code> 这一路到目前为止到过的最大值，<code>otherAddTop</code> 同理。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> l = i &lt;&lt; 1, r = i &lt;&lt; 1 | 1;
+        maxHistory[i] = max(maxHistory[l], maxHistory[r]);   <span class="cm">// 历史最大照样可以取 max 合并</span>
+        sum[i] = sum[l] + sum[r];
+        mx[i] = max(mx[l], mx[r]);
+        <span class="kw">if</span> (mx[l] &gt; mx[r]) {
+            cnt[i] = cnt[l];
+            sem[i] = max(sem[l], mx[r]);
+        } <span class="kw">else</span> <span class="kw">if</span> (mx[l] &lt; mx[r]) {
+            cnt[i] = cnt[r];
+            sem[i] = max(mx[l], sem[r]);
+        } <span class="kw">else</span> {
+            cnt[i] = cnt[l] + cnt[r];
+            sem[i] = max(sem[l], sem[r]);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) {
+            sum[i] = mx[i] = maxHistory[i] = arr[l];   <span class="cm">// 一开始 B 和 A 完全一样</span>
+            sem[i] = LOWEST;
+            cnt[i] = 1;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            build(l, mid, i &lt;&lt; 1);
+            build(mid + 1, r, i &lt;&lt; 1 | 1);
+            up(i);
+        }
+        maxAdd[i] = otherAdd[i] = maxAddTop[i] = otherAddTop[i] = 0;
+    }</pre>
+    <p>为什么非得记标记的峰值？看一次「加 3 再加 −6」。整段加 3 时，这段的最大值是 5，加上 3 到过 8；再加 −6 之后当前只剩 2。如果只记当前增量 −3，那么这段的子孙在被下发时只会拿到 −3，历史峰值 8 就丢了。<code>maxAddTop</code> 记的是 3（那一路到过的最高点），下发时它才知道这一段有格子到过 8。</p>
+
+    <h2>三、一次 lazy 里的六件事</h2>
+    <pre class="code"><span class="kw">long</span> <span class="kw">long</span> maxHistory[MAXN &lt;&lt; 2];   <span class="cm">// 这一段里 B 的最大值</span>
+    <span class="kw">long</span> <span class="kw">long</span> maxAdd[MAXN &lt;&lt; 2];       <span class="cm">// 最大值累计加了多少</span>
+    <span class="kw">long</span> <span class="kw">long</span> otherAdd[MAXN &lt;&lt; 2];     <span class="cm">// 其他数字累计加了多少</span>
+    <span class="kw">long</span> <span class="kw">long</span> maxAddTop[MAXN &lt;&lt; 2];    <span class="cm">// 历史上 maxAdd 到过的最大值</span>
+    <span class="kw">long</span> <span class="kw">long</span> otherAddTop[MAXN &lt;&lt; 2];  <span class="cm">// 历史上 otherAdd 到过的最大值</span>
+
+    <span class="cm">// 前四个数是「现在」，后两个带 Top 的是「历史以来的峰值」</span>
+    <span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">int</span> n, <span class="kw">long</span> <span class="kw">long</span> maxAddv, <span class="kw">long</span> <span class="kw">long</span> otherAddv,
+              <span class="kw">long</span> <span class="kw">long</span> maxUpv, <span class="kw">long</span> <span class="kw">long</span> otherUpv) {
+        maxHistory[i] = max(maxHistory[i], mx[i] + maxUpv);
+        maxAddTop[i] = max(maxAddTop[i], maxAdd[i] + maxUpv);
+        otherAddTop[i] = max(otherAddTop[i], otherAdd[i] + otherUpv);
+        sum[i] += maxAddv * cnt[i] + otherAddv * (n - cnt[i]);
+        mx[i] += maxAddv;
+        sem[i] += sem[i] == LOWEST ? 0 : otherAddv;
+        maxAdd[i] += maxAddv;
+        otherAdd[i] += otherAddv;
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i, <span class="kw">int</span> ln, <span class="kw">int</span> rn) {
+        <span class="kw">int</span> l = i &lt;&lt; 1, r = i &lt;&lt; 1 | 1;
+        <span class="kw">long</span> <span class="kw">long</span> tmp = max(mx[l], mx[r]);
+        <span class="kw">if</span> (mx[l] == tmp) lazy(l, ln, maxAdd[i], otherAdd[i], maxAddTop[i], otherAddTop[i]);
+        <span class="kw">else</span>              lazy(l, ln, otherAdd[i], otherAdd[i], otherAddTop[i], otherAddTop[i]);
+        <span class="kw">if</span> (mx[r] == tmp) lazy(r, rn, maxAdd[i], otherAdd[i], maxAddTop[i], otherAddTop[i]);
+        <span class="kw">else</span>              lazy(r, rn, otherAdd[i], otherAdd[i], otherAddTop[i], otherAddTop[i]);
+        maxAdd[i] = otherAdd[i] = maxAddTop[i] = otherAddTop[i] = 0;
+    }</pre>
+    <p>前三个是历史，后四个是现在。注意 <code>maxHistory[i]</code> 那句用的是「当前最大值加上这一次的抬升」，而不是加上累积增量：整段加 3 之后再加 3，历史峰值应该是「原值加 3」和「原值加 6」里更大的那个，<code>maxAddTop</code> 保证第二趟拿到的是 6 而不是 6 减 3。</p>
+    <p>两个 Top 用 max 累加，不用加法。因为历史峰值是「到过多少」，不是「一共加了多少」：加 3 之后减 1，这一路的峰值是 3，不是 2。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">long</span> <span class="kw">long</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="cm">// 现在加 jobv，历史峰值也跟着往上抬 jobv</span>
+            lazy(i, r - l + 1, jobv, jobv, jobv, jobv);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            down(i, mid - l + 1, r - mid);
+            <span class="kw">if</span> (jobl &lt;= mid) add(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+            <span class="kw">if</span> (jobr &gt; mid) add(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+            up(i);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">setMin</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">long</span> <span class="kw">long</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobv &gt;= mx[i]) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr &amp;&amp; sem[i] &lt; jobv) {
+            <span class="cm">// 最大值往下掉，历史峰值不动（其他数字本来就有 otherUpv = 0）</span>
+            lazy(i, r - l + 1, jobv - mx[i], 0, jobv - mx[i], 0);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            down(i, mid - l + 1, r - mid);
+            <span class="kw">if</span> (jobl &lt;= mid) setMin(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+            <span class="kw">if</span> (jobr &gt; mid) setMin(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+            up(i);
+        }
+    }</pre>
+    <p>取 min 命中时传的是 <code>(jobv - mx[i], 0, jobv - mx[i], 0)</code>：最大值那一路往下掉，其他数字一动不动，历史方面只有「最大值现在掉到了 jobv」这件事需要记，而它比之前到过的要低，<code>max</code> 一下毫无影响。</p>
+    <p>区间加传的是 <code>(jobv, jobv, jobv, jobv)</code>：现在抬 jobv，历史峰值也跟着抬 jobv，两批数字都一样。</p>
+
+    <h2>四、走一遍看得更清楚</h2>
+    <p>拿 A 等于 [1, 5, 3, 5, 2, 4] 举例，B 一开始和它一样：</p>
+    <ul>
+      <li><code>add(2, 5, 3)</code>：A 变成 1、8、6、8、5、4，B 同步成 1、8、6、8、5、4，A 的最大值和 B 的最大值都是 8，累加和 32</li>
+      <li><code>add(2, 5, -6)</code>：A 变成 1、2、0、2、-1、4，A 的最大值掉到 4，B 还记着 8，累加和 8</li>
+      <li><code>setMin(1, 6, 2)</code>：A 变成 1、2、0、2、-1、2，A 的最大值 2，B 的最大值还是 8，累加和 6</li>
+      <li><code>add(3, 4, 10)</code>：A 变成 1、2、10、12、-1、2，这一轮把位置 3、4 抬过 8，B 的最大值变成 12，累加和 26</li>
+    </ul>
+    <figure class="fig" id="fig-ab"></figure>
+    <p>第 4 步最能说明 <code>maxAddTop</code> 的用处：位置 4 在前面两趟里经历过「加 3 到 8、再减 6 到 2」，这两趟的标记都还挂在祖先结点上没下去。等它这一趟被访问时，祖先把 <code>maxAddTop</code> 等于 3 一起交下来，它的历史峰值才知道是 8 而不是 2。</p>
+    <figure class="fig" id="fig-channel"></figure>
+    <p>所以 <code>down</code> 里两个孩子拿到的参数不一样：最大值等于父亲最大值的那个孩子，走「最大值通道」；另一个走「其他数字通道」。两条通道各带两个值，一共四个，全都要交下去。</p>
+    <div class="viz" id="viz-history">
+      <h3>演示：A 一路涨跌，B 只涨不跌</h3>
+      <p class="viz-hint">点「下一步」依次执行操作，看 A、B 两排数字和它们各自的最大值，注意取 min 之后哪几个格子掉到了 B 下面。</p>
+    </div>
+
+    <h2>五、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>项</th><th>代价</th></tr>
+      <tr><td>建树</td><td>O(n)</td></tr>
+      <tr><td>区间加</td><td>O(log n)</td></tr>
+      <tr><td>区间取 min</td><td>O(log n) 均摊</td></tr>
+      <tr><td>三种查询</td><td>O(log n)</td></tr>
+      <tr><td>空间</td><td>O(n)：八个四倍数组</td></tr>
+    </table>
+    <p>按 n 等于 5×10⁵ 算：七个 long long 数组加一个 int 数组，每个长度都是四倍，一共约 114.4 MiB。这是这一族写法里最费空间的一套，八个数组一个都不能省。</p>
+    <p>实测（g++ -O2，同一份操作跑 5 遍取最好）：n 和 m 都是 5×10⁵ 时 287.936 ms；n 是 5×10⁵、m 是 2×10⁵ 时 124.765 ms。对照的朴素做法是每次操作之后扫一遍更新 B，那要 O(nm)，这个规模下完全跑不动。</p>
+    <p>时间复杂度和把三个历史量删掉之后一样，多出来的只是常数：每个结点的 <code>lazy</code> 从四个参数变成六个，<code>up</code> 多一句取 max。</p>
+
+    <h2>六、几种写错的样子</h2>
+    <p>同样每组 3000 个小样本、每个样本最多 60 步，值域分三档：</p>
+    <ul>
+      <li><code>lazy</code> 里不更新 <code>maxHistory</code>：86.67% / 90.77% / 89.70%</li>
+      <li><code>up</code> 里不算 <code>maxHistory</code>：94.67% / 95.93% / 95.47%</li>
+      <li><code>maxAddTop</code> 写成 <code>max(maxAddTop[i], maxUpv)</code>，把累积的 <code>maxAdd</code> 丢了：46.60% / 54.80% / 55.90%。这一条是三组里唯一「一半才抓得到」的，因为它只在连续两趟增量方向不同时才现形。</li>
+      <li>取 min 时把历史那一路的 <code>otherUpv</code> 也传成 <code>jobv - mx[i]</code>：三档都是 0.00%，是真等价。<code>otherAddTop</code> 恒不小于 <code>otherAdd</code>，而取 min 传进来的是个负数，加上去只会更小，<code>max</code> 一下不会改变它。</li>
+    </ul>
+
+    <h2>七、总结</h2>
+    <p>历史最值要求「只涨不跌」的那个数组也能懒更新，于是每个结点除了当前状态还要记三个历史量。关键在 <code>lazy</code>：抬升要同时抬三个历史量，压低对历史毫无影响（B 只涨不跌），两个 Top 用 max 累加而不是加法。</p>
+    <p>这套结构的核心难点是「标记的峰值」这个概念：<code>maxAdd</code> 是现在欠了多少，<code>maxAddTop</code> 是这一路欠到过多少。下发的时候两个都要交下去，只交前者会丢掉中途的峰值。</p>
+
+    <h2>最后</h2>
+    <p>一是 <code>lazy</code> 里那三句历史更新必须在改 <code>mx[i]</code> 之前写，顺序反了 <code>mx[i] + maxUpv</code> 就用的是改过之后的值。</p>
+    <p>二是 <code>down</code> 收尾要把四个标记一起清零，漏掉两个 Top 会让同一次抬升被反复计入历史。</p>
+    <p>三是取 min 那一路的历史参数是 <code>(jobv - mx[i], 0, jobv - mx[i], 0)</code>，第四位必须是 0，其他数字这一趟没有动过。</p>
+
+    <h2>相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P6242" target="_blank">P6242 线段树 3（区间最值操作、区间历史最值）</a></td><td>luogu.com.cn/problem/P6242</td></tr>
+    </table>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解114【扩展】线段树专题5-开点线段树、区间最值和历史最值</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = {blue:'#2563eb', blueBg:'#dbeafe', blueLt:'#eef4ff',
+           orange:'#ea580c', orangeBg:'#ffedd5', gray:'#9aa0a6',
+           bg:'#f6f7f9', bd:'#e6e8eb', ink:'#1f2328', dim:'#5c6370'};
+
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x,y,s,o){
+    o = o || {};
+    return '<text x="'+x+'" y="'+y+'" font-size="'+(o.size||12)+'" fill="'+(o.fill||C.ink)+
+           '" text-anchor="'+(o.anchor||'middle')+'"'+(o.mono?' font-family="ui-monospace,Menlo,monospace"':'')+
+           (o.weight?' font-weight="'+o.weight+'"':'')+'>'+esc(s)+'</text>';
+  }
+  function R(x,y,w,h,fill,stroke){
+    return '<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w)+'" height="'+Math.max(0,h)+
+           '" rx="3" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="1"':'')+'/>';
+  }
+  function mount(id, hh, body, cap){
+    var f = document.getElementById(id);
+    if (!f) return;
+    f.innerHTML = '<svg viewBox="0 0 680 '+hh+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+
+      body + '</svg>'+(cap?'<figcaption>'+cap+'</figcaption>':'');
+  }
+  function bind(id, ev, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
+  var LLOW = -9007199254740991;
+
+  // ---------- 图：A / B 四步 ----------
+  (function(){
+    var g = '', i, j;
+    g += T(340, 18, 'A = [1, 5, 3, 5, 2, 4]，四步之后 A 和 B 分别是什么', {size:13, weight:'600'});
+    var rows = [
+      {tag:'初始',       A:[1,5,3,5,2,4],   B:[1,5,3,5,2,4],   note:'两边完全一样'},
+      {tag:'add(2,5,3)', A:[1,8,6,8,5,4],   B:[1,8,6,8,5,4],   note:'A 涨到 8，B 跟着涨'},
+      {tag:'add(2,5,-6)',A:[1,2,0,2,-1,4],  B:[1,8,6,8,5,4],   note:'A 掉到 4，B 停在 8'},
+      {tag:'setMin(1,6,2)',A:[1,2,0,2,-1,2],B:[1,8,6,8,5,4],   note:'A 最大 2，B 还是 8'},
+      {tag:'add(3,4,10)', A:[1,2,10,12,-1,2],B:[1,8,10,12,5,4],note:'位置 4 到 12，把 B 顶上去'}
+    ];
+    var CW = 54, x0 = 210;
+    for (i = 0; i < rows.length; i++) {
+      var y = 36 + i * 52;
+      g += T(150, y + 18, rows[i].tag, {size:11, fill:C.dim, anchor:'end', mono:true});
+      for (j = 0; j < 6; j++) {
+        var below = rows[i].A[j] < rows[i].B[j];
+        g += R(x0 + j * CW, y, CW - 5, 22, below ? C.orangeBg : C.bg, below ? C.orange : C.bd);
+        g += T(x0 + j * CW + (CW - 5) / 2, y + 15, String(rows[i].A[j]), {size:11, mono:true, fill:C.blue});
+        g += R(x0 + j * CW, y + 24, CW - 5, 22, C.blueLt, C.blue);
+        g += T(x0 + j * CW + (CW - 5) / 2, y + 39, String(rows[i].B[j]), {size:11, mono:true, fill:C.blue});
+      }
+      g += T(600, y + 30, rows[i].note, {size:10.5, fill:C.gray});
+    }
+    g += T(340, 36 + 5 * 52 + 12, '每格上面是 A、下面是 B；橙框标出 A 已经掉到历史纪录下面的格子', {size:11.5, fill:C.dim});
+    mount('fig-ab', 36 + 5 * 52 + 32, g, 'B 只涨不跌：A 掉下来的时候它留在原地，A 涨过去的时候它才动。');
+  })();
+
+  // ---------- 图：两条通道 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, '下传时要把「现在欠多少」和「欠到过多少」一起交下去', {size:13, weight:'600'});
+    g += R(24, 34, 272, 104, C.blueLt, C.blue);
+    g += T(160, 58, '祖先后连着两次整段加：先 +3 再 −6', {size:11.5, fill:C.ink, weight:'600'});
+    g += T(160, 82, '现在   maxAdd = −3', {size:11.5, mono:true, fill:C.dim});
+    g += T(160, 102, '历史   maxAddTop = 3', {size:11.5, mono:true, fill:C.blue});
+    g += T(160, 126, '−3 是最终结果，3 才是中途到过的高度', {size:11, fill:C.gray});
+    g += '<path d="M 300 86 L 344 86" stroke="'+C.blue+'" stroke-width="1.5" fill="none"/>';
+    g += '<path d="M 338 82 L 344 86 L 338 90" stroke="'+C.blue+'" stroke-width="1.5" fill="none"/>';
+    g += R(352, 34, 304, 104, C.orangeBg, C.orange);
+    g += T(504, 58, '孩子收到四个参数', {size:11.5, fill:C.ink, weight:'600'});
+    g += T(504, 82, 'maxHistory = max(原值, mx + maxAddTop)', {size:11, mono:true, fill:C.orange});
+    g += T(504, 102, '只用 maxAdd 的话，中途那次 8 就丢了', {size:11.5, fill:C.ink});
+    g += T(504, 126, '两个 Top 用 max 累加，不是加法', {size:11, fill:C.gray});
+    g += T(340, 162, '走「最大值通道」的孩子拿 maxAdd 和 maxAddTop，另一个孩子两路都拿 other 开头那两个',
+           {size:11.5, fill:C.dim});
+    mount('fig-channel', 186, g, '标记的当前值和标记的峰值是两件事，下发时一个都不能少。');
+  })();
+
+  // ============ 演示：A / B ============
+  (function(){
+    var PRESETS = [
+      {a:[1,5,3,5,2,4], seq:[[1,2,5,3],[1,2,5,-6],[2,1,6,2],[1,3,4,10],[5,1,6],[4,1,6],[3,1,6]]},
+      {a:[6,2,8,4,9,1], seq:[[2,1,6,5],[1,1,3,4],[4,1,6],[1,4,6,-7],[5,2,5]]},
+      {a:[3,3,3,3,3,3], seq:[[1,1,6,2],[5,1,6],[1,1,6,-5],[4,1,6],[2,2,4,1],[5,1,6]]}
+    ];
+    var host = document.getElementById('viz-history');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'hs-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = '初始 ' + PRESETS[i].a.join(' ') + '（第 ' + (i + 1) + ' 组）';
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'hs-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'hs-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'hs-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'hs-sum';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'hs-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var cur = [], step = -1, N = 6, SZ = 0;
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      N = p.a.length; SZ = 4 * N + 5;
+      var sum = [], mx = [], cnt = [], sem = [], maxAdd = [], otherAdd = [],
+          maxHistory = [], maxAddTop = [], otherAddTop = [], i;
+      for (i = 0; i < SZ; i++) {
+        sum.push(0); mx.push(0); cnt.push(0); sem.push(0); maxAdd.push(0); otherAdd.push(0);
+        maxHistory.push(0); maxAddTop.push(0); otherAddTop.push(0);
+      }
+      function up(i){
+        var l = i << 1, r = i << 1 | 1;
+        maxHistory[i] = Math.max(maxHistory[l], maxHistory[r]);
+        sum[i] = sum[l] + sum[r];
+        mx[i] = Math.max(mx[l], mx[r]);
+        if (mx[l] > mx[r]) { cnt[i] = cnt[l]; sem[i] = Math.max(sem[l], mx[r]); }
+        else if (mx[l] < mx[r]) { cnt[i] = cnt[r]; sem[i] = Math.max(mx[l], sem[r]); }
+        else { cnt[i] = cnt[l] + cnt[r]; sem[i] = Math.max(sem[l], sem[r]); }
+      }
+      function lazy(i, n, ma, oa, mu, ou){
+        maxHistory[i] = Math.max(maxHistory[i], mx[i] + mu);
+        maxAddTop[i] = Math.max(maxAddTop[i], maxAdd[i] + mu);
+        otherAddTop[i] = Math.max(otherAddTop[i], otherAdd[i] + ou);
+        sum[i] += ma * cnt[i] + oa * (n - cnt[i]);
+        mx[i] += ma;
+        sem[i] += sem[i] === LLOW ? 0 : oa;
+        maxAdd[i] += ma;
+        otherAdd[i] += oa;
+      }
+      function down(i, ln, rn){
+        var l = i << 1, r = i << 1 | 1, tmp = Math.max(mx[l], mx[r]);
+        if (mx[l] === tmp) lazy(l, ln, maxAdd[i], otherAdd[i], maxAddTop[i], otherAddTop[i]);
+        else lazy(l, ln, otherAdd[i], otherAdd[i], otherAddTop[i], otherAddTop[i]);
+        if (mx[r] === tmp) lazy(r, rn, maxAdd[i], otherAdd[i], maxAddTop[i], otherAddTop[i]);
+        else lazy(r, rn, otherAdd[i], otherAdd[i], otherAddTop[i], otherAddTop[i]);
+        maxAdd[i] = otherAdd[i] = maxAddTop[i] = otherAddTop[i] = 0;
+      }
+      function buildTree(l, r, i){
+        if (l === r) { sum[i] = mx[i] = maxHistory[i] = p.a[l - 1]; sem[i] = LLOW; cnt[i] = 1; return; }
+        var mid = (l + r) >> 1;
+        buildTree(l, mid, i << 1); buildTree(mid + 1, r, i << 1 | 1); up(i);
+      }
+      function add(jobl, jobr, jobv, l, r, i){
+        if (jobl <= l && r <= jobr) { lazy(i, r - l + 1, jobv, jobv, jobv, jobv); return; }
+        var mid = (l + r) >> 1; down(i, mid - l + 1, r - mid);
+        if (jobl <= mid) add(jobl, jobr, jobv, l, mid, i << 1);
+        if (jobr > mid) add(jobl, jobr, jobv, mid + 1, r, i << 1 | 1);
+        up(i);
+      }
+      function setMin(jobl, jobr, jobv, l, r, i){
+        if (jobv >= mx[i]) return;
+        if (jobl <= l && r <= jobr && sem[i] < jobv) { lazy(i, r - l + 1, jobv - mx[i], 0, jobv - mx[i], 0); return; }
+        var mid = (l + r) >> 1; down(i, mid - l + 1, r - mid);
+        if (jobl <= mid) setMin(jobl, jobr, jobv, l, mid, i << 1);
+        if (jobr > mid) setMin(jobl, jobr, jobv, mid + 1, r, i << 1 | 1);
+        up(i);
+      }
+      function querySum(jobl, jobr, l, r, i){
+        if (jobl <= l && r <= jobr) return sum[i];
+        var mid = (l + r) >> 1; down(i, mid - l + 1, r - mid);
+        var res = 0;
+        if (jobl <= mid) res += querySum(jobl, jobr, l, mid, i << 1);
+        if (jobr > mid) res += querySum(jobl, jobr, mid + 1, r, i << 1 | 1);
+        return res;
+      }
+      function queryMax(jobl, jobr, l, r, i){
+        if (jobl <= l && r <= jobr) return mx[i];
+        var mid = (l + r) >> 1; down(i, mid - l + 1, r - mid);
+        var res = LLOW;
+        if (jobl <= mid) res = Math.max(res, queryMax(jobl, jobr, l, mid, i << 1));
+        if (jobr > mid) res = Math.max(res, queryMax(jobl, jobr, mid + 1, r, i << 1 | 1));
+        return res;
+      }
+      function queryHis(jobl, jobr, l, r, i){
+        if (jobl <= l && r <= jobr) return maxHistory[i];
+        var mid = (l + r) >> 1; down(i, mid - l + 1, r - mid);
+        var res = LLOW;
+        if (jobl <= mid) res = Math.max(res, queryHis(jobl, jobr, l, mid, i << 1));
+        if (jobr > mid) res = Math.max(res, queryHis(jobl, jobr, mid + 1, r, i << 1 | 1));
+        return res;
+      }
+      buildTree(1, N, 1);
+      var steps = [], k, j;
+      for (k = 0; k < p.seq.length; k++) {
+        var op = p.seq[k], txt = '', out = null;
+        if (op[0] === 1) { add(op[1], op[2], op[3], 1, N, 1); txt = 'add(' + op[1] + ',' + op[2] + ',' + op[3] + ')'; }
+        else if (op[0] === 2) { setMin(op[1], op[2], op[3], 1, N, 1); txt = 'setMin(' + op[1] + ',' + op[2] + ',' + op[3] + ')'; }
+        else if (op[0] === 3) { out = querySum(op[1], op[2], 1, N, 1); txt = '查 A 累加和(' + op[1] + ',' + op[2] + ') = ' + out; }
+        else if (op[0] === 4) { out = queryMax(op[1], op[2], 1, N, 1); txt = '查 A 最大值(' + op[1] + ',' + op[2] + ') = ' + out; }
+        else { out = queryHis(op[1], op[2], 1, N, 1); txt = '查 B 最大值(' + op[1] + ',' + op[2] + ') = ' + out; }
+        var A = [], B = [];
+        for (j = 1; j <= N; j++) { A.push(querySum(j, j, 1, N, 1)); B.push(queryHis(j, j, 1, N, 1)); }
+        steps.push({txt:txt, out:out, A:A, B:B,
+                    am:queryMax(1, N, 1, N, 1), bm:queryHis(1, N, 1, N, 1), as:querySum(1, N, 1, N, 1)});
+      }
+      cur = {steps:steps, a:p.a.slice()};
+      step = -1;
+      render();
+    }
+    function render(){
+      var s = step >= 0 ? cur.steps[step] : null;
+      var i, g = '', CW = 62, x0 = 340 - CW * N / 2;
+      g += T(340, 16, s ? s.txt : '还没开始，点「下一步」', {size:12, weight:'600', fill:s ? C.blue : C.dim});
+      var A = s ? s.A : cur.a, B = s ? s.B : cur.a;
+      for (i = 0; i < N; i++) {
+        g += R(x0 + i * CW, 28, CW - 6, 24, C.bg, C.bd);
+        g += T(x0 + i * CW + (CW - 6) / 2, 45, String(A[i]), {size:11.5, mono:true, fill:C.blue});
+        g += R(x0 + i * CW, 54, CW - 6, 24, C.blueLt, C.blue);
+        g += T(x0 + i * CW + (CW - 6) / 2, 71, String(B[i]), {size:11.5, mono:true, fill:C.blue});
+        g += T(x0 + i * CW + (CW - 6) / 2, 92, String(i + 1), {size:10, mono:true, fill:C.gray});
+        if (s && A[i] < B[i]) { g += R(x0 + i * CW, 26, CW - 4, 54, 'none', C.orange); }
+      }
+      g += T(150, 45, 'A', {size:12, fill:C.ink, mono:true, weight:'600'});
+      g += T(150, 71, 'B', {size:12, fill:C.blue, mono:true, weight:'600'});
+      g += T(340, 112, s ? ('A 最大值 ' + s.am + '，B 最大值 ' + s.bm + '，A 累加和 ' + s.as) : '初始状态',
+             {size:11.5, fill:C.blue, mono:true});
+      g += T(340, 134, s ? ('这一步 A 掉到历史纪录下面的位置：' + (function(){
+             var r = [], k; for (k = 0; k < N; k++) if (s.A[k] < s.B[k]) r.push(k + 1); return r.length ? r.join('、') : '没有';
+           })()) : '橙框标出 A 比 B 低的格子', {size:11.5, fill:C.orange, mono:true});
+      g += T(340, 156, '第 ' + (step + 1) + ' / ' + cur.steps.length + ' 步' + (step < 0 ? '（未开始）' : ''),
+             {size:11.5, fill:C.gray, mono:true});
+      stage.innerHTML = '<svg viewBox="0 0 680 176" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var lh = '', q;
+      for (q = 0; q <= step; q++) {
+        lh += '第 ' + (q + 1) + ' 步：' + cur.steps[q].txt + '，A 最大 ' + cur.steps[q].am + '，B 最大 ' + cur.steps[q].bm + '\n';
+      }
+      log.textContent = lh;
+      ans.innerHTML = (s ? esc(s.txt) : '未开始') +
+        ' <b id="hs-sumline">A ' + A.join(' ') + ' ｜ B ' + B.join(' ') + ' ｜ B 最大 ' + (s ? s.bm : Math.max.apply(null, cur.a)) + '</b>';
+      bNext.disabled = step >= cur.steps.length - 1;
+    }
+    bind('hs-next', 'click', function(){ if (step < cur.steps.length - 1) { step++; render(); } });
+    bind('hs-reset', 'click', function(){ step = -1; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+})();
+</script>
+</body>
+</html>

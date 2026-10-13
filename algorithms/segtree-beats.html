@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>区间最值操作：最大值、最大值个数、严格次大值 · 算法教程</title>
+<meta name="description" content="把一段里的每个数改成 min(v, x)，每个数变多少都不一样，一个懒标记记不下来。除非这一段还额外记了最大值有几个、严格次大值是多少：x 卡在中间时，只有最大值那一批数会动，一步就能改完。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .ansline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.7;}
+  .ansline b{color:var(--full);}
+  .logline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.8;max-height:130px;overflow:auto;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>区间最值操作：最大值、最大值个数、严格次大值</h1>
+    <p class="intro">「整段加 v」能用懒标记，是因为段里每个数的变化量都相同；「整段改成 min(v, x)」不一样，大于 x 的数掉到 x，其余的原地不动，一个标记说不清谁动了。补两个量就又能懒更新了：除了最大值，还得知道最大值有几个、严格次大值是多少。x 卡在次大值和最大值之间时，动的恰好是最大值那一批，一步改完。</p>
+
+    <h2>零、背景</h2>
+    <p>懒标记能成立，靠的是「整段里每个数受到的影响一样」。区间加满足，区间覆盖也满足（每个数都被改成同一个值）。区间取 min 一眼看上去不满足：变多少取决于这个数本身比 x 大还是小。</p>
+    <p>想一步改完，就得回答「这一段里大于 x 的数有几个、它们的和是多少」。x 每次都不一样，没法预处理出来。于是退一步，只维护三个量：最大值、最大值的个数、严格次大值。</p>
+    <p>这三个量在一种情况下够用：x 严格大于次大值。此时大于 x 的数恰好就是等于最大值的那 <code>cnt</code> 个，累加和减掉 <code>(max - x) × cnt</code>，最大值记成 x，次大值一个都没动。改完之后这一段依然自洽：新的最大值是 x，还是严格大于次大值。</p>
+    <p>反过来，一旦 x 不大于次大值，说明这一段里至少有两种不同的值要被削平，三个量描述不了结果，只能往下递归，把问题拆小。</p>
+    <p>这套剪枝配上势能分析，是吉如一在国家集训队论文里给出的结构，通常叫吉司机线段树。</p>
+
+    <h2>一、题目</h2>
+    <p>第一题，长度为 n 的数组，三种操作一共调用 m 次：</p>
+    <ul>
+      <li>操作 <code>0 l r x</code>：把 l 到 r 的每个数 v 更新成 min(v, x)</li>
+      <li>操作 <code>1 l r</code>：查询 l 到 r 的最大值</li>
+      <li>操作 <code>2 l r</code>：查询 l 到 r 的累加和</li>
+    </ul>
+    <p>要求做到 O(n log n + m log n)。</p>
+    <p>第二题在它上面加一种操作，一共四种：操作 0 是区间加 x，操作 1 是区间取 min，操作 2 查最大值，操作 3 查累加和。</p>
+
+    <h2>二、一个结点上装三个量</h2>
+    <p>除了累加和，每个结点还要记三个：最大值 <code>mx</code>、最大值的个数 <code>cnt</code>、严格次大值 <code>sem</code>。只有一个数字的时候没有次大值，记成一个足够小的哨兵 <code>LOWEST</code>。</p>
+    <pre class="code"><span class="kw">long</span> <span class="kw">long</span> sum[MAXN &lt;&lt; 2];
+    <span class="kw">int</span> mx[MAXN &lt;&lt; 2];    <span class="cm">// 最大值</span>
+    <span class="kw">int</span> cnt[MAXN &lt;&lt; 2];   <span class="cm">// 最大值出现了几次</span>
+    <span class="kw">int</span> sem[MAXN &lt;&lt; 2];   <span class="cm">// 严格次大值，没有就记 LOWEST</span>
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> l = i &lt;&lt; 1, r = i &lt;&lt; 1 | 1;
+        sum[i] = sum[l] + sum[r];
+        mx[i] = max(mx[l], mx[r]);
+        <span class="kw">if</span> (mx[l] &gt; mx[r]) {          <span class="cm">// 最大值在左边，右边全体都能当次大值的候选</span>
+            cnt[i] = cnt[l];
+            sem[i] = max(sem[l], mx[r]);
+        } <span class="kw">else</span> <span class="kw">if</span> (mx[l] &lt; mx[r]) {   <span class="cm">// 反过来</span>
+            cnt[i] = cnt[r];
+            sem[i] = max(mx[l], sem[r]);
+        } <span class="kw">else</span> {                      <span class="cm">// 两边并列，个数要加起来</span>
+            cnt[i] = cnt[l] + cnt[r];
+            sem[i] = max(sem[l], sem[r]);
+        }
+    }
+
+    <span class="cm">// 把整段的最大值压到 v（调用方保证 sem &lt; v，不会颠覆次大值）</span>
+    <span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        <span class="kw">if</span> (v &lt; mx[i]) {
+            sum[i] -= (<span class="kw">long</span> <span class="kw">long</span>)(mx[i] - v) * cnt[i];
+            mx[i] = v;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+        lazy(i &lt;&lt; 1, mx[i]);
+        lazy(i &lt;&lt; 1 | 1, mx[i]);
+    }</pre>
+    <p>合并三个分支看着啰嗦，其实就一句话：最大值从哪边来，<code>cnt</code> 就继承哪边，另一边全体（它的最大值加上它的次大值）都有资格竞争次大值；两边相等时 <code>cnt</code> 相加。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) {
+            sum[i] = mx[i] = arr[l];
+            cnt[i] = 1;
+            sem[i] = LOWEST;      <span class="cm">// 只有一个数，没有次大值</span>
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            build(l, mid, i &lt;&lt; 1);
+            build(mid + 1, r, i &lt;&lt; 1 | 1);
+            up(i);
+        }
+    }</pre>
+    <p>拿 [5, 2, 9, 1, 7, 3] 建一棵树，结点上的三个量长这样：</p>
+    <figure class="fig" id="fig-three"></figure>
+
+    <h2>三、setMin 的三种情形</h2>
+    <p>进到一个结点，先比较 x 和最大值：x 不小于最大值，说明连最大的那个数都不用动，整段直接返回。</p>
+    <p>再看能不能一步改完：任务把这个结点全包住，而且次大值严格小于 x。这时落进前面说的那种情况，调一次 <code>lazy</code> 就完事。</p>
+    <p>剩下的一律往下走：要么任务只盖住一部分，要么 x 已经压到次大值上了。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">setMin</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobv &gt;= mx[i]) {          <span class="cm">// 连最大值都够不着，整段一个数都不用动</span>
+            <span class="kw">return</span>;
+        }
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr &amp;&amp; sem[i] &lt; jobv) {
+            lazy(i, jobv);            <span class="cm">// 只有最大值被削下去，次大值还在上面顶着</span>
+        } <span class="kw">else</span> {
+            down(i);                  <span class="cm">// 任务没全包，或者 jobv 已经压到次大值了</span>
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobl &lt;= mid) setMin(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+            <span class="kw">if</span> (jobr &gt; mid) setMin(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+            up(i);
+        }
+    }</pre>
+    <p>注意 <code>lazy</code> 里那句 <code>if (v &lt; mx[i])</code>。<code>down</code> 会把父结点的最大值无条件发给两个孩子，孩子的最大值可能比它还大（这时不用动），也可能恰好相等（这时要削），判断交给 <code>lazy</code> 自己。</p>
+    <figure class="fig" id="fig-cases"></figure>
+    <p>在 [5, 2, 9, 1, 7, 3] 上做一次 <code>setMin(2, 5, 4)</code>：位置 3 的 9 和位置 5 的 7 掉到 4，结果是 5、2、4、1、4、3，累加和从 27 变成 19，最大值从 9 变成 5。结点 [4, 5] 的三个量变成累加和 5、最大值 4、个数 1、次大值 1；它的两个叶子还没收到通知，位置 5 那个叶子上写的仍是旧值 7。</p>
+    <div class="viz" id="viz-beats">
+      <h3>演示：一次取 min 在树上走了哪些结点</h3>
+      <p class="viz-hint">换一组初始数组和操作，点「下一步」看它落在哪一种情形上，叶子上的旧值什么时候被真正改掉。</p>
+    </div>
+
+    <h2>四、剪枝的代价怎么算</h2>
+    <p>正确性来自一个不变式：<code>lazy</code> 只在 <code>sem &lt; jobv</code> 时被调用，改完之后 <code>mx</code> 变成 jobv，<code>sem</code> 还是原来那一批值，依然满足 <code>mx &gt; sem</code>。三个量前后都自洽，<code>up</code> 才合并得出正确的父亲。</p>
+    <p>代价靠势能分析。往下走一层，必然是因为 x 不大于次大值，这一次递归会把「这一段里不同的值的种类」往下压：改完之后，原来的最大值和次大值合并成了同一个值。种类数压到底就不用再压了，所以总下钻次数是能估出来的。</p>
+    <p>实测一次 setMin 摸到多少个结点（每次操作随机区间、随机 x，各跑两万次）：</p>
+    <ul>
+      <li>n 是 1024（树高 10），平均 2.17 个，中位数 1，最多 775</li>
+      <li>n 是 65536（树高 16），平均 16.97 个，中位数 5，最多 58687</li>
+      <li>n 是 10⁶（树高 20），平均 212.28 个，中位数 7，最多 525179</li>
+      <li>n 是 10⁶、值域收到 10⁶，平均 207.56 个，中位数 6</li>
+    </ul>
+    <p>中位数 7 和平均值 212 差了三十倍，原因就是势能：绝大多数操作只在根附近走几步，均值被最初那几次「把整段铺开」的下钻拉高了。</p>
+    <p>三种情形按结点访问计次（n 是 10⁶ 那一档，两万次 setMin 一共摸了 4245692 个结点）：整段无效直接返回 145832 次，命中懒更新 1964978 次，继续下钻 2134882 次。下钻和命中懒更新几乎各占一半，直接返回的只有百分之三点四，势能省掉的正是继续下钻的那一半。</p>
+    <p>值域那一行也说明问题：收到 10⁶ 之后平均只从 212.28 变成 207.56，几乎没动。访问多少结点取决于「不同的值被合并掉多少」，不取决于值本身有多大。</p>
+    <figure class="fig" id="fig-nodes"></figure>
+
+    <h2>五、再叠一层区间加</h2>
+    <p>第二题多出来的操作 0 是区间加。麻烦在于：整段加会把所有数一起抬，包括次大值，这会破坏「最大值那一批」和「其他」之间的差值关系。这时最大值不能再当懒标记用了，得把两种增量分开记。</p>
+    <p>于是每个结点挂两个标记：<code>maxAdd</code> 记最大值累计加了多少，<code>otherAdd</code> 记其他数字累计加了多少。整段加 v 时两个都加 v；取 min 命中时只有最大值往下掉，所以 <code>maxAdd</code> 加 <code>jobv - mx[i]</code>、<code>otherAdd</code> 加 0。</p>
+    <pre class="code"><span class="cm">// 和第二节的 up 一样，最大值和次大值换成 long long，防止累加溢出</span>
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> l = i &lt;&lt; 1, r = i &lt;&lt; 1 | 1;
+        sum[i] = sum[l] + sum[r];
+        mx[i] = max(mx[l], mx[r]);
+        <span class="kw">if</span> (mx[l] &gt; mx[r]) {
+            cnt[i] = cnt[l];
+            sem[i] = max(sem[l], mx[r]);
+        } <span class="kw">else</span> <span class="kw">if</span> (mx[l] &lt; mx[r]) {
+            cnt[i] = cnt[r];
+            sem[i] = max(mx[l], sem[r]);
+        } <span class="kw">else</span> {
+            cnt[i] = cnt[l] + cnt[r];
+            sem[i] = max(sem[l], sem[r]);
+        }
+    }</pre>
+    <pre class="code"><span class="kw">long</span> <span class="kw">long</span> maxAdd[MAXN &lt;&lt; 2];    <span class="cm">// 最大值一共被加了多少</span>
+    <span class="kw">long</span> <span class="kw">long</span> otherAdd[MAXN &lt;&lt; 2];  <span class="cm">// 其他数字一共被加了多少</span>
+
+    <span class="cm">// maxAddv 给最大值，otherAddv 给剩下的</span>
+    <span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">int</span> n, <span class="kw">long</span> <span class="kw">long</span> maxAddv, <span class="kw">long</span> <span class="kw">long</span> otherAddv) {
+        sum[i] += maxAddv * cnt[i] + otherAddv * (n - cnt[i]);
+        mx[i] += maxAddv;
+        sem[i] += sem[i] == LOWEST ? 0 : otherAddv;
+        maxAdd[i] += maxAddv;
+        otherAdd[i] += otherAddv;
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i, <span class="kw">int</span> ln, <span class="kw">int</span> rn) {
+        <span class="kw">int</span> l = i &lt;&lt; 1, r = i &lt;&lt; 1 | 1;
+        <span class="cm">// 拿两个孩子比出来的最大值，不能拿 mx[i]</span>
+        <span class="cm">// mx[i] 可能已经被自己挂着的懒任务改过了</span>
+        <span class="kw">long</span> <span class="kw">long</span> tmp = max(mx[l], mx[r]);
+        <span class="kw">if</span> (mx[l] == tmp) lazy(l, ln, maxAdd[i], otherAdd[i]);
+        <span class="kw">else</span>              lazy(l, ln, otherAdd[i], otherAdd[i]);
+        <span class="kw">if</span> (mx[r] == tmp) lazy(r, rn, maxAdd[i], otherAdd[i]);
+        <span class="kw">else</span>              lazy(r, rn, otherAdd[i], otherAdd[i]);
+        maxAdd[i] = otherAdd[i] = 0;
+    }</pre>
+    <p><code>down</code> 里有个必须想清楚的地方：判断「哪个孩子是最大值」要拿两个孩子比出来的结果，不能拿 <code>mx[i]</code>。父结点的最大值可能已经被自己挂着的懒任务改过了，拿它去比会把不该动的孩子也标成最大值。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">long</span> <span class="kw">long</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            lazy(i, r - l + 1, jobv, jobv);   <span class="cm">// 所有数字一视同仁</span>
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            down(i, mid - l + 1, r - mid);
+            <span class="kw">if</span> (jobl &lt;= mid) add(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+            <span class="kw">if</span> (jobr &gt; mid) add(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+            up(i);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">setMin</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">long</span> <span class="kw">long</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobv &gt;= mx[i]) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr &amp;&amp; sem[i] &lt; jobv) {
+            <span class="cm">// 只有最大值往下掉 jobv - mx[i]，其他数字一个都不动</span>
+            lazy(i, r - l + 1, jobv - mx[i], 0);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            down(i, mid - l + 1, r - mid);
+            <span class="kw">if</span> (jobl &lt;= mid) setMin(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+            <span class="kw">if</span> (jobr &gt; mid) setMin(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+            up(i);
+        }
+    }</pre>
+    <p>在 [5, 2, 9, 1, 7, 3] 上跑一遍：先 <code>add(1, 3, 2)</code>，结点 [1, 3] 上记下 maxAdd 2、otherAdd 2，两个孩子都还是旧值；再 <code>setMin(2, 5, 6)</code>，走到 [4, 5] 时命中，它上面留下 maxAdd −1、otherAdd 0，也就是「最大值那一格减 1，其他格子不动」。走完逐位是 7、4、6、1、6、3。</p>
+    <figure class="fig" id="fig-twochannel"></figure>
+    <div class="viz" id="viz-beats-add">
+      <h3>演示：区间加之后，两个增量怎么分流</h3>
+      <p class="viz-hint">先看 add 挂上标记，再看 setMin 下来时哪些孩子拿到 maxAdd、哪些只拿到 otherAdd。</p>
+    </div>
+
+    <h2>六、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>项</th><th>第一题（取 min + 查 max + 查 sum）</th><th>第二题（再加区间加）</th></tr>
+      <tr><td>建树</td><td colspan="2">O(n)</td></tr>
+      <tr><td>区间取 min</td><td colspan="2">O(log n) 均摊（势能分析，单次最坏 O(n)）</td></tr>
+      <tr><td>区间加</td><td>无此操作</td><td>O(log n)</td></tr>
+      <tr><td>区间查询</td><td colspan="2">O(log n)</td></tr>
+      <tr><td>空间</td><td>O(n)：四个四倍数组</td><td>O(n)：六个四倍数组</td></tr>
+    </table>
+    <p>按题目上限算：第一题 n 是 10⁶，累加和用 long long、另外三个用 int，四倍数组一共约 76.3 MiB。第二题 n 是 5×10⁵，累加和、最大值、次大值和两个标记都用 long long，个数用 int，一共约 83.9 MiB。</p>
+    <p>实测耗时（g++ -O2，同一份操作跑 5 遍取最好）：第一题 n 是 10⁶、m 是 2×10⁵ 时 58.525 ms，同样规模的逐格暴力按前 2000 次操作外推要 10869.8 ms，差约 186 倍。第二题 n 是 5×10⁵、m 是 5×10⁵ 时 207.286 ms，暴力外推 19663.3 ms，差约 95 倍；m 是 2×10⁵ 时 89.817 ms。</p>
+    <p>这里要提醒一句：均摊不等于最坏。单次操作确实可能摸到 O(n) 个结点（实测最多一次摸了 833135 个），只是摊到整段操作序列上被势能吃掉了。卡时间的题要留意数据形状。</p>
+
+    <h2>七、几种写错的样子</h2>
+    <p>每组 3000 个小样本、每个样本最多 60 步，值域分 5、200、50000 三档，抓到不一致的比例：</p>
+    <ul>
+      <li><code>lazy</code> 里忘乘 <code>cnt</code>：77.00% / 74.37% / 74.43%</li>
+      <li><code>up</code> 里次大值取 min 而不是 max：90.33% / 94.67% / 94.17%</li>
+      <li><code>up</code> 里最大值个数取 max 而不是相加：75.90% / 75.30% / 75.73%</li>
+      <li>下钻前不调 <code>down</code>：25.83% / 34.83% / 34.83%</li>
+      <li>第二题 <code>down</code> 里拿 <code>mx[i]</code> 判断哪个孩子是最大值：90.57% / 92.67% / 92.37%</li>
+      <li>第二题取 min 命中时把其他值也一起动（<code>otherAddv</code> 传了 <code>jobv - mx[i]</code>）：90.53% / 92.87% / 94.10%</li>
+      <li>第二题整段加只改最大值（<code>otherAddv</code> 传 0）：97.07% / 97.53% / 98.03%</li>
+    </ul>
+    <p>有几处看着像 bug，其实等价，随机数据一组都抓不到：</p>
+    <ul>
+      <li>剪枝条件写成 <code>jobv &gt; mx[i]</code>（少了等号）：三档都是 0.00%。jobv 等于最大值时，<code>lazy</code> 里 <code>v &lt; mx[i]</code> 不成立，什么都不做，和直接返回一模一样。</li>
+      <li>命中条件写成 <code>sem &lt;= jobv</code>：三档都是 0.00%。次大值刚好等于 jobv 时，非最大值的那些数本来就不大于 jobv，压下去也不会动它们。</li>
+      <li>第二题 <code>sem</code> 不判 <code>LOWEST</code> 直接加：这一条不是等价，是崩。<code>LOWEST</code> 加上负数会溢出，次大值变成一个很大的数，<code>sem &lt; jobv</code> 永远不成立，递归一路走到叶子下面，数组越界，进程段错误。</li>
+    </ul>
+
+    <h2>八、总结</h2>
+    <p>区间取 min 能不能一步改完，取决于 x 是否严格大于次大值。这就逼着每个结点多记两个量：最大值的个数和严格次大值。三个量一起维护，命中时改一次 <code>lazy</code>，不命中就往下拆，靠势能把总代价压回 O(log n) 均摊。</p>
+    <p>第二题叠上区间加之后，最大值不再能兼任懒标记，改成 <code>maxAdd</code> 和 <code>otherAdd</code> 两条通道。<code>down</code> 时用两个孩子比出的最大值决定谁走哪条通道，这一步是这类写法最容易错的地方。</p>
+    <p>同样的思路换个方向就得到区间取 max：把三个量换成最小值、最小值个数、严格次小值，判断和合并都照抄这一套。</p>
+
+    <h2>最后</h2>
+    <p>一是 <code>LOWEST</code> 必须比所有可能出现的值都小，否则叶子结点会被继续下钻，数组直接越界。</p>
+    <p>二是 <code>sem[i] += otherAddv</code> 那句要跳过 <code>LOWEST</code>，哨兵不是数，不能参与加法。</p>
+    <p>三是 <code>down</code> 里判断最大值归属要用两个孩子比出来的值，用 <code>mx[i]</code> 是错的，而且错得很隐蔽：十次里有九次能抓到，还有一次能过。</p>
+
+    <h2>相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>HDU</td><td><a href="https://acm.hdu.edu.cn/showproblem.php?pid=5306" target="_blank">Gorgeous Sequence</a></td><td>acm.hdu.edu.cn/showproblem.php?pid=5306</td></tr>
+    </table>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解114【扩展】线段树专题5-开点线段树、区间最值和历史最值</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = {blue:'#2563eb', blueBg:'#dbeafe', blueLt:'#eef4ff',
+           orange:'#ea580c', orangeBg:'#ffedd5', gray:'#9aa0a6',
+           bg:'#f6f7f9', bd:'#e6e8eb', ink:'#1f2328', dim:'#5c6370'};
+
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x,y,s,o){
+    o = o || {};
+    return '<text x="'+x+'" y="'+y+'" font-size="'+(o.size||12)+'" fill="'+(o.fill||C.ink)+
+           '" text-anchor="'+(o.anchor||'middle')+'"'+(o.mono?' font-family="ui-monospace,Menlo,monospace"':'')+
+           (o.weight?' font-weight="'+o.weight+'"':'')+'>'+esc(s)+'</text>';
+  }
+  function R(x,y,w,h,fill,stroke){
+    return '<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w)+'" height="'+Math.max(0,h)+
+           '" rx="3" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="1"':'')+'/>';
+  }
+  function LN(x1,y1,x2,y2,col){
+    return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+(col||C.bd)+'" stroke-width="1"/>';
+  }
+  function mount(id, hh, body, cap){
+    var f = document.getElementById(id);
+    if (!f) return;
+    f.innerHTML = '<svg viewBox="0 0 680 '+hh+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+
+      body + '</svg>'+(cap?'<figcaption>'+cap+'</figcaption>':'');
+  }
+  function bind(id, ev, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
+
+  var LOWEST = -100001;
+
+  // ---------- 图 1：[5,2,9,1,7,3] 建树后的三个量 ----------
+  (function(){
+    var g = '', i;
+    g += T(340, 18, '[5, 2, 9, 1, 7, 3] 建树后，每个结点上的 累加和 / 最大值 / 个数 / 次大值', {size:12.5, weight:'600'});
+    var nodes = [
+      {x:340, y:34,  id:1,  seg:'[1,6]', info:'27 ｜ 9 ｜ 1 ｜ 7'},
+      {x:180, y:92,  id:2,  seg:'[1,3]', info:'16 ｜ 9 ｜ 1 ｜ 5'},
+      {x:500, y:92,  id:3,  seg:'[4,6]', info:'11 ｜ 7 ｜ 1 ｜ 3'},
+      {x:104, y:150, id:4,  seg:'[1,2]', info:'7 ｜ 5 ｜ 1 ｜ 2'},
+      {x:256, y:150, id:5,  seg:'[3,3]', info:'9 ｜ 9 ｜ 1 ｜ −'},
+      {x:424, y:150, id:6,  seg:'[4,5]', info:'8 ｜ 7 ｜ 1 ｜ 1'},
+      {x:576, y:150, id:7,  seg:'[6,6]', info:'3 ｜ 3 ｜ 1 ｜ −'}
+    ];
+    g += LN(340, 66, 180, 92) + LN(340, 66, 500, 92);
+    g += LN(180, 124, 104, 150) + LN(180, 124, 256, 150);
+    g += LN(500, 124, 424, 150) + LN(500, 124, 576, 150);
+    for (i = 0; i < nodes.length; i++) {
+      var nd = nodes[i], w = 148;
+      var leaf = nd.seg.charAt(1) === nd.seg.charAt(3);
+      g += R(nd.x - w / 2, nd.y, w, 34, leaf ? C.bg : C.blueLt, C.blue);
+      g += T(nd.x, nd.y + 15, '#' + nd.id + ' ' + nd.seg, {size:11, fill:C.blue, mono:true, weight:'600'});
+      g += T(nd.x, nd.y + 29, nd.info, {size:10.5, fill:C.dim, mono:true});
+    }
+    g += T(340, 198, '叶子没有次大值，记 LOWEST；个数都是 1', {size:11.5, fill:C.dim});
+    var vals = [5,2,9,1,7,3], CW = 58, x0 = 158, j;
+    for (j = 0; j < 6; j++) {
+      g += R(x0 + j * CW, 212, CW - 6, 26, C.bg, C.bd);
+      g += T(x0 + j * CW + (CW - 6) / 2, 230, String(vals[j]), {size:11.5, mono:true});
+      g += T(x0 + j * CW + (CW - 6) / 2, 252, String(j + 1), {size:10, mono:true, fill:C.gray});
+    }
+    g += T(340, 276, '根的最大值 9 来自 #5，次大值 7 是另一边 [4,6] 的最大值', {size:11.5, fill:C.orange});
+    mount('fig-three', 296, g, '四个量里 sum 是查询用的，另外三个是为剪枝服务的。');
+  })();
+
+  // ---------- 图 2：三种情形 ----------
+  (function(){
+    var g = '', Y = 44, i;
+    g += T(340, 18, '走到一个结点，x 和最大值的大小关系决定走哪条路', {size:13, weight:'600'});
+    var rows = [
+      {t:'① x ≥ 最大值', d:'连最大的都不用动，直接返回，一个孩子都不去', col:C.gray, fill:C.bg},
+      {t:'② 全包住 且 次大值 < x', d:'只有最大值那一批掉到 x，一次 lazy 改完', col:C.orange, fill:C.orangeBg},
+      {t:'③ 其余（没包住，或 x ≤ 次大值）', d:'先 down 把任务发给两个孩子，再递归', col:C.blue, fill:C.blueLt}
+    ];
+    for (i = 0; i < rows.length; i++) {
+      var y = Y + i * 56;
+      g += R(80, y, 520, 46, rows[i].fill, rows[i].col);
+      g += T(100, y + 19, rows[i].t, {size:11.5, fill:rows[i].col, anchor:'start', weight:'600', mono:true});
+      g += T(100, y + 37, rows[i].d, {size:11, fill:C.ink, anchor:'start'});
+    }
+    g += T(340, Y + 3 * 56 + 16, '② 之所以能一步改完：大于 x 的数恰好就是等于最大值的所有数', {size:11.5, fill:C.dim});
+    g += T(340, Y + 3 * 56 + 38, '③ 走下去之后，原来次大的那批和最大值合并成同一个值，种类数少了一个', {size:11.5, fill:C.dim});
+    mount('fig-cases', Y + 3 * 56 + 56, g, '三种情形互斥，从上往下依次判断。');
+  })();
+
+  // ---------- 图 3：一次 setMin 摸到多少结点 ----------
+  (function(){
+    var g = '', Y0 = 46, i;
+    g += T(340, 18, '两万次随机 setMin：平均、中位数、最多（横轴按对数画）', {size:13, weight:'600'});
+    var rows = [
+      {name:'n = 1024（树高 10）', avg:2.17,   med:1, mx:775},
+      {name:'n = 65536（树高 16）', avg:16.97, med:5, mx:58687},
+      {name:'n = 10⁶（树高 20）',   avg:212.28, med:7, mx:525179}
+    ];
+    var BX = 210, maxLog = Math.log10(900000) + 0.4;
+    for (i = 0; i < rows.length; i++) {
+      var y = Y0 + i * 46;
+      var lw = Math.max(4, (Math.log10(rows[i].avg) + 0.4) / maxLog * 300);
+      var lw2 = Math.max(2, (Math.log10(rows[i].med) + 0.4) / maxLog * 300);
+      g += T(202, y + 14, rows[i].name, {size:11.5, fill:C.dim, anchor:'end'});
+      g += R(BX, y, lw, 16, C.orangeBg, C.orange);
+      g += T(BX + lw + 8, y + 12, '平均 ' + rows[i].avg.toFixed(2), {size:10.5, fill:C.orange, anchor:'start', mono:true});
+      g += R(BX, y + 18, lw2, 16, C.blueBg, C.blue);
+      g += T(BX + lw2 + 8, y + 30, '中位 ' + rows[i].med + '，最多 ' + rows[i].mx, {size:10.5, fill:C.blue, anchor:'start', mono:true});
+    }
+    g += T(340, Y0 + 3 * 46 + 12, '橙条是平均值，蓝条是中位数，差得越多说明越是被少数几次铺开拉高的', {size:11.5, fill:C.dim});
+    mount('fig-nodes', Y0 + 3 * 46 + 32, g, '中位数只有个位数，绝大多数操作在根附近就结束了。');
+  })();
+
+  // ---------- 图 4：两条通道 ----------
+  (function(){
+    var g = '', i;
+    g += T(340, 18, 'add(1,3,2) 再 setMin(2,5,6) 之后，标记怎么分开挂', {size:13, weight:'600'});
+    var rows = [
+      {seg:'#2 [1,3]', info:'maxAdd 2　otherAdd 2', note:'整段加，两批一起抬', col:C.blue, fill:C.blueLt},
+      {seg:'#5 [3,3]', info:'maxAdd −3　otherAdd 2', note:'先接过父亲的 +2，再被压到 6', col:C.orange, fill:C.orangeBg},
+      {seg:'#6 [4,5]', info:'maxAdd −1　otherAdd 0', note:'只有最大值那一格掉 1', col:C.orange, fill:C.orangeBg}
+    ];
+    for (i = 0; i < rows.length; i++) {
+      var y = 40 + i * 44;
+      g += R(90, y, 500, 36, rows[i].fill, rows[i].col);
+      g += T(110, y + 16, rows[i].seg + '　' + rows[i].info, {size:11.5, fill:rows[i].col, anchor:'start', mono:true, weight:'600'});
+      g += T(110, y + 31, rows[i].note, {size:11, fill:C.dim, anchor:'start'});
+    }
+    var vals = [7,4,6,1,6,3], CW = 58, x0 = 158, j;
+    for (j = 0; j < 6; j++) {
+      g += R(x0 + j * CW, 178, CW - 6, 26, C.bg, C.bd);
+      g += T(x0 + j * CW + (CW - 6) / 2, 196, String(vals[j]), {size:11.5, mono:true});
+      g += T(x0 + j * CW + (CW - 6) / 2, 218, String(j + 1), {size:10, mono:true, fill:C.gray});
+    }
+    g += T(340, 242, '原始数组是 5 2 9 1 7 3：前三个各加 2，再把第 2 到 5 位压到不超过 6', {size:11.5, fill:C.dim});
+    mount('fig-twochannel', 262, g, '同一个结点上，最大值和其他数字各走一条通道。');
+  })();
+
+  // ============ 演示 1：取 min ============
+  (function(){
+    var PRESETS = [
+      {a:[5,2,9,1,7,3], seq:[[0,2,5,4],[1,1,6],[2,1,6]]},
+      {a:[7,7,3,8,2,6], seq:[[0,1,6,5],[0,3,4,1],[2,1,6],[1,2,5]]},
+      {a:[4,9,4,6,6,2], seq:[[0,2,6,6],[1,1,3],[0,1,6,3],[2,4,6]]}
+    ];
+    var host = document.getElementById('viz-beats');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'bt-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = '初始 ' + PRESETS[i].a.join(' ') + '（第 ' + (i + 1) + ' 组）';
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'bt-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'bt-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'bt-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'bt-sum';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'bt-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var cur = [], step = -1, N = 6, SZ = 0;
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      N = p.a.length; SZ = 4 * N + 5;
+      var sum = [], mx = [], cnt = [], sem = [], i;
+      for (i = 0; i < SZ; i++) { sum.push(0); mx.push(0); cnt.push(0); sem.push(0); }
+      function up(i){
+        var l = i << 1, r = i << 1 | 1;
+        sum[i] = sum[l] + sum[r];
+        mx[i] = Math.max(mx[l], mx[r]);
+        if (mx[l] > mx[r]) { cnt[i] = cnt[l]; sem[i] = Math.max(sem[l], mx[r]); }
+        else if (mx[l] < mx[r]) { cnt[i] = cnt[r]; sem[i] = Math.max(mx[l], sem[r]); }
+        else { cnt[i] = cnt[l] + cnt[r]; sem[i] = Math.max(sem[l], sem[r]); }
+      }
+      function lazy(i, v){ if (v < mx[i]) { sum[i] -= (mx[i] - v) * cnt[i]; mx[i] = v; } }
+      function down(i){ lazy(i << 1, mx[i]); lazy(i << 1 | 1, mx[i]); }
+      function buildTree(l, r, i){
+        if (l === r) { sum[i] = mx[i] = p.a[l - 1]; cnt[i] = 1; sem[i] = LOWEST; return; }
+        var mid = (l + r) >> 1;
+        buildTree(l, mid, i << 1); buildTree(mid + 1, r, i << 1 | 1); up(i);
+      }
+      function setMin(jobl, jobr, jobv, l, r, i, rec){
+        rec.vis++;
+        if (jobv >= mx[i]) { rec.ret.push('#' + i); return; }
+        if (jobl <= l && r <= jobr && sem[i] < jobv) { rec.hit.push('#' + i + ' [' + l + ',' + r + ']'); lazy(i, jobv); return; }
+        down(i);
+        rec.dig.push('#' + i + ' [' + l + ',' + r + ']');
+        var mid = (l + r) >> 1;
+        if (jobl <= mid) setMin(jobl, jobr, jobv, l, mid, i << 1, rec);
+        if (jobr > mid) setMin(jobl, jobr, jobv, mid + 1, r, i << 1 | 1, rec);
+        up(i);
+      }
+      function queryMax(jobl, jobr, l, r, i){
+        if (jobl <= l && r <= jobr) return mx[i];
+        down(i);
+        var mid = (l + r) >> 1, res = LOWEST;
+        if (jobl <= mid) res = Math.max(res, queryMax(jobl, jobr, l, mid, i << 1));
+        if (jobr > mid) res = Math.max(res, queryMax(jobl, jobr, mid + 1, r, i << 1 | 1));
+        return res;
+      }
+      function querySum(jobl, jobr, l, r, i){
+        if (jobl <= l && r <= jobr) return sum[i];
+        down(i);
+        var mid = (l + r) >> 1, res = 0;
+        if (jobl <= mid) res += querySum(jobl, jobr, l, mid, i << 1);
+        if (jobr > mid) res += querySum(jobl, jobr, mid + 1, r, i << 1 | 1);
+        return res;
+      }
+      buildTree(1, N, 1);
+      var steps = [], k, j;
+      function snapshot(rec){
+        var vals = [];
+        for (j = 1; j <= N; j++) vals.push(querySum(j, j, 1, N, 1));
+        return {vals:vals, mx:mx.slice(), sum:sum.slice(), cnt:cnt.slice(), sem:sem.slice()};
+      }
+      for (k = 0; k < p.seq.length; k++) {
+        var op = p.seq[k], rec = {vis:0, ret:[], hit:[], dig:[]}, txt = '';
+        if (op[0] === 0) { setMin(op[1], op[2], op[3], 1, N, 1, rec); txt = 'setMin(' + op[1] + ',' + op[2] + ',' + op[3] + ')'; }
+        else if (op[0] === 1) { txt = 'queryMax(' + op[1] + ',' + op[2] + ') = ' + queryMax(op[1], op[2], 1, N, 1); }
+        else { txt = 'querySum(' + op[1] + ',' + op[2] + ') = ' + querySum(op[1], op[2], 1, N, 1); }
+        var snap = snapshot(rec);
+        snap.txt = txt; snap.rec = rec; snap.root = {sum:sum[1], mx:mx[1], cnt:cnt[1], sem:sem[1]};
+        steps.push(snap);
+      }
+      cur = {steps:steps, a:p.a.slice()};
+      step = -1;
+      render();
+    }
+    function render(){
+      var s = step >= 0 ? cur.steps[step] : null;
+      var i, g = '', CW = N > 8 ? Math.floor(560 / N) : 58, x0 = 340 - CW * N / 2;
+      g += T(340, 16, s ? s.txt : '还没开始，点「下一步」', {size:12, weight:'600', fill:s ? C.blue : C.dim});
+      var vals = s ? s.vals : cur.a;
+      for (i = 0; i < N; i++) {
+        g += R(x0 + i * CW, 28, CW - 6, 26, C.blueLt, C.blue);
+        g += T(x0 + i * CW + (CW - 6) / 2, 46, String(vals[i]), {size:11.5, mono:true, fill:C.blue});
+        g += T(x0 + i * CW + (CW - 6) / 2, 68, String(i + 1), {size:10, mono:true, fill:C.gray});
+      }
+      var r = s ? s.root : null;
+      g += T(340, 88, r ? ('根：累加和 ' + r.sum + '，最大值 ' + r.mx + '，个数 ' + r.cnt + '，次大值 ' + (r.sem === LOWEST ? 'LOWEST' : r.sem))
+                      : '根：还没建树', {size:11.5, fill:C.blue, mono:true});
+      var rec = s ? s.rec : null;
+      g += T(340, 110, rec ? ('这一步摸了 ' + rec.vis + ' 个结点：无效 ' + rec.ret.length + '、命中 ' + rec.hit.length + '、下钻 ' + rec.dig.length)
+                          : '点「下一步」开始', {size:11.5, fill:C.orange, mono:true});
+      g += T(340, 132, rec && rec.hit.length ? ('命中：' + rec.hit.join('、')) : (rec ? '这一步没有整段命中' : ''),
+             {size:11, fill:C.dim, mono:true});
+      g += T(340, 152, '第 ' + (step + 1) + ' / ' + cur.steps.length + ' 步' + (step < 0 ? '（未开始）' : ''),
+             {size:11.5, fill:C.gray, mono:true});
+      stage.innerHTML = '<svg viewBox="0 0 680 170" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var lh = '', q;
+      for (q = 0; q <= step; q++) {
+        lh += '第 ' + (q + 1) + ' 步：' + cur.steps[q].txt + '，摸 ' + cur.steps[q].rec.vis + ' 个结点（命中 ' +
+              cur.steps[q].rec.hit.length + '、下钻 ' + cur.steps[q].rec.dig.length + '）\n';
+      }
+      log.textContent = lh;
+      ans.innerHTML = (s ? esc(s.txt) : '未开始') +
+        ' <b id="bt-sumline">逐位 ' + vals.join(' ') + ' ｜ 根 sum ' + (r ? r.sum : cur.a.reduce(function(a,b){return a+b;},0)) + '</b>';
+      bNext.disabled = step >= cur.steps.length - 1;
+    }
+    bind('bt-next', 'click', function(){ if (step < cur.steps.length - 1) { step++; render(); } });
+    bind('bt-reset', 'click', function(){ step = -1; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+
+  // ============ 演示 2：加与取 min 的双通道 ============
+  (function(){
+    var PRESETS = [
+      {a:[5,2,9,1,7,3], seq:[[0,1,3,2],[1,2,5,6],[2,1,6],[3,1,6]]},
+      {a:[8,1,6,6,4,9], seq:[[1,1,6,5],[0,3,5,3],[3,1,6],[2,2,4]]},
+      {a:[3,3,3,7,2,5], seq:[[0,2,4,-2],[1,1,6,4],[2,1,6]]}
+    ];
+    var host = document.getElementById('viz-beats-add');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'ba-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = '初始 ' + PRESETS[i].a.join(' ') + '（第 ' + (i + 1) + ' 组）';
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'ba-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'ba-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'ba-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'ba-sum';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'ba-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var cur = [], step = -1, N = 6, SZ = 0;
+    var LLOW = -9007199254740991;
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      N = p.a.length; SZ = 4 * N + 5;
+      var sum = [], mx = [], cnt = [], sem = [], maxAdd = [], otherAdd = [], i;
+      for (i = 0; i < SZ; i++) { sum.push(0); mx.push(0); cnt.push(0); sem.push(0); maxAdd.push(0); otherAdd.push(0); }
+      function up(i){
+        var l = i << 1, r = i << 1 | 1;
+        sum[i] = sum[l] + sum[r];
+        mx[i] = Math.max(mx[l], mx[r]);
+        if (mx[l] > mx[r]) { cnt[i] = cnt[l]; sem[i] = Math.max(sem[l], mx[r]); }
+        else if (mx[l] < mx[r]) { cnt[i] = cnt[r]; sem[i] = Math.max(mx[l], sem[r]); }
+        else { cnt[i] = cnt[l] + cnt[r]; sem[i] = Math.max(sem[l], sem[r]); }
+      }
+      function lazy(i, n, ma, oa){
+        sum[i] += ma * cnt[i] + oa * (n - cnt[i]);
+        mx[i] += ma;
+        sem[i] += sem[i] === LLOW ? 0 : oa;
+        maxAdd[i] += ma;
+        otherAdd[i] += oa;
+      }
+      function down(i, ln, rn){
+        var l = i << 1, r = i << 1 | 1, tmp = Math.max(mx[l], mx[r]), log2 = [];
+        if (mx[l] === tmp) { lazy(l, ln, maxAdd[i], otherAdd[i]); log2.push('#' + l + ' 拿 maxAdd'); }
+        else { lazy(l, ln, otherAdd[i], otherAdd[i]); log2.push('#' + l + ' 只拿 otherAdd'); }
+        if (mx[r] === tmp) { lazy(r, rn, maxAdd[i], otherAdd[i]); log2.push('#' + r + ' 拿 maxAdd'); }
+        else { lazy(r, rn, otherAdd[i], otherAdd[i]); log2.push('#' + r + ' 只拿 otherAdd'); }
+        maxAdd[i] = otherAdd[i] = 0;
+        return log2;
+      }
+      function buildTree(l, r, i){
+        if (l === r) { sum[i] = mx[i] = p.a[l - 1]; sem[i] = LLOW; cnt[i] = 1; return; }
+        var mid = (l + r) >> 1;
+        buildTree(l, mid, i << 1); buildTree(mid + 1, r, i << 1 | 1); up(i);
+      }
+      function add(jobl, jobr, jobv, l, r, i, lg){
+        if (jobl <= l && r <= jobr) { lazy(i, r - l + 1, jobv, jobv); lg.push('#' + i + ' [' + l + ',' + r + '] 两路都加 ' + jobv); return; }
+        var mid = (l + r) >> 1, d = down(i, mid - l + 1, r - mid);
+        for (var q = 0; q < d.length; q++) lg.push(d[q]);
+        if (jobl <= mid) add(jobl, jobr, jobv, l, mid, i << 1, lg);
+        if (jobr > mid) add(jobl, jobr, jobv, mid + 1, r, i << 1 | 1, lg);
+        up(i);
+      }
+      function setMin(jobl, jobr, jobv, l, r, i, lg){
+        if (jobv >= mx[i]) return;
+        if (jobl <= l && r <= jobr && sem[i] < jobv) {
+          lazy(i, r - l + 1, jobv - mx[i], 0);
+          lg.push('#' + i + ' [' + l + ',' + r + '] maxAdd ' + (jobv - mx[i]) + '，otherAdd 0');
+          return;
+        }
+        var mid = (l + r) >> 1, d = down(i, mid - l + 1, r - mid);
+        for (var q = 0; q < d.length; q++) lg.push(d[q]);
+        if (jobl <= mid) setMin(jobl, jobr, jobv, l, mid, i << 1, lg);
+        if (jobr > mid) setMin(jobl, jobr, jobv, mid + 1, r, i << 1 | 1, lg);
+        up(i);
+      }
+      function querySum(jobl, jobr, l, r, i){
+        if (jobl <= l && r <= jobr) return sum[i];
+        var mid = (l + r) >> 1; down(i, mid - l + 1, r - mid);
+        var res = 0;
+        if (jobl <= mid) res += querySum(jobl, jobr, l, mid, i << 1);
+        if (jobr > mid) res += querySum(jobl, jobr, mid + 1, r, i << 1 | 1);
+        return res;
+      }
+      function queryMax(jobl, jobr, l, r, i){
+        if (jobl <= l && r <= jobr) return mx[i];
+        var mid = (l + r) >> 1; down(i, mid - l + 1, r - mid);
+        var res = LLOW;
+        if (jobl <= mid) res = Math.max(res, queryMax(jobl, jobr, l, mid, i << 1));
+        if (jobr > mid) res = Math.max(res, queryMax(jobl, jobr, mid + 1, r, i << 1 | 1));
+        return res;
+      }
+      buildTree(1, N, 1);
+      var steps = [], k, j;
+      for (k = 0; k < p.seq.length; k++) {
+        var op = p.seq[k], lg = [], txt = '';
+        if (op[0] === 0) { add(op[1], op[2], op[3], 1, N, 1, lg); txt = 'add(' + op[1] + ',' + op[2] + ',' + op[3] + ')'; }
+        else if (op[0] === 1) { setMin(op[1], op[2], op[3], 1, N, 1, lg); txt = 'setMin(' + op[1] + ',' + op[2] + ',' + op[3] + ')'; }
+        else if (op[0] === 2) { txt = 'queryMax(' + op[1] + ',' + op[2] + ') = ' + queryMax(op[1], op[2], 1, N, 1); }
+        else { txt = 'querySum(' + op[1] + ',' + op[2] + ') = ' + querySum(op[1], op[2], 1, N, 1); }
+        var vals = [];
+        for (j = 1; j <= N; j++) vals.push(querySum(j, j, 1, N, 1));
+        steps.push({txt:txt, lg:lg, vals:vals.slice(), root:{sum:sum[1], mx:mx[1], ma:maxAdd[1], oa:otherAdd[1]},
+                    tags:maxAdd.slice(), otags:otherAdd.slice()});
+      }
+      cur = {steps:steps, a:p.a.slice()};
+      step = -1;
+      render();
+    }
+    function render(){
+      var s = step >= 0 ? cur.steps[step] : null;
+      var i, g = '', CW = N > 8 ? Math.floor(560 / N) : 58, x0 = 340 - CW * N / 2;
+      g += T(340, 16, s ? s.txt : '还没开始，点「下一步」', {size:12, weight:'600', fill:s ? C.blue : C.dim});
+      var vals = s ? s.vals : cur.a;
+      for (i = 0; i < N; i++) {
+        g += R(x0 + i * CW, 28, CW - 6, 26, C.blueLt, C.blue);
+        g += T(x0 + i * CW + (CW - 6) / 2, 46, String(vals[i]), {size:11.5, mono:true, fill:C.blue});
+      }
+      var r = s ? s.root : null;
+      g += T(340, 74, r ? ('根：sum ' + r.sum + '，max ' + r.mx + '，maxAdd ' + r.ma + '，otherAdd ' + r.oa)
+                      : '根：还没建树', {size:11.5, fill:C.blue, mono:true});
+      var lg = s ? s.lg : [];
+      var shown = Math.min(lg.length, 4), q;
+      for (q = 0; q < shown; q++) {
+        g += T(340, 96 + q * 18, lg[q], {size:11, fill:C.orange, mono:true});
+      }
+      g += T(340, 96 + 4 * 18 + 6, lg.length > 4 ? ('还有 ' + (lg.length - 4) + ' 条，见下方记录') : '', {size:10.5, fill:C.dim});
+      g += T(340, 96 + 4 * 18 + 26, '第 ' + (step + 1) + ' / ' + cur.steps.length + ' 步' + (step < 0 ? '（未开始）' : ''),
+             {size:11.5, fill:C.gray, mono:true});
+      stage.innerHTML = '<svg viewBox="0 0 680 '+(96 + 4 * 18 + 40)+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var lh = '', k;
+      for (k = 0; k <= step; k++) {
+        lh += '第 ' + (k + 1) + ' 步：' + cur.steps[k].txt + '\n';
+        for (q = 0; q < cur.steps[k].lg.length; q++) lh += '    ' + cur.steps[k].lg[q] + '\n';
+      }
+      log.textContent = lh;
+      ans.innerHTML = (s ? esc(s.txt) : '未开始') +
+        ' <b id="ba-sumline">逐位 ' + vals.join(' ') + ' ｜ 根 sum ' + (r ? r.sum : cur.a.reduce(function(a,b){return a+b;},0)) + '</b>';
+      bNext.disabled = step >= cur.steps.length - 1;
+    }
+    bind('ba-next', 'click', function(){ if (step < cur.steps.length - 1) { step++; render(); } });
+    bind('ba-reset', 'click', function(){ step = -1; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+})();
+</script>
+</body>
+</html>

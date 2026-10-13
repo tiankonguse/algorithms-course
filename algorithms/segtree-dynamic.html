@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>动态开点线段树：范围大到开不下也能用 · 算法教程</title>
+<meta name="description" content="范围是 1 到 10 的 9 次方时，四倍静态数组要 89 GiB。动态开点线段树不为每一段预留空间，走到哪一段才给哪一段发一个编号，两道题分别演示怎么照常挂懒更新，以及怎么连懒更新都省掉。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .ansline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.7;}
+  .ansline b{color:var(--full);}
+  .logline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.8;max-height:130px;overflow:auto;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>动态开点线段树：范围大到开不下也能用</h1>
+    <p class="intro">范围是 1 到 10 的 9 次方，四倍长度的静态数组要占 91552.7 MiB，差不多 89 GiB，谁也开不出来。可是操作只有 1000 次，每次真正在树上走的路不超过 60 层。差了五个数量级，就别按范围开空间了：走到哪一段，再给哪一段发一个编号。</p>
+
+    <h2>零、背景</h2>
+    <p>一棵线段树到底要多少空间，取决于按「范围」算还是按「用过的结点」算。按范围算是 4n 个结点，每个结点要放累加和（8 字节）和懒标记（8 字节），再加左右孩子的编号（各 4 字节），一个结点 24 字节。</p>
+    <p>把 n 换成具体数字：n 是一百万的时候四倍数组是 91.6 MiB，还能接受；n 是一亿的时候是 9155.3 MiB；n 是十亿的时候是 91552.7 MiB。后面这两个数已经不是「优化一下常数」能解决的了。</p>
+    <p>另一头是操作数量。一次区间修改在树上走的路，是两条从根到叶子的边线，每层最多两个结点，树高是 log₂n，所以一次操作新碰到的结点不超过 2·log₂n 个。范围十亿的树高只有 30，一千次操作撑死碰到六万个结点，六万个结点每个 24 字节只有 1.7 MB。</p>
+    <p>两头一比就清楚了：范围大、操作少，按范围开空间是浪费，按操作开空间才对得上。</p>
+
+    <h2>一、题目</h2>
+    <p>第一题：n 个位置编号 1 到 n，一开始全是 0，一共调用 m 次操作。</p>
+    <ul>
+      <li>操作 <code>1 l r v</code>：把 l 到 r 的每个数加上 v</li>
+      <li>操作 <code>2 l r</code>：返回 l 到 r 的累加和</li>
+    </ul>
+    <p>其中 1 ≤ n ≤ 10⁹，1 ≤ m ≤ 10³。</p>
+    <p>第二题：实现一个结构，支持范围是 1 到 10⁹ 的区间，调用加起来 10⁵ 次。</p>
+    <ul>
+      <li><code>add(l, r)</code>：把 l 到 r 范围内的数字都设置成 1</li>
+      <li><code>count()</code>：返回整个范围内有多少个 1</li>
+    </ul>
+    <p>第二题只有「设置成 1」，没有「设置回 0」，这一点后面会省掉很大一件事。</p>
+
+    <h2>二、只在不得不去的时候才申请</h2>
+    <p>静态线段树里，i 号结点的两个孩子固定是 <code>i &lt;&lt; 1</code> 和 <code>i &lt;&lt; 1 | 1</code>。这个规则一去掉，就得自己记孩子的编号。</p>
+    <p>做法是发号码：变量 <code>cnt</code> 记已经发出去多少个号，1 号给根，之后谁要孩子就 <code>++cnt</code> 领一个新的。<code>lc[i]</code>、<code>rc[i]</code> 记 i 号结点的左右孩子编号，0 表示这个孩子还从来没有被申请过。</p>
+    <pre class="code"><span class="cm">// 范围 1~n，n 可以到 10^9</span>
+    <span class="cm">// 空间按「操作次数 * 树高 * 2」估，再留一截余量</span>
+    <span class="kw">const</span> <span class="kw">int</span> LIMIT = 80001;
+
+    <span class="kw">int</span> cnt;                 <span class="cm">// 已经发出的结点编号，1 号是根</span>
+    <span class="kw">int</span> lc[LIMIT], rc[LIMIT];  <span class="cm">// 左右孩子的编号，0 表示还没申请过</span>
+    <span class="kw">long</span> <span class="kw">long</span> sum[LIMIT];      <span class="cm">// 这一段的累加和</span>
+    <span class="kw">long</span> <span class="kw">long</span> addTag[LIMIT];   <span class="cm">// 这一段挂着的整段加任务</span>
+
+    <span class="kw">void</span> <span class="fn">clear</span>() {
+        fill(lc, lc + LIMIT, 0);
+        fill(rc, rc + LIMIT, 0);
+        fill(sum, sum + LIMIT, 0);
+        fill(addTag, addTag + LIMIT, 0);
+        cnt = 1;
+    }</pre>
+    <p>建树这一步直接不要了。整棵树只有一个根，根代表的范围是 1 到 n，所有位置的值都是 0。</p>
+    <p>区间加的写法和静态版差不多，区别只有两句：要往左走之前看一眼 <code>lc[i]</code>，是 0 就领一个号；要往右走之前同样看一眼 <code>rc[i]</code>。</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> h, <span class="kw">int</span> l, <span class="kw">int</span> r) {
+        sum[h] = sum[l] + sum[r];
+    }
+
+    <span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">long</span> <span class="kw">long</span> v, <span class="kw">int</span> n) {
+        sum[i] += v * n;
+        addTag[i] += v;
+    }
+
+    <span class="cm">// ln / rn 是左右两段各有多长</span>
+    <span class="cm">// 下发之前必须先把两孩子申请出来，否则任务没地方放</span>
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i, <span class="kw">int</span> ln, <span class="kw">int</span> rn) {
+        <span class="kw">if</span> (addTag[i] != 0) {
+            <span class="kw">if</span> (lc[i] == 0) lc[i] = ++cnt;
+            <span class="kw">if</span> (rc[i] == 0) rc[i] = ++cnt;
+            lazy(lc[i], addTag[i], ln);
+            lazy(rc[i], addTag[i], rn);
+            addTag[i] = 0;
+        }
+    }</pre>
+    <pre class="code"><span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">long</span> <span class="kw">long</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            lazy(i, jobv, r - l + 1);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            down(i, mid - l + 1, r - mid);
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                <span class="kw">if</span> (lc[i] == 0) lc[i] = ++cnt;   <span class="cm">// 不得不去左边，才申请左边</span>
+                add(jobl, jobr, jobv, l, mid, lc[i]);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                <span class="kw">if</span> (rc[i] == 0) rc[i] = ++cnt;   <span class="cm">// 不得不去右边，才申请右边</span>
+                add(jobl, jobr, jobv, mid + 1, r, rc[i]);
+            }
+            up(i, lc[i], rc[i]);
+        }
+    }</pre>
+    <p>查询更省：任务往左拐的时候，如果 <code>lc[i]</code> 还是 0，说明这一整段从头到尾没被碰过，值全是 0，连递归都不用进。</p>
+    <pre class="code"><span class="kw">long</span> <span class="kw">long</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="kw">return</span> sum[i];
+        }
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        down(i, mid - l + 1, r - mid);
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="cm">// 从来没被申请过的分支，整段都是 0，查都不用查</span>
+        <span class="kw">if</span> (jobl &lt;= mid &amp;&amp; lc[i] != 0) {
+            ans += query(jobl, jobr, l, mid, lc[i]);
+        }
+        <span class="kw">if</span> (jobr &gt; mid &amp;&amp; rc[i] != 0) {
+            ans += query(jobl, jobr, mid + 1, r, rc[i]);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+    <p>还有一处容易漏。<code>down</code> 要把懒任务交给两个孩子，交之前得先保证孩子存在，所以在 <code>down</code> 里也要申请。任务没地方放，比没申请到编号更麻烦：它会顺着 0 号结点把数据写进一个谁都不读的地方。</p>
+
+    <h2>三、一次 add 走过的路</h2>
+    <p>拿 n 等于 8 举例，看 <code>add(3, 6, 5)</code> 会把树开成什么样。根是 [1, 8]，中点 4，任务跨过中点，所以左右都要去：[1, 4] 和 [5, 8] 各领一个号。</p>
+    <p>左边 [1, 4] 只需要它的右半 [3, 4]，于是 [3, 4] 领号，[1, 2] 不存在。右边 [5, 8] 只需要它的左半 [5, 6]，[7, 8] 也不存在。这一趟一共开出 5 个结点，位置 1 和 2 从头到尾没有被访问过。</p>
+    <p>再来一次 <code>add(7, 8, 2)</code>，这回走着走着要拐进 [7, 8]，它才被申请出来，编号 6。两次操作之后树上是 6 个结点，逐位看是 0、0、5、5、5、5、2、2。</p>
+    <p>然后查一次 [2, 7]。查到 [7, 8] 这一层时要把它挂着的 2 下发出去，下发前先给两个孩子申请空间，于是 [7, 7] 和 [8, 8] 这两个叶子是查询的时候才出现的。查询本身也会让树长大。</p>
+    <figure class="fig" id="fig-open-path"></figure>
+    <p>一个细节：<code>up(i, lc[i], rc[i])</code> 里的 <code>lc[i]</code> 可能是 0，<code>sum[0]</code> 恒为 0，所以不用为「一边不存在」写特判。</p>
+    <div class="viz" id="viz-dyn">
+      <h3>演示：按操作顺序看树怎么长出来</h3>
+      <p class="viz-hint">范围取 1 到 8，点「下一步」依次执行操作，看每一步新申请了哪些结点、每个位置上是多少。</p>
+    </div>
+
+    <h2>四、空间要开多大</h2>
+    <p>估法是「操作次数 × 树高 × 2」。实测下来比它略多一点：n 是十亿、m 是一千、操作里三分之二是区间加，三个随机种子分别开出 71841、71956、72028 个结点，平均每个操作开出 71.84 到 72.03 个，单个操作最多开出 103 个。估法给的是 1000 × 30 × 2 = 60000，实际七万二。</p>
+    <p>所以常量取 80001 只富余一成。操作次数翻倍，这个常量就得跟着翻倍，别写死一个数就不管了。</p>
+    <p>换小一点的范围，每操作开出的结点数基本跟着树高走：n 是一亿时平均 59.01 个（树高 27），n 是一百万时平均 32.05 个（树高 20）。</p>
+    <figure class="fig" id="fig-cnt"></figure>
+    <p>时间上：n 是十亿、m 是一千，同一份操作跑 200 遍取最好，开点 0.238 ms。先把所有端点离散化再做普通线段树（离散出 3002 个区间，不含排序去重）是 0.099 ms，只要开点的四成。离散化要先拿到全部操作才能开始，在线读一个做一个的题用不上这条；而且离散化要处理「相邻端点之间那一段」，想清楚它的代价，不如开点来得直接。</p>
+
+    <h2>五、第二题：连懒更新都不用</h2>
+    <p>第二题的特殊性在于，查询永远只问全量：<code>count()</code> 直接返回 <code>sum[1]</code>。既然不问小区间，就不需要把任务往叶子传，只要根是对的就行。而根是 <code>up</code> 上推出来的，<code>up</code> 一直在保证这件事。</p>
+    <p>另一个条件是只有「设置成 1」。一段已经全是 1，以后还是 1，往下的任务也就没有意义了。<code>setOne</code> 开头一句「这一段满了就返回」，把整棵树的生长按住了。</p>
+    <pre class="code"><span class="cm">// 只有「把一段置 1」，没有「置回 0」</span>
+    <span class="cm">// 所以整段满了就直接返回，不需要任何懒更新标记</span>
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> h, <span class="kw">int</span> l, <span class="kw">int</span> r) {
+        sum[h] = sum[l] + sum[r];
+    }
+
+    <span class="kw">void</span> <span class="fn">setOne</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (sum[i] == r - l + 1) {   <span class="cm">// 这一段已经全是 1</span>
+            <span class="kw">return</span>;
+        }
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            sum[i] = r - l + 1;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                <span class="kw">if</span> (lc[i] == 0) lc[i] = ++cnt;
+                setOne(jobl, jobr, l, mid, lc[i]);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                <span class="kw">if</span> (rc[i] == 0) rc[i] = ++cnt;
+                setOne(jobl, jobr, mid + 1, r, rc[i]);
+            }
+            up(i, lc[i], rc[i]);
+        }
+    }</pre>
+    <p>这句早退有多值钱，看实测。十亿范围、10⁵ 次 add：</p>
+    <ul>
+      <li>区间很长（平均五亿）时，整棵树只开出 459 个结点，早退命中 99986 次，占 99.99%</li>
+      <li>区间长度不超过一百万时，开出 106643 个结点</li>
+      <li>区间长度不超过 1000 时，开出 2856171 个结点，早退只命中 0.86%</li>
+      <li>区间长度不超过 10 时，开出 1759902 个结点</li>
+      <li>全是单点区间时，开出 1443204 个结点</li>
+    </ul>
+    <p>最后几行藏着一个坑：常见题解里常量写成 700001，随机大区间够用（只要 459 个），区间一短就崩：长度不超过 1000 时要 286 万个结点，全是单点也要 144 万个。拿 700001 的数组跑 10 万次单点 add，进程直接段错误（退出码 139），连一个错误答案的机会都不给你。开点线段树的空间要按操作形状估，不能照抄一个数。</p>
+    <p>拿有序表（平衡树里存不相交区间，合并之后累加段长）做对照，同样是 10⁵ 次 add 加 10⁵ 次 count：区间很长时有序表 2.660 ms、开点 2.090 ms；区间长度不超过 1000 时有序表 44975.399 ms、开点 28.002 ms；单点区间时有序表 48106.545 ms、开点 18.679 ms。有序表那边的统计是每次把段扫一遍算总数，段数一多就崩。真要在生产里用有序表，得再维护一个总量，那时候大区间场景它会更快。开点线段树贵在常数，赢在分析成本低。</p>
+    <figure class="fig" id="fig-c2"></figure>
+    <div class="viz" id="viz-count">
+      <h3>演示：只置 1 的时候，早退把树按住</h3>
+      <p class="viz-hint">范围取 1 到 32（真实题目是十亿），点「下一步」逐条执行 add，看哪些段已经满了、这一步有没有新开结点。</p>
+    </div>
+
+    <h2>六、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>项</th><th>第一题（区间加 + 区间求和）</th><th>第二题（置 1 + 全量计数）</th></tr>
+      <tr><td>单次操作</td><td>O(log n)：一路走到底，每层最多两个结点</td><td>O(log n)，整段已满时 O(1) 返回</td></tr>
+      <tr><td>建树</td><td colspan="2">O(1)，只有一个根</td></tr>
+      <tr><td>全程总代价</td><td colspan="2">O(m log n)</td></tr>
+      <tr><td>空间</td><td colspan="2">O(m log n)：与范围 n 无关，只与操作次数有关</td></tr>
+    </table>
+    <p>按第一题的数据范围算：m 是 1000、n 是 10⁹，结点上界按 80001 开，四个数组一共 80001 × (4 + 4 + 8 + 8) 字节，约 1.83 MiB。第二题按 10⁵ 次操作估，最费空间的是长度一千左右的区间，要 286 万个结点，三个 int 数组约 32.7 MiB。</p>
+    <p>空间不再出现 n，这是开点线段树唯一真正的好处。时间复杂度和静态版完全一样，常数还大一点（每次访问多一次间接寻址），所以范围开得下的题别用它。</p>
+
+    <h2>七、几种写错的样子</h2>
+    <p>第一种：查询时不判断 <code>lc[i]</code> 是不是 0，照常递归进去。400 组随机测试里答案一次没错，结点数也一个没多，正确版和错法版都是平均 63.60 个。能兜住是因为 0 号结点自始至终没人写过，没申请过的分支读出来恒是 0，正好是求和题的单位元；可这是拿哨兵赌正确性，哪天有别的代码往 0 号结点写进一个数，所有查询跟着一起错。白付的代价是时间：每次查询都要往这些没申请过的分支里白跑一趟，深度和树高一样。</p>
+    <p>第二种：<code>down</code> 里直接把任务交给 <code>lc[i]</code>，忘了先申请。400 组里 364 组出错，一共 4542 处错误答案，编号数掉到 58.22。任务全写进了 0 号结点，它的两个孩子被反复申请，树等于没建。</p>
+    <p>第三种：号码领好了，递归的时候却照堆式编号写 <code>i &lt;&lt; 1</code>。400 组里 368 组出错。开点线段树的编号和位置没关系，任何一处按 2i 推算都是错的。</p>
+    <p>第四种是第二题专属：忘了调 <code>up</code>。3 万次 add 里 30000 次对不上，第一次 add 就现形（根是 0，应为 1）。</p>
+    <p>第五种也是第二题：把「整段已满就返回」那句删了。看着像只是少了个优化，其实它会把答案算错。删掉之后，一个已经被整段置 1 的结点在遇到新的部分覆盖任务时，会去申请只走了一边的孩子，再用 <code>up</code> 把两边加起来，另一边还是 0，老数据就这么丢了。实测：区间长度不超过 1000 时 3 万次 add 有 29980 次对不上，第一次现形在第 21 次；开出的结点从 4128 涨到 113676，耗时从 0.949 ms 涨到 6.221 ms（各跑 5 遍取最好）。区间全是单点时这句早退从来不触发，删不删结果一模一样，都是 91208 个结点、0 次对不上，这也是它在小样例上容易蒙混过关的原因。</p>
+
+    <h2>八、总结</h2>
+    <p>开点线段树把「按范围开空间」换成「按操作开空间」。结点编号靠 <code>cnt</code> 自增发放，<code>lc</code>、<code>rc</code> 记孩子，0 表示没申请过。改动集中在三处：递归前申请孩子、<code>down</code> 里申请孩子、查询时遇到 0 直接跳过。</p>
+    <p>第二题示范了另一件事：操作的形状决定结构能省到什么程度。只有置 1、只问全量，就能连懒更新一起不要，还顺手用一个早退把树的大小按在几百个结点上。</p>
+    <p>代价要记清楚：常数比静态版差，空间估错了会直接越界。能离散化、能用有序表的题，开点往往不是最优解，只是想起来最省事的解。</p>
+
+    <h2>最后</h2>
+    <p>一是空间常量要按「操作次数 × 树高 × 2」自己估，再留两成以上的余量，别照抄 80001 或 700001。</p>
+    <p>二是 <code>down</code> 里那两个申请不能省，省了会让任务写进 0 号结点。</p>
+    <p>三是第二题的早退不是优化，它和「只置 1、只问全量」这两条性质绑在一起，删掉会算错。</p>
+
+    <h2>相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P2781" target="_blank">P2781 动态开点线段树</a></td><td>luogu.com.cn/problem/P2781</td></tr>
+      <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/count-integers-in-intervals/" target="_blank">统计区间中的整数数目</a></td><td>leetcode.cn/problems/count-integers-in-intervals</td></tr>
+    </table>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解114【扩展】线段树专题5-开点线段树、区间最值和历史最值</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = {blue:'#2563eb', blueBg:'#dbeafe', blueLt:'#eef4ff',
+           orange:'#ea580c', orangeBg:'#ffedd5', gray:'#9aa0a6',
+           bg:'#f6f7f9', bd:'#e6e8eb', ink:'#1f2328', dim:'#5c6370'};
+
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x,y,s,o){
+    o = o || {};
+    return '<text x="'+x+'" y="'+y+'" font-size="'+(o.size||12)+'" fill="'+(o.fill||C.ink)+
+           '" text-anchor="'+(o.anchor||'middle')+'"'+(o.mono?' font-family="ui-monospace,Menlo,monospace"':'')+
+           (o.weight?' font-weight="'+o.weight+'"':'')+'>'+esc(s)+'</text>';
+  }
+  function R(x,y,w,h,fill,stroke){
+    return '<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w)+'" height="'+Math.max(0,h)+
+           '" rx="3" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="1"':'')+'/>';
+  }
+  function LN(x1,y1,x2,y2,col,dash){
+    return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+(col||C.bd)+
+           '" stroke-width="1"'+(dash?' stroke-dasharray="3 3"':'')+'/>';
+  }
+  function mount(id, hh, body, cap){
+    var f = document.getElementById(id);
+    if (!f) return;
+    f.innerHTML = '<svg viewBox="0 0 680 '+hh+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+
+      body + '</svg>'+(cap?'<figcaption>'+cap+'</figcaption>':'');
+  }
+  function bind(id, ev, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // ---------- 图 1：n = 8，两次 add 之后开了哪些点 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, 'n = 8，add(3,6,5) 与 add(7,8,2) 之后树上的六个结点', {size:13, weight:'600'});
+    var nodes = [
+      {x:340, y:38,  lab:'#1 [1,8]',   sub:'sum 24',        col:C.blue,   fill:C.blueLt},
+      {x:190, y:96,  lab:'#2 [1,4]',   sub:'sum 10',        col:C.blue,   fill:C.blueLt},
+      {x:490, y:96,  lab:'#4 [5,8]',   sub:'sum 14',        col:C.blue,   fill:C.blueLt},
+      {x:268, y:154, lab:'#3 [3,4]',   sub:'sum 10  add 5', col:C.orange, fill:C.orangeBg},
+      {x:412, y:154, lab:'#5 [5,6]',   sub:'sum 10  add 5', col:C.orange, fill:C.orangeBg},
+      {x:600, y:154, lab:'#6 [7,8]',   sub:'sum 4  add 2',  col:C.orange, fill:C.orangeBg}
+    ];
+    var i;
+    g += LN(340, 68, 190, 96) + LN(340, 68, 490, 96);
+    g += LN(190, 126, 268, 154, C.gray, true);
+    g += LN(490, 126, 412, 154) + LN(490, 126, 600, 154);
+    for (i = 0; i < nodes.length; i++) {
+      var nd = nodes[i], w = 128;
+      g += R(nd.x - w / 2, nd.y, w, 38, nd.fill, nd.col);
+      g += T(nd.x, nd.y + 16, nd.lab, {size:11.5, fill:nd.col, mono:true, weight:'600'});
+      g += T(nd.x, nd.y + 32, nd.sub, {size:11, fill:C.dim, mono:true});
+    }
+    g += R(112, 154, 128, 38, C.bg, C.gray);
+    g += T(176, 176, '[1,2] 没申请', {size:11, fill:C.gray, mono:true});
+    g += T(176, 192, '虚线是没走的路', {size:10, fill:C.gray});
+    var vals = [0,0,5,5,5,5,2,2], CW = 58, x0 = 96, j;
+    for (j = 0; j < 8; j++) {
+      g += R(x0 + j * CW, 218, CW - 6, 26, vals[j] ? C.blueBg : C.bg, vals[j] ? C.blue : C.bd);
+      g += T(x0 + j * CW + (CW - 6) / 2, 236, String(vals[j]), {size:11.5, mono:true, fill:vals[j] ? C.blue : C.gray});
+      g += T(x0 + j * CW + (CW - 6) / 2, 258, String(j + 1), {size:10, mono:true, fill:C.gray});
+    }
+    g += T(340, 282, '查一次 [2,7] 时 #6 要下发任务，这时才现开 [7,7] 和 [8,8] 两个叶子', {size:11.5, fill:C.dim});
+    mount('fig-open-path', 300, g, '每个结点只在第一次被走到的时候领号，位置 1、2 从头到尾没有被访问过。');
+  })();
+
+  // ---------- 图 2：每操作开出的结点数 ----------
+  (function(){
+    var g = '', Y0 = 46, i;
+    g += T(340, 18, 'm = 1000 次操作，平均每操作开出几个结点', {size:13, weight:'600'});
+    var rows = [
+      {name:'n = 10⁶（树高 20）', v:32.05, tot:32051},
+      {name:'n = 10⁸（树高 27）', v:59.01, tot:59010},
+      {name:'n = 10⁹（树高 30）', v:71.84, tot:71841}
+    ];
+    var BX = 210, maxv = 80;
+    for (i = 0; i < rows.length; i++) {
+      var y = Y0 + i * 36;
+      var lw = rows[i].v / maxv * 300;
+      g += T(202, y + 16, rows[i].name, {size:11.5, fill:C.dim, anchor:'end'});
+      g += R(BX, y, lw, 24, C.blueBg, C.blue);
+      g += T(BX + lw + 10, y + 16, rows[i].v.toFixed(2) + ' 个/操作，共 ' + rows[i].tot,
+             {size:11.5, fill:C.blue, anchor:'start', mono:true});
+    }
+    g += T(340, Y0 + 3 * 36 + 14, '估法「操作数 × 树高 × 2」给 60000，实测七万二，多出两成', {size:11.5, fill:C.dim});
+    g += T(340, Y0 + 3 * 36 + 36, '顺带对比：1.7 MB 的按需空间 对 89 GiB 的四倍数组', {size:11.5, fill:C.orange, mono:true});
+    mount('fig-cnt', Y0 + 3 * 36 + 54, g, '常量取 80001 只富余一成，操作次数翻倍就要跟着翻倍。');
+  })();
+
+  // ---------- 图 3：第二题的结点数（对数） ----------
+  (function(){
+    var g = '', Y0 = 46, i;
+    g += T(340, 18, '10⁵ 次 add 之后整棵树有多大（横轴按对数画）', {size:13, weight:'600'});
+    var rows = [
+      {name:'区间很长（均值 5×10⁸）', v:459,      col:C.blue,   note:'早退命中 99.99%'},
+      {name:'长度不超过 10⁶',        v:106643,   col:C.blue,   note:''},
+      {name:'全是单点区间',          v:1443204,  col:C.orange, note:'超过 700001，越界'},
+      {name:'长度不超过 10',         v:1759902,  col:C.orange, note:'超过 700001，越界'}
+    ];
+    var BX = 230, maxLog = Math.log10(2000000) + 0.4;
+    for (i = 0; i < rows.length; i++) {
+      var y = Y0 + i * 36;
+      var lw = Math.max(4, (Math.log10(rows[i].v) + 0.4) / maxLog * 225);
+      g += T(222, y + 16, rows[i].name, {size:11.5, fill:C.dim, anchor:'end'});
+      g += R(BX, y, lw, 24, rows[i].col === C.blue ? C.blueBg : C.orangeBg, rows[i].col);
+      g += T(BX + lw + 10, y + 16, rows[i].v + ' 个 ' + rows[i].note,
+             {size:11, fill:rows[i].col, anchor:'start', mono:true});
+    }
+    g += T(340, Y0 + 4 * 36 + 14, '形状决定一切：区间越长越容易整段置满，树就越矮越小', {size:11.5, fill:C.dim});
+    mount('fig-c2', Y0 + 4 * 36 + 34, g, '同样是 10⁵ 次操作，结点数从 459 到 176 万，差三千多倍。');
+  })();
+
+  // ============ 演示 1：动态开点 ============
+  (function(){
+    var PRESETS = [
+      {n:8,  seq:[[1,3,6,5],[1,7,8,2],[2,3,6],[1,1,2,7],[2,1,8]]},
+      {n:16, seq:[[1,5,9,3],[1,2,4,4],[2,3,12],[1,11,16,2],[2,1,16],[1,7,7,-9],[2,5,10]]},
+      {n:8,  seq:[[1,1,8,1],[2,4,4],[1,4,6,3],[2,2,7]]}
+    ];
+    var host = document.getElementById('viz-dyn');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'dy-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = 'n = ' + PRESETS[i].n + '，' + PRESETS[i].seq.length + ' 次操作（第 ' + (i + 1) + ' 组）';
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'dy-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'dy-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'dy-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'dy-sum';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'dy-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var cur = [], step = -1, N = 8;
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      N = p.n;
+      var lc = [0, 0], rc = [0, 0], sum = [0, 0], addTag = [0, 0], cnt = 1, k;
+      function lazy(i, v, len){ sum[i] += v * len; addTag[i] += v; }
+      function down(i, ln, rn){
+        if (addTag[i] !== 0) {
+          if (lc[i] === 0) { lc[i] = ++cnt; lc.push(0); rc.push(0); sum.push(0); addTag.push(0); }
+          if (rc[i] === 0) { rc[i] = ++cnt; lc.push(0); rc.push(0); sum.push(0); addTag.push(0); }
+          lazy(lc[i], addTag[i], ln);
+          lazy(rc[i], addTag[i], rn);
+          addTag[i] = 0;
+        }
+      }
+      function add(jobl, jobr, jobv, l, r, i, born){
+        if (jobl <= l && r <= jobr) { lazy(i, jobv, r - l + 1); return; }
+        var mid = (l + r) >> 1;
+        down(i, mid - l + 1, r - mid);
+        if (jobl <= mid) {
+          if (lc[i] === 0) { lc[i] = ++cnt; lc.push(0); rc.push(0); sum.push(0); addTag.push(0); born.push(lc[i] + ' [' + l + ',' + mid + ']'); }
+          add(jobl, jobr, jobv, l, mid, lc[i], born);
+        }
+        if (jobr > mid) {
+          if (rc[i] === 0) { rc[i] = ++cnt; lc.push(0); rc.push(0); sum.push(0); addTag.push(0); born.push(rc[i] + ' [' + (mid + 1) + ',' + r + ']'); }
+          add(jobl, jobr, jobv, mid + 1, r, rc[i], born);
+        }
+        sum[i] = sum[lc[i]] + sum[rc[i]];
+      }
+      function query(jobl, jobr, l, r, i){
+        if (jobl <= l && r <= jobr) return sum[i];
+        var mid = (l + r) >> 1, res = 0;
+        down(i, mid - l + 1, r - mid);
+        if (jobl <= mid && lc[i] !== 0) res += query(jobl, jobr, l, mid, lc[i]);
+        if (jobr > mid && rc[i] !== 0) res += query(jobl, jobr, mid + 1, r, rc[i]);
+        return res;
+      }
+      var steps = [];
+      for (k = 0; k < p.seq.length; k++) {
+        var op = p.seq[k], born = [], txt = '', ret = null;
+        if (op[0] === 1) {
+          add(op[1], op[2], op[3], 1, p.n, 1, born);
+          txt = 'add(' + op[1] + ',' + op[2] + ',' + op[3] + ')';
+        } else {
+          ret = query(op[1], op[2], 1, p.n, 1);
+          txt = 'query(' + op[1] + ',' + op[2] + ') 返回 ' + ret;
+        }
+        var vals = [0], j;
+        for (j = 1; j <= p.n; j++) vals[j] = query(j, j, 1, p.n, 1);
+        steps.push({txt:txt, born:born, cnt:cnt, vals:vals.slice(), lc:lc.slice(), rc:rc.slice(),
+                    sum:sum.slice(), addTag:addTag.slice(), ret:ret});
+      }
+      cur = {steps:steps, n:p.n};
+      step = -1;
+      render();
+    }
+    function render(){
+      var s = step >= 0 ? cur.steps[step] : null;
+      var n = cur.n, i, j;
+      var g = '';
+      g += T(340, 16, s ? s.txt : '还没开始，点「下一步」', {size:12, weight:'600', fill:s ? C.blue : C.dim});
+      // 结点列表
+      var list = [];
+      if (s) {
+        for (i = 1; i <= s.cnt; i++) list.push(i);
+      }
+      var per = Math.min(6, Math.max(1, Math.ceil(list.length / 2)));
+      var bw = 190, gap = 20, cols = 2;
+      var x0n = 340 - (cols * bw + (cols - 1) * gap) / 2, nodeH = per * 30;
+      for (i = 0; i < list.length && i < per * cols; i++) {
+        var id = list[i];
+        var col = Math.floor(i / per), rowi = i % per;
+        var x = x0n + col * (bw + gap), y = 30 + rowi * 30;
+        var hot = s && s.born.join(' ').indexOf('#' + id + ' ') >= 0;
+        g += R(x, y, bw, 24, hot ? C.orangeBg : C.bg, hot ? C.orange : C.bd);
+        g += T(x + bw / 2, y + 16, '#' + id + ' sum ' + s.sum[id] + (s.addTag[id] ? ' add ' + s.addTag[id] : ''),
+               {size:10.5, mono:true, fill:hot ? C.orange : C.dim});
+      }
+      g += T(340, 30 + nodeH + 12, s ? ('已发出 ' + s.cnt + ' 个编号，这一步新建 ' + (s.born.length ? s.born.join('、') : '无'))
+                                     : '整棵树只有 1 号根', {size:11.5, fill:C.blue, mono:true});
+      // 逐位
+      var CW = n > 8 ? Math.floor(560 / n) : 58, x0 = 340 - (CW * n) / 2, yv = 30 + nodeH + 28;
+      for (j = 1; j <= n; j++) {
+        var v = s ? s.vals[j] : 0;
+        g += R(x0 + (j - 1) * CW, yv, CW - 6, 24, v ? C.blueBg : C.bg, v ? C.blue : C.bd);
+        g += T(x0 + (j - 1) * CW + (CW - 6) / 2, yv + 16, String(v), {size:11, mono:true, fill:v ? C.blue : C.gray});
+      }
+      var HH = yv + 24 + 26;
+      g += T(340, yv + 42, '第 ' + (step + 1) + ' / ' + cur.steps.length + ' 步' + (step < 0 ? '（未开始）' : ''),
+             {size:11.5, fill:C.orange, mono:true});
+      stage.innerHTML = '<svg viewBox="0 0 680 '+HH+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var lh = '', q;
+      for (q = 0; q <= step; q++) lh += '第 ' + (q + 1) + ' 步：' + cur.steps[q].txt + (cur.steps[q].born.length ? '，新建 ' + cur.steps[q].born.join('、') : '') + '\n';
+      log.textContent = lh;
+      ans.innerHTML = (s ? esc(s.txt) : '未开始') +
+        ' <b id="dy-sumline">逐位 ' + (s ? s.vals.slice(1).join(' ') : new Array(cur.n + 1).join('0 ').trim()) +
+        ' ｜ 编号数 ' + (s ? s.cnt : 1) + '</b>';
+      bNext.disabled = step >= cur.steps.length - 1;
+    }
+    bind('dy-next', 'click', function(){ if (step < cur.steps.length - 1) { step++; render(); } });
+    bind('dy-reset', 'click', function(){ step = -1; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+
+  // ============ 演示 2：只置 1 的区间计数 ============
+  (function(){
+    var PRESETS = [
+      {n:32, seq:[[3,20],[25,30],[1,2],[12,15],[28,32]], tag:'大区间为主'},
+      {n:32, seq:[[5,5],[9,9],[5,5],[17,17],[3,3],[9,9],[22,22],[5,5]], tag:'全是单点'},
+      {n:32, seq:[[2,7],[6,7],[20,24],[2,7],[11,13],[24,28]], tag:'短区间'}
+    ];
+    var host = document.getElementById('viz-count');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'ct-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = PRESETS[i].tag + '（' + PRESETS[i].seq.length + ' 次 add）';
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'ct-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'ct-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'ct-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'ct-sum';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'ct-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var cur = [], step = -1;
+    function build(){
+      var p = PRESETS[parseInt(sel.value, 10)];
+      var N = p.n, vis = [], k, i;
+      for (i = 0; i <= N + 1; i++) vis.push(0);
+      var steps = [];
+      var lc = [0, 0], rc = [0, 0], sum = [0, 0], cnt = 1;
+      function up(h, l, r){ sum[h] = sum[l] + sum[r]; }
+      function setOne(jobl, jobr, l, r, i, born, hit){
+        if (sum[i] === r - l + 1) { hit.push('#' + i + ' [' + l + ',' + r + ']'); return; }
+        if (jobl <= l && r <= jobr) { sum[i] = r - l + 1; return; }
+        var mid = (l + r) >> 1;
+        if (jobl <= mid) {
+          if (lc[i] === 0) { lc[i] = ++cnt; lc.push(0); rc.push(0); sum.push(0); born.push('#' + lc[i] + ' [' + l + ',' + mid + ']'); }
+          setOne(jobl, jobr, l, mid, lc[i], born, hit);
+        }
+        if (jobr > mid) {
+          if (rc[i] === 0) { rc[i] = ++cnt; lc.push(0); rc.push(0); sum.push(0); born.push('#' + rc[i] + ' [' + (mid + 1) + ',' + r + ']'); }
+          setOne(jobl, jobr, mid + 1, r, rc[i], born, hit);
+        }
+        up(i, lc[i], rc[i]);
+      }
+      for (k = 0; k < p.seq.length; k++) {
+        var born = [], hit = [];
+        setOne(p.seq[k][0], p.seq[k][1], 1, N, 1, born, hit);
+        for (i = p.seq[k][0]; i <= p.seq[k][1]; i++) vis[i] = 1;
+        var c = 0;
+        for (i = 1; i <= N; i++) c += vis[i];
+        steps.push({txt:'add(' + p.seq[k][0] + ',' + p.seq[k][1] + ')', born:born, hit:hit,
+                    cnt:cnt, vis:vis.slice(), count:sum[1], want:c});
+      }
+      cur = {steps:steps, n:N};
+      step = -1;
+      render();
+    }
+    function render(){
+      var s = step >= 0 ? cur.steps[step] : null;
+      var n = cur.n, i, g = '';
+      g += T(340, 16, s ? s.txt : '还没开始，点「下一步」', {size:12, weight:'600', fill:s ? C.blue : C.dim});
+      var CW = Math.floor(600 / n), x0 = 40, yv = 30;
+      for (i = 1; i <= n; i++) {
+        var on = s ? s.vis[i] === 1 : false;
+        g += R(x0 + (i - 1) * CW, yv, CW - 3, 22, on ? C.blueBg : C.bg, on ? C.blue : C.bd);
+        if (CW >= 16) g += T(x0 + (i - 1) * CW + (CW - 3) / 2, yv + 15, on ? '1' : '0',
+                             {size:10, mono:true, fill:on ? C.blue : C.gray});
+      }
+      g += T(340, yv + 40, '1 到 ' + n + '，涂蓝的格子已经被置成 1', {size:11.5, fill:C.dim});
+      g += T(340, yv + 62, s ? ('count() = ' + s.count + '，树上 ' + s.cnt + ' 个结点') : 'count() = 0，树上 1 个结点',
+             {size:11.5, fill:C.blue, mono:true});
+      g += T(340, yv + 84, s ? ('这一步早退 ' + s.hit.length + ' 次' + (s.hit.length ? '：' + s.hit.slice(0, 3).join('、') : '') +
+                                '，新建 ' + s.born.length + ' 个结点') : '整段已满就返回，一次都不会往下走',
+             {size:11.5, fill:C.orange, mono:true});
+      g += T(340, yv + 106, '第 ' + (step + 1) + ' / ' + cur.steps.length + ' 步' + (step < 0 ? '（未开始）' : ''),
+             {size:11.5, fill:C.dim, mono:true});
+      stage.innerHTML = '<svg viewBox="0 0 680 '+(yv + 124)+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var lh = '', q;
+      for (q = 0; q <= step; q++) {
+        lh += '第 ' + (q + 1) + ' 步：' + cur.steps[q].txt + '，count ' + cur.steps[q].count +
+              '，早退 ' + cur.steps[q].hit.length + ' 次，新建 ' + cur.steps[q].born.length + ' 个\n';
+      }
+      log.textContent = lh;
+      ans.innerHTML = (s ? esc(s.txt) : '未开始') +
+        ' <b id="ct-sumline">count ' + (s ? s.count : 0) + '（对照 ' + (s ? s.want : 0) + '） ｜ 结点 ' + (s ? s.cnt : 1) + '</b>';
+      bNext.disabled = step >= cur.steps.length - 1;
+    }
+    bind('ct-next', 'click', function(){ if (step < cur.steps.length - 1) { step++; render(); } });
+    bind('ct-reset', 'click', function(){ step = -1; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+})();
+</script>
+</body>
+</html>
