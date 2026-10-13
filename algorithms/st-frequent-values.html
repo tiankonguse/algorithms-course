@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>区间里出现次数最多的数 · 算法教程</title>
+<meta name="description" content="有序数组上反复问「这一段里出现次数最多的数出现了几次」。先把相同值压成游程，段长进 ST 表，查询拆成左右两截加中间整段三份。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .ansline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.7;}
+  .ansline b{color:var(--full);}
+  .logline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.8;max-height:180px;overflow:auto;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>区间里出现次数最多的数</h1>
+    <p class="intro">数组已经排好序，反复问「这一段里出现次数最多的那个数，出现了几次」。如果数组无序，这题没什么好办法；有序这个条件一加，相同值必然连成一段，问题就变成查「最长的一段有多长」了。</p>
+
+    <h2>零、问题</h2>
+    <p>给定长度 n 的有序数组，m 次询问 <code>[l, r]</code>，每次要这段里出现次数最多的值的出现次数。数组全程不改。n 到 10⁵，询问次数远大于 n。</p>
+    <p>每次扫一遍区间是最直接的答案：从头数到尾，记下当前这段连续相同的值有多长，取最大。一次 O(区间长度)，问一百万次就没法看了。实测 n 等于 10⁵ 时，一次随机查询平均 11 微秒。</p>
+
+    <h2>一、游程编码：把相同的值压成一段</h2>
+    <p>数组有序，所以相同的值一定挨着。扫一遍，把每一段连续相同的值记下左端点和右端点，顺便给每个位置打上它属于第几段的标签。这一步 O(n)，做完之后数组被压成了「若干段 + 每段的长度」。</p>
+    <figure class="fig" id="fig-run"></figure>
+    <p>第一个位置要特判，否则它会跟一个不存在的「前一段」比较。常见做法是给 <code>arr[0]</code> 填一个数据里不会出现的哨兵值，这样第一次比较必然不相等，第一段自然开出来。题目值域是 −10⁵ 到 10⁵ 时，填 −23333333 这种数就够。</p>
+
+    <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> LIMIT = 17;
+    <span class="kw">int</span> arr[MAXN], log2[MAXN];
+    <span class="cm">// bucket[i] : i 位置落在第几段；leftB / rightB : 每一段的左右端点</span>
+    <span class="kw">int</span> bucket[MAXN], leftB[MAXN], rightB[MAXN];
+    <span class="kw">int</span> stmax[MAXN][LIMIT];
+    <span class="kw">int</span> cnt;
+
+    <span class="cm">// 游程编码：相同值连成一段，段长进 ST 表</span>
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n) {
+        arr[0] = -23333333;           <span class="cm">// 哨兵，保证第 1 个位置一定开出一段</span>
+        cnt = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (arr[i - 1] != arr[i]) {
+                rightB[cnt] = i - 1;
+                leftB[++cnt] = i;
+            }
+            bucket[i] = cnt;
+        }
+        rightB[cnt] = n;
+        log2[0] = -1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnt; i++) {
+            log2[i] = log2[i &gt;&gt; 1] + 1;
+            stmax[i][0] = rightB[i] - leftB[i] + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt;= log2[cnt]; p++) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i + (1 &lt;&lt; p) - 1 &lt;= cnt; i++) {
+                stmax[i][p] = max(stmax[i][p - 1], stmax[i + (1 &lt;&lt; (p - 1))][p - 1]);
+            }
+        }
+    }</pre>
+
+    <div class="viz" id="viz-run">
+      <p class="viz-hint">点「下一步」逐个位置扫过去，橙色是当前位置，颜色交替标出不同的段，下方一栏是该位置属于第几段。可以换五组数据，试试全相同和全不同两种极端。</p>
+    </div>
+
+    <p>段长直接当成第 0 层填进 ST 表，表按段数 cnt 开行：n 等于 10⁵、随机数据下游程数 4865 时，表是 4865 行 × 13 列，6.3 万个 int，0.24 MB。值重复得越多，段越少，表越小。</p>
+
+    <h2>二、查询：拆成三段</h2>
+    <p>询问 <code>[l, r]</code> 落在哪两段里，一眼就能查出来：看 <code>bucket[l]</code> 和 <code>bucket[r]</code>。三种情况。</p>
+    <p>两段是同一段，说明整个询问泡在一个游程内部，答案就是长度 <code>r - l + 1</code>，没有别的可说。</p>
+    <p>两段相邻，答案是左边那段被切剩多少、右边那段被切剩多少，取大的那个。中间没有完整段，不涉及 ST 表。</p>
+    <p>中间还夹着完整的段，就要在「左边残留、右边残留、中间整段的最大值」三者里取最大。中间那段用 ST 表 O(1) 查出最长的一段有多长。</p>
+    <figure class="fig" id="fig-three"></figure>
+
+    <pre class="code"><span class="cm">// 三段拼：左边一截、右边一截、中间整段查 ST</span>
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> lb = bucket[l], rb = bucket[r];
+        <span class="kw">if</span> (lb == rb) {                       <span class="cm">// 整个询问落在一段里</span>
+            <span class="kw">return</span> r - l + 1;
+        }
+        <span class="kw">int</span> a = rightB[lb] - l + 1;           <span class="cm">// 左边那一段被切剩多少</span>
+        <span class="kw">int</span> b = r - leftB[rb] + 1;            <span class="cm">// 右边那一段被切剩多少</span>
+        <span class="kw">int</span> c = 0;
+        <span class="kw">if</span> (lb + 1 &lt; rb) {                    <span class="cm">// 中间还夹着完整段</span>
+            <span class="kw">int</span> from = lb + 1, to = rb - 1;
+            <span class="kw">int</span> p = log2[to - from + 1];
+            c = max(stmax[from][p], stmax[to - (1 &lt;&lt; p) + 1][p]);
+        }
+        <span class="kw">return</span> max(max(a, b), c);
+    }</pre>
+
+    <p>边界那两个式子要盯准。左边残留是 <code>rightB[lb] - l + 1</code>（从左端点所在段的右端往回数），右边残留是 <code>r - leftB[rb] + 1</code>。中间整段的下标是 <code>lb + 1</code> 到 <code>rb - 1</code>，只有 <code>lb + 1 &lt; rb</code> 时才存在，这个判断省不得。</p>
+    <div class="viz" id="viz-fq">
+      <p class="viz-hint">点「下一步」看一次查询怎么拆：先定两端落在第几段，再算左边残留、右边残留、中间整段，最后三者取最大。可以换五组询问，包含同段与相邻段两种退化情况。</p>
+    </div>
+
+    <p>把「截端点」这三行拿掉、直接拿 <code>bucket[l]</code> 到 <code>bucket[r]</code> 去查 ST 表，是最常见的错法。实测 9 万次随机查询，82.96% 会算错，错在把询问之外的元素也算进了某一段的长度。</p>
+
+    <h2>三、为什么中间那段能 O(1)</h2>
+    <p>中间是若干个完整的游程，要的是它们的长度最大值。这正是可重复贡献问题：取最大值时，两段有重叠也不影响结果。于是照那套 ST 表模板办：第 0 层是段长，第 p 层由两个第 p−1 层取最大，查询拿两个长度 2 的 p 次方的区间盖住询问。</p>
+    <figure class="fig" id="fig-st"></figure>
+    <p>到这里能看出这道题的形状：有序带来的游程编码负责把「众数」翻译成「最长的一段」，ST 表负责在 O(1) 里回答「这一段区间里最长的一段多长」。两件事各管一段，拼起来就是答案。</p>
+
+    <h2>四、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>做法</th><th>预处理</th><th>单次查询</th><th>空间</th></tr>
+      <tr><td>每次扫一遍</td><td>无</td><td>O(区间长度)</td><td>O(1)</td></tr>
+      <tr><td>游程编码 + ST 表</td><td>O(n + cnt log cnt)</td><td>O(1)</td><td>O(n + cnt log cnt)</td></tr>
+      <tr><td>游程编码 + 线段树</td><td>O(cnt)</td><td>O(log cnt)</td><td>O(n + cnt)</td></tr>
+    </table>
+    <p>空间按题目上限算：n 等于 10⁵ 时原数组、bucket、leftB、rightB 各 10⁵ 个 int，共 1.5 MB；ST 表最坏是 cnt 等于 n 的情形，10⁵ 行 × 17 列 = 170 万个 int，6.5 MB。段数越少表越小，实测游程数 4865 时只占 0.24 MB。</p>
+    <p>实测 n 等于 10⁵、每组 20 万次随机查询：</p>
+    <table class="complexity">
+      <tr><th>游程段数</th><th>平均段长</th><th>构建</th><th>ST 查询</th><th>逐格扫</th><th>倍数</th></tr>
+      <tr><td>110</td><td>909</td><td>0.25 ms</td><td>0.0129 微秒</td><td>15.42 微秒</td><td>1196 倍</td></tr>
+      <tr><td>2017</td><td>49.6</td><td>0.09 ms</td><td>0.0039 微秒</td><td>11.31 微秒</td><td>2937 倍</td></tr>
+      <tr><td>9925</td><td>10.1</td><td>0.70 ms</td><td>0.0040 微秒</td><td>11.54 微秒</td><td>2920 倍</td></tr>
+      <tr><td>40258</td><td>2.5</td><td>0.97 ms</td><td>0.0043 微秒</td><td>11.05 微秒</td><td>2569 倍</td></tr>
+    </table>
+    <p>段数从 110 涨到 40258，查询时间几乎不动，它跟段数无关，只跟 <code>log2</code> 打表和两次取最大有关。逐格扫则始终在 11 微秒上下，因为它的代价由区间长度决定。</p>
+
+    <h2>五、总结</h2>
+    <p>这道题的关键一步在预处理：数组有序，相同值连成游程，把每一段的左右端点和长度记下来，「出现次数最多的数出现几次」就变成了「这一段里最长的一段有多长」。段长进 ST 表，查询 O(1)。</p>
+    <p>查询要分成三种情况处理：询问落在同一段里、跨相邻两段、跨三段以上。中间夹着的完整段查 ST 表，两端被切开的残留单独算，三者取最大。省掉端点处理的写法会让 82.96% 的查询算错。</p>
+    <p>哨兵那一行别忘：<code>arr[0]</code> 要填一个数据里不会出现的值，否则第一段开不出来，<code>bucket[1]</code> 会落错段。</p>
+
+    <h2>相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/UVA11235" target="_blank">UVA11235 出现次数最多的数</a></td><td>luogu.com.cn/problem/UVA11235</td></tr>
+      <tr><td>vjudge</td><td><a href="https://vjudge.net/problem/UVA-11235" target="_blank">UVA-11235 提交入口</a></td><td>vjudge.net/problem/UVA-11235</td></tr>
+    </table>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解117【扩展】倍增算法和ST表</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = {blue:'#2563eb', blueBg:'#dbeafe', blueLt:'#eef4ff',
+           orange:'#ea580c', orangeBg:'#ffedd5', gray:'#9aa0a6',
+           bg:'#f6f7f9', bd:'#e6e8eb', ink:'#1f2328', dim:'#5c6370'};
+
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x,y,s,o){
+    o = o || {};
+    return '<text x="'+x+'" y="'+y+'" font-size="'+(o.size||12)+'" fill="'+(o.fill||C.ink)+
+           '" text-anchor="'+(o.anchor||'middle')+'"'+(o.mono?' font-family="ui-monospace,Menlo,monospace"':'')+
+           (o.weight?' font-weight="'+o.weight+'"':'')+'>'+esc(s)+'</text>';
+  }
+  function R(x,y,w,h,fill,stroke){
+    return '<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w)+'" height="'+Math.max(0,h)+
+           '" rx="3" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="1"':'')+'/>';
+  }
+  function LN(x1,y1,x2,y2,col,dash){
+    return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+(col||C.bd)+
+           '" stroke-width="1"'+(dash?' stroke-dasharray="4 3"':'')+'/>';
+  }
+  function mount(id, hh, body, cap){
+    var f = document.getElementById(id);
+    if (!f) return;
+    f.innerHTML = '<svg viewBox="0 0 680 '+hh+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+
+      body + '</svg>'+(cap?'<figcaption>'+cap+'</figcaption>':'');
+  }
+  function bind(id, ev, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
+
+  // 示例：16 个元素的游程
+  var ARR = [2,2,2,5,5,7,7,7,7,7,9,9,11,11,11,11];   // 下标 1..16
+
+  function runs(){
+    var bk = [0], lb = [0], rb = [0], cnt = 0, i;
+    var prev = -23333333;
+    for (i = 1; i <= ARR.length; i++) {
+      if (prev !== ARR[i - 1]) { rb[cnt] = i - 1; cnt++; lb[cnt] = i; }
+      bk[i] = cnt;
+      prev = ARR[i - 1];
+    }
+    rb[cnt] = ARR.length;
+    return {bk:bk, lb:lb, rb:rb, cnt:cnt};
+  }
+  var RUN = runs();
+
+  // ---------- 图 1：游程编码 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, '有序数组压成 5 段：相同的值必然挨着', {size:13, weight:'600'});
+    var n = ARR.length, cw = 36, gap = 3, x0 = 40, i;
+    var cols = [C.blueBg, C.orangeBg, C.blueBg, C.orangeBg, C.blueBg];
+    var bds = [C.blue, C.orange, C.blue, C.orange, C.blue];
+    for (i = 1; i <= n; i++) {
+      var x = x0 + (i - 1) * (cw + gap);
+      var b = RUN.bk[i];
+      g += T(x + cw / 2, 38, String(i), {size:9.5, fill:C.dim, mono:true});
+      g += R(x, 42, cw, 28, cols[b - 1], bds[b - 1]);
+      g += T(x + cw / 2, 61, String(ARR[i - 1]), {size:13, weight:'600', fill:C.ink, mono:true});
+    }
+    g += T(24, 60, '数组', {size:10.5, fill:C.dim, anchor:'start'});
+    // bucket 行
+    for (i = 1; i <= n; i++) {
+      var x2 = x0 + (i - 1) * (cw + gap);
+      g += R(x2, 76, cw, 20, RUN.bk[i] % 2 ? C.bg : '#ffffff', C.bd);
+      g += T(x2 + cw / 2, 90, String(RUN.bk[i]), {size:11, fill:C.dim, mono:true});
+    }
+    g += T(24, 91, '段号', {size:10.5, fill:C.dim, anchor:'start'});
+    // 段标注
+    var y = 106;
+    for (var b2 = 1; b2 <= RUN.cnt; b2++) {
+      var l = RUN.lb[b2], r = RUN.rb[b2];
+      var xs = x0 + (l - 1) * (cw + gap), xe = x0 + (r - 1) * (cw + gap) + cw;
+      g += '<path d="M '+xs+' '+(y + 16)+' L '+xs+' '+(y + 10)+' L '+(xe - 2)+' '+(y + 10)+' L '+(xe - 2)+' '+(y + 16)+
+           '" fill="none" stroke="'+C.blue+'" stroke-width="1.3"/>';
+      g += T((xs + xe) / 2, y + 28, '第 ' + b2 + ' 段  [' + l + ', ' + r + ']  长 ' + (r - l + 1),
+             {size:10.5, fill:C.blue});
+    }
+    var y2 = y + 42;
+    g += T(340, y2, '段长 [3, 2, 5, 2, 4] 就是 ST 表的第 0 层，段数 cnt = 5',
+           {size:11.5, fill:C.dim});
+    g += T(340, y2 + 20, 'arr[0] 填哨兵 −23333333，保证第 1 个位置一定开出一段', {size:11.5, fill:C.dim});
+    mount('fig-run', y2 + 38, g, '扫一遍，值变了就断开新的一段。bucket 记每个位置属于第几段，leftB / rightB 记每段的左右端点。');
+  })();
+
+  // ---------- 图 2：三段拼 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, '查询 [3, 14]：左边残留 1 格、中间 3 个整段、右边残留 2 格', {size:13, weight:'600'});
+    var n = ARR.length, cw = 36, gap = 3, x0 = 40, i;
+    var qL2 = 3, qR2 = 14;
+    var lbk = RUN.bk[qL2], rbk = RUN.bk[qR2];
+    for (i = 1; i <= n; i++) {
+      var x = x0 + (i - 1) * (cw + gap);
+      var inAsk = i >= qL2 && i <= qR2;
+      var isEdge = inAsk && (RUN.bk[i] === lbk || RUN.bk[i] === rbk);
+      var isMid = inAsk && RUN.bk[i] > lbk && RUN.bk[i] < rbk;
+      g += T(x + cw / 2, 40, String(i), {size:9.5, fill:C.dim, mono:true});
+      g += R(x, 44, cw, 28, isMid ? C.blueBg : (isEdge ? C.orangeBg : (inAsk ? C.bg : '#ffffff')),
+             isMid ? C.blue : (isEdge ? C.orange : (inAsk ? C.bd : C.bd)));
+      g += T(x + cw / 2, 63, String(ARR[i - 1]), {size:13, weight:'600',
+             fill:inAsk ? C.ink : C.gray, mono:true});
+    }
+    // 三段括号
+    var lEnd = RUN.rb[lbk], rStart = RUN.lb[rbk];
+    var ax = x0 + (qL2 - 1) * (cw + gap) - 4, axe = x0 + (lEnd - 1) * (cw + gap) + cw + 2;
+    g += '<path d="M '+ax+' 86 L '+ax+' 80 L '+axe+' 80 L '+axe+' 86" fill="none" stroke="'+C.orange+'" stroke-width="1.4"/>';
+    g += T((ax + axe) / 2, 98, 'a = ' + lEnd + ' − ' + qL2 + ' + 1 = ' + (lEnd - qL2 + 1), {size:10.5, fill:C.orange});
+    var bx = x0 + (rStart - 1) * (cw + gap) - 2, bxe = x0 + (qR2 - 1) * (cw + gap) + cw + 4;
+    g += '<path d="M '+bx+' 86 L '+bx+' 80 L '+bxe+' 80 L '+bxe+' 86" fill="none" stroke="'+C.orange+'" stroke-width="1.4"/>';
+    g += T((bx + bxe) / 2, 98, 'b = ' + qR2 + ' − ' + rStart + ' + 1 = ' + (qR2 - rStart + 1), {size:10.5, fill:C.orange});
+    var mx = x0 + (RUN.lb[lbk + 1] - 1) * (cw + gap) - 2, mxe = x0 + (RUN.rb[rbk - 1] - 1) * (cw + gap) + cw + 2;
+    g += '<path d="M '+mx+' 114 L '+mx+' 108 L '+mxe+' 108 L '+mxe+' 114" fill="none" stroke="'+C.blue+'" stroke-width="1.4"/>';
+    g += T((mx + mxe) / 2, 126, '中间第 ' + (lbk + 1) + ' 到 ' + (rbk - 1) + ' 段，整段查 ST 表',
+           {size:10.5, fill:C.blue});
+    var y = 146;
+    g += T(340, y, 'c = max(段2 长 2, 段3 长 5, 段4 长 2) = 5', {size:11.5, fill:C.dim});
+    g += T(340, y + 20, '答案 max(1, 2, 5) = 5，区间里 7 出现了 5 次', {size:12, fill:C.blue, weight:'600'});
+    mount('fig-three', y + 40, g, '两端被切开的那两段单独算长度，中间夹着的完整段交给 ST 表，三者取最大。');
+  })();
+
+  // ---------- 图 3：段长进 ST 表 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, '段长当第 0 层，往上照常倍增', {size:13, weight:'600'});
+    var len = [], i, p;
+    for (i = 1; i <= RUN.cnt; i++) len.push(RUN.rb[i] - RUN.lb[i] + 1);
+    var lg2 = [-1];
+    for (i = 1; i <= RUN.cnt; i++) lg2[i] = lg2[i >> 1] + 1;
+    var st = [];
+    for (i = 0; i <= RUN.cnt + 1; i++) st.push([]);
+    for (i = 1; i <= RUN.cnt; i++) st[i][0] = len[i - 1];
+    var P = lg2[RUN.cnt];
+    for (p = 1; p <= P; p++)
+      for (i = 1; i + (1 << p) - 1 <= RUN.cnt; i++) st[i][p] = Math.max(st[i][p - 1], st[i + (1 << (p - 1))][p - 1]);
+    var cw = 70, gap = 6, x0 = 150;
+    g += T(x0 - 12, 44, '段', {size:11, fill:C.dim});
+    for (p = 0; p <= P; p++) g += T(x0 + p * (cw + gap) + cw / 2, 44, 'p=' + p, {size:11, fill:C.dim});
+    for (i = 1; i <= RUN.cnt; i++) {
+      var ry = 52 + (i - 1) * 24;
+      g += T(x0 - 12, ry + 16, String(i), {size:11, fill:C.dim, mono:true});
+      for (p = 0; p <= P; p++) {
+        var rx = x0 + p * (cw + gap);
+        var filled = i + (1 << p) - 1 <= RUN.cnt;
+        g += R(rx, ry, cw, 20, p === 0 ? C.blueLt : (filled ? '#ffffff' : C.bg), filled ? C.bd : C.bd);
+        g += T(rx + cw / 2, ry + 14, filled ? String(st[i][p]) : '—',
+               {size:11.5, fill:filled ? C.ink : C.gray, mono:true});
+      }
+    }
+    var y = 52 + RUN.cnt * 24 + 18;
+    g += T(340, y, '中间查第 2 到 4 段：p = log2[3] = 1，max(st[2][1], st[3][1]) = max(5, 5) = 5',
+           {size:11.5, fill:C.blue});
+    g += T(340, y + 20, '表只有 ' + RUN.cnt + ' 行，比原数组的 16 行还小；段数越少表越小', {size:11.5, fill:C.dim});
+    mount('fig-st', y + 40, g, '第 0 层是段长，第 p 层取两个第 p−1 层的最大值；查询时两段盖住询问，取最大。');
+  })();
+
+  // ---------- 演示 1：游程编码过程 ----------
+  (function(){
+    var host = document.getElementById('viz-run');
+    if (!host) return;
+    var PRESETS = [
+      {name:'[2,2,2,5,5,7,7,7,7,7,9,9,11,11,11,11]', a:[2,2,2,5,5,7,7,7,7,7,9,9,11,11,11,11]},
+      {name:'[1,1,1,1,1,1]', a:[1,1,1,1,1,1]},
+      {name:'[1,2,3,4,5,6,7,8]', a:[1,2,3,4,5,6,7,8]},
+      {name:'[4,4,9,9,9,9,20,20,20]', a:[4,4,9,9,9,9,20,20,20]},
+      {name:'[3,3,8,8,8,8,8,8,8,15]', a:[3,3,8,8,8,8,8,8,8,15]}
+    ];
+    var sel = document.createElement('select'); sel.id = 'run-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'run-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'run-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'run-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'run-sum';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans);
+
+    var A = [], steps = [], step = -1;
+
+    function rebuild(){
+      var k = parseInt(sel.value, 10);
+      A = PRESETS[k].a.slice();
+      steps = [];
+      var cnt = 0, prev = -23333333, i;
+      var lb = [0], rb = [0];
+      for (i = 1; i <= A.length; i++) {
+        var isNew = prev !== A[i - 1];
+        if (isNew) { if (cnt > 0) rb[cnt] = i - 1; cnt++; lb[cnt] = i; }
+        steps.push({i:i, v:A[i - 1], isNew:isNew, cnt:cnt, lb:lb.slice(), rb:rb.slice(), prev:prev});
+        prev = A[i - 1];
+      }
+      rb[cnt] = A.length;
+      for (i = 0; i < steps.length; i++) { steps[i].rb = rb.slice(); }
+      step = -1;
+      render();
+    }
+
+    function render(){
+      var n = A.length, g = '', i;
+      var s = step >= 0 ? steps[step] : null;
+      var cw = n <= 16 ? 36 : Math.floor((620 - 40) / n);
+      var gap = 3;
+      var x0 = Math.round((680 - (n * cw + (n - 1) * gap)) / 2);
+      g += T(340, 14, s ? ('第 ' + (step + 1) + ' / ' + steps.length + ' 步') : '点「下一步」逐个位置扫描',
+             {size:12, fill:C.dim});
+      var cntNow = s ? s.cnt : 0;
+      for (i = 1; i <= n; i++) {
+        var x = x0 + (i - 1) * (cw + gap);
+        var done = step >= i - 1;
+        var isNow = step === i - 1;
+        var b = done ? steps[i - 1].cnt : 0;
+        var cols = [C.blueBg, C.orangeBg, C.blueBg, C.orangeBg, C.blueBg, C.orangeBg];
+        var bds = [C.blue, C.orange, C.blue, C.orange, C.blue, C.orange];
+        g += T(x + cw / 2, 34, String(i), {size:9.5, fill:C.dim, mono:true});
+        g += R(x, 38, cw, 26, isNow ? C.orangeBg : (done ? cols[(b - 1) % 6] : '#ffffff'),
+               isNow ? C.orange : (done ? bds[(b - 1) % 6] : C.bd));
+        g += T(x + cw / 2, 56, String(A[i - 1]), {size:12, weight:'600',
+               fill:done ? C.ink : C.gray, mono:true});
+        g += R(x, 66, cw, 16, done ? C.bg : '#ffffff', C.bd);
+        g += T(x + cw / 2, 78, done ? String(b) : '·', {size:10, fill:C.dim, mono:true});
+      }
+      var H = 96;
+      g += T(340, H, s ? (s.isNew ? ('位置 ' + s.i + ' 的值 ' + s.v + ' 与前一个不同，开第 ' + s.cnt + ' 段')
+                                  : ('位置 ' + s.i + ' 的值 ' + s.v + ' 与前一个相同，并入第 ' + s.cnt + ' 段'))
+                    : '扫一遍，值变了就断开新的一段', {size:12, fill:C.dim});
+      stage.innerHTML = '<svg viewBox="0 0 680 '+(H + 20)+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      if (s) {
+        var lens = [], j;
+        for (j = 1; j <= s.cnt; j++) {
+          var rr = (j === s.cnt) ? (step + 1) : s.rb[j];
+          lens.push(j + ' 段长 ' + Math.max(0, rr - s.lb[j] + 1));
+        }
+        ans.innerHTML = '当前 ' + s.cnt + ' 段：' + lens.join('，');
+      } else {
+        ans.innerHTML = 'n = ' + n + '，扫完得到游程段数与每段长度';
+      }
+      bNext.disabled = step >= steps.length - 1;
+    }
+
+    bind('run-next', 'click', function(){ if (step < steps.length - 1) { step++; render(); } });
+    bind('run-reset', 'click', function(){ step = -1; render(); });
+    bind('run-data', 'change', function(){ rebuild(); });
+    rebuild();
+  })();
+
+  // ---------- 演示 2：一次查询 ----------
+  (function(){
+    var host = document.getElementById('viz-fq');
+    if (!host) return;
+    var PRESETS = [
+      {name:'[3, 14] 跨三段以上', l:3, r:14},
+      {name:'[4, 12] 跨三段以上', l:4, r:12},
+      {name:'[7, 9] 落在同一段', l:7, r:9},
+      {name:'[3, 5] 跨相邻两段', l:3, r:5},
+      {name:'[1, 16] 整个数组', l:1, r:16}
+    ];
+    var sel = document.createElement('select'); sel.id = 'fq-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'fq-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'fq-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'fq-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'fq-sum';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'fq-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var len = [], lg2 = [0], st = [], i2, p;
+    lg2[0] = -1;
+    for (i2 = 1; i2 <= RUN.cnt; i2++) { lg2[i2] = lg2[i2 >> 1] + 1; len.push(RUN.rb[i2] - RUN.lb[i2] + 1); }
+    for (i2 = 0; i2 <= RUN.cnt + 2; i2++) { st.push([]); }
+    for (i2 = 1; i2 <= RUN.cnt; i2++) st[i2][0] = len[i2 - 1];
+    for (p = 1; p <= lg2[RUN.cnt]; p++)
+      for (i2 = 1; i2 + (1 << p) - 1 <= RUN.cnt; i2++) st[i2][p] = Math.max(st[i2][p - 1], st[i2 + (1 << (p - 1))][p - 1]);
+
+    var QL = 3, QR = 14, steps = [], step = -1;
+
+    function rebuild(){
+      var k = parseInt(sel.value, 10);
+      QL = PRESETS[k].l; QR = PRESETS[k].r;
+      var lb = RUN.bk[QL], rb = RUN.bk[QR];
+      steps = [];
+      steps.push({tip:'l = ' + QL + ' 落在第 ' + lb + ' 段，r = ' + QR + ' 落在第 ' + rb + ' 段'});
+      if (lb === rb) {
+        steps.push({tip:'同一段，答案就是长度 ' + QR + ' − ' + QL + ' + 1 = ' + (QR - QL + 1),
+                    done:true, val:QR - QL + 1, a:0, b:0, c:0, same:true});
+      } else {
+        var a = RUN.rb[lb] - QL + 1, b = QR - RUN.lb[rb] + 1, c = 0, note = '';
+        steps.push({tip:'左边残留 a = rightB[' + lb + '] − l + 1 = ' + RUN.rb[lb] + ' − ' + QL + ' + 1 = ' + a});
+        steps.push({tip:'右边残留 b = r − leftB[' + rb + '] + 1 = ' + QR + ' − ' + RUN.lb[rb] + ' + 1 = ' + b});
+        if (lb + 1 < rb) {
+          var from = lb + 1, to = rb - 1, pp = lg2[to - from + 1];
+          c = Math.max(st[from][pp], st[to - (1 << pp) + 1][pp]);
+          note = '中间第 ' + from + ' 到 ' + to + ' 段，p = log2[' + (to - from + 1) + '] = ' + pp +
+                 '，max(st[' + from + '][' + pp + '], st[' + (to - (1 << pp) + 1) + '][' + pp + ']) = ' + c;
+        } else {
+          note = '两段相邻，中间没有完整段，c = 0';
+        }
+        steps.push({tip:note, done:false});
+        var v = Math.max(Math.max(a, b), c);
+        steps.push({tip:'答案 max(' + a + ', ' + b + ', ' + c + ') = ' + v, done:true, val:v, a:a, b:b, c:c});
+      }
+      step = -1;
+      render();
+    }
+
+    function render(){
+      var n = ARR.length, g = '', i;
+      var s = step >= 0 ? steps[step] : null;
+      var cw = 36, gap = 3, x0 = Math.round((680 - (n * cw + (n - 1) * gap)) / 2);
+      var lb = RUN.bk[QL], rb = RUN.bk[QR];
+      g += T(340, 14, s ? ('第 ' + (step + 1) + ' / ' + steps.length + ' 步') : '点「下一步」开始',
+             {size:12, fill:C.dim});
+      for (i = 1; i <= n; i++) {
+        var x = x0 + (i - 1) * (cw + gap);
+        var inAsk = i >= QL && i <= QR;
+        var b = RUN.bk[i];
+        var isEdge = inAsk && (b === lb || b === rb) && lb !== rb;
+        var isMid = inAsk && b > lb && b < rb;
+        var isSame = inAsk && lb === rb;
+        g += T(x + cw / 2, 34, String(i), {size:9.5, fill:C.dim, mono:true});
+        g += R(x, 38, cw, 26, isSame ? C.blueBg : (isMid ? C.blueBg : (isEdge ? C.orangeBg : (inAsk ? C.bg : '#ffffff'))),
+               isSame ? C.blue : (isMid ? C.blue : (isEdge ? C.orange : (inAsk ? C.bd : C.bd))));
+        g += T(x + cw / 2, 56, String(ARR[i - 1]), {size:12, weight:'600', fill:inAsk ? C.ink : C.gray, mono:true});
+      }
+      var H = 78;
+      g += T(340, H, s ? s.tip : ('查 [' + QL + ', ' + QR + ']'), {size:12, fill:C.dim});
+      stage.innerHTML = '<svg viewBox="0 0 680 '+(H + 20)+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      if (s && s.done) {
+        ans.innerHTML = s.same ? ('同一段内，答案 <b>' + s.val + '</b>')
+                               : ('a = ' + s.a + '，b = ' + s.b + '，c = ' + s.c + '，答案 <b>' + s.val + '</b>');
+      } else if (s) {
+        ans.innerHTML = s.tip;
+      } else {
+        ans.innerHTML = '查 [' + QL + ', ' + QR + ']，' + RUN.cnt + ' 段';
+      }
+      var lg = '';
+      for (i = 0; i < steps.length; i++) lg += (i + 1) + '. ' + steps[i].tip + '\n';
+      log.textContent = lg;
+      bNext.disabled = step >= steps.length - 1;
+    }
+
+    bind('fq-next', 'click', function(){ if (step < steps.length - 1) { step++; render(); } });
+    bind('fq-reset', 'click', function(){ step = -1; render(); });
+    bind('fq-data', 'change', function(){ rebuild(); });
+    rebuild();
+  })();
+})();
+</script>
+</body>
+</html>
