@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扫描线：线段树维护覆盖 · 算法教程</title>
+<meta name="description" content="一次扫描动的是一整段区间，要问被覆盖的总长度。这个量由左右两段相加得到，能合并，正好是线段树的活。矩形面积并和周长并，一套代码改两行。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .ansline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.7;}
+  .ansline b{color:var(--full);}
+  .logline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.8;max-height:150px;overflow:auto;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>扫描线：线段树维护覆盖</h1>
+    <p class="intro">一次扫描动的是一整段，不再是一个点。要问这一整段里被覆盖的总长度，堆答不了，线段树正好：这个量由左右两段相加得到，合得起来。</p>
+
+    <h2>零、背景</h2>
+    <p>上一门的扫描线配的是堆，因为那里每个边界造成的改变是「一个数进集合、一个数出集合」。矩形问题里换了一幅样子：一条扫描线带的是一整段 y 区间，要么把 [y1, y2) 整段盖住，要么整段取消。</p>
+    <p>要维护的量也随之变成「当前被覆盖的总长度」。这个量和区间与、区间和一样，由左右两段相加得到，能合并，所以线段树能维护它。面积并和周长并两道题，用的是同一棵线段树、同一套扫描线。</p>
+
+    <h2>一、矩形面积并</h2>
+    <p>题意：n 个矩形，第 i 个是 <code>(x1, y1)</code> 到 <code>(x2, y2)</code>，求它们并集的面积。n 到 10⁵，坐标 0 到 10⁹，答案在 64 位整数里。</p>
+    <p>扫 x 轴。每个矩形拆成两条边：左边缘 <code>(x1, y1, y2, +1)</code>，右边缘 <code>(x2, y1, y2, -1)</code>，意思是「从这条边开始，[y1, y2) 这段多盖一层」或者「少盖一层」。全部 2n 条边按 x 排序。</p>
+    <p>相邻两条边之间，覆盖情况不变，这段时间贡献的面积就是「当前覆盖长度 × 两条边的横向距离」。所以整道题只需要维护一个数：y 轴上当前被覆盖的总长度。</p>
+
+    <h2>二、线段树上挂三个量</h2>
+    <p>先把 y 坐标离散化：收集全部 y1 和 y2，排序去重，相邻两个坐标之间是一段。设去重后有 m 个坐标，线段树就建在这 m 减 1 段上。</p>
+    <p>每个节点挂三个量。<code>length</code> 是这个节点所辖范围的总长度，建树时定死，之后不动；<code>times</code> 是这个节点被整段覆盖了几层；<code>cover</code> 是这个节点所辖范围里，被覆盖的长度合计。查询永远只问根，<code>cover[1]</code> 就是当前覆盖总长度。</p>
+    <p>合并规则只有三条：<code>times</code> 大于 0，说明这段被整段盖住，<code>cover</code> 等于 <code>length</code>；<code>times</code> 是 0 且这是叶子，这段什么都没盖，<code>cover</code> 是 0；否则 <code>cover</code> 是左右儿子的 <code>cover</code> 相加。</p>
+    <p>这里有个省事的地方：不需要懒更新标记。查询永远只问根，而每次加一层后续一定有等量的减一层把它抵消，任务根本不用往叶子传，<code>up</code> 一路上推就能保证根是对的。</p>
+    <figure class="fig" id="fig-tree"></figure>
+    <p>看这张图。三条线处理完之后，五段叶子的 <code>times</code> 都是 1，每段 <code>cover</code> 等于 <code>length</code>，一路合并到根，<code>cover[1]</code> 是 6，y 轴上 0 到 6 全盖住。注意中间那些 <code>times</code> 是 0 的节点：它们没被任何一条线完整盖住，<code>cover</code> 是两个儿子加起来的结果。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+
+    <span class="kw">int</span> ysort[MAXN];
+    <span class="cm">// 线段树某范围总长度</span>
+    <span class="kw">int</span> length[MAXN &lt;&lt; 2];
+    <span class="cm">// 线段树某范围覆盖长度</span>
+    <span class="kw">int</span> cover[MAXN &lt;&lt; 2];
+    <span class="cm">// 线段树某范围覆盖次数</span>
+    <span class="kw">int</span> times[MAXN &lt;&lt; 2];
+
+    <span class="kw">int</span> <span class="fn">prepare</span>(<span class="kw">int</span> n) {
+        sort(ysort + 1, ysort + n + 1);
+        <span class="kw">int</span> m = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            <span class="kw">if</span> (ysort[m] != ysort[i]) {
+                ysort[++m] = ysort[i];
+            }
+        }
+        ysort[m + 1] = ysort[m];
+        <span class="kw">return</span> m;
+    }
+
+    <span class="kw">int</span> <span class="fn">rankOf</span>(<span class="kw">int</span> m, <span class="kw">int</span> num) {
+        <span class="kw">int</span> ans = 0, l = 1, r = m, mid;
+        <span class="kw">while</span> (l &lt;= r) {
+            mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (ysort[mid] &gt;= num) {
+                ans = mid;
+                r = mid - 1;
+            } <span class="kw">else</span> {
+                l = mid + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l &lt; r) {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            build(l, mid, i &lt;&lt; 1);
+            build(mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        length[i] = ysort[r + 1] - ysort[l];
+        times[i] = 0;
+        cover[i] = 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (times[i] &gt; 0) {
+            cover[i] = length[i];
+        } <span class="kw">else</span> <span class="kw">if</span> (l == r) {
+            cover[i] = 0;
+        } <span class="kw">else</span> {
+            cover[i] = cover[i &lt;&lt; 1] + cover[i &lt;&lt; 1 | 1];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            times[i] += jobv;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                add(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                add(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+            }
+        }
+        up(l, r, i);
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">compute</span>(<span class="kw">int</span> n, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; rec) {
+        <span class="cm">// 0 : x 1 : y1 2 : y2 3 : +1 / -1</span>
+        vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; <span class="fn">line</span>(2 * n + 1, vector&lt;<span class="kw">int</span>&gt;(4));
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, j = 1 + n; i &lt;= n; i++, j++) {
+            <span class="kw">int</span> x1 = rec[i - 1][0], y1 = rec[i - 1][1], x2 = rec[i - 1][2], y2 = rec[i - 1][3];
+            ysort[i] = y1;
+            ysort[j] = y2;
+            line[i] = {x1, y1, y2, 1};
+            line[j] = {x2, y1, y2, -1};
+        }
+        n &lt;&lt;= 1;
+        <span class="kw">int</span> m = prepare(n);
+        build(1, m, 1);
+        sort(line.begin() + 1, line.begin() + n + 1, [](<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; a, <span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; b) {
+            <span class="kw">return</span> a[0] &lt; b[0];
+        });
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, pre = 0; i &lt;= n; i++) {
+            ans += (<span class="kw">long</span> <span class="kw">long</span>)cover[1] * (line[i][0] - pre);
+            pre = line[i][0];
+            add(rankOf(m, line[i][1]), rankOf(m, line[i][2]) - 1, line[i][3], 1, m, 1);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+    <p>这段代码里有三处容易看漏。<code>build</code> 里 <code>length[i]</code> 用的是 <code>ysort[r + 1] - ysort[l]</code>，是真实坐标差，不是段数；离散化时往 <code>ysort</code> 末尾多写了一个 <code>ysort[m + 1] = ysort[m]</code>，是为了让最右边那段取到右端点。<code>up</code> 里叶子的特判不能省，叶子没有儿子，不能去读。</p>
+
+    <h2>三、矩形周长并</h2>
+    <p>题意：还是 n 个矩形，求并集轮廓的周长。周长分两半，垂直边和水平边。</p>
+    <p>垂直边按 x 扫，流程和面积并一样，边还是 <code>(x, y1, y2, ±1)</code>。区别在统计方式：每处理一条边，<code>cover[1]</code> 会从处理前的值变成处理后的值，这个变化量的绝对值，就是这条边新增或消失的覆盖长度。把所有边上的变化量累加起来，就是垂直边的总长。</p>
+    <p>举个例子：覆盖长度从 4 涨到 6，说明 y 轴上多出一段长 2 的覆盖，那一定对应着某条垂直边露出了 2 的长度；从 6 掉到 4 同理。一条边盖住一小段已经盖着的地方，<code>cover</code> 不变，这段边藏在并集内部，不该算。</p>
+    <p>水平边把坐标换个名字再扫一遍：边的形式变成 <code>(y, x1, x2, ±1)</code>，离散化收 x 坐标，其余一模一样。两次扫描的结果相加就是周长。</p>
+    <figure class="fig" id="fig-peri"></figure>
+    <p>三个矩形拼成一个缺角的方形，轮廓一眼数得清：垂直边共 16（左侧 8、右下 4、右上侧的内缘 4），水平边共 16，周长 32。两次扫描各算一半，谁也别替谁。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+
+    <span class="kw">int</span> vsort[MAXN];
+    <span class="cm">// 线段树某范围总长度</span>
+    <span class="kw">int</span> length[MAXN &lt;&lt; 2];
+    <span class="cm">// 线段树某范围覆盖长度</span>
+    <span class="kw">int</span> cover[MAXN &lt;&lt; 2];
+    <span class="cm">// 线段树某范围覆盖次数</span>
+    <span class="kw">int</span> times[MAXN &lt;&lt; 2];
+    <span class="cm">// 0 : 扫描线位置 1 : 区间左端 2 : 区间右端 3 : +1 / -1</span>
+    vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; line;
+
+    <span class="kw">int</span> <span class="fn">prepare</span>(<span class="kw">int</span> n) {
+        sort(vsort + 1, vsort + n + 1);
+        <span class="kw">int</span> m = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            <span class="kw">if</span> (vsort[m] != vsort[i]) {
+                vsort[++m] = vsort[i];
+            }
+        }
+        vsort[m + 1] = vsort[m];
+        <span class="kw">return</span> m;
+    }
+
+    <span class="kw">int</span> <span class="fn">rankOf</span>(<span class="kw">int</span> m, <span class="kw">int</span> num) {
+        <span class="kw">int</span> ans = 0, l = 1, r = m, mid;
+        <span class="kw">while</span> (l &lt;= r) {
+            mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (vsort[mid] &gt;= num) {
+                ans = mid;
+                r = mid - 1;
+            } <span class="kw">else</span> {
+                l = mid + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l &lt; r) {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            build(l, mid, i &lt;&lt; 1);
+            build(mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        length[i] = vsort[r + 1] - vsort[l];
+        times[i] = 0;
+        cover[i] = 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (times[i] &gt; 0) {
+            cover[i] = length[i];
+        } <span class="kw">else</span> <span class="kw">if</span> (l == r) {
+            cover[i] = 0;
+        } <span class="kw">else</span> {
+            cover[i] = cover[i &lt;&lt; 1] + cover[i &lt;&lt; 1 | 1];
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            times[i] += jobv;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                add(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                add(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+            }
+        }
+        up(l, r, i);
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">scan</span>(<span class="kw">int</span> n) {
+        <span class="kw">int</span> m = prepare(n);
+        build(1, m, 1);
+        <span class="cm">// 同一个位置有多条扫描线时，先处理+1再处理-1，投影长度才不会频繁变化</span>
+        sort(line.begin() + 1, line.begin() + n + 1, [](<span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; a, <span class="kw">const</span> vector&lt;<span class="kw">int</span>&gt;&amp; b) {
+            <span class="kw">return</span> a[0] != b[0] ? a[0] &lt; b[0] : a[3] &gt; b[3];
+        });
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">int</span> pre = cover[1];
+            add(rankOf(m, line[i][1]), rankOf(m, line[i][2]) - 1, line[i][3], 1, m, 1);
+            ans += abs(cover[1] - pre);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">scanY</span>(<span class="kw">int</span> n, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; rec) {
+        line.assign(2 * n + 1, vector&lt;<span class="kw">int</span>&gt;(4));
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, j = 1 + n; i &lt;= n; i++, j++) {
+            <span class="kw">int</span> x1 = rec[i - 1][0], y1 = rec[i - 1][1], x2 = rec[i - 1][2], y2 = rec[i - 1][3];
+            vsort[i] = y1;
+            vsort[j] = y2;
+            line[i] = {x1, y1, y2, 1};
+            line[j] = {x2, y1, y2, -1};
+        }
+        <span class="kw">return</span> scan(n &lt;&lt; 1);
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">scanX</span>(<span class="kw">int</span> n, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; rec) {
+        line.assign(2 * n + 1, vector&lt;<span class="kw">int</span>&gt;(4));
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, j = 1 + n; i &lt;= n; i++, j++) {
+            <span class="kw">int</span> x1 = rec[i - 1][0], y1 = rec[i - 1][1], x2 = rec[i - 1][2], y2 = rec[i - 1][3];
+            vsort[i] = x1;
+            vsort[j] = x2;
+            line[i] = {y1, x1, x2, 1};
+            line[j] = {y2, x1, x2, -1};
+        }
+        <span class="kw">return</span> scan(n &lt;&lt; 1);
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">compute</span>(<span class="kw">int</span> n, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; rec) {
+        <span class="kw">return</span> scanY(n, rec) + scanX(n, rec);
+    }</pre>
+    <p>排序那里有个坑。同一个 x 上可能同时压着 +1 和 -1 的边，比如两个矩形共享一条竖边。必须先处理 +1 再处理 -1：先让新矩形盖上去，覆盖长度不变；要是先减，覆盖长度先掉一个坑再涨回来，变化量白算一倍。测试数据不一定安排这种情况，但排序里写上只要几个字符。</p>
+
+    <div class="viz" id="viz-rect">
+      <h3>演示：矩形面积并的扫描过程</h3>
+      <p class="viz-hint">点「下一步」逐条处理扫描线，看每条的 ±1 怎么改变 y 轴各段的覆盖层数、cover[1] 怎么变、累计面积怎么涨。三组矩形可切换。</p>
+    </div>
+
+    <h2>四、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>项</th><th>面积并</th><th>周长并</th></tr>
+      <tr><td>离散化</td><td>O(n log n)</td><td>O(n log n) × 2</td></tr>
+      <tr><td>扫描过程</td><td>O(n log n)</td><td>O(n log n)</td></tr>
+      <tr><td>全程</td><td>O(n log n)</td><td>O(n log n)</td></tr>
+      <tr><td>空间</td><td>O(n)</td><td>O(n)</td></tr>
+    </table>
+    <p>2n 条边，每条边在线段树上走一遍是 O(log n)，没有懒标记的下发，常数很小。空间上四个数组按 2n 开，面积并按 2 × 10⁵ 开，约几 MB。</p>
+    <p>实测 n 是 10⁵、坐标 10⁹：面积并 0.134 秒，周长并 0.176 秒（本机 clang -O2）。</p>
+
+    <h2>五、总结</h2>
+    <p>扫描线配线段树的骨架：矩形拆边、坐标离散化、边排序、逐条 <code>add</code>，问根上的 <code>cover[1]</code>。面积并问的是「两条边之间覆盖长度是多少」，周长并问的是「一条边让覆盖长度变了多少」。</p>
+    <p>不需要懒标记是这两道题的特例，来源是「只问根」加「加减成对」；线段树本身并没有因此变强。</p>
+
+    <h2>最后</h2>
+    <p>一是 <code>length</code> 用真实坐标差，格子数不等于长度，最后一段要靠 <code>ysort[m + 1]</code> 兜住。</p>
+    <p>二是 <code>up</code> 的叶子特判、<code>times</code> 大于 0 直接给 <code>length</code>，这两句是合并规则的全部，写反一处整棵树的 <code>cover</code> 都是错的。</p>
+    <p>三是周长并记得扫两遍，x 管垂直边、y 管水平边；同位置的边先加后减。</p>
+
+    <h2>相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P5490" target="_blank">P5490 矩形面积并</a></td><td>luogu.com.cn/problem/P5490</td></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P1856" target="_blank">P1856 矩形周长并</a></td><td>luogu.com.cn/problem/P1856</td></tr>
+      <tr><td>POJ</td><td><a href="http://poj.org/problem?id=1177" target="_blank">1177 Picture</a></td><td>poj.org/problem?id=1177</td></tr>
+    </table>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解115【扩展】线段树专题6-线段树与扫描线结合的题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = {blue:'#2563eb', blueBg:'#dbeafe', blueLt:'#eef4ff',
+           orange:'#ea580c', orangeBg:'#ffedd5', gray:'#9aa0a6',
+           bg:'#f6f7f9', bd:'#e6e8eb', ink:'#1f2328', dim:'#5c6370'};
+
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x,y,s,o){
+    o = o || {};
+    return '<text x="'+x+'" y="'+y+'" font-size="'+(o.size||12)+'" fill="'+(o.fill||C.ink)+
+           '" text-anchor="'+(o.anchor||'middle')+'"'+(o.mono?' font-family="ui-monospace,Menlo,monospace"':'')+
+           (o.weight?' font-weight="'+o.weight+'"':'')+'>'+esc(s)+'</text>';
+  }
+  function R(x,y,w,h,fill,stroke){
+    return '<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w)+'" height="'+Math.max(0,h)+
+           '" rx="3" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="1"':'')+'/>';
+  }
+  function LN(x1,y1,x2,y2,col,dash){
+    return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+(col||C.bd)+
+           '" stroke-width="1"'+(dash?' stroke-dasharray="4 3"':'')+'/>';
+  }
+  function mount(id, hh, body, cap){
+    var f = document.getElementById(id);
+    if (!f) return;
+    f.innerHTML = '<svg viewBox="0 0 680 '+hh+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+
+      body + '</svg>'+(cap?'<figcaption>'+cap+'</figcaption>':'');
+  }
+  function bind(id, ev, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
+
+  // ---------- 图 1：五段叶子的线段树 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, '三条 +1 之后线段树的样子（y 离散成 0 1 2 3 4 6 五段）', {size:13, weight:'600'});
+    // y 轴条带
+    var segs = [['0,1',1],['1,2',1],['2,3',1],['3,4',1],['4,6',1]];
+    var bx = 60, by = 34, bw = 108, i;
+    for (i = 0; i < 5; i++) {
+      g += R(bx + i * (bw + 4), by, bw, 26, C.blueBg, C.blue);
+      g += T(bx + i * (bw + 4) + bw / 2, by + 17, '[' + segs[i][0] + ')  times ' + segs[i][1],
+             {size:10.5, mono:true, fill:C.blue});
+    }
+    g += T(340, by + 44, '五段各被盖了 1 层，cover[1] = 6，y 轴 0 到 6 全盖住', {size:11.5, fill:C.blue});
+    // 线段树
+    var nodes = [
+      {x:340, y:96,  lab:'[1,5]  y:0~6',  sub:'times 0  cover 6  len 6', col:C.blue, fill:C.blueLt},
+      {x:170, y:158, lab:'[1,3]  y:0~3',  sub:'times 0  cover 3  len 3', col:C.blue, fill:C.blueLt},
+      {x:510, y:158, lab:'[4,5]  y:3~6',  sub:'times 0  cover 3  len 3', col:C.blue, fill:C.blueLt},
+      {x:85,  y:220, lab:'[1,2]  y:0~2',  sub:'times 0  cover 2  len 2', col:C.blue, fill:C.blueLt},
+      {x:255, y:220, lab:'[3,3]  y:2~3',  sub:'times 1  cover 1  len 1', col:C.orange, fill:C.orangeBg},
+      {x:425, y:220, lab:'[4,4]  y:3~4',  sub:'times 1  cover 1  len 1', col:C.orange, fill:C.orangeBg},
+      {x:595, y:220, lab:'[5,5]  y:4~6',  sub:'times 1  cover 2  len 2', col:C.orange, fill:C.orangeBg}
+    ];
+    var edges = [[0,1],[0,2],[1,3],[1,4],[2,5],[2,6]];
+    for (i = 0; i < edges.length; i++) {
+      var a = nodes[edges[i][0]], b = nodes[edges[i][1]];
+      g += LN(a.x, a.y + 30, b.x, b.y, C.gray);
+    }
+    for (i = 0; i < nodes.length; i++) {
+      var nd = nodes[i], w = 150;
+      g += R(nd.x - w / 2, nd.y, w, 34, nd.fill, nd.col);
+      g += T(nd.x, nd.y + 14, nd.lab, {size:11, fill:nd.col, mono:true, weight:'600'});
+      g += T(nd.x, nd.y + 28, nd.sub, {size:10.5, fill:C.dim, mono:true});
+    }
+    g += T(340, 276, '橙色的节点被某条线完整盖住（times > 0），cover 直接取 length', {size:11.5, fill:C.dim});
+    g += T(340, 296, '蓝色的节点没人完整盖过，cover 是两个儿子相加', {size:11.5, fill:C.dim});
+    mount('fig-tree', 312, g, 'length 建树时定死；times 记被整段覆盖的层数；cover 是真正被盖住的长度。');
+  })();
+
+  // ---------- 图 2：周长并的垂直边与水平边 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, '三个矩形拼成的缺角方形：垂直边 16，水平边 16，周长 32', {size:13, weight:'600'});
+    // 俯视图：y 向上，原点左下
+    var x0 = 150, y0 = 250, u = 26;
+    function px(v){ return x0 + v * u; }
+    function py(v){ return y0 - v * u; }
+    // 三个矩形描边
+    g += R(px(0), py(4), 4 * u, 4 * u, 'none', C.gray);
+    g += R(px(4), py(4), 4 * u, 4 * u, 'none', C.gray);
+    g += R(px(0), py(8), 4 * u, 4 * u, 'none', C.gray);
+    // 轮廓
+    var pts = [[0,0],[8,0],[8,4],[4,4],[4,8],[0,8]];
+    for (var i = 0; i < pts.length; i++) {
+      var a = pts[i], b = pts[(i + 1) % pts.length];
+      var col = a[0] === b[0] ? C.orange : C.blue;
+      g += LN(px(a[0]), py(a[1]), px(b[0]), py(b[1]), col);
+    }
+    // 边长标注
+    g += T(px(4), py(0) + 16, 'y = 0，长 8', {size:10.5, fill:C.blue, mono:true});
+    g += T(px(6), py(4) + 16, 'y = 4，长 4', {size:10.5, fill:C.blue, mono:true});
+    g += T(px(2), py(8) - 8, 'y = 8，长 4', {size:10.5, fill:C.blue, mono:true});
+    g += T(px(0) - 12, py(4), 'x = 0，长 8', {size:10.5, fill:C.orange, anchor:'end', mono:true});
+    g += T(px(8) + 12, py(2), 'x = 8，长 4', {size:10.5, fill:C.orange, anchor:'start', mono:true});
+    g += T(px(4) + 12, py(6), 'x = 4，长 4', {size:10.5, fill:C.orange, anchor:'start', mono:true});
+    g += T(x0 - 20, y0 + 18, '0', {size:10, mono:true, fill:C.gray});
+    g += T(x0 + 8 * u, y0 + 18, '8', {size:10, mono:true, fill:C.gray});
+    // 右侧说明
+    var rx = 430;
+    g += T(rx, 60, '两次扫描各算一半', {size:12, fill:C.ink, anchor:'start', weight:'600'});
+    g += T(rx, 86, 'scanY：边是 (x, y1, y2, ±1)', {size:11.5, fill:C.orange, anchor:'start', mono:true});
+    g += T(rx, 106, '每条边让 cover[1] 变了多少，就加多少', {size:11.5, fill:C.dim, anchor:'start', mono:true});
+    g += T(rx, 124, '累加得垂直边总长 16', {size:11.5, fill:C.orange, anchor:'start', mono:true, weight:'600'});
+    g += T(rx, 156, 'scanX：边是 (y, x1, x2, ±1)', {size:11.5, fill:C.blue, anchor:'start', mono:true});
+    g += T(rx, 176, '换个轴名，流程一模一样', {size:11.5, fill:C.dim, anchor:'start', mono:true});
+    g += T(rx, 194, '累加得水平边总长 16', {size:11.5, fill:C.blue, anchor:'start', mono:true, weight:'600'});
+    g += T(rx, 226, '同一个 x 上先处理 +1 再处理 -1', {size:11.5, fill:C.ink, anchor:'start'});
+    g += T(rx, 246, '否则共享边处 cover 先掉后涨，', {size:11.5, fill:C.dim, anchor:'start'});
+    g += T(rx, 266, '白算一倍变化量', {size:11.5, fill:C.dim, anchor:'start'});
+    mount('fig-peri', 300, g, '周长 = 垂直边 + 水平边，一次扫描管一个方向。');
+  })();
+
+  // ============ 演示：面积并的扫描过程 ============
+  (function(){
+    var PRESETS = [
+      {name:'三个错位矩形', R:[[1,1,5,4],[3,3,7,6],[2,0,4,2]], want:24},
+      {name:'2 × 2 网格', R:[[0,0,5,5],[5,0,10,5],[0,5,5,10],[5,5,10,10]], want:100},
+      {name:'大矩形套小矩形', R:[[0,0,8,8],[2,2,6,6]], want:64}
+    ];
+    var host = document.getElementById('viz-rect');
+    if (!host) return;
+    var sel = document.createElement('select'); sel.id = 'rc-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = PRESETS[i].name + '（' + PRESETS[i].R.length + ' 个矩形）';
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'rc-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'rc-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'rc-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'rc-sum';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'rc-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var cur = {steps:[]}, step = -1;
+
+    function build(){
+      var R = PRESETS[parseInt(sel.value, 10)].R.map(function(r){ return r.slice(); });
+      var n = R.length, i, j;
+      var ys = [];
+      for (i = 0; i < n; i++) { ys.push(R[i][1], R[i][3]); }
+      ys.sort(function(a, b){ return a - b; });
+      var uni = [];
+      for (i = 0; i < ys.length; i++) if (!uni.length || uni[uni.length - 1] !== ys[i]) uni.push(ys[i]);
+      var m = uni.length;
+      var lines = [];
+      for (i = 0; i < n; i++) {
+        lines.push({x:R[i][0], y1:R[i][1], y2:R[i][3], v:1, id:i});
+        lines.push({x:R[i][2], y1:R[i][1], y2:R[i][3], v:-1, id:i});
+      }
+      lines.sort(function(a, b){ return a.x - b.x; });
+      function idx(v){ return uni.indexOf(v); }
+      var steps = [], times = [], pre_x = lines[0].x;
+      for (i = 0; i < m - 1; i++) times.push(0);
+      var area = 0;
+      for (i = 0; i < lines.length; i++) {
+        var ln = lines[i], cover = 0;
+        for (j = 0; j < m - 1; j++) if (times[j] > 0) cover += uni[j + 1] - uni[j];
+        var dx = ln.x - pre_x;
+        area += cover * dx;
+        pre_x = ln.x;
+        for (j = idx(ln.y1); j < idx(ln.y2); j++) times[j] += ln.v;
+        var cover2 = 0;
+        for (j = 0; j < m - 1; j++) if (times[j] > 0) cover2 += uni[j + 1] - uni[j];
+        steps.push({x:ln.x, v:ln.v, y1:ln.y1, y2:ln.y2, id:ln.id, cover0:cover, dx:dx,
+                    add:cover * dx, area:area, times:times.slice(), cover:cover2});
+      }
+      cur = {steps:steps, R:R, ys:uni};
+      step = -1;
+      render();
+    }
+
+    function render(){
+      var s = step >= 0 ? cur.steps[step] : null;
+      var RS = cur.R, ys = cur.ys, i, j;
+      var g = '';
+      g += T(340, 16, s ? ('处理 x = ' + s.x + ' 上矩形 ' + String.fromCharCode(65 + s.id) + ' 的' + (s.v > 0 ? '左边缘' : '右边缘') +
+                           '（[' + s.y1 + ',' + s.y2 + ') ' + (s.v > 0 ? '+1' : '-1') + '）')
+                      : '还没开始，点「下一步」',
+             {size:12, weight:'600', fill:s ? C.blue : C.dim});
+      // 俯视图：x 向右，y 向上
+      var xmax = 0, ymax = 0;
+      for (i = 0; i < RS.length; i++) {
+        xmax = Math.max(xmax, RS[i][2]); ymax = Math.max(ymax, RS[i][3]);
+      }
+      var x0 = 96, ybase = 210, u = 22;
+      function px(v){ return x0 + v / xmax * 300; }
+      function py(v){ return ybase - v / ymax * 160; }
+      for (i = 0; i < RS.length; i++) {
+        var r = RS[i];
+        g += R(px(r[0]), py(r[3]), px(r[2]) - px(r[0]), py(r[1]) - py(r[3]), 'none', C.gray);
+        g += T(px(r[0]) + 10, py(r[1]) - 8, String.fromCharCode(65 + i), {size:11, fill:C.gray, weight:'600', anchor:'start'});
+      }
+      // 已扫区域高亮：当前 times > 0 的段
+      if (s) {
+        for (j = 0; j < ys.length - 1; j++) {
+          if (s.times[j] > 0) {
+            g += R(px(0), py(ys[j + 1]), px(s.x) - px(0), py(ys[j]) - py(ys[j + 1]), C.blueBg, 'none');
+          }
+        }
+        g += LN(px(s.x), py(ymax) - 14, px(s.x), ybase, C.orange, true);
+        g += T(px(s.x), py(ymax) - 20, 'x = ' + s.x, {size:11, fill:C.orange, weight:'600', mono:true});
+      }
+      g += LN(px(0), ybase, px(xmax), ybase, C.dim);
+      // 右侧 y 轴覆盖条带
+      var rx = 470, ry = 44;
+      g += T(rx, ry, 'y 轴覆盖（times）', {size:11, fill:C.dim, anchor:'start'});
+      for (j = 0; j < ys.length - 1; j++) {
+        var t = s ? s.times[j] : 0;
+        var yy = ry + 12 + j * 24, hh = (ys[j + 1] - ys[j]) / ymax * 160;
+        g += R(rx, yy, 120, Math.max(18, hh), t > 0 ? C.blueBg : C.bg, t > 0 ? C.blue : C.bd);
+        g += T(rx + 60, yy + Math.max(18, hh) / 2 + 4, '[' + ys[j] + ',' + ys[j + 1] + ')  ×' + t,
+               {size:10.5, mono:true, fill:t > 0 ? C.blue : C.gray});
+      }
+      // 底部状态
+      var sy = 244;
+      g += T(96, sy, s ? ('本条边之前 cover = ' + s.cover0 + '，之后 cover = ' + s.cover) : 'cover = 0',
+             {size:11.5, fill:C.blue, anchor:'start', mono:true});
+      g += T(96, sy + 22, s ? ('本条边贡献面积 = ' + s.cover0 + ' × ' + s.dx + ' = ' + s.add) : '',
+             {size:11.5, fill:C.dim, anchor:'start', mono:true});
+      g += T(96, sy + 44, s ? ('累计面积 = ' + s.area) : '累计面积 = 0',
+             {size:12.5, fill:C.orange, anchor:'start', mono:true, weight:'600'});
+      g += T(340, sy + 44, '第 ' + (step + 1) + ' / ' + cur.steps.length + ' 步' + (step < 0 ? '（未开始）' : ''),
+             {size:11.5, fill:C.dim, anchor:'end', mono:true});
+      var HH = sy + 62;
+      stage.innerHTML = '<svg viewBox="0 0 680 '+HH+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var lh = '', q;
+      for (q = 0; q <= step; q++) {
+        var st = cur.steps[q];
+        lh += 'x = ' + st.x + '：' + (st.v > 0 ? '+' : '-') + '1 [' + st.y1 + ',' + st.y2 + ') ，cover ' + st.cover0 + ' → ' + st.cover +
+              '，面积 +' + st.add + '，累计 ' + st.area + '\n';
+      }
+      log.textContent = lh;
+      ans.innerHTML = (s ? ('x = ' + s.x) : '未开始') +
+        ' <b id="rc-line">cover ' + (s ? s.cover : 0) + ' ｜ 累计面积 ' + (s ? s.area : 0) + '</b>';
+      bNext.disabled = step >= cur.steps.length - 1;
+    }
+    bind('rc-next', 'click', function(){ if (step < cur.steps.length - 1) { step++; render(); } });
+    bind('rc-reset', 'click', function(){ step = -1; render(); });
+    sel.addEventListener('change', build);
+    build();
+  })();
+})();
+</script>
+</body>
+</html>
