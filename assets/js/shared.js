@@ -677,7 +677,7 @@
 
       // 8-7. 上下篇（按三层目录铺平后的顺序；两个链接放在同一个 .pager 行内）
       if (main && sidebar) {
-        const idx = curAlgo ? flat.findIndex(a => a.id === curAlgo.id) : -1;
+        const idx = curAlgo ? flat.findIndex(a => a.file === curAlgo.file) : -1;
         if (idx >= 0) {
           const nav = document.createElement('nav');
           nav.className = 'pager';
