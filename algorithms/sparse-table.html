@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>倍增与 ST 表 · 算法教程</title>
+<meta name="description" content="跳 1 步、2 步、4 步、8 步各能到哪，预先算好填进一张表。从二进制的两个小问题讲到倍增表的构建，再从表里 O(log n) 地凑出最少跳几步。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .ansline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.7;}
+  .ansline b{color:var(--full);}
+  .logline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.8;max-height:180px;overflow:auto;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>倍增与 ST 表</h1>
+    <p class="intro">一条线上每次只能往右跳，跳 1 步最远到哪是已知的。把跳 2 步、4 步、8 步各能到哪也预先算出来存成一张表，问「从这儿到那儿最少几步」就不用一步一步数了。这张表叫 ST 表（Sparse Table），填它的手法叫倍增。</p>
+
+    <h2>零、先把二进制的两件小事做对</h2>
+    <p>第一个：给一个正数 x，已知 m 个二进制位一定够表示它，从高位到低位打印每一位。做法是从最高位往下试，能减就减，减不动就是 0。</p>
+    <figure class="fig" id="fig-bits"></figure>
+    <p>第二个：求不超过 x 的最大 2 的幂是 2 的几次方。这件事在后面每次查询都要用一次，写法上有个坑。</p>
+    <p>最顺手的写法是让 power 从 0 往上涨，直到 <code>1 &lt;&lt; power</code> 超过 x 为止。x 小的时候它是对的，x 到 2×10⁹ 就出事：power 涨到 31 时 <code>1 &lt;&lt; 31</code> 在 int 里是 −2147483648，负数照样满足「小于等于 x」，循环继续；power 到 32，C++ 里移位超过位宽是未定义行为，x86 机器上等价于 <code>1 &lt;&lt; (power &amp; 31)</code>，值绕回 1，条件再次成立。这台机器上的实测结果是循环一直涨到 40 次上限都没停。</p>
+    <figure class="fig" id="fig-overflow"></figure>
+    <p>把 x 先右移一位再比就绕开了：<code>1 &lt;&lt; power</code> 最多走到 int 正数的一半，永远不会溢出。</p>
+
+    <pre class="code"><span class="cm">// &lt;= x 的最大 2 的幂，是 2 的几次方</span>
+    <span class="kw">int</span> <span class="fn">floorLog</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> power = 0;
+        <span class="cm">// 判据写成 (1 &lt;&lt; power) &lt;= x 会溢出：power 涨到 31 时 1 &lt;&lt; 31 是 INT_MIN</span>
+        <span class="cm">// 再往后 C++ 里移位超过位宽是未定义行为，x86 上绕回 1，循环停不下来</span>
+        <span class="cm">// 把 x 右移一位再比，1 &lt;&lt; power 最多走到 int 的一半，永远不溢出</span>
+        <span class="kw">while</span> ((1 &lt;&lt; power) &lt;= (x &gt;&gt; 1)) {
+            power++;
+        }
+        <span class="kw">return</span> power;
+    }</pre>
+
+    <p>每次现算一次幂次太浪费，多数做法是打一张表。<code>log2[0] = -1</code> 是故意写的，这样 <code>log2[1] = log2[0] + 1 = 0</code> 刚好对上，整张表一个循环就出来了。</p>
+
+    <pre class="code"><span class="cm">// log2[i] : 不超过 i 的最大 2 的幂，是 2 的几次方</span>
+    <span class="kw">void</span> <span class="fn">buildLog</span>(<span class="kw">int</span> n) {
+        log2[0] = -1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            log2[i] = log2[i &gt;&gt; 1] + 1;
+        }
+    }</pre>
+
+    <p>表里第 i 项是不超过 i 的那个最大 2 的幂的指数，1 到 32 全部与 <code>floor(log2(i))</code> 一致，实测过。</p>
+
+    <div class="viz" id="viz-bits">
+      <p class="viz-hint">点「下一步」从最高位往下试，看每一位是够减写 1 还是够不着写 0，右边一栏是剩余的数。可以换五组数据。</p>
+    </div>
+
+    <h2>一、问题：一条只能往右跳的线</h2>
+    <p>线段上有 n 个点，编号 1 到 n。已知每个点 i 往右跳 1 步最远能到 <code>jump1[i]</code>，并且 i 小于 j 时必有 <code>jump1[i]</code> 不超过 <code>jump1[j]</code>。从任何点出发都能走到第 n 个点。要回答两个问题：</p>
+    <p>1）怎么造一张表，能查「从 i 出发跳 2 的 p 次方步，最远到哪个点」；</p>
+    <p>2）从 x 到 y 最少跳几步。</p>
+    <p>第二个问题用第一张表来答，两个问题一起解决。</p>
+
+    <h2>二、朴素做法：一步一步挪</h2>
+    <p>第一问的第 0 列就是 <code>jump1</code> 本身，白给。第二问也从这里起步：cur 从 x 出发，每次 <code>cur = jump1[cur]</code>，数到 cur 不小于 y 为止。这个循环的次数就是答案。</p>
+    <p>跳跃的跨度越大，循环越少；跨度最小是每次只前进 1，那时从 1 到 n 要走 n 减 1 次。实测一组 n 等于 10⁶、平均跨度 3 的数据，一次查询平均要跳 12.36 万次，每次 129 微秒。查询一多，时间全花在这上面。</p>
+
+    <h2>三、倍增：一次算出 2 的 p 次方步</h2>
+    <p>跳 2 的 p 次方步，等于先跳 2 的 p−1 次方步，落地之后再跳 2 的 p−1 次方步。前后两半长度一样，所以整段行程完全由落地那一刻决定：</p>
+    <p><code>st[i][p] = st[ st[i][p-1] ][p-1]</code></p>
+    <p>第 0 列是 <code>jump1</code>，第 1 列由第 0 列算，第 2 列由第 1 列算，一路推下去。p 最大取到 <code>floorLog(n)</code> 就够：再往上跳，2 的 p 次方已经超过 n，落点只会是终点。</p>
+
+    <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXN = 1000001;
+    <span class="kw">const</span> <span class="kw">int</span> LIMIT = 21;
+    <span class="cm">// jump1[i] : 从 i 号点出发跳 1 步，最远能到达的点</span>
+    <span class="kw">int</span> jump1[MAXN];
+    <span class="cm">// stjump[i][p] : 从 i 号点出发跳 2 的 p 次方步，最远能到达的点</span>
+    <span class="kw">int</span> stjump[MAXN][LIMIT];
+    <span class="kw">int</span> power;
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n) {
+        power = floorLog(n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            stjump[i][0] = jump1[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt;= power; p++) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+                <span class="cm">// 跳 2 的 p 次方步 = 先跳 2 的 p-1 次方步，再跳 2 的 p-1 次方步</span>
+                stjump[i][p] = stjump[stjump[i][p - 1]][p - 1];
+            }
+        }
+    }</pre>
+
+    <p>填表的顺序有个讲究：外层枚举 p，内层枚举 i。因为每个格子的值只依赖第 p−1 列，第 p−1 列必须是完整的。反过来写的话，用到的时候那一列还只有一半。</p>
+    <figure class="fig" id="fig-table"></figure>
+    <p>整张表 n 行、<code>floorLog(n) + 1</code> 列。n 等于 10⁶ 时是 2000 万个 int，76.3 MB，构建 97 毫秒。空间是这张表最贵的地方，后面几门会反复提到这个代价。</p>
+
+    <h2>四、查询：从最大的步长往下试</h2>
+    <p>有了表，第二个问题换个问法：从 x 出发，最多能往前「浪费」多少步还够不着 y。p 从 <code>floorLog(n)</code> 一路降到 0，每档看一眼 <code>st[cur][p]</code>，落点还在 y 左边就真的跳过去，否则这一档不动。走完整个循环，cur 停在「再跳一步就够着 y」的位置上，答案再加 1。</p>
+
+    <pre class="code"><span class="cm">// 从 x 出发，最少跳几步能到 y（x &lt;= y）</span>
+    <span class="kw">int</span> <span class="fn">minSteps</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        <span class="kw">if</span> (x &gt;= y) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">int</span> cur = x, ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> p = power; p &gt;= 0; p--) {
+            <span class="kw">int</span> next = stjump[cur][p];
+            <span class="kw">if</span> (next &lt; y) {          <span class="cm">// 跳过去还够不着，这一跳就值得走</span>
+                ans += 1 &lt;&lt; p;
+                cur = next;
+            }
+        }
+        <span class="kw">return</span> ans + 1;              <span class="cm">// 再跳一步才真正落进 y</span>
+    }</pre>
+
+    <p>为什么从大到小就一定对。大步长能走通时，小步长也一定走得通，先试大的不会把路走死；反过来先试小的，可能连着试好几档都「看起来能走」，结果加起来反而超过了该停的位置。二进制拆分的唯一性保证了这个贪心正确：任何步数都能唯一拆成若干个 2 的幂，从大到小试，就是在逐位确定这个拆法的每一位。</p>
+    <figure class="fig" id="fig-greedy"></figure>
+    <p>循环固定跑 <code>floorLog(n) + 1</code> 次。同一组 n 等于 10⁶ 的数据，倍增每次查询 0.284 微秒，对朴素的 129 微秒是 456 倍。n 等于 10⁵ 时是 15.8 对 0.053 微秒，298 倍。</p>
+
+    <div class="viz" id="viz-jump">
+      <p class="viz-hint">点「下一步」让 p 从大到小走一遍，橙色是当前正在试的那一格，下方整张表实时对照。可以换五组数据，跨度从 1 到 5。</p>
+    </div>
+
+    <h2>五、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>环节</th><th>时间</th><th>空间</th></tr>
+      <tr><td>log2 打表</td><td>O(n)</td><td>O(n)</td></tr>
+      <tr><td>倍增填表</td><td>O(n log n)</td><td>O(n log n)</td></tr>
+      <tr><td>单次查询最少步数</td><td>O(log n)</td><td>O(1)</td></tr>
+      <tr><td>朴素一步一步挪</td><td>O(步数)，最坏 O(n)</td><td>O(1)</td></tr>
+    </table>
+    <p>空间按题目上限算：n 等于 10⁶ 时表是 10⁶ 行 × 20 列 = 2000 万个 int，76.3 MB。列数取 <code>floorLog(n) + 1</code>，n 等于 2×10⁵ 时是 18 列，10⁶ 时是 20 列，用常量 21 开数组足够。</p>
+    <p>这张表一旦填好就不能改：改一个 <code>jump1[i]</code>，受影响的格子是 O(log n) 个，重填整张表又是 O(n log n)。所以倍增适合静态数据，这是它最硬的约束。</p>
+
+    <h2>六、总结</h2>
+    <p>倍增的核心是一句话：跳 2 的 p 次方步等于跳两次 2 的 p−1 次方步。靠这一句把「跳很多步」变成两次查表，填表 O(n log n)，查询 O(log n)。查询时从大到小试步长，靠的是二进制拆分的唯一性。</p>
+    <p>两个工程细节值得记住。求「不超过 x 的最大 2 的幂」要把 x 右移一位再比，否则 power 到 31 就溢出，循环停不下来；log2 打表从 <code>log2[0] = -1</code> 起步，一个循环填完，比每个位置现算一遍省事得多。</p>
+    <p>代价是空间：n log n 个格子，n 等于 10⁶ 就是 76 MB，而且表填完不支持修改。同样的「预先算好 2 的 p 次方」搬到数组区间上还能再快一档，那里的查询是 O(1)。</p>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解117【扩展】倍增算法和ST表</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = {blue:'#2563eb', blueBg:'#dbeafe', blueLt:'#eef4ff',
+           orange:'#ea580c', orangeBg:'#ffedd5', gray:'#9aa0a6',
+           bg:'#f6f7f9', bd:'#e6e8eb', ink:'#1f2328', dim:'#5c6370'};
+
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x,y,s,o){
+    o = o || {};
+    return '<text x="'+x+'" y="'+y+'" font-size="'+(o.size||12)+'" fill="'+(o.fill||C.ink)+
+           '" text-anchor="'+(o.anchor||'middle')+'"'+(o.mono?' font-family="ui-monospace,Menlo,monospace"':'')+
+           (o.weight?' font-weight="'+o.weight+'"':'')+'>'+esc(s)+'</text>';
+  }
+  function R(x,y,w,h,fill,stroke){
+    return '<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w)+'" height="'+Math.max(0,h)+
+           '" rx="3" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="1"':'')+'/>';
+  }
+  function LN(x1,y1,x2,y2,col,dash){
+    return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+(col||C.bd)+
+           '" stroke-width="1"'+(dash?' stroke-dasharray="4 3"':'')+'/>';
+  }
+  function mount(id, hh, body, cap){
+    var f = document.getElementById(id);
+    if (!f) return;
+    f.innerHTML = '<svg viewBox="0 0 680 '+hh+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+
+      body + '</svg>'+(cap?'<figcaption>'+cap+'</figcaption>':'');
+  }
+  function bind(id, ev, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
+
+  // ---------- 图 1：101 的十位 ----------
+  (function(){
+    var g = '';
+    g += T(340, 20, 'x = 101，用 10 个二进制位从高位到低位打印', {size:13, weight:'600'});
+    var bits = [0,0,0,1,1,0,0,1,0,1];   // 位 9 .. 位 0
+    var cw = 52, gap = 6, x0 = 40, y0 = 40;
+    var i, x;
+    for (i = 0; i < 10; i++) {
+      x = x0 + i * (cw + gap);
+      var p = 9 - i, w = 1 << p;
+      g += T(x + cw / 2, y0 + 2, '第 ' + p + ' 位', {size:10.5, fill:C.dim});
+      g += R(x, y0 + 8, cw, 34, bits[i] ? C.blueBg : '#ffffff', bits[i] ? C.blue : C.bd);
+      g += T(x + cw / 2, y0 + 32, String(bits[i]), {size:16, weight:'600', fill:bits[i] ? C.blue : C.gray, mono:true});
+      g += T(x + cw / 2, y0 + 58, String(w), {size:11, fill:bits[i] ? C.ink : C.gray, mono:true});
+    }
+    g += T(24, y0 + 30, '位号', {size:11, fill:C.dim, anchor:'start'});
+    g += T(24, y0 + 58, '权值', {size:11, fill:C.dim, anchor:'start'});
+    g += T(340, y0 + 88, '能减就减：64 减完剩 37，32 减完剩 5，4 减完剩 1，最后 1 减完归零', {size:11.5, fill:C.dim});
+    g += T(340, y0 + 108, '101 = 64 + 32 + 4 + 1，四个 1 分别在位 6、位 5、位 2、位 0', {size:11.5, fill:C.blue});
+    mount('fig-bits', y0 + 122, g, '从高位往下试，够减就写 1 并减掉，不够就写 0。剩下的一定能被更低的位表示完。');
+  })();
+
+  // ---------- 图 2：溢出的循环 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, 'x = 2 000 000 000 时，两种写法走到哪一步', {size:13, weight:'600'});
+    var rows = [
+      {p:'0 ~ 29', v:'1 ~ 536 870 912', note:'都小于 x，循环继续', col:C.ink},
+      {p:'30', v:'1 073 741 824', note:'最后一个不超过 x 的 2 的幂', col:C.blue},
+      {p:'31', v:'-2 147 483 648', note:'溢出成负数，负数照样 <= x，循环继续', col:C.orange},
+      {p:'32', v:'1', note:'移位超位宽，x86 上绕回 1，循环继续', col:C.orange},
+      {p:'33 以后', v:'2, 4, 8 ...', note:'永远不超过 x，循环停不下来', col:C.orange}
+    ];
+    var y = 40, i;
+    g += T(60, y, 'power', {size:11, fill:C.dim, anchor:'start'});
+    g += T(200, y, '1 << power', {size:11, fill:C.dim, anchor:'start'});
+    g += T(340, y, '发生了什么', {size:11, fill:C.dim, anchor:'start'});
+    y += 8;
+    g += LN(40, y, 640, y, C.bd);
+    for (i = 0; i < rows.length; i++) {
+      var ry = y + 12 + i * 26;
+      g += R(44, ry, 496, 22, i % 2 ? C.bg : '#ffffff', null);
+      g += T(60, ry + 15, rows[i].p, {size:11.5, fill:rows[i].col, anchor:'start', mono:true});
+      g += T(200, ry + 15, rows[i].v, {size:11.5, fill:rows[i].col, anchor:'start', mono:true});
+      g += T(340, ry + 15, rows[i].note, {size:11.5, fill:rows[i].col, anchor:'start'});
+    }
+    var y2 = y + 12 + rows.length * 26 + 20;
+    g += T(340, y2, '把判据换成 (1 << power) <= (x >> 1)：power 停在 30，2 的 30 次方 = 1 073 741 824',
+           {size:11.5, fill:C.blue});
+    mount('fig-overflow', y2 + 22, g, '溢出写法在 power 到 31 时把 1 移成了 INT_MIN，之后再也停不下来；右移一位再比可以让左值最多走到 int 的一半。');
+  })();
+
+  // ---------- 图 3：倍增表 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, 'st[i][p] 的一角：第 p 列由第 p-1 列两次查表得到', {size:13, weight:'600'});
+    var jump1 = [3,4,6,6,8,8,9,11,11,12,12,12];
+    var st = [];
+    var i, p;
+    for (i = 0; i < 12; i++) { st.push([jump1[i]]); }
+    for (p = 1; p <= 3; p++) {
+      for (i = 0; i < 12; i++) {
+        st[i][p] = st[st[i][p - 1] - 1][p - 1];
+      }
+    }
+    var cw = 46, ch = 24, x0 = 120, y0 = 36;
+    g += T(x0 - 12, y0 + 16, 'i', {size:11, fill:C.dim});
+    for (p = 0; p <= 3; p++) {
+      g += T(x0 + 44 + p * (cw + 8) + cw / 2, y0 + 4, 'p=' + p, {size:11, fill:C.dim});
+      g += T(x0 + 44 + p * (cw + 8) + cw / 2, y0 + 16, '2^' + p + ' 步', {size:10, fill:C.gray});
+    }
+    for (i = 0; i < 12; i++) {
+      var ry = y0 + 22 + i * ch;
+      g += T(x0 - 12, ry + 16, String(i + 1), {size:11, fill:C.dim, mono:true});
+      for (p = 0; p <= 3; p++) {
+        var rx = x0 + 44 + p * (cw + 8);
+        var hot = (i === 0 && p === 2) || (i === 0 && p === 1) || (i === 5 && p === 1);
+        g += R(rx, ry, cw, ch - 2, p === 0 ? C.blueLt : (hot ? C.orangeBg : '#ffffff'),
+               p === 0 ? C.bd : (hot ? C.orange : C.bd));
+        g += T(rx + cw / 2, ry + 15, String(st[i][p]), {size:12, fill:hot ? C.orange : C.ink, mono:true});
+      }
+    }
+    var yEnd = y0 + 22 + 12 * ch;
+    // 箭头：st[1][2] = st[ st[1][1] ][1]
+    var ax = x0 + 44 + 2 * (cw + 8) + cw, ay = y0 + 22 + 16;
+    var bx = x0 + 44 + 1 * (cw + 8) + cw, by = y0 + 22 + 16;
+    var cx = x0 + 44 + 1 * (cw + 8) + cw, cy = y0 + 22 + 5 * ch + 16;
+    g += '<path d="M '+(bx + 4)+' '+by+' C '+(bx - 30)+' '+by+' '+(cx - 70)+' '+cy+' '+(cx + cw + 4)+' '+cy+
+         '" fill="none" stroke="'+C.orange+'" stroke-width="1.2" stroke-dasharray="4 3"/>';
+    g += '<path d="M '+(cx + cw + 4)+' '+cy+' C '+(cx + cw + 40)+' '+cy+' '+(ax + 40)+' '+ay+' '+(ax + 4)+' '+ay+
+         '" fill="none" stroke="'+C.orange+'" stroke-width="1.2" stroke-dasharray="4 3"/>';
+    g += T(340, yEnd + 22, 'st[1][2] = st[ st[1][1] ][1] = st[6][1] = 11：先跳 2 步到 6，再跳 2 步到 11',
+           {size:11.5, fill:C.orange});
+    g += T(340, yEnd + 42, '第 0 列就是 jump1，白给；后面每一列都由前一列两次查表拼出来',
+           {size:11.5, fill:C.dim});
+    mount('fig-table', yEnd + 56, g, '12 个点、跨度为 3 左右的一张表。p 最大取到 3，因为 2 的 3 次方已经超过 12 的一半。');
+  })();
+
+  // ---------- 图 4：贪心从大到小 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, '从 1 跳到 12：p 从 3 降到 0，够不着才跳', {size:13, weight:'600'});
+    var steps = [
+      {p:3, to:'12', take:false, note:'落点 12 已经够着了，这一档不动'},
+      {p:2, to:'11', take:true,  note:'落点 11 还在 12 左边，跳过去，cur = 11'},
+      {p:1, to:'12', take:false, note:'从 11 跳 2 步到 12，够着了，不动'},
+      {p:0, to:'12', take:false, note:'从 11 跳 1 步也是 12，不动'}
+    ];
+    var y = 40, i;
+    g += T(110, y, '步长', {size:11, fill:C.dim});
+    g += T(210, y, '落点 st[cur][p]', {size:11, fill:C.dim});
+    g += T(360, y, '跳不跳', {size:11, fill:C.dim});
+    y += 8; g += LN(40, y, 640, y, C.bd);
+    for (i = 0; i < steps.length; i++) {
+      var ry = y + 10 + i * 28;
+      g += R(44, ry, 496, 24, steps[i].take ? C.orangeBg : (i % 2 ? C.bg : '#ffffff'), steps[i].take ? C.orange : null);
+      g += T(110, ry + 16, '2^' + steps[i].p + ' = ' + (1 << steps[i].p) + ' 步', {size:11.5, fill:C.ink, mono:true});
+      g += T(210, ry + 16, steps[i].to, {size:12, fill:steps[i].take ? C.orange : C.dim, mono:true});
+      g += T(360, ry + 16, steps[i].note, {size:11.5, fill:steps[i].take ? C.orange : C.dim, anchor:'start'});
+    }
+    var y2 = y + 10 + steps.length * 28 + 18;
+    g += T(340, y2, '循环结束 cur = 11，ans = 4，答案 = 4 + 1 = 5 步', {size:12, fill:C.blue, weight:'600'});
+    g += T(340, y2 + 20, '真实路径 1 → 3 → 6 → 8 → 11 → 12，确实 5 步', {size:11.5, fill:C.dim});
+    g += T(340, y2 + 40, '朴素写法要一步一步数到 12，这里只试了 4 档（floorLog(12) + 1）',
+           {size:11.5, fill:C.dim});
+    mount('fig-greedy', y2 + 56, g, '大步长走得通时小步长也走得通，先试大的不会把路走死；循环固定跑 floorLog(n) + 1 次。');
+  })();
+
+  // ---------- 演示 1：倍增跳表 ----------
+  (function(){
+    var host = document.getElementById('viz-jump');
+    if (!host) return;
+    var PRESETS = [
+      {name:'跨度 3：1 跳到 12', jump:[3,4,6,6,8,8,9,11,11,12,12,12], from:1, to:12},
+      {name:'跨度 1：1 跳到 10', jump:[2,3,4,5,6,7,8,9,10,10], from:1, to:10},
+      {name:'跨度 5：1 跳到 16', jump:[6,7,8,9,11,13,14,15,16,16,16,16,16,16,16,16], from:1, to:16},
+      {name:'从中间出发：5 跳到 16', jump:[6,7,8,9,11,13,14,15,16,16,16,16,16,16,16,16], from:5, to:16},
+      {name:'相邻两级：8 跳到 12', jump:[3,4,6,6,8,8,9,11,11,12,12,12], from:8, to:12}
+    ];
+    var sel = document.createElement('select'); sel.id = 'jump-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'jump-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'jump-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'jump-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'jump-sum';
+    var log = document.createElement('div'); log.className = 'logline'; log.id = 'jump-log';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans); host.appendChild(log);
+
+    var J = [], N = 0, POWER = 0, ST = [], FROM = 1, TO = 1, steps = [], step = -1;
+
+    function floorLog(v){ var r = 0; while ((1 << r) <= (v >> 1)) r++; return r; }
+
+    function buildAll(){
+      N = J.length; POWER = floorLog(N);
+      ST = [];
+      var i, p;
+      for (i = 0; i <= N; i++) { ST.push([]); for (p = 0; p <= POWER; p++) ST[i].push(0); }
+      for (i = 1; i <= N; i++) ST[i][0] = J[i - 1];
+      for (p = 1; p <= POWER; p++)
+        for (i = 1; i <= N; i++) ST[i][p] = ST[ST[i][p - 1]][p - 1];
+    }
+
+    function rebuild(){
+      var k = parseInt(sel.value, 10);
+      var cfg = PRESETS[k];
+      J = cfg.jump.slice(); FROM = cfg.from; TO = cfg.to;
+      buildAll();
+      // 重新生成 steps，把每一步的「跳之前位置」记全
+      steps = [];
+      var cur = FROM, ans = 0, p;
+      for (p = POWER; p >= 0; p--) {
+        var nx = ST[cur][p];
+        var take = nx < TO;
+        var before = cur;
+        if (take) { ans += 1 << p; cur = nx; }
+        steps.push({p:p, before:before, next:nx, take:take, ans:ans, after:cur});
+      }
+      steps.push({done:true, ans:ans, after:cur, total:ans + 1});
+      step = -1;
+      render();
+    }
+
+    function render(){
+      var g = '', i;
+      var s = step >= 0 ? steps[step] : null;
+      var cw = N <= 12 ? 44 : Math.floor((600 - 80) / N);
+      var gap = N <= 12 ? 6 : 3;
+      var x0 = Math.round((680 - (N * cw + (N - 1) * gap)) / 2);
+      g += T(340, 16, s && s.done ? '循环结束' : ('第 ' + (step + 1) + ' / ' + (steps.length - 1) + ' 步'),
+             {size:12, fill:C.dim});
+      // 点
+      for (i = 1; i <= N; i++) {
+        var x = x0 + (i - 1) * (cw + gap);
+        var isCur = s && (s.after === i);
+        var isFrom = FROM === i, isTo = TO === i;
+        g += R(x, 30, cw, 30, isCur ? C.orangeBg : (isFrom || isTo ? C.blueBg : '#ffffff'),
+               isCur ? C.orange : (isFrom || isTo ? C.blue : C.bd));
+        g += T(x + cw / 2, 50, String(i), {size:13, weight:'600',
+               fill:isCur ? C.orange : (isFrom || isTo ? C.blue : C.ink), mono:true});
+        if (isFrom) g += T(x + cw / 2, 24, '起', {size:10, fill:C.blue});
+        if (isTo) g += T(x + cw / 2, 24, '终', {size:10, fill:C.blue});
+      }
+      // 本步的跳跃
+      var y = 78;
+      if (s && !s.done) {
+        g += T(340, y, '试 2^' + s.p + ' = ' + (1 << s.p) + ' 步：从 ' + s.before + ' 到 ' + s.next +
+               (s.take ? '，够不着，跳' : '，够着了，不动'),
+               {size:12, fill:s.take ? C.orange : C.dim});
+      } else if (s && s.done) {
+        g += T(340, y, '循环走完，cur 停在 ' + s.after + '，ans = ' + s.ans + '，答案 ' + s.total + ' 步',
+               {size:12, fill:C.blue});
+      } else {
+        g += T(340, y, '点「下一步」开始：p 从 ' + POWER + ' 降到 0', {size:12, fill:C.dim});
+      }
+      // 表
+      var ty = 100, pcols = POWER + 1;
+      var tcw = Math.min(46, Math.floor(520 / (pcols + 1)));
+      var tx0 = Math.round((680 - ((pcols + 1) * tcw)) / 2);
+      g += T(tx0 - 6, ty + 14, 'i', {size:10.5, fill:C.dim});
+      for (i = 0; i <= POWER; i++) g += T(tx0 + tcw + i * tcw + tcw / 2, ty + 14, 'p=' + i, {size:10.5, fill:C.dim});
+      for (i = 1; i <= N; i++) {
+        var ry = ty + 20 + (i - 1) * 20;
+        g += T(tx0 - 6, ry + 14, String(i), {size:10.5, fill:C.dim, mono:true});
+        for (var p2 = 0; p2 <= POWER; p2++) {
+          var rx = tx0 + tcw + p2 * tcw;
+          var hot = s && !s.done && i === s.before && p2 === s.p;
+          g += R(rx, ry, tcw - 2, 18, hot ? C.orangeBg : (i % 2 ? C.bg : '#ffffff'), hot ? C.orange : C.bd);
+          g += T(rx + (tcw - 2) / 2, ry + 13, String(ST[i][p2]), {size:11, fill:hot ? C.orange : C.ink, mono:true});
+        }
+      }
+      var H = ty + 20 + N * 20 + 16;
+      stage.innerHTML = '<svg viewBox="0 0 680 '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      // 答案行
+      var txt = '';
+      if (s && s.done) {
+        txt = '最少 <b>' + s.total + '</b> 步：循环里跳了 ' + s.ans + ' 步到 ' + s.after + '，再加最后一步到 ' + TO;
+      } else if (s) {
+        txt = '当前 ans = ' + s.ans + '，cur = ' + s.after;
+      } else {
+        txt = '从 ' + FROM + ' 到 ' + TO + '，power = ' + POWER;
+      }
+      ans.innerHTML = txt;
+      // 日志
+      var lg = '';
+      for (i = 0; i < steps.length; i++) {
+        var t = steps[i];
+        if (t.done) { lg += '循环结束 → 答案 ' + t.total + ' 步\n'; break; }
+        lg += 'p=' + t.p + '  从 ' + t.before + ' 跳 ' + (1 << t.p) + ' 步到 ' + t.next + '  ' +
+              (t.take ? '够不着，跳（ans=' + t.ans + '）' : '够着了，不动') + '\n';
+      }
+      log.textContent = lg;
+      bNext.disabled = step >= steps.length - 1;
+    }
+
+    bind('jump-next', 'click', function(){ if (step < steps.length - 1) { step++; render(); } });
+    bind('jump-reset', 'click', function(){ step = -1; render(); });
+    bind('jump-data', 'change', function(){ rebuild(); });
+    rebuild();
+  })();
+
+  // ---------- 演示 2：二进制位分解 ----------
+  (function(){
+    var host = document.getElementById('viz-bits');
+    if (!host) return;
+    var PRESETS = [
+      {name:'x = 101，10 位', x:101, m:10},
+      {name:'x = 13，5 位', x:13, m:5},
+      {name:'x = 255，8 位', x:255, m:8},
+      {name:'x = 1000，12 位', x:1000, m:12},
+      {name:'x = 1，4 位', x:1, m:4}
+    ];
+    var sel = document.createElement('select'); sel.id = 'bits-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'bits-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'bits-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'bits-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'bits-sum';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans);
+
+    var X = 101, M = 10, steps = [], step = -1;
+
+    function rebuild(){
+      var k = parseInt(sel.value, 10);
+      X = PRESETS[k].x; M = PRESETS[k].m;
+      steps = [];
+      var t = X, p;
+      for (p = M - 1; p >= 0; p--) {
+        var w = 1 << p, take = w <= t;
+        if (take) t -= w;
+        steps.push({p:p, w:w, take:take, rest:t});
+      }
+      step = -1;
+      render();
+    }
+
+    function render(){
+      var g = '', i;
+      var s = step >= 0 ? steps[step] : null;
+      var cw = M <= 10 ? 54 : Math.floor((640 - 60) / M);
+      var gap = M <= 10 ? 6 : 3;
+      var x0 = Math.round((680 - (M * cw + (M - 1) * gap)) / 2);
+      g += T(340, 16, s ? ('第 ' + (step + 1) + ' / ' + steps.length + ' 步') : '点「下一步」从最高位开始试',
+             {size:12, fill:C.dim});
+      for (i = 0; i < M; i++) {
+        var p = M - 1 - i, w = 1 << p;
+        var x = x0 + i * (cw + gap);
+        var done = step >= i;
+        var isNow = step === i;
+        var bit = done ? (steps[i].take ? 1 : 0) : null;
+        g += T(x + cw / 2, 36, '位 ' + p, {size:10.5, fill:C.dim});
+        g += R(x, 42, cw, 34, isNow ? C.orangeBg : (bit === 1 ? C.blueBg : '#ffffff'),
+               isNow ? C.orange : (bit === 1 ? C.blue : C.bd));
+        g += T(x + cw / 2, 64, bit === null ? '?' : String(bit),
+               {size:15, weight:'600', fill:isNow ? C.orange : (bit === 1 ? C.blue : (bit === 0 ? C.gray : C.bd)), mono:true});
+        g += T(x + cw / 2, 92, String(w), {size:10.5, fill:bit === 1 ? C.ink : C.gray, mono:true});
+      }
+      var y = 116;
+      if (s) {
+        g += T(340, y, '2^' + s.p + ' = ' + s.w + (s.take ? '  ≤  剩下的 ' + (s.rest + s.w) + '，写 1，剩 ' + s.rest
+                                                          : '  >  剩下的 ' + s.rest + '，写 0'),
+               {size:12, fill:s.take ? C.orange : C.dim});
+      } else {
+        g += T(340, y, '剩下来的数从 ' + X + ' 开始，逐位够减就减', {size:12, fill:C.dim});
+      }
+      stage.innerHTML = '<svg viewBox="0 0 680 '+(y + 24)+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      var picked = [];
+      for (i = 0; i <= step; i++) if (steps[i].take) picked.push(steps[i].w);
+      ans.innerHTML = s ? (picked.length ? '已取 ' + picked.join(' + ') + ' = <b>' + (X - s.rest) + '</b>，还剩 ' + s.rest
+                                         : '一位都没取，还剩 ' + s.rest)
+                        : 'x = ' + X + '，用 ' + M + ' 位表示';
+      bNext.disabled = step >= steps.length - 1;
+    }
+
+    bind('bits-next', 'click', function(){ if (step < steps.length - 1) { step++; render(); } });
+    bind('bits-reset', 'click', function(){ step = -1; render(); });
+    bind('bits-data', 'change', function(){ rebuild(); });
+    rebuild();
+  })();
+})();
+</script>
+</body>
+</html>

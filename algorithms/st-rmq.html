@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ST 表做区间最值与公约数 · 算法教程</title>
+<meta name="description" content="把每个长度为 2 的幂的区间的答案预先算好，查询时用两段有重叠的区间盖住询问，重叠不影响结果就成立。最大值、最小值、公约数都能这么办，区间和不行。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .viz-hint{font-size:13px;color:var(--text-dim);margin:-6px 0 10px;}
+  .ansline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.7;}
+  .ansline b{color:var(--full);}
+  .logline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;margin:8px 0 0;padding:8px 10px;background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;line-height:1.8;max-height:180px;overflow:auto;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>ST 表做区间最值与公约数</h1>
+    <p class="intro">静态数组上反复问「这一段里最大的是几」，最直接的答案是线段树。还有个更笨也更快的办法：把每个长度恰好是 2 的幂的区间的答案全算出来存好，查询时拿两段这样的区间盖住询问，一拼就出结果，一次查询 O(1)。</p>
+
+    <h2>零、问题与一个前提</h2>
+    <p>给定长度 n 的数组，m 次询问 <code>[l, r]</code>，每次要这段里的最大值、最小值或者全体元素的最大公约数。数组全程不改。这叫 RMQ（Range Minimum/Maximum Query）问题。</p>
+    <p>线段树是通用解：构建 O(n)，单次查询 O(log n)，还能支持修改。数组不改这个前提一加，事情就变了 —— 不需要支持修改，就可以把所有答案预先算好，把查询压到常数时间。</p>
+
+    <h2>一、可重复贡献：重叠了有什么关系</h2>
+    <p>ST 表能用，靠的是被查询的那个运算有一条性质：把两个有重叠部分的区间的答案再合并一次，得到的还是合并后整个区间的答案。最大值就满足：<code>max(a, b, c)</code> 和 <code>max(max(a, b), max(b, c))</code> 是一个东西，b 被算了两次不影响结果。最小值、最大公约数、按位与、按位或都是这样。这叫可重复贡献问题。</p>
+    <figure class="fig" id="fig-repeat"></figure>
+    <p>区间求和就不满足。两段重叠一格，那一格被加两次，答案直接虚高。实测把下面的 <code>max</code> 换成加法、其余一字不动，随机查询里 100% 算错，因为两段永远有重叠，从不例外。</p>
+
+    <h2>二、查询：两段盖住整个询问</h2>
+    <p>令 <code>p = log2[r - l + 1]</code>，也就是区间长度里那个最大的 2 的幂的指数。取两段长度都是 2 的 p 次方的区间：左段从 l 起，右段到 r 止。</p>
+    <figure class="fig" id="fig-cover"></figure>
+    <p>这两段一定能盖满 <code>[l, r]</code>。理由是 <code>2^(p+1)</code> 严格大于区间长度，左段的尾巴 <code>l + 2^p - 1</code> 一定够得到右段的头 <code>r - 2^p + 1</code> 的前面一格。它们还一定有重叠，重叠长度恰好是 <code>2^(p+1) - len</code>：区间长度刚好是 2 的幂时两段完全重合，长度是 <code>2^(p+1) - 1</code> 时只重叠一格。实测二十万次随机查询，重叠长度从 1 到 524286，平均 147061，占区间长度的 44.51%，没有一次不重叠。</p>
+    <p>重叠这一格在可重复贡献的运算下无所谓，于是查询就两行：</p>
+
+    <pre class="code"><span class="cm">// [l, r] 上的最大值减去最小值，一次查询 O(1)</span>
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> p = log2[r - l + 1];
+        <span class="kw">int</span> a = max(stmax[l][p], stmax[r - (1 &lt;&lt; p) + 1][p]);
+        <span class="kw">int</span> b = min(stmin[l][p], stmin[r - (1 &lt;&lt; p) + 1][p]);
+        <span class="kw">return</span> a - b;
+    }</pre>
+
+    <p>右边那段的起点写成 <code>r - (1 &lt;&lt; p) + 1</code>，加的那个 1 是全场最容易漏的地方。实测 9 万次随机查询，漏掉它有 35.86% 的查询算错。另一个高频错误是 <code>p</code> 取成 <code>log2[len] + 1</code>：多取一档会让两段越出数组右边界，抓取率 72.42%。</p>
+
+    <h2>三、构建：长度翻倍，一层一层填</h2>
+    <p>要查的是「从 i 起、长度 2 的 p 次方的区间的答案」，记为 <code>st[i][p]</code>。第 0 层就是单个元素，第 p 层由两个第 p−1 层拼出来，前后两半各长 2 的 p−1 次方：</p>
+    <p><code>st[i][p] = max( st[i][p-1], st[i + 2^(p-1)][p-1] )</code></p>
+
+    <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXN = 50001;
+    <span class="kw">const</span> <span class="kw">int</span> LIMIT = 16;
+    <span class="kw">int</span> arr[MAXN], log2[MAXN];
+    <span class="kw">int</span> stmax[MAXN][LIMIT], stmin[MAXN][LIMIT];
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n) {
+        log2[0] = -1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            log2[i] = log2[i &gt;&gt; 1] + 1;
+            stmax[i][0] = arr[i];
+            stmin[i][0] = arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt;= log2[n]; p++) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i + (1 &lt;&lt; p) - 1 &lt;= n; i++) {
+                stmax[i][p] = max(stmax[i][p - 1], stmax[i + (1 &lt;&lt; (p - 1))][p - 1]);
+                stmin[i][p] = min(stmin[i][p - 1], stmin[i + (1 &lt;&lt; (p - 1))][p - 1]);
+            }
+        }
+    }</pre>
+
+    <p>两层循环的顺序是死的：外层 p 从 1 涨到 <code>log2[n]</code>，内层 i 从 1 走到 <code>n - 2^p + 1</code>。内层那个上界就是「这一段不能越出数组」，越界的格子不会被问到，填不填都行，但写了更省时间。</p>
+    <figure class="fig" id="fig-build"></figure>
+    <p>log2 那张表跟着 <code>i</code> 一起递推填，<code>log2[0] = -1</code> 让 <code>log2[1]</code> 落到 0。它既用于构建的上界判断，也用于查询时定 p，一次填好两处用。</p>
+
+    <h2>四、换一个运算：区间最大公约数</h2>
+    <p>把 <code>max</code> 换成 <code>gcd</code>，构建和查询的骨架一个字都不用动。原因是 gcd 同样满足可重复贡献：<code>gcd(a, b, c)</code> 等于 <code>gcd(gcd(a, b), gcd(b, c))</code>，中间那个 b 算两次不碍事。</p>
+
+    <pre class="code"><span class="cm">// 换运算不改骨架：把 build 里的 max 换成 gcd，查询一行不动</span>
+    <span class="kw">int</span> <span class="fn">gcd</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">return</span> b == 0 ? a : gcd(b, a % b);
+    }
+
+    <span class="kw">void</span> <span class="fn">buildGcd</span>(<span class="kw">int</span> n) {
+        log2[0] = -1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            log2[i] = log2[i &gt;&gt; 1] + 1;
+            stgcd[i][0] = arr[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt;= log2[n]; p++) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i + (1 &lt;&lt; p) - 1 &lt;= n; i++) {
+                stgcd[i][p] = gcd(stgcd[i][p - 1], stgcd[i + (1 &lt;&lt; (p - 1))][p - 1]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">queryGcd</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> p = log2[r - l + 1];
+        <span class="kw">return</span> gcd(stgcd[l][p], stgcd[r - (1 &lt;&lt; p) + 1][p]);
+    }</pre>
+
+    <p>这就是 ST 表最实用的一面：认准「运算满足结合律、幂等、可交换」这三条，就能套模板。按位与、按位或同理，把 <code>gcd</code> 换成 <code>&amp;</code> 或者 <code>|</code> 就完事。</p>
+
+    <h2>五、ST 表与线段树，各自适合什么</h2>
+    <p>两套结构都做了实测，n 从 5 万到 100 万，查询各跑 20 万次。</p>
+    <table class="complexity">
+      <tr><th>规模</th><th>ST 构建</th><th>线段树构建</th><th>ST 查询</th><th>线段树查询</th><th>ST 空间</th><th>线段树空间</th></tr>
+      <tr><td>n = 5×10⁴</td><td>2.99 ms</td><td>0.24 ms</td><td>0.0081 微秒</td><td>0.1487 微秒</td><td>6.1 MB</td><td>1.5 MB</td></tr>
+      <tr><td>n = 2×10⁵</td><td>16.55 ms</td><td>0.89 ms</td><td>0.0177 微秒</td><td>0.1817 微秒</td><td>27.5 MB</td><td>6.1 MB</td></tr>
+      <tr><td>n = 10⁶</td><td>109.32 ms</td><td>3.64 ms</td><td>0.0212 微秒</td><td>0.2386 微秒</td><td>152.6 MB</td><td>30.5 MB</td></tr>
+    </table>
+    <figure class="fig" id="fig-cmp"></figure>
+    <p>结论很清楚。查询快一个数量级（10 到 18 倍），构建慢一个数量级（12 到 30 倍），空间贵 4 到 5 倍。数组静态、查询次数压倒性多于构建次数时，ST 表划算；反过来，或者需要支持修改，老老实实用线段树。</p>
+    <p>还有一个容易忘的限制：ST 表能维护的信息非常有限。它只存「某个区间的答案」，靠两段拼一次出结果，中间过程一概不保留。想在查询里带上「第几大」「出现过几次」这类要跨段统计的信息，ST 表就无能为力了，那是线段树和莫队的地盘。</p>
+
+    <h2>六、复杂度分析</h2>
+    <table class="complexity">
+      <tr><th>做法</th><th>构建时间</th><th>单次查询</th><th>空间</th><th>支持修改</th></tr>
+      <tr><td>ST 表</td><td>O(n log n)</td><td>O(1)</td><td>O(n log n)</td><td>不支持</td></tr>
+      <tr><td>线段树</td><td>O(n)</td><td>O(log n)</td><td>O(n)</td><td>支持</td></tr>
+      <tr><td>每次扫一遍</td><td>O(1)</td><td>O(n)</td><td>O(1)</td><td>支持</td></tr>
+    </table>
+    <p>空间按题目上限算。第一题 n 等于 5×10⁴，<code>log2[n]</code> 是 15，两个表各 50001 行 × 16 列，共 6.1 MB。第二题 n 等于 1000，一张表 1001 行 × 10 列，不到 40 KB。开数组时列数取 <code>log2[n] + 1</code> 再加一格余量，5×10⁴ 用 16、1000 用 10。</p>
+    <p>构建那个 O(n log n) 是实打实的：内层跑 <code>n - 2^p + 1</code> 次，p 从 1 到 <code>log2[n]</code>，加起来是 n log n 减 2 的幂之和，量级不变。这也是它构建比线段树慢的原因 —— 线段树的构建只扫一遍，O(n)。</p>
+
+    <h2>七、总结</h2>
+    <p>ST 表的查询是两段有重叠的区间拼一次：长度取 2 的 p 次方（p 是 <code>log2[len]</code>），左段从 l 起，右段到 r 止。两段必然盖满询问、必然有重叠，重叠在可重复贡献的运算下无所谓。查询 O(1)，构建 O(n log n)，空间 O(n log n)。</p>
+    <p>适用边界记两条。运算必须可重复贡献，最大值、最小值、gcd、按位与、按位或都行，区间和不行（实测换成加法 100% 算错）；数组必须静态，表一旦填好改一个元素要重填整张。</p>
+    <p>代码上只有两个地方会写错：右段起点 <code>r - (1 &lt;&lt; p) + 1</code> 少写那个 1（35.86% 的查询出错），以及 p 多取一档（72.42% 出错）。把这两处对一遍，剩下就是模板。</p>
+
+    <h2>相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P2880" target="_blank">P2880 区间最大值与最小值之差</a></td><td>luogu.com.cn/problem/P2880</td></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P1890" target="_blank">P1890 区间最大公约数</a></td><td>luogu.com.cn/problem/P1890</td></tr>
+    </table>
+
+    <h2>参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解117【扩展】倍增算法和ST表</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = {blue:'#2563eb', blueBg:'#dbeafe', blueLt:'#eef4ff',
+           orange:'#ea580c', orangeBg:'#ffedd5', gray:'#9aa0a6',
+           bg:'#f6f7f9', bd:'#e6e8eb', ink:'#1f2328', dim:'#5c6370'};
+
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x,y,s,o){
+    o = o || {};
+    return '<text x="'+x+'" y="'+y+'" font-size="'+(o.size||12)+'" fill="'+(o.fill||C.ink)+
+           '" text-anchor="'+(o.anchor||'middle')+'"'+(o.mono?' font-family="ui-monospace,Menlo,monospace"':'')+
+           (o.weight?' font-weight="'+o.weight+'"':'')+'>'+esc(s)+'</text>';
+  }
+  function R(x,y,w,h,fill,stroke){
+    return '<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w)+'" height="'+Math.max(0,h)+
+           '" rx="3" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="1"':'')+'/>';
+  }
+  function LN(x1,y1,x2,y2,col,dash){
+    return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+(col||C.bd)+
+           '" stroke-width="1"'+(dash?' stroke-dasharray="4 3"':'')+'/>';
+  }
+  function mount(id, hh, body, cap){
+    var f = document.getElementById(id);
+    if (!f) return;
+    f.innerHTML = '<svg viewBox="0 0 680 '+hh+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+
+      body + '</svg>'+(cap?'<figcaption>'+cap+'</figcaption>':'');
+  }
+  function bind(id, ev, fn){ var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
+
+  // ---------- 图 1：可重复贡献 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, '同一段重叠，max 无所谓，求和就出事', {size:13, weight:'600'});
+    var a = [4, 7, 3];       // 左段 [4,7]，右段 [7,3]，中间 7 重叠
+    function band(y0, title, mid, right, col, okNote){
+      var out = '';
+      var cw = 96, gap = 10, x0 = 150;
+      out += T(24, y0 + 22, title, {size:12, fill:C.dim, anchor:'start'});
+      var i;
+      for (i = 0; i < 3; i++) {
+        var x = x0 + i * (cw + gap);
+        var inBoth = (i === 1);
+        out += R(x, y0, cw, 40, inBoth ? C.orangeBg : '#ffffff', inBoth ? C.orange : C.bd);
+        out += T(x + cw / 2, y0 + 25, String(a[i]), {size:15, weight:'600', fill:inBoth ? C.orange : C.ink, mono:true});
+      }
+      // 两段括号
+      out += '<path d="M '+(x0 - 6)+' '+(y0 + 48)+' L '+(x0 - 6)+' '+(y0 + 42)+' L '+(x0 + 2 * (cw + gap) - gap + 6)+' '+(y0 + 42)+
+             ' L '+(x0 + 2 * (cw + gap) - gap + 6)+' '+(y0 + 48)+'" fill="none" stroke="'+C.blue+'" stroke-width="1.4"/>';
+      out += '<path d="M '+(x0 + (cw + gap) - 6)+' '+(y0 + 48)+' L '+(x0 + (cw + gap) - 6)+' '+(y0 + 54)+' L '+(x0 + 3 * (cw + gap) - gap + 6)+' '+(y0 + 54)+
+             ' L '+(x0 + 3 * (cw + gap) - gap + 6)+' '+(y0 + 48)+'" fill="none" stroke="'+C.blue+'" stroke-width="1.4"/>';
+      out += T(24, y0 + 76, mid, {size:11.5, fill:C.dim, anchor:'start'});
+      out += T(24, y0 + 96, right, {size:11.5, fill:col, anchor:'start'});
+      return out;
+    }
+    g += band(40, '取最大值', '左段 max(4, 7) = 7，右段 max(7, 3) = 7，合并 max(7, 7) = 7',
+              '整段 max(4, 7, 3) 也是 7，重叠的 7 算了两次不影响', C.blue);
+    g += band(150, '求和', '左段 4 + 7 = 11，右段 7 + 3 = 10，合并 11 + 10 = 21',
+              '整段 4 + 7 + 3 = 14，重叠的 7 被加了两遍，虚高 7', C.orange);
+    g += T(340, 258, '判据：运算满足结合律、幂等、可交换，重叠就无害', {size:11.5, fill:C.dim});
+    mount('fig-repeat', 272, g, '两段区间有重叠时，max / min / gcd / 按位与 / 按位或都拿重叠段算两次也不改变结果，区间和会重复计数。');
+  })();
+
+  // ---------- 图 2：两段覆盖 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, '查询 [2, 8]：长度 7，p = 2，两段各长 4', {size:13, weight:'600'});
+    var arr = [3, 7, 2, 9, 5, 1, 8, 4, 6];   // 下标 1..9
+    var l = 2, r = 8, p = 2, len = r - l + 1;
+    var cw = 58, gap = 8, x0 = 60, y0 = 44;
+    var i, x;
+    for (i = 1; i <= 9; i++) {
+      x = x0 + (i - 1) * (cw + gap);
+      var inL = i >= l && i <= l + (1 << p) - 1;
+      var inR = i >= r - (1 << p) + 1 && i <= r;
+      var inBoth = inL && inR;
+      g += T(x + cw / 2, y0 - 8, String(i), {size:10.5, fill:C.dim, mono:true});
+      g += R(x, y0, cw, 36, inBoth ? C.orangeBg : (inL || inR ? C.blueBg : '#ffffff'),
+             inBoth ? C.orange : (inL || inR ? C.blue : C.bd));
+      g += T(x + cw / 2, y0 + 24, String(arr[i - 1]), {size:15, weight:'600',
+             fill:inBoth ? C.orange : (inL || inR ? C.blue : C.gray), mono:true});
+    }
+    // 左段括号
+    var lb = x0 + (l - 1) * (cw + gap) - 5, lr = x0 + (l + (1 << p) - 2) * (cw + gap) + cw + 5;
+    var rb = x0 + (r - (1 << p)) * (cw + gap) - 5, rr = x0 + (r - 1) * (cw + gap) + cw + 5;
+    g += '<path d="M '+lb+' '+(y0 + 48)+' L '+lb+' '+(y0 + 42)+' L '+lr+' '+(y0 + 42)+' L '+lr+' '+(y0 + 48)+
+         '" fill="none" stroke="'+C.blue+'" stroke-width="1.4"/>';
+    g += T((lb + lr) / 2, y0 + 62, '左段 [2, 5]  长 4', {size:11, fill:C.blue});
+    g += '<path d="M '+rb+' '+(y0 + 74)+' L '+rb+' '+(y0 + 68)+' L '+rr+' '+(y0 + 68)+' L '+rr+' '+(y0 + 74)+
+         '" fill="none" stroke="'+C.blue+'" stroke-width="1.4"/>';
+    g += T((rb + rr) / 2, y0 + 88, '右段 [5, 8]  长 4，起点 8 - 4 + 1 = 5', {size:11, fill:C.blue});
+    var y = y0 + 112;
+    g += T(340, y, '左段 max = 9、min = 2；右段 max = 8、min = 1', {size:11.5, fill:C.dim});
+    g += T(340, y + 20, '位置 5 被两段同时盖住（重叠 2^(p+1) - len = 8 - 7 = 1 格），取最值无所谓', {size:11.5, fill:C.orange});
+    g += T(340, y + 40, '答案：max(9, 8) - min(2, 1) = 9 - 1 = 8', {size:12, fill:C.blue, weight:'600'});
+    mount('fig-cover', y + 58, g, '两段长度都取 2 的 p 次方时，必然盖满整个询问区间，也必然有重叠；可重复贡献的运算让重叠变得无害。');
+  })();
+
+  // ---------- 图 3：构建层次 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, 'n = 9 时的填表顺序：外层 p 递增，内层 i 走到 n - 2^p + 1', {size:13, weight:'600'});
+    var n = 9, cw = 56, gap = 6, x0 = 80, y0 = 40;
+    var p, i, y;
+    g += T(x0 - 12, y0 + 14, 'p', {size:11, fill:C.dim});
+    for (i = 1; i <= n; i++) g += T(x0 + (i - 1) * (cw + gap) + cw / 2, y0 + 14, String(i), {size:11, fill:C.dim, mono:true});
+    for (p = 0; p <= 3; p++) {
+      y = y0 + 22 + p * 26;
+      var cnt = n - (1 << p) + 1;
+      g += T(x0 - 12, y + 17, 'p=' + p, {size:11, fill:C.dim, mono:true});
+      for (i = 1; i <= cnt; i++) {
+        var x = x0 + (i - 1) * (cw + gap);
+        g += R(x, y, cw, 22, p === 0 ? C.blueLt : (p === 3 ? C.orangeBg : '#ffffff'),
+               p === 0 ? C.bd : (p === 3 ? C.orange : C.bd));
+        g += T(x + cw / 2, y + 15, p === 0 ? 'a[' + i + ']' : '·', {size:10.5, fill:C.gray, mono:true});
+      }
+      g += T(x0 + (cnt - 1) * (cw + gap) + cw + 16, y + 16,
+             (p === 0 ? '单个元素，直接抄' : ('长 ' + (1 << p) + '，可填 ' + cnt + ' 格')),
+             {size:10.5, fill:C.dim, anchor:'start'});
+    }
+    y = y0 + 22 + 3 * 26 + 24;
+    g += T(340, y, 'st[i][p] = max( st[i][p-1], st[i + 2^(p-1)][p-1] )：两个半段各长 2 的 p-1 次方',
+           {size:11.5, fill:C.blue});
+    g += T(340, y + 20, 'p = 3 时只剩 2 格能填（9 - 8 + 1），再往上 2 的 4 次方已经超过 n，用不上',
+           {size:11.5, fill:C.dim});
+    mount('fig-build', y + 40, g, '第 0 层是原数组，往上每层长度翻倍、可填的格子数递减；外循环必须是 p，内循环才是 i。');
+  })();
+
+  // ---------- 图 4：性能对比 ----------
+  (function(){
+    var g = '';
+    g += T(340, 18, 'n = 10⁶：构建慢一个数量级，查询快一个数量级', {size:13, weight:'600'});
+    function bars(y0, title, va, vb, la, lb, unit){
+      var out = '';
+      var maxv = Math.max(va, vb), w = 300, x0 = 200;
+      out += T(24, y0 + 16, title, {size:11.5, fill:C.dim, anchor:'start'});
+      out += R(x0, y0, Math.max(2, w * va / maxv), 20, C.orangeBg, C.orange);
+      out += T(x0 + Math.max(2, w * va / maxv) + 8, y0 + 15, la + ' ' + unit, {size:11, fill:C.orange, anchor:'start'});
+      out += R(x0, y0 + 26, Math.max(2, w * vb / maxv), 20, C.blueBg, C.blue);
+      out += T(x0 + Math.max(2, w * vb / maxv) + 8, y0 + 41, lb + ' ' + unit, {size:11, fill:C.blue, anchor:'start'});
+      return out;
+    }
+    g += bars(40, '构建', 109.32, 3.64, 'ST 109.32', '线段树 3.64', 'ms');
+    g += bars(100, '单次查询', 0.2386, 0.0212, '线段树 0.2386', 'ST 0.0212', '微秒');
+    g += bars(160, '空间', 152.6, 30.5, 'ST 152.6', '线段树 30.5', 'MB');
+    g += T(340, 226, '查询次数压倒构建次数、数组又全程不改时，ST 表这笔买卖划算', {size:11.5, fill:C.dim});
+    mount('fig-cmp', 242, g, '同样是 n = 10⁶，ST 表构建慢 30 倍、空间贵 5 倍，但每次查询快 11 倍。');
+  })();
+
+  // ---------- 演示 1：一次查询的两段 ----------
+  (function(){
+    var host = document.getElementById('viz-query');
+    if (!host) return;
+    var PRESETS = [
+      {name:'[3,7,2,9,5,1,8,4,6] 查 [2,8]', a:[3,7,2,9,5,1,8,4,6], l:2, r:8},
+      {name:'同上，查 [1,9] 整段', a:[3,7,2,9,5,1,8,4,6], l:1, r:9},
+      {name:'同上，查 [3,3] 单格', a:[3,7,2,9,5,1,8,4,6], l:3, r:3},
+      {name:'[5,5,5,2,2,8,8,8,1] 查 [2,9]', a:[5,5,5,2,2,8,8,8,1], l:2, r:9},
+      {name:'[4,1,9,6,3,7,2] 查 [2,6]', a:[4,1,9,6,3,7,2], l:2, r:6}
+    ];
+    var sel = document.createElement('select'); sel.id = 'q-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'q-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'q-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'q-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'q-sum';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans);
+
+    var A = [], L = 1, R = 1, LG = [], STMAX = [], STMIN = [], steps = [], step = -1;
+
+    function buildAll(){
+      var n = A.length, i, p;
+      LG = [0];
+      LG[0] = -1;
+      for (i = 1; i <= n; i++) LG[i] = LG[i >> 1] + 1;
+      STMAX = []; STMIN = [];
+      for (i = 0; i <= n + 1; i++) { STMAX.push([]); STMIN.push([]); }
+      for (i = 1; i <= n; i++) { STMAX[i][0] = A[i - 1]; STMIN[i][0] = A[i - 1]; }
+      for (p = 1; p <= LG[n]; p++)
+        for (i = 1; i + (1 << p) - 1 <= n; i++) {
+          STMAX[i][p] = Math.max(STMAX[i][p - 1], STMAX[i + (1 << (p - 1))][p - 1]);
+          STMIN[i][p] = Math.min(STMIN[i][p - 1], STMIN[i + (1 << (p - 1))][p - 1]);
+        }
+    }
+
+    function rebuild(){
+      var k = parseInt(sel.value, 10), cfg = PRESETS[k];
+      A = cfg.a.slice(); L = cfg.l; R = cfg.r;
+      buildAll();
+      var p = LG[R - L + 1];
+      var ls = L, le = L + (1 << p) - 1, rs = R - (1 << p) + 1, re = R;
+      var mx = Math.max(STMAX[L][p], STMAX[rs][p]);
+      var mn = Math.min(STMIN[L][p], STMIN[rs][p]);
+      var realMx = A[L - 1], realMn = A[L - 1], i;
+      for (i = L; i <= R; i++) { realMx = Math.max(realMx, A[i - 1]); realMn = Math.min(realMn, A[i - 1]); }
+      steps = [
+        {tip:'区间长度 ' + (R - L + 1) + '，p = log2[' + (R - L + 1) + '] = ' + p + '，每段长 ' + (1 << p)},
+        {tip:'左段 [' + ls + ', ' + le + ']，最大值 ' + STMAX[L][p] + '、最小值 ' + STMIN[L][p]},
+        {tip:'右段 [' + rs + ', ' + re + ']，起点 ' + R + ' - ' + (1 << p) + ' + 1 = ' + rs +
+             '，最大值 ' + STMAX[rs][p] + '、最小值 ' + STMIN[rs][p]},
+        {tip:'两段重叠 ' + ((1 << (p + 1)) - (R - L + 1)) + ' 格，最值运算下无所谓',
+         done:true, mx:mx, mn:mn, realMx:realMx, realMn:realMn, ls:ls, le:le, rs:rs, re:re, p:p}
+      ];
+      step = -1;
+      render();
+    }
+
+    function render(){
+      var n = A.length, g = '', i;
+      var s = step >= 0 ? steps[step] : null;
+      var cw = n <= 9 ? 58 : Math.floor((620 - 60) / n);
+      var gap = n <= 9 ? 8 : 4;
+      var x0 = Math.round((680 - (n * cw + (n - 1) * gap)) / 2);
+      g += T(340, 14, s ? ('第 ' + (step + 1) + ' / ' + steps.length + ' 步') : '点「下一步」开始',
+             {size:12, fill:C.dim});
+      var p = LG[R - L + 1];
+      var ls = L, le = L + (1 << p) - 1, rs = R - (1 << p) + 1, re = R;
+      var showL = s && step >= 1, showR = s && step >= 2, showBoth = s && step >= 3;
+      for (i = 1; i <= n; i++) {
+        var x = x0 + (i - 1) * (cw + gap);
+        var inL = showL && i >= ls && i <= le;
+        var inR = showR && i >= rs && i <= re;
+        var inBoth = inL && inR;
+        var asked = i >= L && i <= R;
+        g += T(x + cw / 2, 30, String(i), {size:10.5, fill:C.dim, mono:true});
+        g += R(x, 36, cw, 34, inBoth ? C.orangeBg : (inL || inR ? C.blueBg : (asked ? C.bg : '#ffffff')),
+               inBoth ? C.orange : (inL || inR ? C.blue : (asked ? C.bd : C.bd)));
+        g += T(x + cw / 2, 58, String(A[i - 1]), {size:15, weight:'600',
+               fill:inBoth ? C.orange : (inL || inR ? C.blue : (asked ? C.ink : C.gray)), mono:true});
+      }
+      if (showL) {
+        var lb = x0 + (ls - 1) * (cw + gap) - 5, lr = x0 + (le - 1) * (cw + gap) + cw + 5;
+        g += '<path d="M '+lb+' 84 L '+lb+' 78 L '+lr+' 78 L '+lr+' 84" fill="none" stroke="'+C.blue+'" stroke-width="1.4"/>';
+        g += T((lb + lr) / 2, 96, '左段长 ' + (1 << p), {size:11, fill:C.blue});
+      }
+      if (showR) {
+        var rb = x0 + (rs - 1) * (cw + gap) - 5, rr = x0 + (re - 1) * (cw + gap) + cw + 5;
+        g += '<path d="M '+rb+' 112 L '+rb+' 106 L '+rr+' 106 L '+rr+' 112" fill="none" stroke="'+C.blue+'" stroke-width="1.4"/>';
+        g += T((rb + rr) / 2, 124, '右段长 ' + (1 << p) + '，起点 ' + R + ' - ' + (1 << p) + ' + 1', {size:11, fill:C.blue});
+      }
+      g += T(340, 148, s ? s.tip : ('查 [' + L + ', ' + R + ']，长度 ' + (R - L + 1)), {size:12, fill:C.dim});
+      stage.innerHTML = '<svg viewBox="0 0 680 164" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      if (s && s.done) {
+        ans.innerHTML = '结果 max(' + s.mx + ') − min(' + s.mn + ') = <b>' + (s.mx - s.mn) +
+                        '</b>，与整段实算的 ' + s.realMx + ' / ' + s.realMn + ' 一致';
+      } else if (s) {
+        ans.innerHTML = s.tip;
+      } else {
+        ans.innerHTML = '查 [' + L + ', ' + R + ']，p = ' + p + '，每段长 ' + (1 << p);
+      }
+      bNext.disabled = step >= steps.length - 1;
+    }
+
+    bind('q-next', 'click', function(){ if (step < steps.length - 1) { step++; render(); } });
+    bind('q-reset', 'click', function(){ step = -1; render(); });
+    bind('q-data', 'change', function(){ rebuild(); });
+    rebuild();
+  })();
+
+  // ---------- 演示 2：逐层构建 ----------
+  (function(){
+    var host = document.getElementById('viz-build');
+    if (!host) return;
+    var PRESETS = [
+      {name:'[3,7,2,9,5,1,8,4,6]', a:[3,7,2,9,5,1,8,4,6]},
+      {name:'[5,5,5,2,2,8,8,8,1]', a:[5,5,5,2,2,8,8,8,1]},
+      {name:'[4,1,9,6,3,7,2]', a:[4,1,9,6,3,7,2]},
+      {name:'[2,4,6,8,10,12]', a:[2,4,6,8,10,12]},
+      {name:'[9,1,9,1,9,1,9,1]', a:[9,1,9,1,9,1,9,1]}
+    ];
+    var sel = document.createElement('select'); sel.id = 'b-data';
+    var i, o;
+    for (i = 0; i < PRESETS.length; i++) {
+      o = document.createElement('option'); o.value = String(i);
+      o.textContent = PRESETS[i].name;
+      sel.appendChild(o);
+    }
+    var ctl = document.createElement('div'); ctl.className = 'viz-controls';
+    var bNext = document.createElement('button'); bNext.textContent = '下一步'; bNext.id = 'b-next';
+    var bReset = document.createElement('button'); bReset.textContent = '重置'; bReset.id = 'b-reset';
+    ctl.appendChild(bNext); ctl.appendChild(bReset);
+    var stage = document.createElement('div'); stage.id = 'b-stage';
+    var ans = document.createElement('div'); ans.className = 'ansline'; ans.id = 'b-sum';
+    host.appendChild(sel); host.appendChild(ctl); host.appendChild(stage); host.appendChild(ans);
+
+    var A = [], LG = [], ST = [], layers = [], step = -1;
+
+    function rebuild(){
+      var k = parseInt(sel.value, 10);
+      A = PRESETS[k].a.slice();
+      var n = A.length, i, p;
+      LG = [-1];
+      for (i = 1; i <= n; i++) LG[i] = LG[i >> 1] + 1;
+      ST = [];
+      for (i = 0; i <= n + 1; i++) ST.push([]);
+      layers = [];
+      // 第 0 层：一次一格
+      for (i = 1; i <= n; i++) {
+        ST[i][0] = A[i - 1];
+        layers.push({p:0, i:i, v:A[i - 1], from:[i], note:'第 0 层 = 元素本身'});
+      }
+      for (p = 1; p <= LG[n]; p++) {
+        for (i = 1; i + (1 << p) - 1 <= n; i++) {
+          var a1 = ST[i][p - 1], a2 = ST[i + (1 << (p - 1))][p - 1];
+          ST[i][p] = Math.max(a1, a2);
+          layers.push({p:p, i:i, v:ST[i][p], from:[i, i + (1 << (p - 1))],
+                       note:'两半各长 ' + (1 << (p - 1)) + '：max(' + a1 + ', ' + a2 + ')'});
+        }
+      }
+      step = -1;
+      render();
+    }
+
+    function render(){
+      var n = A.length, g = '', i, p;
+      var s = step >= 0 ? layers[step] : null;
+      var cw = Math.min(58, Math.floor((620 - 60) / n)), gap = 6;
+      var x0 = Math.round((680 - (n * cw + (n - 1) * gap)) / 2);
+      var P = LG[n];
+      g += T(340, 14, s ? ('第 ' + (step + 1) + ' / ' + layers.length + ' 步') : '点「下一步」逐格填表',
+             {size:12, fill:C.dim});
+      g += T(x0 - 10, 40, 'p', {size:10.5, fill:C.dim});
+      for (p = 0; p <= P; p++) {
+        var ry = 30 + p * 30;
+        g += T(x0 - 10, ry + 20, 'p=' + p, {size:10.5, fill:C.dim, mono:true});
+        var cnt = n - (1 << p) + 1;
+        for (i = 1; i <= cnt; i++) {
+          var x = x0 + (i - 1) * (cw + gap);
+          var filled = false, j;
+          for (j = 0; j <= step; j++) if (layers[j].p === p && layers[j].i === i) filled = true;
+          var isNow = s && s.p === p && s.i === i;
+          g += R(x, ry, cw, 26, isNow ? C.orangeBg : (filled ? C.blueLt : '#ffffff'),
+                 isNow ? C.orange : (filled ? C.bd : C.bd));
+          g += T(x + cw / 2, ry + 18, filled ? String(ST[i][p]) : '·',
+                 {size:12, fill:isNow ? C.orange : (filled ? C.ink : C.gray), mono:true});
+        }
+      }
+      var H = 30 + (P + 1) * 30 + 26;
+      g += T(340, H - 6, s ? s.note : ('第 0 层抄原数组，往上每层长度翻倍，共 ' + (P + 1) + ' 层'),
+             {size:12, fill:C.dim});
+      stage.innerHTML = '<svg viewBox="0 0 680 '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'+g+'</svg>';
+      ans.innerHTML = s ? ('st[' + s.i + '][' + s.p + '] = ' + s.v + '（' + s.note + '）')
+                        : ('n = ' + n + '，log2[n] = ' + P + '，共 ' + (P + 1) + ' 层');
+      bNext.disabled = step >= layers.length - 1;
+    }
+
+    bind('b-next', 'click', function(){ if (step < layers.length - 1) { step++; render(); } });
+    bind('b-reset', 'click', function(){ step = -1; render(); });
+    bind('b-data', 'change', function(){ rebuild(); });
+    rebuild();
+  })();
+})();
+</script>
+</body>
+</html>
