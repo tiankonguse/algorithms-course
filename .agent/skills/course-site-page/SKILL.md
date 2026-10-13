@@ -126,6 +126,10 @@ seed = (seed + 0x6D2B79F5) | 0; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + M
 
 **演示出「算出来的结果」时配自写 CDP 脚本**（005）：控制区是 select/滑块时 shot_steps 点不到——先 `select.value = ...; dispatchEvent(new Event('change'))`，再按文字找按钮点击，最后截图。判断标色别只信缩略图（005 把橙色看成蓝色），读回 DOM 属性（`rect.getAttribute('fill')`）逐格核对最稳。
 
+**绘图 helper 的命名遮蔽是最高频的一类 bug（115/116/117 连踩三次）**：画图 helper 名字极短（`T()` 写字、`R()` 矩形、`LN()` 线、`mount()` 挂载），演示变量一撞名就整块空白，而 verify_pages 只数 svg 数量、照样 PASS。区间端点一律带前缀（`QL/QR`、`curL/curR`），别用裸 `L/R/T/W/H`（`H` 还会撞哈希函数，画布高写 `HH`）。**出了 bug 别全局批量改名**：`\bL\b` 会把 SVG `path` 的 `d="M 114 86 L 114 80"` 里的 `L` 命令一起换掉，只在 `<script>` 段内改名，改完用 CDP 抓一次 `Runtime.exceptionThrown`。
+
+**画图预算按「最长预设」算，不按默认预设**（116 的 n/k 演示 k ≥ 4 越界、117 的复制段画到 `16+m=28` 而 `unit` 按 24 算）——默认预设看不出问题，官方自检也放行，必须把 select **全组合**跑一遍。文字自重叠（尤其「同一句表头写了两遍」造成的 100% 重合，截图完全看不出）只有逐对 `getBBox()` 比对能发现，overlap 脚本要覆盖演示末帧。
+
 ### 写作风格（去 AI 味）——写每一段时就照这个来
 
 **完整 24 类清单在 references/humanize.md**（Wikipedia: Signs of AI writing，含意义拔高/-ing 伪分析/宣传腔/模糊归因/AI 高频词/copula 规避/否定并列/三段式/同义词轮换/破折号/通篇加粗/内联标题列表/emoji/套话结语…），**写页面时和收口前各读一遍**；references/humanize-readme.md 是速览索引。两条冲突以本站为准：引号用「」，章节标题是「零、一、二…」。下面是最容易犯、用户逐条点名确立的几条：
