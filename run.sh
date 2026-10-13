@@ -43,8 +43,10 @@ case "${1:-start}" in
     show_status
     ;;
   start|"")
-    kill_old
+    # 先生成导航，失败就不动正在跑的服务（kill_old 放在构建之后）
     cd "$DIR"
+    python3 tools/build_nav.py || { echo "导航生成失败，服务未启动"; exit 1; }
+    kill_old
     nohup python3 -m http.server "$PORT" >"$LOG_FILE" 2>&1 &
     PID=$!
     echo "$PID" >"$PID_FILE"

@@ -38,44 +38,48 @@ fi
 - 收口（json 接入、prompt.md 更新完成后）最后一步 `rm -f /tmp/algo-course-lock-<编号>/owner` —— **只删 owner，不动目录**。目录留着是正常状态，下一个会话 `mkdir -p` 直接复用；不需要 `rmdir`，也就不会撞上沙箱拒绝。这里的 `-f` 不是「用力删」，是让它**幂等**：收口时 owner 很可能已经不在了（抢锁失败没写过、或死锁分支刚删过），不加 `-f` 会吐 `No such file or directory` 并返回非 0，收口在 `&&` 链或 `set -e` 里就会被打断、看起来像没释放干净。
 - **死锁判定只看 owner 的年龄**：`find "$LOCK/owner" -mmin +60` 命中即死锁。用 **owner 的 mtime**，别用目录 mtime（目录 mtime 会被任何读写刷新，判不准）。不再附加「json 里还没有该课条目」这个条件 —— 它正是上面那个永久卡死的来源。「该课是否已完成」交给下面第 1 条兜底双查独立负责，与「锁是否还活着」是两回事。
 - 锁机制没生效时的兜底双查（开工读本节后、进主循环前）：
-  1. json 里已存在该课页面 id → 该课已完成，直接跳过（幂等，不做第二遍）；
+  1. nav 里已存在该课页面 → 该课已完成，直接跳过（幂等，不做第二遍）：`grep -rq '"file": "<该课页面名>.html"' nav/*/*/index.json`（2026-10 起导航真值是 nav/，旧 json 里的 `id` 字段已废弃）；
   2. `algorithms/<该课>.html` 存在且 mtime 在 60 分钟内 → 有人正在做，不开工，等对方收口后复核。
 - 新旧格式兼容：本脚本读锁**只看 owner 的 mtime、不看它的内容**，所以过渡期里旧版写的 `HH:MM <task_id>` 格式（如 `12:23 task-13140865480706`）一样认得，不需要转换。
 
-## json 条目字段约定（2026-10-04 新增，插新页时逐条核对）
+## 导航条目字段约定（2026-10 改版：真值是 nav/ 目录树）
 
-首页卡片 / 侧栏 / 难度筛选全部读 `assets/data/algorithms.json`，条目字段必须齐全且类型正确，缺一个就会在首页渲染出 `undefined`。实测踩过的两种：006/007/010/011/012 五条只写了 file/title/desc/group，卡片描述显示 `undefined`；`linked-list-reverse` 的 level 填了字符串「入门」，难度标签直接显示 `undefined`、筛选 chips 多出「undefined 1」。新条目固定六个字段：
+首页卡片 / 侧栏 / 难度筛选读的是 `assets/data/algorithms.json`，但**这份文件是生成物，不要手改**——它由 `tools/build_nav.py` 递归扫 `nav/` 生成，`run.sh` 启动时自动跑一遍。加页面改 `nav/`。
 
+页面条目固定四个字段（`nav/<cat>/<group>/index.json` 里的一条）：
 
-
-* `id`：页面文件名去掉 `.html`（如 `binary-search`）
-
-* `file`：`algorithms/xxx.html`
-
+* `file`：页面**文件名**（如 `binary-search.html`），不带目录，实际路径由生成器拼成 `algorithms/<file>`
 * `title`：标题
-
-* `description`：卡片描述，**字段名是 description，不是 desc**（老页面统一用前者，早期几课写成 desc 才踩的坑）
-
-* `group`：**二级分类名**（三层目录的中间层，见下）
+* `description`：卡片描述，**字段名是 description，不是 desc**（多字段会被生成器当硬错拦下）
 * `level`：**数字 1~5**（1 入门 / 2 进阶 / 3 高阶 / 4 挑战 / 5 硬核），不能写字符串「入门」
 
-### 三层目录（2026-10-12 重建，替代旧的 40 个扁平分组）
+字段必须齐全且类型正确，缺一个就会在首页渲染出 `undefined`。实测踩过的两种：006/007/010/011/012 五条只写了部分字段，卡片描述显示 `undefined`；`linked-list-reverse` 的 level 填了字符串「入门」，难度标签直接显示 `undefined`、筛选 chips 多出「undefined 1」。现在这两类都会被 `--check` 拦住。
 
-`assets/data/algorithms.json` 顶层是三个键：
+### 三层目录（2026-10 起：nav/ 目录树，每层只管自己这一层）
 
-* `categories`：一级分类名的有序数组（语言基础 / 算法基础 / 搜索 / 动态规划 / 字符串 / 数学 / 数据结构 / 图论 / 计算几何 / 杂项 / 专题，参考 OI-wiki）。**没有页面的分类不会出现在顶栏**（目前计算几何、专题为空）。
-* `groups`：二级分类，每条固定 `{ name, cat, desc }`；`cat` 是所属一级分类名，数组顺序即侧栏与首页顺序。第三层就是页面本身，不再有单独一层。
-* `algorithms`：页面条目，`group` 字段必须等于某个 `groups[].name`。
-
-新建页面时：把条目 `append` 进 `algorithms`（`group` 写目标二级分类名）；目标二级分类已存在就不用动 `groups` / `categories`。**二级分类名全局唯一**（顶栏靠 `cat` 归类，重名会串分类）。自检：`verify_home.js` 会逐分类核对分区数与卡片数，`verify_pages.js` 的 pager 链按「分类 → 二级 → algorithms 原顺序」铺平后核对。
-
-收口时一条命令核对六字段计数都等于总条数：
-
-
+导航真值是 `nav/` 下的目录树，一共三层，每层一个 `index.json` 只描述**自己的直接子项**：
 
 ```
-python3 -c "import json; from collections import Counter; d=json.load(open('assets/data/algorithms.json')); print(len(d['algorithms']), dict(Counter(k for a in d['algorithms'] for k in a)))"
+nav/index.json                 [{dir, name, desc}]   一级分类，数组顺序即展示顺序
+nav/<cat>/index.json           [{dir, name, desc}]   该一级下的二级分类
+nav/<cat>/<group>/index.json   [{file, title, description, level}]   该二级下的页面
 ```
+
+* 目录名是英文 slug（如 `basics/sorting/`），中文显示名与备注写在**父层** json 里，不存两份。
+* 一级顺序看 `nav/index.json` 的数组顺序；二级顺序看 `nav/<cat>/index.json`；组内页面顺序看该组自己的 `index.json`。**没有页面的分类不会出现在顶栏**（目前计算几何、专题为空）。
+* **二级分类名全局唯一**（顶栏靠它归类，重名会串分类），slug 也全局唯一。
+* 生成器校验：缺字段 / 多字段 / slug 不合规则 / `file` 在 `algorithms/` 下不存在（**大小写不一致单列硬错**，mac 能跑 Linux 404）/ 同一页被两组收录 / level 不是 1~5 整数 → 全部硬错；`algorithms/` 下有 html 没被任何 `index.json` 收录、nav 下有目录父层没登记 → 警告（`--strict` 变硬错）。
+
+新建页面时：往目标组的 `index.json` 插一条即可，目标组已存在就不用动上两层。要开新组：**先在 `nav/<cat>/index.json` 登记，再建目录写页面列表**（反过来会被报「野目录」）。
+
+收口一条命令（比跑 Chrome 便宜一个数量级）：
+
+```
+python3 tools/build_nav.py --check          # 只校验不写；--strict 把警告也当错误
+python3 tools/build_nav.py --stats          # 打印 406 / 77 / 9 与难度分布
+```
+
+自检：`verify_home.js` 逐分类核对分区数与卡片数，`verify_pages.js` 的 pager 链按「一级 → 二级 → 组内顺序」铺平后核对。生成器另有 `--verify-against <旧json>` 做六层比对（含 406 页上下篇链逐页模拟）。
 
 ## 页面写作约定（2026-10-04 用户定，013 起生效）
 

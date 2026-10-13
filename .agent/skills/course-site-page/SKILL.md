@@ -154,19 +154,23 @@ seed = (seed + 0x6D2B79F5) | 0; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + M
 
 ## 七、接入索引与翻页顺序
 
-**新条目固定六个字段，缺一个或类型写错首页渲染 undefined**（2026-10-04 用户定；006/007/010/011/012 缺字段、linked-list-reverse level 写字符串都踩过）：
+**导航真值是 `nav/` 目录树，`assets/data/algorithms.json` 是生成物，不要手改**（2026-10 改版；`run.sh` 启动时自动跑 `tools/build_nav.py`）。加页面改 `nav/<一级>/<二级>/index.json`。
 
-- `id`：页面文件名去 `.html`；`file`：`algorithms/xxx.html`；`title`；`description`（**字段名是 description，不是 desc**）；`group`；`level`：**数字 1~5**（1 入门/2 进阶/3 高阶/4 挑战/5 硬核），**不能写字符串「入门」**。
+**新条目固定四个字段，缺一个或类型写错首页渲染 undefined**（2026-10-04 用户定；006/007/010/011/012 缺字段、linked-list-reverse level 写字符串都踩过）：
+
+- `file`：页面**文件名**（`xxx.html`，不带目录，路径由生成器拼成 `algorithms/xxx.html`）；`title`；`description`（**字段名是 description，不是 desc**）；`level`：**数字 1~5**（1 入门/2 进阶/3 高阶/4 挑战/5 硬核），**不能写字符串「入门」**。2026-10 起不再有 `id` 与 `group` 字段——归属由目录决定，`group` 由生成器从目录名反查。
 
 收口必跑（verify_home.js 只查卡片数和组名，查不出缺字段、类型错）：
 
 ```bash
-python3 -c "import json; from collections import Counter; d=json.load(open('assets/data/algorithms.json')); print(len(d['algorithms']), dict(Counter(k for a in d['algorithms'] for k in a)))"
+python3 tools/build_nav.py --check      # 只校验不写；--strict 把警告也当错误
+python3 tools/build_nav.py --stats      # 打印 406 / 77 / 9 与难度分布
 ```
 
-- 新页插到对应 group 的**正确顺序位置**（组内按课程编号排，即首页卡片/侧栏/翻页顺序）。**页面正文不需要也不允许写相邻页链接或指代**——上一节/下一节的翻页由 shared.js 按 json 相邻顺序自动生成（2026-10-06 用户定：页面完全独立）。首页不用动，卡片由 json 生成。
-- **显示顺序看 `groups` 数组的顺序，不是 `algorithms` 数组的位置**（shared.js 按 group 列条目）：组内相对位置有效，改它在数组里的绝对位置对展示没影响。
-- **json 并发写保护**（多会话可能同时读写，2026-10-02 实测）：写前 `cp` 备份到 /tmp，`json.load` → 插入 → `json.dump`，中间不夹长命令。**不要按位置切片替换 `algorithms` 数组**（`algs[a:b]=new` 会把切片里的条目整段删掉，实测删过图论/字符串页）；调整既有条目顺序 = 取出这组 → 排序 → 原地写回同一批下标；**往组里加新条目绝不复用槽位写回**（新条目数 > 旧条目数时按槽位写回会把后面的旧条目挤掉，166 实测挤没 167 三条），用 `algs.splice(插入点, 0, *newEntries)` 或 append 后重排整组；写完核对 `len(algs) == 原数 + 新增数` 并重读确认自己的条目还在。核对改动用 `diff` 对比写前备份，别用 `git diff HEAD`（`json.dump` 整份重写会报上千行假改动）。
+- 新页插到对应组的**正确顺序位置**（组内按课程编号排，即首页卡片/侧栏/翻页顺序）。**页面正文不需要也不允许写相邻页链接或指代**——上一节/下一节的翻页由 shared.js 按铺平顺序自动生成（2026-10-06 用户定：页面完全独立）。首页不用动，卡片由 json 生成。
+- **显示顺序看 `nav/` 三层 json 的数组顺序**：`nav/index.json` 定一级 → `nav/<cat>/index.json` 定二级 → 组内 `index.json` 定页面。生成物里 `algorithms` 数组的下标没有意义（生成器按组输出，必然重排），**定位页面按 `(group, file)`，不要按下标**。
+- 改完**必须重新生成并一起提交**生成物，否则线上不生效：`python3 tools/build_nav.py`。
+- **nav 文件并发写保护**（多会话可能同时读写）：写前 `cp` 备份到 /tmp，`json.load` → `splice` 插入 → `json.dump`，中间不夹长命令。比旧的大 json 安全得多——各会话通常写各自组目录下的小文件，但仍要：写完核对 `len(items) == 原数 + 新增数` 并重读确认自己的条目还在；核对改动用 `diff` 对比写前备份，别用 `git diff HEAD`。**开新组先写父层 `index.json` 再建目录**（反过来会被生成器报「野目录」）。忘了写 nav 的页面不会静默丢失——下次生成会报「孤儿页」。
 
 ## 八、自检（必做）
 
@@ -193,7 +197,7 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 - 首页要单独查（verify_pages 只跑 algorithms/ 下页）→ 直接 verify_home.js；**首页没有侧边栏**，navGroups 为 0 正常，不要当 FAIL 去修。它不查字段齐全/类型对，插过新条目另跑七节 Counter 命令。
 - 全站页列表直接从 json 生成别手敲：
   ```bash
-  PAGES=$(python3 -c "import json;print(' '.join(a['file'].split('/')[-1] for a in json.load(open('assets/data/algorithms.json'))['algorithms']))")
+  PAGES=$(python3 -c "import json,glob;print(' '.join(i['file'] for p in sorted(glob.glob('nav/*/*/index.json')) for i in json.load(open(p, encoding='utf-8'))))")
   $N $SKILL/verify_pages.js ${PAGES}
   ```
 - **拼完页面先跑「杂字扫描」**（003 实测出现过俄文/英文杂字与同音错字）：
