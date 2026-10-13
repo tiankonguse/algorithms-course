@@ -21,9 +21,9 @@ agent_created: true
   - **导学课不产页**（001/002 等）：PPT 无可讲的方法/算法/数据结构，或 `src/classNNN/` 无代码 → 记进 prompt.md「跳过」并注明原因。
   - **方法论课要产页**（判据是「有没有可讲的方法」不是「有没有算法」：005 对数器、007 复杂度、008、019 IO、020 递归、026 容器、029 排序总结先例）。别一看到 PPT 薄、代码不是算法就记「跳过」。
   - **讲数据/概率的页面，正文数字必须自己跑实验量出来**（005 先例：抓取率、命中轮数等都是 /tmp/cppNNN 跑出来的），顺带验证代码能跑。
-- **开工先查半成品**（不只查自己中断的残留）：`ls -lT algorithms/ | tail -20` + 可疑页 `grep -o '@@[A-Za-z0-9_]*@@'`、`grep -c 'figure class="fig"'`、`python3 -c "import json;..."` 看是否已入 json。中断残留往往很完整，判断归属后走「复用 + 补占位符 + 自检」，比重写省一大截。
-- **同课并发互斥（抢锁，2026-10-07 恢复）**：所有「转换下一课」实例都读同一个「下一课」编号，写作期没有互斥，容易重复做同一课白烧 token。**开工第一步（读完 prompt.md 立刻）抢锁**，规则与可直接粘贴的脚本全文在 prompt.md 头部「并发防重」小节（第 9 行起）。要点：**锁的凭据是 `<lockdir>/owner` 文件、不是目录**——`mkdir -p` 幂等建容器，抢锁靠 noclobber 下 `printf ... > owner`（等价 O_EXCL，唯一成功者开工），抢不到且 owner 年龄 ≤ 60 分钟就打印「NNN 正在被另一会话转换」退出；收口最后一步只 `rm -f /tmp/algo-course-lock-<课号>/owner`（**别 rmdir，也别删目录**；目录留着是正常状态）；死锁 = `find owner -mmin +60` 命中（只看 owner mtime，见 pitfalls §8）；锁失效时兜底双查：json 已有该课页面 id → 已完成跳过；页面文件 mtime 60 分钟内 → 有人在做，等对方收口后只做复核（复用 + 核验，不重写、不抢写 json/prompt.md）。
-- 「转换下一课」→ **主循环直接做，不开子智能体**（见十一节）；「连转 N 课」串行，一课收口干净（json + prompt.md 都更新过）再开下一课。
+- **开工先查半成品**（不只查自己中断的残留）：`ls -lT algorithms/ | tail -20` + 可疑页 `grep -o '@@[A-Za-z0-9_]*@@'`、`grep -c 'figure class="fig"'`、`grep -r '<页名>.html' nav/*/*/index.json` 看是否已入 nav。中断残留往往很完整，判断归属后走「复用 + 补占位符 + 自检」，比重写省一大截。
+- **同课并发互斥（抢锁，2026-10-07 恢复）**：所有「转换下一课」实例都读同一个「下一课」编号，写作期没有互斥，容易重复做同一课白烧 token。**开工第一步（读完 prompt.md 立刻）抢锁**，规则与可直接粘贴的脚本全文在 prompt.md 头部「并发防重」小节（第 9 行起）。要点：**锁的凭据是 `<lockdir>/owner` 文件、不是目录**——`mkdir -p` 幂等建容器，抢锁靠 noclobber 下 `printf ... > owner`（等价 O_EXCL，唯一成功者开工），抢不到且 owner 年龄 ≤ 60 分钟就打印「NNN 正在被另一会话转换」退出；收口最后一步只 `rm -f /tmp/algo-course-lock-<课号>/owner`（**别 rmdir，也别删目录**；目录留着是正常状态）；死锁 = `find owner -mmin +60` 命中（只看 owner mtime，见 pitfalls §8）；锁失效时兜底双查：`grep -r '<页名>.html' nav/*/*/index.json` 命中 → 已完成跳过；页面文件 mtime 60 分钟内 → 有人在做，等对方收口后只做复核（复用 + 核验，不重写、不抢写 nav/prompt.md）。
+- 「转换下一课」→ **主循环直接做，不开子智能体**（见十一节）；「连转 N 课」串行，一课收口干净（nav 条目 + 重新生成的 json + prompt.md 都更新过）再开下一课。
 
 ## 一、定位材料
 
@@ -66,7 +66,7 @@ awk '/^\/\/#include/{f=1} f&&/^\/\//{sub(/^\/\//,"");print;next} f{print}' Code0
 ## 四、代码高亮片段
 
 ```bash
-CPP_SRC=/tmp/cppNNN HL_OUT=/tmp/hlNNN/out python3 scripts/gen_code.py
+CPP_SRC=/tmp/cppNNN HL_OUT=/tmp/hlNNN/out python3 $SKILL/gen_code.py
 ```
 
 要点：关键字集合照站内已用（`int if void return for else while false bool const using nullptr namespace true long char` + `#include`；**`std` 和单独的 `include` 不高亮**）；`#include` 必须先换哨兵、跑关键词正则、最后还原成 `<span class="kw">#include</span>`（否则 `include` 被二次包裹）；函数名只高亮定义处（`\b(类型)\s+(\w+)\s*\(`，哨兵 `\x01…\x02` 保护）；带尖括号返回类型（`pair<int,int> key(...)`）补独立规则且在转义后匹配（`>` 已变 `&gt;`）；单行注释先切出（按引号状态判断），最后拼 `<span class="cm">`。
@@ -76,7 +76,7 @@ CPP_SRC=/tmp/cppNNN HL_OUT=/tmp/hlNNN/out python3 scripts/gen_code.py
 先 Write 一版带 `@@片段名@@` 占位符的 HTML，再替换：
 
 ```bash
-HL_OUT=/tmp/hlNNN/out python3 scripts/apply_placeholders.py algorithms/xxx.html
+HL_OUT=/tmp/hlNNN/out python3 $SKILL/apply_placeholders.py algorithms/xxx.html
 ```
 
 - 占位符名**必须和片段文件名一致**（先对一遍名字再跑）。占位符外面**不要自己套 `<pre class="code">`**——gen_code.py 产出已是完整一对 `<pre class="code">…</pre>`，再套会双层嵌套双渲染；已写错的表现是页面出现 `</pre></pre>`，一次替换修回：`<pre class="code">    <pre class="code">` → `<pre class="code">`、`</pre></pre>` → `</pre>`。
@@ -103,14 +103,14 @@ HL_OUT=/tmp/hlNNN/out python3 scripts/apply_placeholders.py algorithms/xxx.html
 
 **页面完全独立（2026-10-06 用户定，三条都要落实）**：
 
-- **正文不写相邻算法链接/指代**：不写「上一篇/下一篇」「上一节/下一节」等指向相邻页的链接，页面结尾也不插任何翻页标记。相邻关系由 json 顺序决定，`shared.js` 在每页底部按索引自动生成「上一篇/下一篇」。
+- **正文不写相邻算法链接/指代**：不写「上一篇/下一篇」「上一节/下一节」等指向相邻页的链接，页面结尾也不插任何翻页标记。相邻关系由 `nav/` 三层的数组顺序决定，`shared.js` 在每页底部按索引自动生成「上一篇/下一篇」。
 - **侧边栏分组默认折叠**：`shared.js` 打开页面时只展开当前算法所在组、并把高亮项自动滚动定位到侧边栏可视区**正中**（手动算 `scrollTop` 并钳位到顶/底边界；页面内容很短无法物理居中时钳位到顶属正常）；其余分组默认收起，点击分组标题可展开/收起（用户手动展开的组会记住）。生成页面不需要为侧边栏写任何标记，也不用管分组展开状态。
-- **pager 链自检照跑**：验证的是 `shared.js` 按 json 相邻顺序生成的翻页文本，不是页面里写死的内容。
+- **pager 链自检照跑**：验证的是 `shared.js` 按 nav 铺平顺序生成的翻页文本，不是页面里写死的内容。
 
 **第二批体验细节（2026-10-06 用户验收后补，实现都在共享层、页面无需任何标记）**：
 
 - **上一篇/下一篇同一行**：`shared.js` 在每页底部渲染**一个** `nav.pager`，里面两个 `.pager-item`（上一篇/下一篇）并排同一行；只有单侧链接时渲染单个卡片（下一篇靠右对齐）。旧的「每链一个 nav」已废弃，别回退。
-- **首页左侧专题目录**：`index.html` 的 `<aside id="homeNav">` 由 `shared.js`（8b-0 段）按 json groups 渲染——`#group-<i>` 锚点 + 序号/组名/篇数，点击平滑定位（`.group{scroll-margin-top:76px}`），滚动时 scrollspy 高亮当前组；首页分组区 `#index-list .group` 带 `id="group-<i>"`。900px 以下 `.home-nav` 自动隐藏。
+- **首页左侧专题目录**：`index.html` 的 `<aside id="homeNav">` 由 `shared.js`（8b-0 段）按导航数据（nav 生成的 groups）渲染——`#group-<i>` 锚点 + 序号/组名/篇数，点击平滑定位（`.group{scroll-margin-top:76px}`），滚动时 scrollspy 高亮当前组；首页分组区 `#index-list .group` 带 `id="group-<i>"`。900px 以下 `.home-nav` 自动隐藏。
 
 **演示的控制按钮容器统一写 `class="viz-controls"`**：shot_element.js 按 `.viz-controls button` 索引点击，自造名字会点空、截图停在初始帧。shared.css 已有该样式。
 
@@ -172,10 +172,30 @@ python3 tools/build_nav.py --stats      # 打印 406 / 77 / 9 与难度分布
 - 改完**必须重新生成并一起提交**生成物，否则线上不生效：`python3 tools/build_nav.py`。
 - **nav 文件并发写保护**（多会话可能同时读写）：写前 `cp` 备份到 /tmp，`json.load` → `splice` 插入 → `json.dump`，中间不夹长命令。比旧的大 json 安全得多——各会话通常写各自组目录下的小文件，但仍要：写完核对 `len(items) == 原数 + 新增数` 并重读确认自己的条目还在；核对改动用 `diff` 对比写前备份，别用 `git diff HEAD`。**开新组先写父层 `index.json` 再建目录**（反过来会被生成器报「野目录」）。忘了写 nav 的页面不会静默丢失——下次生成会报「孤儿页」。
 
+**加一页的标准动作**（三步，别的层一个字都不用碰）：
+
+```bash
+# 1 建页（algorithms/ 平铺，不进子目录）
+# 2 往所属组的 json 插一条四字段
+python3 - <<'PY'
+import json
+p = 'nav/graph/topo-sort/index.json'
+d = json.load(open(p, encoding='utf-8'))
+d.insert(2, {'file': 'xxx.html', 'title': '标题', 'description': '一句话', 'level': 2})
+json.dump(d, open(p, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+PY
+# 3 生成 + 提交（生成物必须入库，否则线上不生效）
+python3 tools/build_nav.py --check && python3 tools/build_nav.py && git add nav assets/data/algorithms.json
+```
+
+**发布（WorkBuddy「发布为应用」打包本地目录）前必须先跑生成器**：线上那份 json 是静态文件，不会自己更新。`nav/` 与 `tools/` 会被一起打包，无害。发布后冒烟：`curl -s <host>/assets/data/algorithms.json | python3 -c "import json,sys;d=json.load(sys.stdin);print(len(d['algorithms']),len(d['groups']))"`。
+
 ## 八、自检（必做）
 
 ```bash
-SKILL=~/project/github/AIProject/algorithms-course/.agent/skills/course-site-page/scripts   # 技能随本仓库放在 .agent/skills 下
+# 技能装两处：仓库 .agent/skills（随本仓库走）与 ~/.workbuddy/skills（用户级），脚本取当前加载的那份
+SKILL=~/project/github/AIProject/algorithms-course/.agent/skills/course-site-page/scripts
+[ -d "$SKILL" ] || SKILL=~/.workbuddy/skills/course-site-page/scripts
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 N=~/.workbuddy/binaries/node/versions/$(cat ~/.workbuddy/binaries/node/versions/current)/bin/node   # 版本号随机器，读 current 拼出
 
@@ -186,7 +206,7 @@ rm -rf /tmp/cdpX; "$CHROME" --headless=new --no-sandbox --disable-gpu \
 sleep 8
 $N $SKILL/verify_pages.js a.html b.html       # 四项：JS 错误 / fig·svg 数 / nav·toc·viz / svg 越界；并打印 pager 链
 $N $SKILL/verify_viz_steps.js a.html b.html   # 交互演示逐帧查越界与空图
-$N $SKILL/verify_home.js                      # 首页：卡片数 / 组名顺序 / JS 错误（期望值直接读 json）
+$N $SKILL/verify_home.js                      # 首页 + 目录页：卡片数 / 组名顺序 / JS 错误（期望值读生成物 json）
 $N $SKILL/shot_element.js a.html ".viz" /tmp/s.png 0 5   # 看图（第几个 .viz、点 .viz-controls 第几个按钮，只点一次）
 $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面、viz 序号、点几次「下一步」、输出）
 ```
@@ -194,8 +214,8 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 - 用 `file://` + `--allow-file-access-from-files`，shared.js 才能 fetch json；沙箱 Chrome 连不上 localhost。
 - **CDP 端口从环境变量 `CDP_PORT` 读**：换端口必须成对写 `--remote-debugging-port=940X` 与 `CDP_PORT=940X`，否则 ECONNREFUSED 易误判「Chrome 没起来」。默认用 9333（脚本默认端口）、`--user-data-dir=/tmp/cdpX`；**并发会话同跑时不要 `pkill -f "remote-debugging-port="`**（会把别人会话的 Chrome 一起杀掉），改用没人占的端口 + 独立 `--user-data-dir`；只有确认站内没有别的会话时清残留才用 pkill。
 - **`verify_pages.js` / `verify_viz_steps.js` 在某些环境对任何页报全 0**（2026-10-05，028 实测，macOS 桌面端豆包 + 特定 Chrome：navigate 后 location.href 变 `chrome-error://chromewebdata/`，换端口/换 user-data-dir 都一样，同环境 verify_home.js 却正常）→ **环境怪癖不是页面问题**。自救：自写 CDP 脚本按「先 `Page.enable` 再 `Page.navigate`、轮询 `readyState` 到 complete、再 `Runtime.evaluate`」顺序连页面，检查项照抄 verify_pages 的 FRAME（figs/svg/nav/toc/viz/code/bbox），实测等价覆盖。
-- 首页要单独查（verify_pages 只跑 algorithms/ 下页）→ 直接 verify_home.js；**首页没有侧边栏**，navGroups 为 0 正常，不要当 FAIL 去修。它不查字段齐全/类型对，插过新条目另跑七节 Counter 命令。
-- 全站页列表直接从 json 生成别手敲：
+- 首页要单独查（verify_pages 只跑 algorithms/ 下页）→ 直接 verify_home.js；**首页没有侧边栏**，navGroups 为 0 正常，不要当 FAIL 去修。它不查字段齐全/类型对，插过新条目另跑 `python3 tools/build_nav.py --check`（13 条硬错全在这，比 Counter 管用）。
+- 全站页列表直接从 nav 生成别手敲（生成物下标无意义，扫 nav 才是真值）：
   ```bash
   PAGES=$(python3 -c "import json,glob;print(' '.join(i['file'] for p in sorted(glob.glob('nav/*/*/index.json')) for i in json.load(open(p, encoding='utf-8'))))")
   $N $SKILL/verify_pages.js ${PAGES}
@@ -261,7 +281,7 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 
 > **2026-10-02 用户定调：转换一节课不开子智能体，太浪费 token。** 现在改为**主循环直接做**。
 
-**单课**：按一~九节完整跑一遍，跑完就收口（改 json、更新 prompt.md、补 memory 日志）。**连转 N 课**：串行，一课做完收口干净再开下一课；上下文太满提示用户 `/compact`，不要自己开子智能体「腾地方」。
+**单课**：按一~九节完整跑一遍，跑完就收口（更新 nav、重新生成 json、更新 prompt.md、补 memory 日志）。**连转 N 课**：串行，一课做完收口干净再开下一课；上下文太满提示用户 `/compact`，不要自己开子智能体「腾地方」。
 
 **控制上下文的小技巧**：PPT 文本别整篇 cat 进上下文（抽到 /tmp/pptNNN.txt 再 grep/sed 按段取）；源码同理（编译跑对拍、不整份读）；页面用「先 Write 带占位符 + 脚本替换」避免手写转义；收口核验只用 grep -c / ls -lT / find -newermt 这类不进上下文的检查。
 
@@ -269,12 +289,18 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 
 ## 十二、多会话共存的几条纪律（锁只挡同课，跨课并发仍要注意）
 
-同一站点可能同时有几个会话在转不同的课，共享 `assets/data/algorithms.json` 与 `prompt.md`：
+同一站点可能同时有几个会话在转不同的课，共享 `nav/` 目录树、生成物 `assets/data/algorithms.json` 与 `prompt.md`：
 
 - **别人的半成品页面不要动**（哪怕占位符还没替换），等它自己收口；先确认自己这课的边界，别顺手「修好」。
-- **组可能已经被别人建好**：插入前 `python3 -c "...Counter(a['group'])"` 看组名与组内顺序，同主题新课**插到组内对应位置**，不要重复建组（重复组名会让首页出现两张一样的卡片头）。
+- **组可能已经被别人建好**：插入前扫一遍 `grep -h '"name"' nav/*/index.json` 与各组的 `title`，同主题新课**插到组内对应位置**，不要重复建组（重复组名会让首页出现两张一样的卡片头）。
 - 收口时 verify_home.js 可能因别人的中间态报 FAIL（某组还没页、组名对不上）→ 先看差异是不是自己那组，不是就放过并在 memory 记一笔。
-- 写 json 的安全纪律（cp 备份、最小改动、核条数、别用 `git diff HEAD`）见七节。
+- 写 nav 的安全纪律（cp 备份、最小改动、核条数、别用 `git diff HEAD`）见七节。**收口必须 `python3 tools/build_nav.py` 重新生成并把生成物一起提交**，否则线上不生效；别人的中间态可能让 `--check` 报 FAIL，只看自己那组。
+
+## 十三、技能自身装两份，改完要同步
+
+本技能同时装在**仓库 `.agent/skills/course-site-page/`** 与**用户级 `~/.workbuddy/skills/course-site-page/`**，调用时命中哪份不一定。改了 SKILL.md 或 scripts，**两份都要落**（`cp` 过去再 `diff -q` 确认），否则下次会话可能读到旧版，按已废弃的流程手改 json 或跑旧的自检脚本。
+
+同步完顺手确认：`diff -rq <仓库>/.agent/skills/course-site-page ~/.workbuddy/skills/course-site-page` 应无输出；CDP 类脚本（verify_pages / verify_viz_steps / shot_* / check_branch / example_controls_check）依赖同目录的 `cdp_page.js`，复制时别漏。
 
 ## 附：详细坑录索引
 
