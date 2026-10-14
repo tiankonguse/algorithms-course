@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>换根 dp：边上有容量，被 min 夹住的那一份 · 算法教程</title>
+<meta name="description" content="Accumulation Degree：选一个源点，让流向所有叶子的总流量最大。难点是换根时被 min 夹住的那一份不能直接减，还有叶子点的 dp 值并不是真值。附实测分布与修正写法。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .rf-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .rf-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .rf-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  .rf-sel{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:5px 8px;font-size:14px;color:var(--text);font-family:inherit;
+  }
+  @media(max-width:760px){
+    .rf-btn{font-size:13px;padding:5px 11px;}
+    .rf-sel{font-size:13px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>换根 dp：边上有容量，被 min 夹住的那一份</h1>
+    <p class="intro">前面两道题换根时扣掉的那一份，都是「整棵子树的贡献」，减一个数就完事。这一页的边上带容量，一份贡献要先和这条边取 min 才会真的流出去，于是换根时用来扣减的那一项也得跟着套上同一个 min。式子只多一层括号，但对错的分界线就在这层括号上。</p>
+
+    <h2>零、背景</h2>
+    <p>深度和那道题的转移是 <code class="inline">dp[v] = dp[u] − sz[v] + (n − sz[v])</code>，扣掉的那一份恰好是 <code class="inline">sz[v]</code>，因为它就是 v 那一支对整棵树贡献的全部。染色收益那道题同理，扣掉的就是子树大小。</p>
+    <p>一旦边上有容量，某一支对父亲的贡献就不再是「这一支自己能出多少」，而是「这一支能出多少」和「这条边能吞多少」里小的那个。换根时要从父亲的答案里扣掉这一支，必须扣 min 之后的结果，扣原始值就会把那条边的余量漏在里面。</p>
+
+    <h2>一、问题</h2>
+    <p>P3585 Accumulation Degree。n 个点的树，每条边有一个容量，代表这条边上最多能流过的水量。选一个点当源点，水从源点出发沿着边一直流到所有叶子（叶子指树上度数为 1 的点），问源点选在哪里能让总流量最大。多组测试数据，n 到 2×10⁵。</p>
+    <p>源点自己也是度数为 1 的点时不算叶子，它就是出水口。当 n = 1 时答案是 0。</p>
+
+    <h2>二、先把源点定在 1 号</h2>
+    <p>记 <code class="inline">flow[u]</code> 为「以 1 为根时，从 u 流进 u 子树内所有叶子的最大流量」。u 的每一支都是独立的，合起来直接相加，所以只看单个儿子 v：</p>
+    <p>v 是叶子，它本身就是出水口，能吃多少只看这条边，贡献是整条边的容量 w。v 不是叶子，它自己内部还要往下分，能出的量是 <code class="inline">flow[v]</code>，但这条边只允许过 w，所以贡献是两者的最小值。</p>
+    <pre class="code">if (degree[v] == 1) flow[u] += w;                 // v 是叶子，整条边都能吃
+else                flow[u] += min(flow[v], w);    // v 还要往下分，两边取小</pre>
+    <p>后序位置合并，一趟 dfs 收完，<code class="inline">flow[1]</code> 就是 1 号做源点时的答案。图 1 是七个点的带权树，边上的数字是容量，点旁的数字是 <code class="inline">flow</code>。</p>
+
+    <figure class="fig">
+      <svg id="figFlow" viewBox="0 0 660 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="以 1 为源点的流量" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>图1：以 1 号做源点。4、5、6、7 是叶子，各自贡献整条边的容量；2 号汇总出 4+2 = 6，3 号汇总出 6+1 = 7。1 号两支分别取 min(6,3) = 3 与 min(7,5) = 5，合计 flow[1] = 8</figcaption>
+    </figure>
+
+    <h2>三、换根：把 u 拆成两半</h2>
+    <p>把源点从 u 挪到相邻的 v，v 的答案由两部分拼成：v 原来那一支（也就是 <code class="inline">flow[v]</code>），加上从 u 那一侧流过来的量。后面这部分要算清楚。</p>
+    <p>以 u 为源点时，u 的答案是所有支路的和，其中 v 这一支贡献的是 <code class="inline">min(flow[v], w)</code>。把它减掉，剩下的就是 u 在去掉 v 之后还能出多少水，记作 <code class="inline">uOut</code>。这个量再过边 (u, v)，所以真正流到 v 的是 <code class="inline">min(uOut, w)</code>。合起来</p>
+    <pre class="code">uOut = dp[u] - min(flow[v], w);
+dp[v] = flow[v] + min(uOut, w);</pre>
+    <p>还有一处特判：如果 u 自己是叶子，说明 u 只有 v 这一个邻居，去掉 v 之后 u 就是纯出水口，能出的量没有上限。这时 <code class="inline">dp[v] = flow[v] + w</code>，直接加上整条边的容量。</p>
+
+    <figure class="fig">
+      <svg id="figCut" viewBox="0 0 660 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="uOut 的拆解" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>图2：dp[u] 拆成「v 那一支」和「其余各个支路之和」。扣掉前者得到 uOut，再和这条边的容量取 min</figcaption>
+    </figure>
+
+    <h2>四、叶子点的 dp 值不是真值</h2>
+    <p>上面那个式子里有个不显眼的缺口。v 是叶子时 <code class="inline">flow[v]</code> 是 0，于是 <code class="inline">uOut = dp[u] − 0</code>，那条边的容量一点没扣掉，算出来的 <code class="inline">dp[v]</code> 偏大。拿图 1 那棵树看，6 号是叶子，以 3 为源点时的答案是 10，程序给 6 号算出的 <code class="inline">dp[6] = 10 − 0 = 10</code> 再和 6 取 min 得 6；而 6 号真的做源点时，水要过边 (3, 6)，先被这条边的容量卡住，真实值是 <code class="inline">min(10 − 6, 6) = 4</code>。</p>
+    <p>这个偏大不会影响最终答案，理由是叶子永远比不过它的父亲：叶子点的值最多是那条边的容量 w，而它父亲当源点时的答案里必含这一支的 w，所以父亲一定不小于它。最大值要么在非叶子点上取到，要么和某个叶子并列，两种情况都不会被这个偏差带跑。</p>
+    <p>实测两万棵随机树（n 从 3 到 40，四种树形，边权 1 到 20）：逐个点比对真值，共 433348 个点，偏大的有 57764 个，占 13.33%，而且全部是叶子点，非叶子点一个不差；把这批树的最大值单独比对，算错的是 0 棵。所以判断题交这个写法没问题，但要是题目问「打印每个点做源点的答案」，就得把判断补上。</p>
+        <pre class="code"><span class="cm">// 想让每个点的 dp 都是真值，把「v 是不是叶子」的判断搬进 dfs2</span>
+    <span class="cm">// v 是叶子时：它这一支对 u 的贡献是整条边的容量 w，不是 min(flow[v], w)</span>
+    <span class="cm">//            而且 v 做根之后自己不再当叶子吃水，不再累加 flow[v]</span>
+    <span class="kw">void</span> <span class="fn">dfs2</span>(<span class="kw">int</span> u, <span class="kw">int</span> f){
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v, w; e != 0; e = nxt[e]){
+            v = to[e]; w = weight[e];
+            <span class="kw">if</span> (v != f){
+                <span class="kw">if</span> (degree[u] == 1){
+                    dp[v] = flow[v] + w;
+                } <span class="kw">else</span> {
+                    <span class="kw">long</span> <span class="kw">long</span> c = (degree[v] == 1) ? (<span class="kw">long</span> <span class="kw">long</span>)w : min(flow[v], (<span class="kw">long</span> <span class="kw">long</span>)w);
+                    <span class="kw">long</span> <span class="kw">long</span> uOut = dp[u] - c;
+                    dp[v] = (degree[v] == 1) ? min(uOut, (<span class="kw">long</span> <span class="kw">long</span>)w)
+                                             : flow[v] + min(uOut, (<span class="kw">long</span> <span class="kw">long</span>)w);
+                }
+                dfs2(v, u);
+            }
+        }
+    }</pre>
+
+    <h2>五、模板代码</h2>
+        <pre class="code"><span class="cm">// degree[u] : 与 u 相连的边数</span>
+    <span class="cm">// flow[u]   : 以 1 为根时，从 u 流进 u 子树内所有叶子的最大流量</span>
+    <span class="cm">// dp[u]     : 以 u 做根时，流到整棵树所有叶子的最大流量</span>
+    <span class="kw">void</span> <span class="fn">dfs1</span>(<span class="kw">int</span> u, <span class="kw">int</span> f){
+        flow[u] = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e != 0; e = nxt[e]){
+            v = to[e];
+            <span class="kw">if</span> (v != f) dfs1(v, u);
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v, w; e != 0; e = nxt[e]){
+            v = to[e]; w = weight[e];
+            <span class="kw">if</span> (v != f){
+                <span class="kw">if</span> (degree[v] == 1) flow[u] += w;                  <span class="cm">// v 是叶子，能吃多少全看这条边</span>
+                <span class="kw">else</span> flow[u] += min(flow[v], (<span class="kw">long</span> <span class="kw">long</span>)w);        <span class="cm">// v 还能往下分，两边取小</span>
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs2</span>(<span class="kw">int</span> u, <span class="kw">int</span> f){
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v, w; e != 0; e = nxt[e]){
+            v = to[e]; w = weight[e];
+            <span class="kw">if</span> (v != f){
+                <span class="kw">if</span> (degree[u] == 1){
+                    dp[v] = flow[v] + w;                           <span class="cm">// 换根后 u 成了叶子</span>
+                } <span class="kw">else</span> {
+                    <span class="kw">long</span> <span class="kw">long</span> uOut = dp[u] - min(flow[v], (<span class="kw">long</span> <span class="kw">long</span>)w);   <span class="cm">// 先扣掉往 v 走的那一支</span>
+                    dp[v] = flow[v] + min(uOut, (<span class="kw">long</span> <span class="kw">long</span>)w);             <span class="cm">// 剩下的从 u 这一侧流过来</span>
+                }
+                dfs2(v, u);
+            }
+        }
+    }</pre>
+
+    <h2>六、源点台</h2>
+    <p>下面把源点一路挪下去。当前这一支被 min 卡住的时候，式子会显示实际取到的是哪一边；挪到叶子点上时，面板会额外报出真实值。</p>
+
+    <div class="viz">
+      <div class="viz-title">源点台：点「下一步」看流量怎么被 min 截住</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">边上的数字是容量，角上是该点当前算出的流量。橙圈是当前源点，绿边是正在换的那条边。叶子点会额外标出真实值。</p>
+      <svg id="rfSvg" viewBox="0 0 660 350" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="换源点演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="breakdown" id="rfInfo"></div>
+      <div class="viz-controls">
+        <select class="rf-sel" id="rfPreset">
+          <option value="0">示例树（7 个点）</option>
+          <option value="1">链（6 个点）</option>
+          <option value="2">星（6 个点）</option>
+          <option value="3">完全二叉（7 个点）</option>
+        </select>
+        <button class="rf-btn" id="rfPrev" type="button">上一步</button>
+        <button class="rf-btn" id="rfNext" type="button">下一步</button>
+        <button class="rf-btn" id="rfReset" type="button">重置</button>
+      </div>
+    </div>
+
+    <figure class="fig">
+      <svg id="figShape" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="不同树形下 1 号做源点的表现" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>图3：n = 50000 的四种树形上，1 号做源点能拿到最优的百分之多少。星上随便挑中心就够了，链和完全二叉上固定 1 号只能拿到一成</figcaption>
+    </figure>
+    <p>差别这么大是因为「源头该放在哪」跟树的形状直接相关。链上水从一端出发，一路被每条边卡一遍，最优是把源点放在正中间，两头各走一半，取到的是两条路径容量的较小值；固定在 1 号就只剩下最细的那条边说了算。星则相反，中心一出去就是所有叶子，每条边都完整地贡献，换到叶子上反而只剩一条边。</p>
+
+    <h2>七、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>环节</th><th>时间</th><th>空间</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>第一趟汇总（dfs1）</td><td><code class="inline">O(n)</code></td><td rowspan="4"><code class="inline">O(n)</code></td></tr>
+        <tr><td>第二趟换根（dfs2）</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>扫最大值</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>合计（T 组数据）</td><td><code class="inline">O(T·n)</code></td></tr>
+        <tr><td>每个源点重算一遍（朴素）</td><td><code class="inline">O(n²)</code></td><td><code class="inline">O(n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间按 n = 2×10⁵ 算。<code class="inline">head</code>、<code class="inline">degree</code>、<code class="inline">flow</code> 各 n 个 int，<code class="inline">nxt</code>、<code class="inline">to</code>、<code class="inline">weight</code> 各 2n 个 int，<code class="inline">dp</code> 是 n 个 long long，合计约 3MB。数字都很小，但 n = 10⁶ 的链上第一趟的递归还是会爆栈，阈值和前面几页一样：本机 8MB 栈下约八万六千层。</p>
+    <p>实测：随机树 n = 10⁵ 换根全程 6.27ms，n = 2×10⁵ 是 8.30ms。朴素做法每个源点重跑一次 dfs，n = 2000 要 20.59ms，n = 4000 是 88.19ms，n = 8000 涨到 392.56ms，翻倍再翻倍，二次方特征很清楚；n = 2×10⁵ 时它要做 4×10¹⁰ 次操作，换根只做 4×10⁵ 次。</p>
+    <p>再看错法的抓取率。两万棵小树上，把 <code class="inline">uOut</code> 里的 min 漏掉写成 <code class="inline">dp[u] − flow[v]</code>，有 42.56% 的树答案会变；把「u 是不是叶子」的判断误写成 v，有 19.81% 的树答案会变。</p>
+
+    <h2>八、总结</h2>
+    <p>要点三条。其一，换根时的转移永远长成「父亲的答案减去这一支的贡献，再补上新的贡献」，边的容量会同时出现在这两处，所以两处都要套 min。其二，当某个方向是「不限量的出水口」时，一般都值得单独写成一条分支，硬塞进统一公式里容易把无穷大算成 0。其三，答案对不等于数据对。这道题只输出一个最大值，叶子上那些偏大的值时时刻刻挂着，却因为「叶子超不过父亲」这一条永远浮不上来；题目一改成输出每个点的答案，同一个写法立刻就错了。</p>
+    <p>下一道题的转移不再是「扣一个数」，而要一次性扣掉一整组数。</p>
+
+    <h2>九、最后</h2>
+    <p>最值得抄下来的一条是那个 <code class="inline">degree[u] == 1</code> 的特判。它出现的位置是 dfs2 而不是 dfs1，很容易在改写的时候被顺手挪到 dfs1 去，那样 u 是叶子的情形就漏了，n = 2 的数据会直接错。另外这道题是多组数据，每次都要把 <code class="inline">head</code> 清到 n + 1，只清到上次的 n 会在下一组更大的数据里读到脏边。</p>
+    <p>《完》</p>
+
+    <h2 id="prob-links">相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>POJ</td><td>Accumulation Degree</td><td><a href="http://poj.org/problem?id=3585" target="_blank">poj.org/problem?id=3585</a></td></tr>
+    </table>
+
+    <h2 id="refs">参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解123【扩展】树上问题专题6-换根dp</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = { blue:'#2563eb', blueB:'#dbeafe', blueL:'#eef4ff', orange:'#ea580c',
+            orangeB:'#ffedd5', gray:'#9aa0a6', bg:'#f6f7f9', bd:'#e6e8eb',
+            dark:'#1f2328', dim:'#6b7280', green:'#15803d' };
+  var INF = 1e18;
+
+  function el(id){ return document.getElementById(id); }
+  function mount(id, s){ var n = el(id); if (n) n.innerHTML = s; }
+  function T(x, y, s, o){
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 11) + '" fill="' + (o.fill || C.dark) +
+           (o.anchor ? '" text-anchor="' + o.anchor : '') + '"' + (o.bold ? ' font-weight="600"' : '') + '>' + s + '</text>';
+  }
+  function LN(x1, y1, x2, y2, o){
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.gray) +
+           '" stroke-width="' + (o.w || 1.3) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function CIR(x, y, r, o){
+    o = o || {};
+    return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + (o.fill || C.bg) +
+           '" stroke="' + (o.stroke || C.gray) + '" stroke-width="' + (o.w || 1.4) + '"/>';
+  }
+  function key(a, b){ return a + '-' + b; }
+
+  function adjW(t){
+    var a = {}, i;
+    for (i = 1; i <= t.n; i++) a[i] = [];
+    for (i = 0; i < t.edges.length; i++){
+      a[t.edges[i][0]].push({v:t.edges[i][1], w:t.edges[i][2]});
+      a[t.edges[i][1]].push({v:t.edges[i][0], w:t.edges[i][2]});
+    }
+    return a;
+  }
+
+  // 课程写法：flow 汇总 + 课程版 dfs2 + 修正版 dfs2
+  function solveFlow(t){
+    var adj = adjW(t), deg = {}, flow = {}, dp = {}, dpT = {}, par = {}, order = [], stk = [1], u, v, w, i, j;
+    for (i = 1; i <= t.n; i++){ deg[i] = adj[i].length; flow[i] = 0; }
+    par[1] = 0;
+    while (stk.length){
+      u = stk.pop(); order.push(u);
+      for (i = 0; i < adj[u].length; i++){ v = adj[u][i].v; if (v !== par[u]){ par[v] = u; stk.push(v); } }
+    }
+    for (i = order.length - 1; i >= 0; i--){
+      u = order[i]; flow[u] = 0;
+      for (j = 0; j < adj[u].length; j++){
+        v = adj[u][j].v; w = adj[u][j].w;
+        if (par[v] === u) flow[u] += (deg[v] === 1) ? w : Math.min(flow[v], w);
+      }
+    }
+    dp[1] = flow[1]; dpT[1] = flow[1];
+    for (i = 0; i < order.length; i++){
+      u = order[i];
+      for (j = 0; j < adj[u].length; j++){
+        v = adj[u][j].v; w = adj[u][j].w;
+        if (par[v] !== u) continue;
+        if (deg[u] === 1){
+          dp[v] = flow[v] + w; dpT[v] = flow[v] + w;
+        } else {
+          var o = dp[u] - Math.min(flow[v], w);
+          dp[v] = flow[v] + Math.min(o, w);
+          var c = (deg[v] === 1) ? w : Math.min(flow[v], w);
+          var o2 = dpT[u] - c;
+          dpT[v] = (deg[v] === 1) ? Math.min(o2, w) : flow[v] + Math.min(o2, w);
+        }
+      }
+    }
+    var best = 1;
+    for (i = 2; i <= t.n; i++) if (dp[i] > dp[best]) best = i;
+    return {adj:adj, deg:deg, flow:flow, dp:dp, dpT:dpT, par:par, order:order, best:best};
+  }
+
+  function drawTree(t, o){
+    o = o || {};
+    var g = '', i, a, b, p, eh, mx, my, dx, dy, L, ox, oy;
+    for (i = 0; i < t.edges.length; i++){
+      a = t.edges[i][0]; b = t.edges[i][1];
+      eh = (o.edgeHL && o.edgeHL[key(a,b)]) || (o.edgeHL && o.edgeHL[key(b,a)]);
+      g += LN(t.pos[a][0], t.pos[a][1], t.pos[b][0], t.pos[b][1],
+              eh ? {stroke:eh.s, w:eh.w || 3} : {stroke:C.gray, w:1.4});
+    }
+    if (o.wt){
+      for (i = 0; i < t.edges.length; i++){
+        a = t.edges[i][0]; b = t.edges[i][1];
+        mx = (t.pos[a][0] + t.pos[b][0]) / 2;
+        my = (t.pos[a][1] + t.pos[b][1]) / 2;
+        dx = t.pos[b][0] - t.pos[a][0]; dy = t.pos[b][1] - t.pos[a][1];
+        L = Math.sqrt(dx * dx + dy * dy);
+        ox = -dy / L * 11; oy = dx / L * 11;
+        g += T(mx + ox, my + oy + 4, String(t.edges[i][2]), {anchor:'middle', size:11.5, bold:true, fill:C.green});
+      }
+    }
+    for (i = 1; i <= t.n; i++){
+      p = t.pos[i];
+      var h = (o.hl && o.hl[i]) || null;
+      g += CIR(p[0], p[1], 16, {fill:h ? h.f : C.bg, stroke:h ? h.s : C.gray, w:h ? 2.4 : 1.4});
+      g += T(p[0], p[1] + 4, String(i), {anchor:'middle', size:12, bold:!!h});
+      if (o.mark && o.mark[i]) g += T(p[0] + 24, p[1] + 16, o.mark[i], {size:10.5, fill:(o.markFill && o.markFill[i]) || C.dim});
+    }
+    return g;
+  }
+
+  var T7 = { n:7, edges:[[1,2,3],[1,3,5],[2,4,4],[2,5,2],[3,6,6],[3,7,1]],
+             pos:{1:[330,60],2:[190,146],3:[470,146],4:[112,238],5:[248,238],6:[410,238],7:[530,238]} };
+
+  // ============ 图1：以 1 为源点 ============
+  (function(){
+    var S = solveFlow(T7), mark = {}, i;
+    for (i = 1; i <= T7.n; i++){
+      if (S.deg[i] === 1) mark[i] = '叶子';
+      else mark[i] = 'flow=' + S.flow[i];
+    }
+    var g = drawTree(T7, {wt:true, hl:{1:{f:C.orangeB, s:C.orange}},
+                          mark:mark, markFill:(function(){ var m = {}; for (i = 1; i <= 7; i++) if (S.deg[i] === 1) m[i] = C.orange; return m; })()});
+    g += T(330, 316, 'flow[1] = 3 + 5 = 8', {anchor:'middle', size:12, bold:true});
+    mount('figFlow', g);
+  })();
+
+  // ============ 图2：uOut 的拆解 ============
+  (function(){
+    var g = '', x0 = 46, W = 568, y0 = 44, HH = 46;
+    g += T(330, 24, '换根时把 u 的答案拆两半', {anchor:'middle', size:12, bold:true});
+    g += '<rect x="' + x0 + '" y="' + y0 + '" width="' + W + '" height="' + HH + '" rx="6" fill="' + C.blueL + '" stroke="' + C.bd + '"/>';
+    g += T(x0 + 18, y0 + 29, 'dp[u]：u 做源点时的总流量 = v 这一支 + u 其余各支之和', {size:12});
+    g += LN(330, y0 + HH, 330, y0 + HH + 26, {stroke:C.blue, w:1.8});
+    g += '<polygon points="330,' + (y0 + HH + 36) + ' 324,' + (y0 + HH + 24) + ' 336,' + (y0 + HH + 24) + '" fill="' + C.blue + '"/>';
+    g += T(344, y0 + HH + 30, '把 v 这一支抠掉：min(flow[v], w)', {size:11.5, fill:C.blue});
+
+    var y1 = y0 + HH + 46;
+    g += '<rect x="' + x0 + '" y="' + y1 + '" width="' + W + '" height="' + HH + '" rx="6" fill="' + C.blueB + '" stroke="' + C.blue + '"/>';
+    g += T(x0 + 18, y1 + 29, 'uOut = dp[u] − min(flow[v], w)：u 去掉 v 之后还能出多少水', {size:12, fill:C.blue});
+    g += LN(330, y1 + HH, 330, y1 + HH + 26, {stroke:C.orange, w:1.8});
+    g += '<polygon points="330,' + (y1 + HH + 36) + ' 324,' + (y1 + HH + 24) + ' 336,' + (y1 + HH + 24) + '" fill="' + C.orange + '"/>';
+    g += T(344, y1 + HH + 30, '再和这条边的容量取 min', {size:11.5, fill:C.orange});
+
+    var y2 = y1 + HH + 46;
+    g += '<rect x="' + x0 + '" y="' + y2 + '" width="' + W + '" height="' + HH + '" rx="6" fill="' + C.orangeB + '" stroke="' + C.orange + '"/>';
+    g += T(x0 + 18, y2 + 29, 'dp[v] = flow[v] + min(uOut, w)', {size:12.5, bold:true, fill:C.orange});
+
+    g += T(x0, y2 + 78, 'u 自己就是叶子时没有「其余各支」，uOut 当无穷大处理，特判成 dp[v] = flow[v] + w', {size:11, fill:C.dim});
+    mount('figCut', g);
+  })();
+
+  // ============ 图3：不同树形下 1 号做源点的表现 ============
+  (function(){
+    var NM = ['随机', '链', '星', '完全二叉'], PCT = [98.97, 12.50, 100.00, 11.11];
+    var g = '', base = 236, i, x, h;
+    g += T(330, 24, 'n = 50000 时 1 号做源点能拿到最优的百分之多少', {anchor:'middle', size:12, bold:true});
+    g += LN(40, base, 620, base, {stroke:C.bd, w:1.4});
+    for (i = 0; i < 4; i++){
+      x = 62 + i * 142;
+      h = Math.round(PCT[i] * 1.7);
+      g += '<rect x="' + x + '" y="' + (base - h) + '" width="92" height="' + h + '" rx="3" fill="' +
+           (PCT[i] >= 90 ? C.orangeB : C.blueB) + '" stroke="' + (PCT[i] >= 90 ? C.orange : C.blue) + '" stroke-width="1.2"/>';
+      g += T(x + 46, base - h - 7, PCT[i].toFixed(2) + '%', {anchor:'middle', size:11, bold:true});
+      g += T(x + 46, base + 18, NM[i], {anchor:'middle', size:11.5});
+    }
+    g += T(330, 282, '橙色的两种树形：中心或随便一个点就是最优；蓝色的两种浪费得厉害', {anchor:'middle', size:11, fill:C.dim});
+    mount('figShape', g);
+  })();
+
+  // ============ 源点台 ============
+  var PRESETS = [
+    T7,
+    { n:6, edges:[[1,2,3],[2,3,5],[3,4,2],[4,5,7],[5,6,4]],
+      pos:{1:[56,120],2:[166,120],3:[276,120],4:[386,120],5:[496,120],6:[606,120]} },
+    { n:6, edges:[[1,2,4],[1,3,7],[1,4,2],[1,5,5],[1,6,3]],
+      pos:{1:[330,152],2:[330,54],3:[240,122],4:[274,240],5:[386,240],6:[420,122]} },
+    { n:7, edges:[[1,2,2],[1,3,5],[2,4,3],[2,5,6],[3,6,4],[3,7,1]],
+      pos:{1:[330,60],2:[200,146],3:[460,146],4:[130,240],5:[270,240],6:[390,240],7:[530,240]} }
+  ];
+
+  var cur = PRESETS[0], S = null, frames = [], step = 0;
+
+  function build(){
+    S = solveFlow(cur);
+    frames = [{kind:'init'}];
+    var i, j, u, kids;
+    for (i = 0; i < S.order.length; i++){
+      u = S.order[i]; kids = [];
+      for (j = 0; j < S.adj[u].length; j++) if (S.par[S.adj[u][j].v] === u) kids.push(S.adj[u][j].v);
+      kids.sort(function(a, b){ return a - b; });
+      for (j = 0; j < kids.length; j++) frames.push({kind:'move', u:u, v:kids[j]});
+    }
+    frames.push({kind:'final'});
+    step = 0;
+    render();
+  }
+
+  function edgeW(u, v){
+    var i;
+    for (i = 0; i < S.adj[u].length; i++) if (S.adj[u][i].v === v) return S.adj[u][i].w;
+    return 0;
+  }
+
+  function render(){
+    var f = frames[step], g = '', i, hl = {}, mark = {}, edgeHL = {}, rows = '';
+    if (f.kind === 'init'){
+      hl[1] = {f:C.orangeB, s:C.orange};
+      for (i = 1; i <= cur.n; i++) mark[i] = (S.deg[i] === 1) ? '叶子' : 'f=' + S.flow[i];
+      g = drawTree(cur, {wt:true, hl:hl, mark:mark});
+      rows += '<div class="row">第 1 / ' + frames.length + ' 步 · 第一趟汇总结束</div>';
+      rows += '<div class="row">叶子直接贡献整条边的容量，非叶子贡献 min(子树流量, 边容量)</div>';
+      rows += '<div class="row total">flow[1] = ' + S.dp[1] + '</div>';
+    } else if (f.kind === 'move'){
+      var w = edgeW(f.u, f.v);
+      hl[f.u] = {f:C.orangeB, s:C.orange};
+      hl[f.v] = {f:C.blueB, s:C.blue};
+      edgeHL[key(f.u, f.v)] = {s:C.green, w:3};
+      for (i = 1; i <= cur.n; i++) mark[i] = 'f=' + S.flow[i];
+      g = drawTree(cur, {wt:true, hl:hl, mark:mark, edgeHL:edgeHL});
+      rows += '<div class="row">第 ' + (step + 1) + ' / ' + frames.length + ' 步 · 源点从 ' + f.u + ' 换到 ' + f.v + '，边容量 ' + w + '</div>';
+      if (S.deg[f.u] === 1){
+        rows += '<div class="row">' + f.u + ' 是叶子，去掉 ' + f.v + ' 之后它是纯出水口，没有上限</div>';
+        rows += '<div class="row total">dp[' + f.v + '] = flow[' + f.v + '] + w = ' + S.flow[f.v] + ' + ' + w + ' = ' + S.dp[f.v] + '</div>';
+      } else {
+        var c = (S.deg[f.v] === 1) ? w : Math.min(S.flow[f.v], w);
+        var o = S.dp[f.u] - c;
+        rows += '<div class="row">' + f.v + ' 这一支对 ' + f.u + ' 的贡献 = min(flow[' + f.v + '] = ' + S.flow[f.v] + ', w = ' + w +
+                ') = ' + c + '，扣掉得 uOut = ' + S.dp[f.u] + ' − ' + c + ' = ' + o + '</div>';
+        rows += '<div class="row total">dp[' + f.v + '] = ' + S.flow[f.v] + ' + min(uOut, w) = ' +
+                S.flow[f.v] + ' + min(' + o + ', ' + w + ') = ' + S.dp[f.v] + '</div>';
+      }
+      if (S.deg[f.v] === 1 && S.dp[f.v] !== S.dpT[f.v]){
+        rows += '<div class="row warn">' + f.v + ' 是叶子：flow[' + f.v + '] = 0，uOut 一点没扣，这里算出的 ' + S.dp[f.v] +
+                ' 偏大。它的真实值是 min(uOut − w, w) = ' + S.dpT[f.v] + '</div>';
+      }
+    } else {
+      for (i = 1; i <= cur.n; i++){
+        mark[i] = 'dp=' + S.dp[i];
+        if (i === S.best) hl[i] = {f:C.orangeB, s:C.orange};
+      }
+      g = drawTree(cur, {wt:true, hl:hl, mark:mark});
+      var list = [];
+      for (i = 1; i <= cur.n; i++) list.push(i + ':' + S.dp[i]);
+      rows += '<div class="row">第 ' + frames.length + ' / ' + frames.length + ' 步 · 第二趟结束</div>';
+      rows += '<div class="row">程序算出的答案 ' + list.join('  ') + '</div>';
+      var dl = [];
+      for (i = 1; i <= cur.n; i++) if (S.dp[i] !== S.dpT[i]) dl.push(i);
+      if (dl.length){
+        var t2 = [];
+        for (i = 0; i < dl.length; i++) t2.push(dl[i] + ':' + S.dpT[dl[i]]);
+        rows += '<div class="row warn">叶子 ' + dl.join('、') + ' 号的值偏大，真实值是 ' + t2.join('  ') +
+                '。它们都比不过自己的父亲，所以最大值不受影响</div>';
+      } else {
+        rows += '<div class="row">这棵树上每个点的值都对</div>';
+      }
+      rows += '<div class="row total">最优源点是 ' + S.best + ' 号，总流量 ' + S.dp[S.best] +
+              '（1 号只有 ' + S.dp[1] + '）</div>';
+    }
+    mount('rfSvg', g);
+    mount('rfInfo', rows);
+    el('rfPrev').disabled = (step === 0);
+    el('rfNext').disabled = (step === frames.length - 1);
+  }
+
+  function bind(id, ev, fn){ var n = el(id); if (n) n.addEventListener(ev, fn); }
+  bind('rfPreset', 'change', function(){ cur = PRESETS[parseInt(this.value, 10)]; build(); });
+  bind('rfPrev', 'click', function(){ if (step > 0){ step--; render(); } });
+  bind('rfNext', 'click', function(){ if (step < frames.length - 1){ step++; render(); } });
+  bind('rfReset', 'click', function(){ step = 0; render(); });
+  build();
+})();
+</script>
+</body>
+</html>

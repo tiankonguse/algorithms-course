@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>换根 dp：留一个次大值，改造成重心与送人回家 · 算法教程</title>
+<meta name="description" content="换根时最长那块如果正好在正在递的这一支里，就必须退而用次大的：CF708C 改造成重心用 inner1/inner2/choose/outer 四个量判定每个点，P6419 Kamp 用同一套套路把「往下最长链」换成「往上最长链」，答案是两倍边权和减最长链。附实测与错法抓取率。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .rk-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .rk-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .rk-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  .rk-sel{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:5px 8px;font-size:14px;color:var(--text);font-family:inherit;
+  }
+  @media(max-width:760px){
+    .rk-btn{font-size:13px;padding:5px 11px;}
+    .rk-sel{font-size:13px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>换根 dp：留一个次大值，改造成重心与送人回家</h1>
+    <p class="intro">前面几页换根时递过去的都是一个数，最多是一整条桶。这一页的两道题要多留一个值：换根时能用的「最大的那一块」，如果恰好落在正在递的这一支里面，就得退而用次大的。留次大不难，难的是记下最大的那一块来自哪个儿子。</p>
+
+    <h2>零、背景</h2>
+    <p>换根的转移式一直是「父亲的答案，减去这一支的贡献，再补上新的贡献」。当补的那一项是「某一侧的最大值」时，会出现一个新情况：父亲的最大值有可能就藏在正在递的这一支里，那样它根本不该被算进去。</p>
+    <p>处理办法只有一种，同时维护最大值与次大值，并且次大值必须来自另一个儿子。下面两道题都要这么做，一道判重心，一道算路程。</p>
+
+    <h2>一、问题一：哪些点可以改造成重心</h2>
+    <p>CF708C Centroids。n 个点的树，一个点是重心当且仅当砍掉它之后，剩下每块连通块的大小都不超过 n/2。允许做一次操作：删一条边、再加一条边，图仍然是一棵树。对每个点回答，做完这次操作之后它能不能变成重心。n 到 4 × 10⁵。</p>
+    <p>那个操作换个说法更直观：从树上切下一块大小不超过 n/2 的连通块，再把它挂到某个点下面。挂在 u 下面，目的就是让 u 砍掉之后最大的那一块变小。</p>
+
+    <h2>二、只有一块可能超标</h2>
+    <p>砍掉 u 之后剩下的块，是「每个儿子那一侧」加上「u 的上面那一侧」，它们的大小加起来是 n − 1。两块都超过 n/2 的话总和就超过 n − 1，不可能。所以超标的块最多只有一块。</p>
+    <p>这一块有两种可能：一是某个儿子的整棵子树，取最大的那个儿子就行；二是「上面」那一侧，大小是 n − sz[u]。两个候选，取超过 n/2 的那个。</p>
+    <p>能被救回来的条件也就清楚了：从超标的那块里再切下一块 P，要求 |P| ≤ n/2，并且切完之后剩下的也 ≤ n/2。|P| 越大越容易满足，所以问题变成「超标块里能整块切下来、且大小不超过 n/2 的最大一块是多少」。</p>
+
+    <figure class="fig">
+      <svg id="figMove" viewBox="0 0 660 350" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="切一块挂到候选点下面" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>图1：以 8 号为例。砍掉它之后只剩一整块 8 个点，超过 4；把 {2,5,6,7} 这 4 个点切下来挂到 8 下面，重新砍掉 8 就分成两块各 4 个点，正好都不超过 ⌊9/2⌋ = 4</figcaption>
+    </figure>
+    <p>图里那棵树一共 9 个点，n/2 = 4。8 号是叶子，砍掉它之后剩下 8 个点连成一整块，远超过 4。切下 {2,5,6,7} 这 4 个点挂到 8 下面之后再砍 8，剩两块各 4 个点，都不超标。</p>
+
+    <h2>三、往里再切一层</h2>
+    <p>先固定 1 号做根，第一趟自底向上。对每个儿子 v，能在 v 那一侧整块切下来、且大小不超过 n/2 的最大块是这样算的：v 整棵子树如果本来就不超过 n/2，那就是 sz[v]；否则要往 v 的里面再切一层，也就是 inner1[v]。</p>
+    <pre class="code">int innerSize = sz[v] <= n / 2 ? sz[v] : inner1[v];   // 太大就往里再切一层</pre>
+    <p>u 的 inner1[u] 是所有儿子里 innerSize 的最大值，inner2[u] 是第二大，并且规定它必须来自另一个儿子；choose[u] 记下最大的那个来自谁。维护方式和「边扫边求最大次大」完全一样，只是多记一个来源。</p>
+    <p>注意 inner1[u] 只覆盖「儿子那一侧」。上面那一侧要单独判，它的大小是 n − sz[u]，能整块切下来的最大块记为 outer[u]，由第二趟补出来。</p>
+
+    <h2>四、往子树外找，要绕开自己这一支</h2>
+    <p>第二趟自顶向下。从 u 递到儿子 v 时，v 的「上面」是 u 这一整侧，它由两部分组成：u 自己上面那一侧，以及 u 除 v 以外的其他儿子那一侧。能整块切下来的块只可能来自这两处。</p>
+    <p>分三种情况写：</p>
+    <ul>
+      <li>如果 n − sz[v] ≤ n/2，那 u 这一整侧就能直接整块切下来，outer[v] = n − sz[v]。</li>
+      <li>否则要往里找，先拿 u 上面那一侧的 outer[u]。</li>
+      <li>再拿 u 其他儿子里的最大可切块。choose[u] ≠ v 时它就是 inner1[u]；choose[u] 正好是 v 时，最大的那块就在 v 里面，不能用，只能退到次大的 inner2[u]。</li>
+    </ul>
+    <p>最后一步就是这一页标题说的「留一个次大值」。少了 inner2，遇到 choose[u] == v 就只能把 v 自己的子树当成外面能切的块，答案会虚高。</p>
+
+    <figure class="fig">
+      <svg id="figOuter" viewBox="0 0 660 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="outer 递推的两条支路" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>图2：同一棵树上两条换根路径。上面走 1 → 3 → 8，第二步撞上 choose[3] = 8，退用 inner2；下面走 1 → 2 → 5 → 6，每一步都被自己挡住，只能一路退用次大，最后差 2 个点救不回来</figcaption>
+    </figure>
+    <p>两幅小图是同一棵树。8 号借到了 {2,5,6,7} 整块，outer 到了 4，8 − 4 = 4 刚好压线；6 号每一步都只能拿次大，outer 停在 2，8 − 2 = 6 还是超过 4。同一个 outer 递推，走法不同结果就差了 2。</p>
+
+    <h2>五、判定</h2>
+    <p>四个量都算完之后，逐点判一次。先看儿子那一侧超不超标，超标就从里面切走 inner1[maxsub[u]]；否则看上面那一侧，超标就切走 outer[u]；都不超标说明它本来就是重心。</p>
+    <pre class="code"><span class="cm">// u 能不能变成重心：唯一可能超标的就是「最大的那一块」</span>
+    <span class="cm">// 超标了就从里面切一刀，切下来的那一块要 &lt;= n/2，且剩下的也要 &lt;= n/2</span>
+    <span class="kw">bool</span> <span class="fn">check</span>(<span class="kw">int</span> u){
+        <span class="kw">if</span> (sz[maxsub[u]] &gt; n / 2){
+            <span class="kw">return</span> sz[maxsub[u]] - inner1[maxsub[u]] &lt;= n / 2;
+        }
+        <span class="kw">if</span> (n - sz[u] &gt; n / 2){
+            <span class="kw">return</span> n - sz[u] - outer[u] &lt;= n / 2;
+        }
+        <span class="kw">return</span> <span class="kw">true</span>;
+    }</pre>
+    <p>完整的第一趟与第二趟如下。maxsub[u] 是「最大的那个儿子」，只在 sz 更大的时候更新，不是「最大的那一块」。</p>
+    <pre class="code"><span class="cm">// sz[u]      : 以 1 为根时 u 的子树大小</span>
+    <span class="cm">// maxsub[u]  : u 最大的那个儿子是谁</span>
+    <span class="cm">// inner1[u]  : u 的儿子里，能整块切下来且大小 &lt;= n/2 的最大一块</span>
+    <span class="cm">// inner2[u]  : 同上第二大，且必须来自另一个儿子</span>
+    <span class="cm">// choose[u]  : inner1[u] 来自哪个儿子</span>
+    <span class="cm">// outer[u]   : u 子树之外，能整块切下来且大小 &lt;= n/2 的最大一块</span>
+    <span class="kw">void</span> <span class="fn">dfs1</span>(<span class="kw">int</span> u, <span class="kw">int</span> f){
+        sz[u] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e != 0; e = nxt[e]){
+            v = to[e];
+            <span class="kw">if</span> (v != f){
+                dfs1(v, u);
+                sz[u] += sz[v];
+                <span class="kw">if</span> (sz[maxsub[u]] &lt; sz[v]) maxsub[u] = v;
+                <span class="kw">int</span> innerSize = sz[v] &lt;= n / 2 ? sz[v] : inner1[v];   <span class="cm">// 太大就往里再切一层</span>
+                <span class="kw">if</span> (inner1[u] &lt; innerSize){
+                    choose[u] = v; inner2[u] = inner1[u]; inner1[u] = innerSize;
+                } <span class="kw">else</span> <span class="kw">if</span> (inner2[u] &lt; innerSize){
+                    inner2[u] = innerSize;
+                }
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs2</span>(<span class="kw">int</span> u, <span class="kw">int</span> f){
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e != 0; e = nxt[e]){
+            v = to[e];
+            <span class="kw">if</span> (v != f){
+                <span class="kw">if</span> (n - sz[v] &lt;= n / 2) outer[v] = n - sz[v];         <span class="cm">// u 那一整侧本来就够小</span>
+                <span class="kw">else</span> <span class="kw">if</span> (choose[u] != v) outer[v] = max(outer[u], inner1[u]);
+                <span class="kw">else</span> outer[v] = max(outer[u], inner2[u]);             <span class="cm">// 最长那块在 v 里，只能用次长</span>
+                dfs2(v, u);
+            }
+        }
+    }</pre>
+
+    <h2>六、问题二：聚会之后送每个人回家</h2>
+    <p>洛谷 P6419 Kamp。n 个点的带权树，有 k 个人分别住在 k 个点上。所有人先各自去聚会点，聚会结束后一起上车，车把每个人送回家；送完最后一位乘客，车不用回到聚会点。对每个点 i 求，聚会点定在 i 时车要跑多远。n 到 2 × 10⁵，k 不超过 n，边权到 10⁹ 量级。</p>
+    <p>换成人话就是：从 u 出发，把 k 位乘客分别送到各自的家，最后停在任意位置，求最短总路程。</p>
+
+    <h2>七、代价 = 两倍边权减去最长链</h2>
+    <p>固定出发点 u，要走的路是「u 到每位乘客的路径的并」，这个并是一棵子树。里面的每条边都要走两遍，进去再出来；只有最后一段例外，送完最后一位乘客就不用回来了。</p>
+    <p>于是代价是两倍的边权和，减掉最后那一段的路程。要让减掉的尽量多，最后送的应该是离 u 最远的那位乘客。</p>
+
+    <figure class="fig">
+      <svg id="figKamp" viewBox="0 0 660 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Kamp 的代价构成" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>图3：聚会点在 1 号，乘客住在 6、8、9 号。7 号没有乘客，5 − 7 那条边不用走；其余 7 条边各走两遍得 48，最后送最远的 6 号（9）不用回来，答案是 39</figcaption>
+    </figure>
+    <p>这里有个细节值得单独说：被减掉的是「u 到最远乘客的距离」，不是「最远的两个乘客之间的距离」。最后一段必须从 u 起步，只能是一条以 u 为端点的链。</p>
+
+    <h2>八、两套量的换根式</h2>
+    <p>和前面重心的题一样分两趟，只是每一点上要维护两个数：一个是代价，一个是到最远乘客的距离。</p>
+    <p>第一趟以 1 为根自底向上。people[u] 是 u 子树里的乘客数；incost[u] 是从 u 出发送完子树内所有乘客再回到 u 的代价，只对 people[v] &gt; 0 的儿子累加 incost[v] + 2w；inner1[u] 是从 u 往下到最远乘客的距离，inner2[u] 是来自另一个儿子的次长，choose[u] 记最长链来自哪个儿子。</p>
+    <p>第二趟自顶向下补 outcost[u] 与 outer[u]，含义分别是「送完子树外所有乘客再回到 u 的代价」和「从 u 往子树外走，到最远乘客的距离」。从 u 递到 v 时，只在 k − people[v] &gt; 0，也就是 v 外面确实还有人时才需要算。</p>
+    <p>outcost[v] 分两种写法。v 子树里没人时，v 外面的人就是「u 外面的」加「u 子树里的全部」，来回各走一次边 (u, v)，于是 outcost[v] = outcost[u] + incost[u] + 2w。v 子树里有人时，incost[u] 里已经含了 incost[v] + 2w 那一份，扣掉它之后来回那两步 w 正好抵消，于是 outcost[v] = outcost[u] + incost[u] − incost[v]。</p>
+    <p>outer[v] 与前面重心的 outer 是同一个形状：最远的乘客要么在 u 的上面（outer[u] + w），要么在 u 的其他儿子里（choose[u] ≠ v 时用 inner1[u]，否则用 inner2[u]，再加 w）。最后把两趟的结果合起来。</p>
+    <pre class="code"><span class="cm">// people[u] : 以 1 为根时 u 的子树里有几位乘客</span>
+    <span class="cm">// incost[u] : 从 u 出发送完子树内所有乘客再回到 u 的代价（每条通往乘客的边走两次）</span>
+    <span class="cm">// inner1[u] : 从 u 往下送乘客的最长链，inner2[u] 是来自另一个儿子的次长链</span>
+    <span class="cm">// choose[u] : 最长链来自哪个儿子</span>
+    <span class="cm">// outcost[u]: 从 u 出发送完子树外所有乘客再回到 u 的代价</span>
+    <span class="cm">// outer[u]  : 从 u 往子树外送乘客的最长链</span>
+    <span class="kw">void</span> <span class="fn">dfs1</span>(<span class="kw">int</span> u, <span class="kw">int</span> f){
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v, w; e != 0; e = nxt[e]){
+            v = to[e]; w = weight[e];
+            <span class="kw">if</span> (v != f){
+                dfs1(v, u);
+                people[u] += people[v];
+                <span class="kw">if</span> (people[v] &gt; 0){
+                    incost[u] += incost[v] + 2LL * w;
+                    <span class="kw">if</span> (inner1[u] &lt; inner1[v] + w){
+                        choose[u] = v; inner2[u] = inner1[u]; inner1[u] = inner1[v] + w;
+                    } <span class="kw">else</span> <span class="kw">if</span> (inner2[u] &lt; inner1[v] + w){
+                        inner2[u] = inner1[v] + w;
+                    }
+                }
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs2</span>(<span class="kw">int</span> u, <span class="kw">int</span> f){
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v, w; e != 0; e = nxt[e]){
+            v = to[e]; w = weight[e];
+            <span class="kw">if</span> (v != f){
+                <span class="kw">if</span> (k - people[v] &gt; 0){                              <span class="cm">// v 外面确实还有人</span>
+                    <span class="kw">if</span> (people[v] == 0) outcost[v] = outcost[u] + incost[u] + 2LL * w;
+                    <span class="kw">else</span> outcost[v] = outcost[u] + incost[u] - incost[v];
+                    <span class="kw">if</span> (v != choose[u]) outer[v] = max(outer[u], inner1[u]) + w;
+                    <span class="kw">else</span> outer[v] = max(outer[u], inner2[u]) + w;
+                }
+                dfs2(v, u);
+            }
+        }
+    }
+
+    <span class="cm">// 最后一段路不用回来，减掉最长的那一条</span>
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++){
+        cout &lt;&lt; incost[i] + outcost[i] - max(inner1[i], outer[i]) &lt;&lt; '\n';
+    }</pre>
+
+    <h2>九、换根台</h2>
+    <p>下面逐个点走第二趟，面板里列出每一位是怎么递出来的，用到次大值的那一步单独标出来。前三个预设是重心的题，后三个是送人回家。</p>
+
+    <div class="viz">
+      <div class="viz-title">换根台：点「下一步」看 outer 怎么往外递</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">圈里的数字是点号，橙圈是当前做根的点或车上的乘客，蓝圈是正在递过去的点，绿边是正在走的那条边。重心题里点下面一行是 sz，第二行是 outer；送人回家那题里是 incost 与 outcost，末帧换成答案。</p>
+      <svg id="rkSvg" viewBox="0 0 660 350" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="换根次大值演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="breakdown" id="rkInfo"></div>
+      <div class="viz-controls">
+        <select class="rk-sel" id="rkPreset">
+          <option value="0">重心 · 分叉树（9 个点）</option>
+          <option value="1">重心 · 链（7 个点）</option>
+          <option value="2">重心 · 星（7 个点）</option>
+          <option value="3">送人回家 · 分叉树（9 个点，3 位乘客）</option>
+          <option value="4">送人回家 · 链（6 个点，2 位乘客）</option>
+          <option value="5">送人回家 · 星（7 个点，3 位乘客）</option>
+        </select>
+        <button class="rk-btn" id="rkPrev" type="button">上一步</button>
+        <button class="rk-btn" id="rkNext" type="button">下一步</button>
+        <button class="rk-btn" id="rkReset" type="button">重置</button>
+      </div>
+    </div>
+
+    <figure class="fig">
+      <svg id="figShape" viewBox="0 0 660 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="四种树形上可行点的占比" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>图4：n = 20000 的四种树形上，能改造成重心的点占多少（横轴取对数）。链上每一个点都可以，星上只有中心可以，随机树与完全二叉树上都只有万分之几</figcaption>
+    </figure>
+    <p>这张图解释了对拍要怎么造数据。随机树上几乎找不到可行的点，光跑随机数据很可能一棵都抓不出错；链和星是两个极端，一个全都可以、一个几乎全都不行，两边各来一批才分得清。</p>
+
+    <h2>十、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>环节</th><th>时间</th><th>空间</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>重心：第一趟统计 sz / inner1 / inner2 / choose</td><td><code class="inline">O(n)</code></td><td rowspan="3"><code class="inline">O(n)</code></td></tr>
+        <tr><td>重心：第二趟递 outer</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>重心：逐点判定</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>重心合计</td><td><code class="inline">O(n)</code></td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>送人回家：第一趟 incost / inner1 / inner2</td><td><code class="inline">O(n)</code></td><td rowspan="2"><code class="inline">O(n)</code></td></tr>
+        <tr><td>送人回家：第二趟 outcost / outer</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>送人回家合计</td><td><code class="inline">O(n)</code></td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>每个点单独重算一遍（朴素）</td><td><code class="inline">O(n²)</code></td><td><code class="inline">O(n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间按题目上限算。重心那题 n = 4 × 10⁵ 时，sz、maxsub、inner1、inner2、choose、outer 六个 int 数组加 head、to、nxt，合计约 17.6MB。送人回家那题 n = 2 × 10⁵ 时，incost 与 outcost 是 long long，加上 people、inner1、inner2、choose、weight 与建图数组，合计约 12MB。送人回家那题的答案必须开 long long：边权到 10⁹、n 到 2 × 10⁵，代价是 10¹⁴ 量级。</p>
+    <p>实测：重心那题 n = 10⁵ 时 3.37ms，n = 4 × 10⁵ 时几次实测在 24.76 到 32.36ms 之间。送人回家那题 n = 2 × 10⁵、k = 1000 时 7 到 8ms；朴素做法对每个点各做一次树形 dp，n = 20000、k = 1000 就要 3395.04ms，而换根在同一份数据上是 0.76ms，差了四千多倍，两万个点上的答案一个都不错。</p>
+    <p>错法抓取率。重心那题，n = 16、8000 棵随机小树上，「太大就当成切不动、往里再切一层那句写成取 0」有 41.25% 的树答案会变；「outer 递推不避开 choose[u] == v、一律用 inner1」有 38.02%。送人回家那题，n = 20000、k = 50、400 组随机数据上，outer 不避 choose 的有 98.00% 组答案会变；outcost 不区分 people[v] == 0、一律写成减法的是 100.00%。另外忘掉最后减最长链，答案平均会膨胀 4.34%。</p>
+
+    <h2>十一、总结</h2>
+    <p>要点三条。其一，换根时补的那一项如果是「某一侧的最大值」，就必须同时留着次大值和它的来源，因为最大值有可能正好落在正在递的这一支里。其二，两道题的 outer 是同一个形状：父亲那一侧去掉 v 这一支之后的全体，能用的信息分成「父亲继承来的」与「父亲另外几个儿子的」两类，后者在 v 恰好是最优儿子时降级为次大。其三，重心那题里「超标的最多一块」是整道题的支点，它把逐块检查压成只查一块。</p>
+    <p>「留次大」这个动作不只出现在换根里。求树的直径、求删点后的最大连通块，凡是要把自己这一支排除在外的地方，都要留它。</p>
+
+    <h2>十二、最后</h2>
+    <p>最容易写错的是 inner1 与 inner2 的更新时机。只有 inner1 真的被刷新时才把旧值让给 inner2；写成「先赋 inner2 再更新 inner1」，在两个儿子给出相同值的时候会把同一个儿子记两遍，choose 也就跟着错了。另外 choose[u] 的初值是 0，而 sz[0] 与 inner1[0] 都是 0，靠全局数组默认清零就行，不用另外初始化。</p>
+    <p>对拍的时候把 n 压到 7 到 16，链和星各造一批。链上每个点都能改成重心，星上只有中心可以，这两个极端能在几组数据里就分出对错；随机树上可行的点只有万分之几，单独用它反而看不出问题。</p>
+    <p>《完》</p>
+
+    <h2 id="prob-links">相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td>哪些点可以改造成重心</td><td><a href="https://www.luogu.com.cn/problem/CF708C" target="_blank">www.luogu.com.cn/problem/CF708C</a></td></tr>
+      <tr><td>Codeforces</td><td>Centroids</td><td><a href="https://codeforces.com/problemset/problem/708/C" target="_blank">codeforces.com/problemset/problem/708/C</a></td></tr>
+      <tr><td>洛谷</td><td>聚会后送每个人回家最短用时</td><td><a href="https://www.luogu.com.cn/problem/P6419" target="_blank">www.luogu.com.cn/problem/P6419</a></td></tr>
+    </table>
+
+    <h2 id="refs">参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解123【扩展】树上问题专题6-换根dp</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = { blue:'#2563eb', blueB:'#dbeafe', blueL:'#eef4ff', orange:'#ea580c',
+            orangeB:'#ffedd5', gray:'#9aa0a6', bg:'#f6f7f9', bd:'#e6e8eb',
+            dark:'#1f2328', dim:'#6b7280', green:'#15803d' };
+
+  function el(id){ return document.getElementById(id); }
+  function mount(id, s){ var n = el(id); if (n) n.innerHTML = s; }
+  function T(x, y, s, o){
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 11) + '" fill="' + (o.fill || C.dark) +
+           (o.anchor ? '" text-anchor="' + o.anchor : '') + '"' + (o.bold ? ' font-weight="600"' : '') + '>' + s + '</text>';
+  }
+  function LN(x1, y1, x2, y2, o){
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.gray) +
+           '" stroke-width="' + (o.w || 1.3) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function CIR(x, y, r, o){
+    o = o || {};
+    return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + (o.fill || C.bg) +
+           '" stroke="' + (o.stroke || C.gray) + '" stroke-width="' + (o.w || 1.4) + '"' +
+           (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function BOX(x, y, w, h, o){
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="6" fill="' + (o.fill || C.bg) +
+           '" stroke="' + (o.stroke || C.bd) + '" stroke-width="1.4"/>';
+  }
+  function key(a, b){ return a + '-' + b; }
+
+  function adjOf(t){
+    var a = {}, i;
+    for (i = 1; i <= t.n; i++) a[i] = [];
+    for (i = 0; i < t.edges.length; i++){
+      a[t.edges[i][0]].push({v:t.edges[i][1], w:t.edges[i][2] || 1});
+      a[t.edges[i][1]].push({v:t.edges[i][0], w:t.edges[i][2] || 1});
+    }
+    return a;
+  }
+  // 儿子按编号升序出栈，方便逐帧阅读
+  function orderOf(t){
+    var adj = adjOf(t), par = {}, order = [], stk = [1], u, v, i, kids;
+    par[1] = 0;
+    while (stk.length){
+      u = stk.pop(); order.push(u);
+      kids = [];
+      for (i = 0; i < adj[u].length; i++){ v = adj[u][i].v; if (v !== par[u]){ par[v] = u; kids.push(v); } }
+      kids.sort(function(a, b){ return a - b; });
+      for (i = kids.length - 1; i >= 0; i--) stk.push(kids[i]);
+    }
+    return {adj:adj, par:par, order:order};
+  }
+
+  // ---------- 重心 ----------
+  function solveCen(t){
+    var R = orderOf(t), adj = R.adj, par = R.par, order = R.order;
+    var half = Math.floor(t.n / 2);
+    var sz = {}, mx = {}, in1 = {}, in2 = {}, cho = {}, out = {}, i, j, u, v, is;
+    for (i = 0; i <= t.n; i++){ sz[i] = 0; mx[i] = 0; in1[i] = 0; in2[i] = 0; cho[i] = 0; out[i] = 0; }
+    for (i = order.length - 1; i >= 0; i--){
+      u = order[i]; sz[u] = 1;
+      for (j = 0; j < adj[u].length; j++){
+        v = adj[u][j].v;
+        if (par[v] !== u) continue;
+        sz[u] += sz[v];
+        if (sz[mx[u]] < sz[v]) mx[u] = v;
+        is = sz[v] <= half ? sz[v] : in1[v];
+        if (in1[u] < is){ cho[u] = v; in2[u] = in1[u]; in1[u] = is; }
+        else if (in2[u] < is) in2[u] = is;
+      }
+    }
+    for (i = 0; i < order.length; i++){
+      u = order[i];
+      for (j = 0; j < adj[u].length; j++){
+        v = adj[u][j].v;
+        if (par[v] !== u) continue;
+        if (t.n - sz[v] <= half) out[v] = t.n - sz[v];
+        else if (cho[u] !== v) out[v] = Math.max(out[u], in1[u]);
+        else out[v] = Math.max(out[u], in2[u]);
+      }
+    }
+    var ok = {}, why = {};
+    for (i = 1; i <= t.n; i++){
+      if (sz[mx[i]] > half){ ok[i] = (sz[mx[i]] - in1[mx[i]]) <= half; why[i] = 'sub'; }
+      else if (t.n - sz[i] > half){ ok[i] = (t.n - sz[i] - out[i]) <= half; why[i] = 'out'; }
+      else { ok[i] = true; why[i] = 'now'; }
+    }
+    return {adj:adj, par:par, order:order, half:half, sz:sz, mx:mx, in1:in1, in2:in2, cho:cho, out:out, ok:ok, why:why};
+  }
+
+  // ---------- 送人回家 ----------
+  function solveKamp(t){
+    var R = orderOf(t), adj = R.adj, par = R.par, order = R.order;
+    var k = t.ppl.length, i, j, u, v, w;
+    var ppl = {}, inc = {}, in1 = {}, in2 = {}, cho = {}, outc = {}, out = {};
+    for (i = 1; i <= t.n; i++){ ppl[i] = 0; inc[i] = 0; in1[i] = 0; in2[i] = 0; cho[i] = 0; outc[i] = 0; out[i] = 0; }
+    for (i = 0; i < t.ppl.length; i++) ppl[t.ppl[i]] = 1;
+    for (i = order.length - 1; i >= 0; i--){
+      u = order[i];
+      for (j = 0; j < adj[u].length; j++){
+        v = adj[u][j].v; w = adj[u][j].w;
+        if (par[v] !== u) continue;
+        ppl[u] += ppl[v];
+        if (ppl[v] > 0){
+          inc[u] += inc[v] + 2 * w;
+          if (in1[u] < in1[v] + w){ cho[u] = v; in2[u] = in1[u]; in1[u] = in1[v] + w; }
+          else if (in2[u] < in1[v] + w) in2[u] = in1[v] + w;
+        }
+      }
+    }
+    for (i = 0; i < order.length; i++){
+      u = order[i];
+      for (j = 0; j < adj[u].length; j++){
+        v = adj[u][j].v; w = adj[u][j].w;
+        if (par[v] !== u) continue;
+        if (k - ppl[v] > 0){
+          if (ppl[v] === 0) outc[v] = outc[u] + inc[u] + 2 * w;
+          else outc[v] = outc[u] + inc[u] - inc[v];
+          out[v] = (v !== cho[u] ? Math.max(out[u], in1[u]) : Math.max(out[u], in2[u])) + w;
+        }
+      }
+    }
+    var ans = {};
+    for (i = 1; i <= t.n; i++) ans[i] = inc[i] + outc[i] - Math.max(in1[i], out[i]);
+    return {adj:adj, par:par, order:order, k:k, ppl:ppl, inc:inc, in1:in1, in2:in2, cho:cho, outc:outc, out:out, ans:ans};
+  }
+
+  // ---------- 通用画树 ----------
+  function drawTree(t, o){
+    o = o || {};
+    var g = '', i, a, b, eh, mx, my, p, h;
+    for (i = 0; i < t.edges.length; i++){
+      a = t.edges[i][0]; b = t.edges[i][1];
+      eh = (o.edgeHL && (o.edgeHL[key(a, b)] || o.edgeHL[key(b, a)])) || null;
+      g += LN(t.pos[a][0], t.pos[a][1], t.pos[b][0], t.pos[b][1],
+              eh ? {stroke:eh.s, w:eh.w || 3, dash:eh.dash} : {stroke:C.gray, w:1.4, dash:o.dashAll});
+    }
+    if (o.ew){
+      for (i = 0; i < t.edges.length; i++){
+        a = t.edges[i][0]; b = t.edges[i][1];
+        mx = (t.pos[a][0] + t.pos[b][0]) / 2; my = (t.pos[a][1] + t.pos[b][1]) / 2;
+        g += '<circle cx="' + mx + '" cy="' + my + '" r="9" fill="' + C.bg + '" stroke="none"/>';
+        g += T(mx, my + 4, String(t.edges[i][2]), {anchor:'middle', size:10, fill:C.dim});
+      }
+    }
+    for (i = 1; i <= t.n; i++){
+      p = t.pos[i]; h = (o.hl && o.hl[i]) || null;
+      g += CIR(p[0], p[1], 16, {fill:h ? h.f : C.bg, stroke:h ? h.s : C.gray, w:h ? 2.4 : 1.4, dash:o.dashAll});
+      g += T(p[0], p[1] + 4, String(i), {anchor:'middle', size:12, bold:!!h});
+      if (o.below && o.below[i]) g += T(p[0], p[1] + 30, o.below[i], {anchor:'middle', size:10.5, fill:(o.belowFill && o.belowFill[i]) || C.dim});
+      if (o.below2 && o.below2[i]) g += T(p[0], p[1] + 44, o.below2[i], {anchor:'middle', size:10.5, fill:(o.belowFill2 && o.belowFill2[i]) || C.dim});
+    }
+    return g;
+  }
+
+  var P9 = {1:[330,50],2:[170,130],3:[330,130],4:[490,130],5:[170,210],8:[330,210],9:[490,210],6:[110,290],7:[230,290]};
+  var E9 = [[1,2],[1,3],[1,4],[2,5],[5,6],[5,7],[3,8],[4,9]];
+
+  // ============ 图1：切一块挂过去 ============
+  (function(){
+    var t = {n:9, edges:E9, pos:{1:[300,40],2:[150,104],3:[300,104],4:[450,104],5:[150,168],8:[300,168],9:[450,168],6:[90,232],7:[210,232]}};
+    var g = '';
+    g += T(28, 24, '以 8 号为例：砍掉它之后只剩一整块', {size:11.5, bold:true});
+    g += drawTree(t, {
+      hl:{8:{f:C.orangeB, s:C.orange}, 2:{f:C.blueB, s:C.blue}, 5:{f:C.blueB, s:C.blue},
+          6:{f:C.blueB, s:C.blue}, 7:{f:C.blueB, s:C.blue}},
+      edgeHL:{ '1-2':{s:C.green, w:2.6, dash:'6 4'} }
+    });
+    g += T(214, 64, '切这条边', {anchor:'middle', size:10.5, fill:C.green});
+    g += T(28, 288, '搬之前', {size:11.5, fill:C.dim});
+    g += BOX(110, 268, 150, 32, {fill:C.orangeB, stroke:C.orange});
+    g += T(185, 289, '其余：8 个点', {anchor:'middle', size:11.5, fill:C.orange});
+    g += T(292, 289, '> 4', {size:11.5, fill:C.orange});
+    g += T(28, 328, '搬之后', {size:11.5, fill:C.dim});
+    g += BOX(110, 308, 150, 32, {fill:C.blueB, stroke:C.blue});
+    g += T(185, 329, '{2,5,6,7}：4', {anchor:'middle', size:11.5, fill:C.blue});
+    g += BOX(272, 308, 150, 32, {fill:C.blueB, stroke:C.blue});
+    g += T(347, 329, '{1,3,4,9}：4', {anchor:'middle', size:11.5, fill:C.blue});
+    mount('figMove', g);
+  })();
+
+  // ============ 图2：outer 的两条支路 ============
+  (function(){
+    var t = {n:9, edges:E9, pos:{1:[170,40],2:[80,88],3:[170,88],4:[260,88],5:[80,136],8:[170,136],9:[260,136],6:[36,184],7:[124,184]}};
+    var g = '';
+    function panel(dy, title, hl, edgeHL, txt){
+      var s = '', q, pp = {};
+      for (q = 1; q <= 9; q++) pp[q] = [t.pos[q][0], t.pos[q][1] + dy];
+      s += drawTree({n:9, edges:E9, pos:pp}, {hl:hl, edgeHL:edgeHL});
+      s += T(340, 40 + dy, title, {size:11.5, bold:true});
+      for (q = 0; q < txt.length; q++){
+        s += T(340, (66 + q * 22) + dy, txt[q][0], {size:11, fill:txt[q][1] ? C.dim : C.dark});
+      }
+      return s;
+    }
+    g += panel(0, '8 号：借到了最大的那一块',
+      {8:{f:C.orangeB, s:C.orange}, 1:{f:C.blueB, s:C.blue}, 3:{f:C.blueB, s:C.blue}},
+      {'1-3':{s:C.blue, w:3}, '3-8':{s:C.blue, w:3}},
+      [['1 → 3：n − sz[3] = 7 > 4，choose[1] = 2 ≠ 3', 0],
+       ['   用 inner1[1] = 4，就是 {2,5,6,7} 整块', 1],
+       ['   outer[3] = max(outer[1], inner1[1]) = 4', 1],
+       ['3 → 8：n − sz[8] = 8 > 4，choose[3] = 8 = v', 0],
+       ['   最长那块就在 8 里，退用 inner2[3] = 0', 1],
+       ['   outer[8] = max(outer[3], inner2[3]) = 4', 1],
+       ['判定：8 − outer[8] = 4 ≤ 4，可以', 0]]);
+    g += panel(215, '6 号：每一步都被自己挡住',
+      {6:{f:C.orangeB, s:C.orange}, 1:{f:C.orangeB, s:C.orange}, 2:{f:C.orangeB, s:C.orange}, 5:{f:C.orangeB, s:C.orange}},
+      {'1-2':{s:C.orange, w:3}, '2-5':{s:C.orange, w:3}, '5-6':{s:C.orange, w:3}},
+      [['1 → 2：n − sz[2] = 5 > 4，choose[1] = 2 = v', 0],
+       ['   最长那块是 2 自己，退用 inner2[1] = 2', 1],
+       ['   outer[2] = max(outer[1], inner2[1]) = 2', 1],
+       ['2 → 5：outer[5] = max(2, inner2[2] = 0) = 2', 0],
+       ['5 → 6：outer[6] = max(2, inner2[5] = 1) = 2', 0],
+       ['outer 一览 1:0 2:2 3:4 4:4 5:2 6:2 7:2 8:4 9:4', 1],
+       ['判定：8 − outer[6] = 6 > 4，不行', 0]]);
+    mount('figOuter', g);
+  })();
+
+  // ============ 图3：Kamp 的代价构成 ============
+  (function(){
+    var E = [[1,2,3],[1,3,2],[1,4,4],[2,5,5],[5,6,1],[5,7,2],[3,8,6],[4,9,3]];
+    var t = {n:9, edges:E, pos:{1:[300,44],2:[150,112],3:[300,112],4:[450,112],5:[150,180],8:[300,180],9:[450,180],6:[90,248],7:[210,248]}};
+    var g = '', eh = {};
+    eh['1-2'] = {s:C.blue, w:3}; eh['1-3'] = {s:C.blue, w:3}; eh['1-4'] = {s:C.blue, w:3};
+    eh['2-5'] = {s:C.blue, w:3}; eh['5-6'] = {s:C.blue, w:3}; eh['3-8'] = {s:C.blue, w:3}; eh['4-9'] = {s:C.blue, w:3};
+    eh['5-7'] = {s:C.gray, w:1.4, dash:'5 4'};
+    g += drawTree(t, {
+      hl:{1:{f:C.orangeB, s:C.orange}, 6:{f:C.blueB, s:C.blue}, 8:{f:C.blueB, s:C.blue}, 9:{f:C.blueB, s:C.blue}},
+      edgeHL:eh, ew:true
+    });
+    g += T(28, 288, '7 号没有乘客，5 − 7 那条边不用走；其余 7 条边各走两遍', {size:11.5});
+    g += T(28, 308, '边权和 = 3 + 5 + 1 + 2 + 6 + 4 + 3 = 24，来回就是 48', {size:11.5});
+    g += T(28, 328, '最后一段不用回来：从 1 到最远的乘客（6 号）是 9', {size:11.5});
+    g += T(28, 348, '答案 = 48 − 9 = 39', {size:11.5, bold:true, fill:C.blue});
+    mount('figKamp', g);
+  })();
+
+  // ============ 图4：四种树形 ============
+  (function(){
+    var d = [['随机', 0.04], ['链', 100], ['星', 0.01], ['完全二叉', 0.07]];
+    var g = '', i, x0 = 110, W = 460, y, wd;
+    var grid = [0.01, 0.1, 1, 10, 100];
+    g += T(340, 232, '能改造成重心的点占比（%，对数轴）', {anchor:'middle', size:11, fill:C.dim});
+    for (i = 0; i < grid.length; i++){
+      var gx = x0 + (Math.log(grid[i]) / Math.LN10 + 2) / 4 * W;
+      g += LN(gx, 40, gx, 188, {stroke:C.bd, w:1});
+      g += T(gx, 204, String(grid[i]), {anchor:'middle', size:10, fill:C.dim});
+    }
+    for (i = 0; i < d.length; i++){
+      y = 46 + i * 40;
+      wd = Math.max(5, (Math.log(d[i][1]) / Math.LN10 + 2) / 4 * W);
+      g += T(100, y + 15, d[i][0], {anchor:'end', size:11});
+      g += '<rect x="' + x0 + '" y="' + y + '" width="' + wd + '" height="22" rx="3" fill="' + C.blueB + '" stroke="' + C.blue + '" stroke-width="1.2"/>';
+      g += T(x0 + wd + 8, y + 16, d[i][1] + '%', {size:10.5, fill:C.blue});
+    }
+    mount('figShape', g);
+  })();
+
+  // ============ 演示 ============
+  var PRESETS = [
+    { mode:'cen', n:9, edges:E9, pos:P9 },
+    { mode:'cen', n:7, edges:[[1,2],[2,3],[3,4],[4,5],[5,6],[6,7]],
+      pos:{1:[55,170],2:[150,170],3:[245,170],4:[340,170],5:[435,170],6:[530,170],7:[625,170]} },
+    { mode:'cen', n:7, edges:[[1,2],[1,3],[1,4],[1,5],[1,6],[1,7]],
+      pos:{1:[330,175],2:[330,45],3:[330,305],4:[200,110],5:[460,110],6:[200,240],7:[460,240]} },
+    { mode:'kamp', n:9, edges:[[1,2,3],[1,3,2],[1,4,4],[2,5,5],[5,6,1],[5,7,2],[3,8,6],[4,9,3]], ppl:[6,8,9], pos:P9 },
+    { mode:'kamp', n:6, edges:[[1,2,2],[2,3,3],[3,4,4],[4,5,2],[5,6,1]], ppl:[2,6],
+      pos:{1:[70,175],2:[175,175],3:[280,175],4:[385,175],5:[490,175],6:[595,175]} },
+    { mode:'kamp', n:7, edges:[[1,2,3],[1,3,5],[1,4,2],[1,5,4],[1,6,1],[1,7,6]], ppl:[2,4,6],
+      pos:{1:[330,175],2:[330,45],3:[330,305],4:[200,110],5:[460,110],6:[200,240],7:[460,240]} }
+  ];
+
+  var cur = PRESETS[0], S = null, frames = [], step = 0;
+
+  function build(){
+    S = cur.mode === 'cen' ? solveCen(cur) : solveKamp(cur);
+    frames = [{kind:'init'}];
+    var i, u, v;
+    for (i = 1; i < S.order.length; i++){
+      v = S.order[i]; u = S.par[v];
+      frames.push({kind:'move', u:u, v:v});
+    }
+    frames.push({kind:'final'});
+    step = 0;
+    render();
+  }
+
+  function render(){
+    var f = frames[step], g = '', rows = '', i, hl = {}, b1 = {}, b2 = {}, f1 = {}, f2 = {}, eh = {};
+    var u = f.u, v = f.v, done = {}, idx;
+
+    // 已经递到过的点（第二趟）
+    for (idx = 1; idx <= step; idx++){
+      if (frames[idx].kind === 'move') done[frames[idx].v] = 1;
+    }
+
+    if (cur.mode === 'cen'){
+      for (i = 1; i <= cur.n; i++){ b1[i] = 'sz=' + S.sz[i]; f1[i] = C.dim; }
+      if (f.kind === 'init'){
+        hl[1] = {f:C.orangeB, s:C.orange};
+      } else if (f.kind === 'move'){
+        hl[u] = {f:C.orangeB, s:C.orange};
+        hl[v] = {f:C.blueB, s:C.blue};
+        eh[key(u, v)] = {s:C.green, w:3};
+        for (i = 1; i <= cur.n; i++) if (done[i]){ b2[i] = '外' + S.out[i]; f2[i] = C.blue; }
+        b2[v] = '外' + S.out[v]; f2[v] = C.orange;
+      } else {
+        for (i = 1; i <= cur.n; i++){
+          b2[i] = S.ok[i] ? '可以' : '不行';
+          f2[i] = S.ok[i] ? C.green : C.orange;
+          if (S.ok[i]) hl[i] = {f:C.blueB, s:C.blue};
+        }
+      }
+      g = drawTree(cur, {hl:hl, below:b1, below2:b2, belowFill2:f2, edgeHL:eh});
+    } else {
+      for (i = 1; i <= cur.n; i++) if (cur.ppl.indexOf(i) >= 0) hl[i] = {f:C.orangeB, s:C.orange};
+      for (i = 1; i <= cur.n; i++){ b1[i] = '内' + S.inc[i]; f1[i] = C.dim; }
+      if (f.kind === 'init'){
+        hl[1] = {f:C.orangeB, s:C.orange};
+      } else if (f.kind === 'move'){
+        hl[u] = {f:C.orangeB, s:C.orange};
+        hl[v] = {f:C.blueB, s:C.blue};
+        eh[key(u, v)] = {s:C.green, w:3};
+        for (i = 1; i <= cur.n; i++) if (done[i]){ b2[i] = '外' + S.outc[i]; f2[i] = C.blue; }
+        b2[v] = '外' + S.outc[v]; f2[v] = C.orange;
+      } else {
+        for (i = 1; i <= cur.n; i++){ b2[i] = '答案' + S.ans[i]; f2[i] = C.green; }
+      }
+      g = drawTree(cur, {hl:hl, below:b1, below2:b2, belowFill2:f2, edgeHL:eh, ew:true});
+    }
+
+    rows += '<div class="row">第 ' + (step + 1) + ' / ' + frames.length + ' 步 · ' +
+            (f.kind === 'init' ? '第一趟结束，' + (cur.mode === 'cen' ? 'sz 与 inner1 / inner2 已算出' : 'incost 与 inner1 已算出')
+             : f.kind === 'final' ? '第二趟结束'
+             : '由 ' + u + ' 递到 ' + v) + '</div>';
+
+    if (cur.mode === 'cen'){
+      if (f.kind === 'init'){
+        rows += '<div class="row">half = ⌊' + cur.n + ' / 2⌋ = ' + S.half + '，超过它就超标</div>';
+        rows += '<div class="row">1 号：sz=' + S.sz[1] + '，最大儿子 ' + S.mx[1] + '，inner1=' + S.in1[1] + '，inner2=' + S.in2[1] + '</div>';
+        rows += '<div class="row">判定 1 号：最大儿子的子树 ' + S.sz[S.mx[1]] + '，' +
+                (S.sz[S.mx[1]] > S.half ? '超标，要切走 inner1 = ' + S.in1[S.mx[1]]
+                 : '不超标；上面那一侧 ' + (cur.n - S.sz[1]) + '，也不超标') + '</div>';
+        rows += '<div class="row total">1 号 ' + (S.ok[1] ? '本来就是重心' : '暂时还不行') + '</div>';
+      } else if (f.kind === 'move'){
+        var rest = cur.n - S.sz[v];
+        if (rest <= S.half){
+          rows += '<div class="row">n − sz[' + v + '] = ' + cur.n + ' − ' + S.sz[v] + ' = ' + rest +
+                  ' ≤ ' + S.half + '，u 这一整侧就能整块切下来</div>';
+          rows += '<div class="row total">outer[' + v + '] = n − sz[' + v + '] = ' + S.out[v] + '</div>';
+        } else {
+          var useIn2 = (S.cho[u] === v);
+          rows += '<div class="row">n − sz[' + v + '] = ' + cur.n + ' − ' + S.sz[v] + ' = ' + rest +
+                  ' > ' + S.half + '，只能往里找</div>';
+          rows += '<div class="row">choose[' + u + '] = ' + S.cho[u] +
+                  (useIn2 ? ' = v，最长那块就在 ' + v + ' 里，退用 inner2[' + u + '] = ' + S.in2[u]
+                          : ' ≠ v，用 inner1[' + u + '] = ' + S.in1[u]) + '</div>';
+          rows += '<div class="row' + (useIn2 ? ' warn' : '') + '">outer[' + v + '] = max(outer[' + u + '] = ' + S.out[u] +
+                  ', ' + (useIn2 ? 'inner2' : 'inner1') + '[' + u + '] = ' + (useIn2 ? S.in2[u] : S.in1[u]) +
+                  ') = ' + S.out[v] + '</div>';
+          rows += '<div class="row total">' + v + ' 号外面能切的最大块是 ' + S.out[v] + '</div>';
+        }
+      } else {
+        var yes = [], no = [];
+        for (i = 1; i <= cur.n; i++) (S.ok[i] ? yes : no).push(i);
+        rows += '<div class="row">能改造成重心的点：' + (yes.length ? yes.join(' ') : '没有') + '，共 ' + yes.length + ' 个</div>';
+        rows += '<div class="row">怎么都救不回来的点：' + (no.length ? no.join(' ') : '没有') + '，共 ' + no.length + ' 个</div>';
+        for (i = 0; i < no.length && i < 2; i++){
+          rows += '<div class="row warn">' + no[i] + ' 号：' +
+                  (S.why[no[i]] === 'sub' ? '最大儿子那块 ' + S.sz[S.mx[no[i]]] + '，切走 ' + S.in1[S.mx[no[i]]] +
+                     ' 之后还剩 ' + (S.sz[S.mx[no[i]]] - S.in1[S.mx[no[i]]]) + ' > ' + S.half
+                   : '上面那块 ' + (cur.n - S.sz[no[i]]) + '，切走 outer = ' + S.out[no[i]] +
+                     ' 之后还剩 ' + (cur.n - S.sz[no[i]] - S.out[no[i]]) + ' > ' + S.half) + '</div>';
+        }
+        rows += '<div class="row total">占比 ' + (100 * yes.length / cur.n).toFixed(1) + '%</div>';
+      }
+    } else {
+      if (f.kind === 'init'){
+        rows += '<div class="row">k = ' + S.k + ' 位乘客，住在 ' + cur.ppl.join('、') + ' 号</div>';
+        rows += '<div class="row">1 号：incost = ' + S.inc[1] + '，往下最长链 inner1 = ' + S.in1[1] +
+                '，最长链来自 ' + S.cho[1] + ' 号</div>';
+        rows += '<div class="row total">1 号的答案 = ' + S.inc[1] + ' + 0 − max(' + S.in1[1] + ', 0) = ' + S.ans[1] + '</div>';
+      } else if (f.kind === 'move'){
+        var w = 0, j;
+        for (j = 0; j < cur.edges.length; j++){
+          if ((cur.edges[j][0] === u && cur.edges[j][1] === v) || (cur.edges[j][0] === v && cur.edges[j][1] === u)) w = cur.edges[j][2];
+        }
+        rows += '<div class="row">边 (' + u + ', ' + v + ') 的边权 w = ' + w + '，v 子树里有 ' + S.ppl[v] + ' 位乘客</div>';
+        if (S.k - S.ppl[v] <= 0){
+          rows += '<div class="row">k − people[' + v + '] = 0，' + v + ' 子树里就是全部乘客，外面没人</div>';
+          rows += '<div class="row total">outcost 与 outer 都保持 0</div>';
+        } else {
+          if (S.ppl[v] === 0){
+            rows += '<div class="row">people[' + v + '] = 0 → outcost[' + v + '] = outcost[' + u + '] + incost[' + u + '] + 2w</div>';
+            rows += '<div class="row">= ' + S.outc[u] + ' + ' + S.inc[u] + ' + ' + (2 * w) + ' = ' + S.outc[v] + '</div>';
+          } else {
+            rows += '<div class="row">people[' + v + '] = ' + S.ppl[v] + ' → outcost[' + v + '] = outcost[' + u + '] + incost[' + u + '] − incost[' + v + ']</div>';
+            rows += '<div class="row">= ' + S.outc[u] + ' + ' + S.inc[u] + ' − ' + S.inc[v] + ' = ' + S.outc[v] + '</div>';
+          }
+          var u2 = (S.cho[u] === v);
+          rows += '<div class="row' + (u2 ? ' warn' : '') + '">choose[' + u + '] = ' + S.cho[u] +
+                  (u2 ? ' = v，退用 inner2[' + u + '] = ' + S.in2[u] : ' ≠ v，用 inner1[' + u + '] = ' + S.in1[u]) + '</div>';
+          rows += '<div class="row">outer[' + v + '] = max(outer[' + u + '] = ' + S.out[u] + ', ' +
+                  (u2 ? 'inner2' : 'inner1') + '[' + u + '] = ' + (u2 ? S.in2[u] : S.in1[u]) + ') + w = ' + S.out[v] + '</div>';
+          rows += '<div class="row total">' + v + ' 号的答案 = ' + S.inc[v] + ' + ' + S.outc[v] + ' − max(' + S.in1[v] + ', ' + S.out[v] + ') = ' + S.ans[v] + '</div>';
+        }
+      } else {
+        var best = 1, lst = [];
+        for (i = 1; i <= cur.n; i++){ lst.push(i + ':' + S.ans[i]); if (S.ans[i] < S.ans[best]) best = i; }
+        rows += '<div class="row">聚会点定在各点时的最短用时 ' + lst.join('  ') + '</div>';
+        rows += '<div class="row total">最省的是 ' + best + ' 号，' + S.ans[best] + '</div>';
+      }
+    }
+
+    mount('rkSvg', g);
+    mount('rkInfo', rows);
+    el('rkPrev').disabled = (step === 0);
+    el('rkNext').disabled = (step === frames.length - 1);
+  }
+
+  function bind(id, ev, fn){ var n = el(id); if (n) n.addEventListener(ev, fn); }
+  bind('rkPreset', 'change', function(){ cur = PRESETS[parseInt(this.value, 10)]; build(); });
+  bind('rkPrev', 'click', function(){ if (step > 0){ step--; render(); } });
+  bind('rkNext', 'click', function(){ if (step < frames.length - 1){ step++; render(); } });
+  bind('rkReset', 'click', function(){ step = 0; render(); });
+  build();
+})();
+</script>
+</body>
+</html>
