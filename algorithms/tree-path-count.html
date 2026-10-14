@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>路径上的词频统计 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .pc-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .pc-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .pc-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  .pc-sel{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:5px 8px;font-size:14px;color:var(--text);font-family:inherit;
+  }
+  #pcSvg text{font-size:11px;}
+  @media(max-width:760px){
+    .pc-btn{font-size:13px;padding:5px 11px;}
+    .pc-sel{font-size:13px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>路径上的词频统计</h1>
+    <p class="intro">树上一条路径，把路上所有边改成同一种值，最少改几条。答案不用真去走一遍路径：每个点带一份 26 个计数器的前缀和，两端各拿一份、减掉最低公共祖先的两倍，每条查询 26 次加减就结束。</p>
+
+    <h2>零、背景</h2>
+    <p>上一页的跳表在每一格挂了一个最小值。这一页换一种挂法：不挂在跳表上，挂在每个点自己身上——<code class="inline">weightCnt[u][w]</code> 记「从根到 u 的路径上，权值为 w 的边有几条」。它就是数组上的前缀和搬到树上：路径 a 到 b 的词频，等于 a 的前缀、b 的前缀相加，再减掉两份 LCA 的前缀。</p>
+    <p>为什么是 26：这题的边权只有 1 到 26。26 个计数器看着多，摊到一次查询上只是 26 次数组访问，而路径本身可能有三千多条边。</p>
+
+    <h2>一、问题</h2>
+    <p>一棵 n 个节点的树，节点编号 0 到 n − 1，每条边带一个 1 到 26 的权值。m 条查询 (a, b)，问 a 到 b 的最短路径上，把所有边变成同一种值最少要改几条。1 ≤ n ≤ 10⁴，1 ≤ m ≤ 2 × 10⁴。</p>
+    <p>答案的形状一句话就能写出来：路径上有 <code class="inline">L</code> 条边，出现最多的那个权值有 <code class="inline">mx</code> 条，改 <code class="inline">L − mx</code> 条——出现最多的全部留下，其余每条改一次。</p>
+    <p>难的是 L 和 mx 怎么快速拿到。朴素做法沿父亲指针把路径走一遍、逐条统计，一条查询 O(路径长度)。随机树上平均路径只有十几条边，这个做法其实不慢；可树一旦退化成一条链，n = 10⁴ 时平均路径三千多条边，实测同一批查询，逐条走要 211.6 ms，26 个计数器只要 1.45 ms，差 146 倍。</p>
+
+    <figure class="fig">
+      <svg id="figCost" viewBox="0 0 660 290" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="两种统计方式的代价" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>路径越长，沿路径逐条走越吃亏；计数器的代价与路径长度无关</figcaption>
+    </figure>
+
+    <h2>二、每个点一份前缀计数</h2>
+    <p>DFS 时从父亲往儿子拷一份计数器再加一，根自己那份全零：</p>
+
+    <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXN = 10001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXW = 26;
+
+    <span class="kw">int</span> headEdge[MAXN], edgeNext[MAXN &lt;&lt; 1], edgeTo[MAXN &lt;&lt; 1], edgeValue[MAXN &lt;&lt; 1];
+    <span class="kw">int</span> tcnt;
+    <span class="kw">int</span> weightCnt[MAXN][MAXW + 1];
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> w, <span class="kw">int</span> f) {
+        <span class="kw">if</span> (u == 0) {
+            memset(weightCnt[u], 0, <span class="kw">sizeof</span> weightCnt[u]);
+        } <span class="kw">else</span> {
+            memcpy(weightCnt[u], weightCnt[f], <span class="kw">sizeof</span> weightCnt[u]);
+            weightCnt[u][w]++;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = headEdge[u]; e != 0; e = edgeNext[e]) {
+            <span class="kw">if</span> (edgeTo[e] != f) {
+                dfs(edgeTo[e], edgeValue[e], u);
+            }
+        }
+    }</pre>
+
+    <p>查询时取三个点的计数器做差：</p>
+    <p><code class="inline">路径上权值 w 的条数 = weightCnt[a][w] + weightCnt[b][w] − 2 × weightCnt[c][w]</code>，c 是 LCA。</p>
+
+    <figure class="fig">
+      <svg id="figCnt" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="前缀计数相减" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>a 与 b 的前缀里各多算了一段，把 c 那份减掉两遍正好抵消</figcaption>
+    </figure>
+
+    <p>逻辑和两点距离公式一模一样：根到 a 与根到 b 在 LCA 以上完全重合，两份相加把这一段算了两次，减两份刚好。26 个权值各做一遍这个减法，同时记下最大值与总和。</p>
+
+    <h2>三、LCA 一次性算完</h2>
+    <p>查询全部提前给定，这正好是离线场景。Tarjan 算法一趟 DFS 配一个并查集，把 m 条查询全部答完，代价 O(n + m)，比建跳表的 O(n log n) 还省：</p>
+    <p>1）进入 u，先把所有儿子递归完；<br>
+       2）然后看挂在 u 上的每条查询 (u, v)：如果 v 已经访问过，这条查询的 LCA 就是 <code class="inline">find(v)</code>——v 所在并查集的根，此刻正好指向「u 与 v 的最低公共祖先」；<br>
+       3）最后把 <code class="inline">father[u]</code> 设成自己的父亲，向上归队。</p>
+    <p>关键在第 2 步：递归完 v 的整棵子树之后、还没退出 u 的父亲之前，并查集里 v 到 u 路径上的点全都指向 u。这时从 v 那头问一次 find，拿到的正是 LCA。</p>
+
+    <figure class="fig">
+      <svg id="figTarjan" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Tarjan 离线求 LCA" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>子树走完才答挂在身上的查询，此刻 find(v) 指向的正是 LCA</figcaption>
+    </figure>
+
+    <p>每条查询要在两端各挂一次（<code class="inline">addQuery(a, b, i)</code> 与 <code class="inline">addQuery(b, a, i)</code>），因为不知道 DFS 会先到哪一头。</p>
+
+    <h2>四、代码</h2>
+    <p>查询挂链与并查集：</p>
+
+    <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXM = 20001;
+
+    <span class="kw">int</span> headQuery[MAXN], queryNext[MAXM &lt;&lt; 1], queryTo[MAXM &lt;&lt; 1], queryIndex[MAXM &lt;&lt; 1];
+    <span class="kw">int</span> qcnt;
+    <span class="kw">bool</span> visited[MAXN];
+    <span class="kw">int</span> father[MAXN];
+    <span class="kw">int</span> lcaAns[MAXM];
+
+    <span class="kw">void</span> <span class="fn">addQuery</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> i) {
+        queryNext[qcnt] = headQuery[u];
+        queryTo[qcnt] = v;
+        queryIndex[qcnt] = i;
+        headQuery[u] = qcnt++;
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (i != father[i]) {
+            father[i] = find(father[i]);
+        }
+        <span class="kw">return</span> father[i];
+    }
+
+    <span class="kw">void</span> <span class="fn">tarjan</span>(<span class="kw">int</span> u, <span class="kw">int</span> f) {
+        visited[u] = <span class="kw">true</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> e = headEdge[u]; e != 0; e = edgeNext[e]) {
+            <span class="kw">if</span> (edgeTo[e] != f) {
+                tarjan(edgeTo[e], u);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = headQuery[u]; e != 0; e = queryNext[e]) {
+            <span class="kw">int</span> v = queryTo[e];
+            <span class="kw">if</span> (visited[v]) {
+                lcaAns[queryIndex[e]] = find(v);
+            }
+        }
+        father[u] = f;
+    }</pre>
+
+    <p>主流程四步：建图、DFS 铺计数器、Tarjan 求出全部 LCA、逐条做 26 次减法。</p>
+
+    <pre class="code">vector&lt;<span class="kw">int</span>&gt; <span class="fn">minOperationsQueries</span>(<span class="kw">int</span> n, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; &amp;edges,
+                                    vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt; &amp;queries) {
+        build(n);
+        <span class="kw">for</span> (auto &amp;e : edges) {
+            addEdge(e[0], e[1], e[2]);
+            addEdge(e[1], e[0], e[2]);
+        }
+        dfs(0, 0, -1);
+        <span class="kw">int</span> m = queries.size();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; m; i++) {
+            addQuery(queries[i][0], queries[i][1], i);
+            addQuery(queries[i][1], queries[i][0], i);
+        }
+        tarjan(0, -1);
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">ans</span>(m);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; m; i++) {
+            <span class="kw">int</span> a = queries[i][0], b = queries[i][1], c = lcaAns[i];
+            <span class="kw">int</span> allCnt = 0, maxCnt = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> w = 1; w &lt;= MAXW; w++) {
+                <span class="kw">int</span> wcnt = weightCnt[a][w] + weightCnt[b][w] - 2 * weightCnt[c][w];
+                maxCnt = max(maxCnt, wcnt);
+                allCnt += wcnt;
+            }
+            ans[i] = allCnt - maxCnt;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+    <h2>五、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>步骤</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>DFS 铺 26 个前缀计数器</td><td><code class="inline">O(26n)</code></td><td><code class="inline">O(26n)</code></td></tr>
+        <tr><td>Tarjan 求全部 LCA</td><td><code class="inline">O(n + m)</code></td><td><code class="inline">O(n + m)</code></td></tr>
+        <tr><td>单条查询做 26 次减法</td><td><code class="inline">O(26)</code></td><td><code class="inline">O(1)</code></td></tr>
+        <tr><td>合计</td><td><code class="inline">O(26(n + m))</code></td><td><code class="inline">O(26n + m)</code></td></tr>
+      </tbody>
+    </table>
+    <p>按题目上限算：n = 10⁴ 时 <code class="inline">weightCnt</code> 占 10⁴ × 27 × 4 ≈ 1.05 MiB，查询挂链 2 × 2 × 10⁴ 个 int 约 0.6 MiB。对照另一种选择：跳表方案要 n × 14 × 4 ≈ 0.54 MiB 的表加 O(log n) 一次查询，n = 10⁴、m = 2 × 10⁴ 的实测里倍增总共 2.56 ms、Tarjan 0.60 ms。查询不追加强制在线时，离线的 Tarjan 又快又省。</p>
+
+    <div class="viz">
+      <div class="viz-title">26 个计数器怎么相减</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">边权只有 1、2、3 三种的小树。选一条查询，点「下一步」，看三个计数器怎么摆出来、减完之后答案在哪。</p>
+      <svg id="pcSvg" viewBox="0 0 660 350" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="词频统计演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>路径经过的点</span>
+        <span><span class="dot partial"></span>被减掉两遍的 LCA</span>
+      </div>
+      <div class="breakdown" id="pcInfo"></div>
+      <div class="viz-controls">
+        <select class="pc-sel" id="pcQ">
+          <option value="0">3 → 5（权值 1 和 2 各两条）</option>
+          <option value="1">3 → 4（只隔两条边）</option>
+          <option value="2">4 → 5（三种权值混着）</option>
+          <option value="3">3 → 2（LCA 是根）</option>
+          <option value="4">2 → 5（一条边）</option>
+        </select>
+        <button class="pc-btn" id="pcPrev" type="button">上一步</button>
+        <button class="pc-btn" id="pcNext" type="button">下一步</button>
+        <button class="pc-btn" id="pcReset" type="button">重置</button>
+      </div>
+    </div>
+
+    <h2>六、最后</h2>
+    <p>这一页的三件事：把「数路径上的边」拆成「26 个权值各数一遍」；每个点存一份从根下来的前缀计数，路径词频用三次读数相减得到；查询全给齐时用 Tarjan 一趟 DFS 配并查集把 LCA 一次算完。</p>
+    <p>树退化成链时，逐条走路径的做法要 146 倍的时间；随机树上平均路径只有 15.77 条边、最长 31，两种做法差距不大，但题面不保证树长什么样，按最坏情况选就对了。</p>
+    <p>出现最多的权值平均只占 2.63 条边，也就是说 83% 的边都得改——这题真正的「工作量」全在改边上，统计本身便宜得很。</p>
+    <p>《完》</p>
+
+    <h2 id="prob-links">相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>LeetCode</td><td>边权相等的最小修改次数</td><td><a href="https://leetcode.cn/problems/minimum-edge-weight-equilibrium-queries-in-a-tree/" target="_blank">leetcode.cn/problems/minimum-edge-weight-equilibrium-queries-in-a-tree</a></td></tr>
+    </table>
+
+    <h2 id="refs">参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解119【扩展】树上问题专题2-树上倍增和LCA-下</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = { blue:'#2563eb', blueB:'#dbeafe', orange:'#ea580c', orangeB:'#ffedd5',
+            gray:'#9aa0a6', bg:'#f6f7f9', bd:'#e6e8eb', dark:'#1f2328', dim:'#6b7280' };
+  function el(id){ return document.getElementById(id); }
+  function mount(id, s){ var n = el(id); if (n) n.innerHTML = s; }
+  function T(x, y, s, o){
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 11) + '" fill="' + (o.fill || C.dark) +
+           (o.anchor ? '" text-anchor="' + o.anchor : '') + '"' + (o.bold ? ' font-weight="600"' : '') + '>' + s + '</text>';
+  }
+  function LN(x1, y1, x2, y2, o){
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.gray) +
+           '" stroke-width="' + (o.w || 1.3) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function CIR(x, y, r, o){
+    o = o || {};
+    return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + (o.fill || '#fff') +
+           '" stroke="' + (o.stroke || C.bd) + '" stroke-width="' + (o.w || 1.5) + '"/>';
+  }
+  function RECT(x, y, w, h, o){
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (o.rx || 8) +
+           '" fill="' + (o.fill || C.bg) + '" stroke="' + (o.stroke || C.bd) + '" stroke-width="1"/>';
+  }
+  function ARC(x1, y1, x2, y2, lift, o){
+    o = o || {};
+    var mx = (x1 + x2) / 2, my = (y1 + y2) / 2 - lift;
+    return '<path d="M ' + x1 + ' ' + y1 + ' Q ' + mx + ' ' + my + ' ' + x2 + ' ' + y2 +
+           '" fill="none" stroke="' + (o.stroke || C.orange) + '" stroke-width="' + (o.w || 1.6) + '"' +
+           (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+
+  /* ---------- 图 1：前缀计数相减 ---------- */
+  (function(){
+    var XY = {0:[110,60], 1:[70,150], 2:[150,150], 3:[40,240], 4:[110,240], 5:[190,240]};
+    var E = [[0,1,1],[0,2,2],[1,3,1],[1,4,3],[2,5,2]];
+    var g = '';
+    for (var i = 0; i < E.length; i++){
+      var e = E[i], A = XY[e[0]], B = XY[e[1]];
+      g += LN(A[0], A[1], B[0], B[1]);
+      var mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2;
+      g += RECT(mx + 8, my - 9, 16, 15, {rx:3, fill:'#fff'});
+      g += T(mx + 16, my + 3, String(e[2]), {anchor:'middle', size:10});
+    }
+    for (var k = 0; k <= 5; k++){
+      var p = XY[k];
+      var hot = (k === 3 || k === 5);
+      var isC = (k === 0);
+      g += CIR(p[0], p[1], 16, isC ? {fill:C.orangeB, stroke:C.orange} : hot ? {fill:C.blueB, stroke:C.blue} : {fill:'#fff', stroke:C.bd});
+      g += T(p[0], p[1] + 4, String(k), {anchor:'middle'});
+    }
+    g += T(XY[3][0] - 22, XY[3][1] - 18, 'a', {fill:C.blue, bold:true});
+    g += T(XY[5][0] + 24, XY[5][1] - 18, 'b', {fill:C.blue, bold:true});
+    g += T(XY[0][0] - 30, XY[0][1] - 16, 'c = 0', {fill:C.orange, bold:true, size:10, anchor:'end'});
+    // 右侧三份计数器
+    var tables = [
+      ['weightCnt[3]', [2, 0, 0], 380],
+      ['weightCnt[5]', [0, 2, 0], 500],
+      ['weightCnt[0]', [0, 0, 0], 380]
+    ];
+    g += T(380, 34, '权值 1 / 2 / 3 的计数', {size:10, fill:C.dim});
+    for (var t = 0; t < 3; t++){
+      var y = 50 + t * 40;
+      g += RECT(370, y, 240, 32, {fill:'#fff'});
+      g += T(382, y + 20, tables[t][0], {size:10});
+      for (var w = 0; w < 3; w++){
+        g += T(500 + w * 34, y + 20, String(tables[t][1][w]), {anchor:'middle', size:11, bold:true});
+      }
+    }
+    g += T(370, 196, '路径计数 = a + b − 2 × c', {size:10, fill:C.dim});
+    g += RECT(370, 206, 240, 32, {fill:C.orangeB, stroke:C.orange});
+    g += T(382, 226, '路径', {size:10});
+    for (var w2 = 0; w2 < 3; w2++){
+      g += T(500 + w2 * 34, 226, [2, 2, 0][w2], {anchor:'middle', size:11, bold:true, fill:C.orange});
+    }
+    g += T(370, 262, 'L = 4，最多那个权值有 2 条', {size:10, fill:C.dim});
+    g += T(370, 282, '改 4 − 2 = 2 条', {size:11, fill:C.orange, bold:true});
+    mount('figCnt', g);
+  })();
+
+  /* ---------- 图 2：Tarjan ---------- */
+  (function(){
+    var XY = {0:[110,60], 1:[70,150], 2:[150,150], 3:[40,240], 4:[110,240], 5:[190,240]};
+    var E = [[0,1],[0,2],[1,3],[1,4],[2,5]];
+    var g = '';
+    for (var i = 0; i < E.length; i++){
+      var A = XY[E[i][0]], B = XY[E[i][1]];
+      g += LN(A[0], A[1], B[0], B[1]);
+    }
+    for (var k = 0; k <= 5; k++){
+      var p = XY[k];
+      var done = (k === 3 || k === 4 || k === 1 || k === 5 || k === 2);
+      g += CIR(p[0], p[1], 16, done ? {fill:C.blueB, stroke:C.blue} : {fill:'#fff', stroke:C.bd});
+      g += T(p[0], p[1] + 4, String(k), {anchor:'middle'});
+    }
+    g += CIR(XY[0][0], XY[0][1], 20, {fill:'none', stroke:C.orange, w:2});
+    g += T(XY[0][0] + 30, XY[0][1] - 8, '正在退出 u = 0', {fill:C.orange, size:10, bold:true});
+    g += ARC(XY[0][0], XY[0][1], XY[3][0], XY[3][1], 60);
+    g += T(40, 108, '查询 (0, 3)', {size:10, fill:C.orange});
+    g += ARC(XY[0][0], XY[0][1], XY[5][0], XY[5][1], 90);
+    g += T(180, 96, '查询 (0, 5)', {size:10, fill:C.orange});
+    g += T(40, 285, '3、5 的子树都走完了：find(3) = 0，find(5) = 0', {size:10, fill:C.dim});
+    g += T(40, 285, '', {size:10});
+    g += T(370, 60, '退出 u 之前，并查集长这样', {bold:true});
+    var rows = [
+      ['find(3)', '0', '3 的子树走完了，一路指向 0'],
+      ['find(4)', '0', '同上'],
+      ['find(5)', '0', '2 的子树也走完了'],
+      ['find(1)', '0', '1 自己还没被挂到 0 上']
+    ];
+    for (var r = 0; r < rows.length; r++){
+      var y = 82 + r * 30;
+      g += RECT(360, y - 16, 260, 26, {fill:'#fff'});
+      g += T(372, y, rows[r][0], {size:10, bold:true});
+      g += T(440, y, '→ ' + rows[r][1], {size:10, fill:C.blue, bold:true});
+      g += T(370, y + 22, rows[r][2], {size:9, fill:C.dim});
+    }
+    g += T(360, 220, '这时挂在 0 上的查询 (0, v) 直接读 find(v)', {size:10, fill:C.dim});
+    g += T(360, 244, '答完之后才执行 father[0] = −1', {size:10, fill:C.dim});
+    mount('figTarjan', g);
+  })();
+
+  /* ---------- 图 3：两种统计方式的代价 ---------- */
+  (function(){
+    var g = '';
+    var groups = [
+      ['随机树：平均 15.77 条边', [['26 个计数器', 2.881, C.blue], ['沿路径逐条走', 5.619, C.gray]]],
+      ['一条链：平均 3339.96 条边', [['26 个计数器', 1.447, C.blue], ['沿路径逐条走', 211.601, C.gray]]]
+    ];
+    var mx = 211.601;
+    for (var gi = 0; gi < 2; gi++){
+      var baseY = 34 + gi * 110;
+      g += T(40, baseY, groups[gi][0], {size:11, bold:true});
+      for (var ri = 0; ri < 2; ri++){
+        var row = groups[gi][1][ri];
+        var y = baseY + 16 + ri * 26;
+        var wBar = 30 + 340 * row[1] / mx;
+        g += T(40, y + 13, row[0], {size:10});
+        g += RECT(170, y, wBar, 20, {fill:row[2], stroke:'none', rx:4});
+        g += T(180 + wBar, y + 14, row[1] + ' ms', {size:10, fill:row[2] === C.blue ? C.blue : C.dim, bold:true});
+      }
+    }
+    g += T(40, 268, '同一批 20000 条查询，n = 10000；链的那组相差 146 倍', {size:10, fill:C.dim});
+    mount('figCost', g);
+  })();
+
+  /* ---------- 演示 ---------- */
+  var PAR = {0:0, 1:0, 2:0, 3:1, 4:1, 5:2};
+  var XY = {0:[130,70], 1:[80,170], 2:[200,170], 3:[40,270], 4:[130,270], 5:[240,270]};
+  var EWD = [[0,1,1],[0,2,2],[1,3,1],[1,4,3],[2,5,2]];
+  var WMAX = 3;
+
+  function depOf(u){ var d = 0; while (u !== 0){ u = PAR[u]; d++; } return d; }
+  function lcaOf(a, b){
+    while (depOf(a) > depOf(b)) a = PAR[a];
+    while (depOf(b) > depOf(a)) b = PAR[b];
+    while (a !== b){ a = PAR[a]; b = PAR[b]; }
+    return a;
+  }
+  function cntOf(u){
+    var r = [0, 0, 0, 0];
+    while (u !== 0){
+      for (var i = 0; i < EWD.length; i++){
+        if (EWD[i][0] === PAR[u] && EWD[i][1] === u) r[EWD[i][2]]++;
+      }
+      u = PAR[u];
+    }
+    return r;
+  }
+
+  var QS = [[3,5],[3,4],[4,5],[3,2],[2,5]];
+  var cur = [3, 5], at = 0;
+
+  function buildSteps(){
+    var a = cur[0], b = cur[1], c = lcaOf(a, b);
+    var ca = cntOf(a), cb = cntOf(b), cc = cntOf(c);
+    var diff = [], all = 0, mx = 0, mxw = 0;
+    for (var w = 1; w <= WMAX; w++){
+      var v = ca[w] + cb[w] - 2 * cc[w];
+      diff.push(v);
+      all += v;
+      if (v > mx){ mx = v; mxw = w; }
+    }
+    return [
+      { t:'第 1 步：a = ' + a + '，b = ' + b + '，LCA = ' + c,
+        s:'先按 DFS 把每个点自己的计数器铺好（从根下来，拷父亲那份再加一）。', hot:{} },
+      { t:'第 2 步：weightCnt[' + a + '] = [' + ca.slice(1).join(', ') + ']',
+        s:'根到 ' + a + ' 一路上权值 1、2、3 各出现几次。', hot:{a:1} },
+      { t:'第 3 步：weightCnt[' + b + '] = [' + cb.slice(1).join(', ') + ']',
+        s:'b 这份同样从根铺下来。', hot:{b:1} },
+      { t:'第 4 步：weightCnt[' + c + '] = [' + cc.slice(1).join(', ') + ']',
+        s:'LCA 那份是两条根链重合的部分，一会儿要减两遍。', hot:{c:1} },
+      { t:'第 5 步：逐个权值相减',
+        s:'路径上权值 1、2、3 分别是 ' + diff.join('、') + ' 条，合计 L = ' + all + ' 条边。', hot:{c:1}, diff:diff },
+      { t:'第 6 步：答案',
+        s:'出现最多的是权值 ' + mxw + '，有 ' + mx + ' 条，全部留下；其余 ' + (all - mx) + ' 条各改一次。', hot:{c:1}, diff:diff }
+    ];
+  }
+  var STEPS = buildSteps();
+
+  function render(){
+    var st = STEPS[at];
+    var g = '';
+    for (var i = 0; i < EWD.length; i++){
+      var e = EWD[i], A = XY[e[0]], B = XY[e[1]];
+      g += LN(A[0], A[1], B[0], B[1]);
+      var mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2;
+      g += RECT(mx + 8, my - 9, 16, 15, {rx:3, fill:'#fff'});
+      g += T(mx + 16, my + 3, String(e[2]), {anchor:'middle', size:10});
+    }
+    for (var u = 0; u <= 5; u++){
+      var p = XY[u];
+      var isHot = (st.hot && st.hot[u]) || (st.hot && (u === cur[0] || u === cur[1]));
+      var isC = (st.hot && st.hot.c && u === lcaOf(cur[0], cur[1]));
+      g += CIR(p[0], p[1], 16, isC ? {fill:C.orangeB, stroke:C.orange} : isHot ? {fill:C.blueB, stroke:C.blue} : {fill:'#fff', stroke:C.bd});
+      g += T(p[0], p[1] + 4, String(u), {anchor:'middle'});
+    }
+    g += T(XY[cur[0]][0] - 22, XY[cur[0]][1] - 18, 'a', {fill:C.blue, bold:true});
+    g += T(XY[cur[1]][0] + 24, XY[cur[1]][1] - 18, 'b', {fill:C.blue, bold:true});
+    // 右侧表
+    if (at >= 1){
+      var c = lcaOf(cur[0], cur[1]);
+      var rows = [];
+      if (at >= 1) rows.push(['cnt[' + cur[0] + ']', cntOf(cur[0])]);
+      if (at >= 2) rows.push(['cnt[' + cur[1] + ']', cntOf(cur[1])]);
+      if (at >= 3) rows.push(['cnt[' + c + ']', cntOf(c)]);
+      if (at >= 4){
+        var ca = cntOf(cur[0]), cb = cntOf(cur[1]), cc = cntOf(c);
+        var d = [];
+        for (var w = 1; w <= WMAX; w++) d.push(ca[w] + cb[w] - 2 * cc[w]);
+        rows.push(['路径', d]);
+      }
+      g += T(340, 44, '权值 1 / 2 / 3', {size:10, fill:C.dim});
+      for (var r = 0; r < rows.length; r++){
+        var y = 58 + r * 34;
+        var last = (r === rows.length - 1 && at >= 4);
+        g += RECT(330, y - 16, 250, 30, {fill:last ? C.orangeB : '#fff', stroke:last ? C.orange : C.bd});
+        g += T(342, y + 4, rows[r][0], {size:10});
+        for (var w2 = 1; w2 <= WMAX; w2++){
+          g += T(480 + (w2 - 1) * 32, y + 5, String(rows[r][1][w2]), {anchor:'middle', size:11, bold:true, fill:last ? C.orange : C.dark});
+        }
+      }
+    }
+    if (at >= 5){
+      var c2 = lcaOf(cur[0], cur[1]);
+      var ca2 = cntOf(cur[0]), cb2 = cntOf(cur[1]), cc2 = cntOf(c2);
+      var all = 0, mxv = 0, mxw2 = 0;
+      for (var w3 = 1; w3 <= WMAX; w3++){
+        var v = ca2[w3] + cb2[w3] - 2 * cc2[w3];
+        all += v;
+        if (v > mxv){ mxv = v; mxw2 = w3; }
+      }
+      g += T(330, 220, 'L = ' + all + '，出现最多的权值是 ' + mxw2 + '（' + mxv + ' 条）', {size:10, fill:C.dim});
+      g += T(330, 240, '改 ' + (all - mxv) + ' 条', {size:12, fill:C.orange, bold:true});
+    }
+    mount('pcSvg', g);
+    mount('pcInfo', '<div><strong>' + st.t + '</strong></div><div>' + st.s + '</div>');
+    el('pcPrev').disabled = at === 0;
+    el('pcNext').disabled = at === STEPS.length - 1;
+  }
+  el('pcQ').addEventListener('change', function(){
+    cur = QS[parseInt(this.value, 10)];
+    STEPS = buildSteps();
+    at = 0;
+    render();
+  });
+  el('pcPrev').addEventListener('click', function(){ if (at > 0){ at--; render(); } });
+  el('pcNext').addEventListener('click', function(){ if (at < STEPS.length - 1){ at++; render(); } });
+  el('pcReset').addEventListener('click', function(){ at = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>
