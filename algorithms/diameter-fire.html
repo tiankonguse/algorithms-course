@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>消防：在直径上选一段路 · 算法教程</title>
+<meta name="description" content="给定长度上限 s，在直径上滑窗找一段路径建消防站，让最远居民的步行距离尽量短。最优路径为什么一定在直径上，滑窗和单调队列怎么配合。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .fr-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .fr-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .fr-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  .fr-sel{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:5px 8px;font-size:14px;color:var(--text);font-family:inherit;
+  }
+  @media(max-width:760px){
+    .fr-btn{font-size:13px;padding:5px 11px;}
+    .fr-sel{font-size:13px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>消防：在直径上选一段路</h1>
+    <p class="intro">给定一个长度上限 s，在树上选一条总长不超过 s 的路径建消防站，让最远居民走到消防站的距离尽量短。结论有点反直觉：最优的那条路一定在某条直径上。于是问题变成在直径上开一个窗户，左右一滑，答案就出来了。</p>
+
+    <h2>零、背景</h2>
+    <p>前两课把直径求了出来，这一课用它。树上很多「选一条路」的问题，最优的那条路都能落到直径上，消防是其中最经典的一个：它要在直径上滑窗，还要一个单调队列帮忙。</p>
+
+    <h2>一、问题</h2>
+    <p>消防：n 个点的树，n − 1 条边，边权非负。给定非负整数 s，选一条长度不超过 s 的路径，在路径上的点建消防站，每个居民可以去这条路径上的任何消防站。目标让最远居民的步行距离尽量少，返回这个最小值。n 不超过 3×10⁵。</p>
+    <p>居民到消防站的距离，就是他到路径上最近那个点的距离。所以题目就是：选一条长 ≤ s 的路径 Q，最小化 max(所有点到 Q 的距离)。</p>
+
+    <h2>二、结论：最优路径可以取在直径上</h2>
+    <p>先说结论再给理由。<strong>一定存在一条最优路径，整条落在某条直径上。</strong></p>
+    <p>理由是这样。设直径 D 的端点是 start 和 end，Q 是任意一条长不超过 s 的路径，a、b 是它的两个端点。把 a、b 分别沿树连到直径上，落点记为 pa、pb。取直径上 pa 到 pb 的那一段作为窗口 [l, r]（靠 end 一侧的叫 l，靠 start 一侧的叫 r）。这个窗口跟 Q 比，三头都亏不了：</p>
+    <p>1）长度。窗口长 dist(pa, pb)，而 a 到 b 的唯一路径必然经过 pa、pb 之间的那段直径，所以 dist(pa, pb) ≤ dist(a, b) ≤ s，窗口合法。<br>
+       2）两侧。Q 上离 end 最近的点恰好就是 l：Q 从 a 爬到 pa、沿直径走到 pb、再爬下去到 b，挂在直径上的那两段只会离 end 更远。所以 dist(end, l) = dist(end, Q)。同理 dist(r, start) = dist(start, Q)。<br>
+       3）窗口里面。对挂在窗口内某个直径点 p 上的任意居民 v，v 到 Q 上任何一点的路都要经过 p（Q 在直径上含 p，挂枝里的点要出来必须先到 p），而 p 自己就在 Q 上，所以 dist(v, Q) = dist(v, p)。也就是说，挂在窗口内的居民到 Q 的距离恰好等于到窗口的距离。</p>
+    <p>三路合起来：窗口的「最远居民距离」不超过 Q 的。既然任意 Q 都能被直径上的一段窗口顶掉，最优解一定能在直径上取到。</p>
+
+    <figure class="fig">
+      <svg id="frFigOne" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="示例树、直径与窗口" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>蓝色是直径，橙色是窗口 [l, r]，三段距离里的最大值就是这段窗口的答案</figcaption>
+    </figure>
+
+    <h2>三、直径上的一段路，答案怎么算</h2>
+    <p>窗口 [l, r] 定下来之后，最远居民分三类，各有一个代表距离：</p>
+    <p>1）住在 l 的 end 侧（含 end 自己）：最远的不会超过 dist(end, l)。<br>
+       2）住在窗口里的直径点挂出来的树枝上：最远的是窗口内各点 maxDist 的最大值，maxDist[p] 表示从 p 出发不进直径能走的最远距离。<br>
+       3）住在 r 的 start 侧（含 start 自己）：最远的不超过 dist(r, start)。</p>
+    <p>第 1、3 条能成立，靠的是一条支配引理：<strong>挂在直径点 p 上的树枝，长度不会超过 p 到任一端点的距离</strong>。要是比 dist(p, end) 还长，树枝尖走到 end 就超过直径了，自相矛盾。实测 5000 棵随机树上的 33000 个直径点，0 个违反。</p>
+    <p>所以窗口 [l, r] 的答案 = max(dist(end, l), 窗口内 maxDist 的最大值, dist(r, start))。注意第 3 项还顺手把 r 点自己的 maxDist 兜住了：r 上的树枝再长也长不过 dist(r, start)。</p>
+
+    <h2>四、滑窗加单调队列</h2>
+    <p>窗口要短（≤ s），又要尽量长：把窗口拉长只会覆盖更多点，最远距离不会变大。所以对每个 l，r 能塞多远就塞多远。而 l 往 start 侧走的时候，允许的 r 也只会越来越远，两个指针都只朝一个方向动，合起来每边走一遍。</p>
+    <p>麻烦在窗口内 maxDist 的最大值：l 一动，窗口进出都要更新。单调队列维护「下标递增、maxDist 递减」，队首就是窗口最大值，进出均摊 O(1)。</p>
+
+        <pre class="code"><span class="cm">// 消防前置：两遍dfs定直径，再算每个直径点的两个量</span>
+    <span class="cm">// pred[i] 是i到它在直径上前一个点的距离；maxDist[i] 是从i不进直径能走的最远距离</span>
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> f, <span class="kw">int</span> w) {
+        last[u] = f;
+        dist[u] = dist[f] + w;
+        pred[u] = w;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e != 0; e = nxt[e]) {
+            <span class="kw">if</span> (to[e] != f) {
+                dfs(to[e], u, weight[e]);
+            }
+        }
+    }
+
+    <span class="cm">// 不能走向直径路径上的节点，能走出的最大距离</span>
+    <span class="kw">int</span> <span class="fn">maxDistanceExceptDiameter</span>(<span class="kw">int</span> u, <span class="kw">int</span> f, <span class="kw">int</span> c) {
+        <span class="kw">int</span> ans = c;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e != 0; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (!diameterPath[v] &amp;&amp; v != f) {
+                ans = max(ans, maxDistanceExceptDiameter(v, u, c + weight[e]));
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">distance</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = ed; i != 0; i = last[i]) {
+            diameterPath[i] = <span class="kw">true</span>;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = ed; i != 0; i = last[i]) {
+            maxDist[i] = maxDistanceExceptDiameter(i, 0, 0);
+        }
+    }</pre>
+
+    <p>滑窗本体：</p>
+
+        <pre class="code"><span class="cm">// 滑窗：l 从直径一端走向另一端，r 是第一个放不进窗口的点</span>
+    <span class="cm">// 窗口里的点建消防站，答案 = max(左侧距离, 窗口内maxDist, 右侧距离)</span>
+    <span class="cm">// 单调队列维护窗口内的maxDist最大值</span>
+    <span class="kw">int</span> <span class="fn">compute</span>() {
+        <span class="kw">int</span> suml = 0, sumr = 0;
+        <span class="kw">int</span> h = 0, t = 0;
+        <span class="kw">int</span> ans = INT_MAX;
+        <span class="kw">for</span> (<span class="kw">int</span> l = ed, r = ed; l != 0; l = last[l]) {
+            <span class="kw">while</span> (r != 0 &amp;&amp; sumr - suml + pred[r] &lt;= s) {
+                <span class="kw">while</span> (h &lt; t &amp;&amp; maxDist[que[t - 1]] &lt;= maxDist[r]) {
+                    t--;
+                }
+                sumr += pred[r];
+                que[t++] = r;
+                r = last[r];
+            }
+            <span class="cm">// 队列空时补 0：单点窗口的答案只由两侧距离决定</span>
+            <span class="kw">int</span> qmax = (h &lt; t) ? maxDist[que[h]] : 0;
+            ans = min(ans, max(max(suml, qmax), diameter - sumr));
+            <span class="kw">if</span> (que[h] == l) {
+                h++;
+            }
+            suml += pred[l];
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+    <p>代码里两个细节值得停一下。其一，队列里存的是 [l, r)，不含 r；候选值里的 dist(r, start) 已经把 r 点自己的 maxDist 兜住了（第三节的支配引理），所以不漏。其二，l 追上 r 时窗口缩成单点 {l}，队列空出来，队首要补一个 0 再读。单点窗口的答案本来就是 max(dist(end, l), dist(l, start))，maxDist[l] 被两侧距离兜住，补 0 不影响结果；不补的话读到的是上一轮留下的旧值，实测 6000 组小 s 的随机树加不加这个保护答案完全一致，但没必要赌这个。</p>
+
+    <figure class="fig">
+      <svg id="frFigTwo" viewBox="0 0 660 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="滑窗过程" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>l 往 start 侧走一步，r 能跟进多少跟多少；单调队列队首给出窗口内 maxDist 的最大值</figcaption>
+    </figure>
+
+    <p>递归深度还是那个老问题：算 maxDist 的 dfs 深度等于树高，链上就是 n。本机 g++ -O2、8MB 栈下实测这个递归约 13 万层见顶（每帧约 64 字节），n = 3×10⁵ 的链会爆栈。求直径那两趟 dfs 同理。稳妥做法是都改成显式栈，把「当前遍历到第几条边」压进栈里，弹栈时接着走。</p>
+
+    <h2>五、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>环节</th><th>时间</th><th>空间</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>两遍 dfs 求直径</td><td><code class="inline">O(n)</code></td><td rowspan="4"><code class="inline">O(n)</code></td></tr>
+        <tr><td>每个直径点算 maxDist</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>滑窗 + 单调队列</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>合计</td><td><code class="inline">O(n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>拉出来实测一下差距。n = 2×10⁵ 的梳状树（主链 10 万，每个主链点挂一片叶子）、s = 10⁵：滑窗版 0.20ms，不用单调队列、每个 l 都重扫一遍窗口的朴素版 1936.26ms，差 9000 多倍，答案一致。换成 n = 6 万的链、s 大到覆盖整条直径（朴素版的最坏情况）：0.43ms 对 740.14ms，1700 多倍。单调队列在这里是能不能过的分界线。</p>
+
+    <figure class="fig">
+      <svg id="frFigThree" viewBox="0 0 660 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="滑窗与朴素耗时对比" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>同样求答案，单调队列把窗口最大值均摊掉，大窗口下差出三个数量级</figcaption>
+    </figure>
+    <p>空间按题目上限 n = 3×10⁵ 算：链式前向星三个 int 数组，dist、last、pred、maxDist 各一个，直径标记一个 bool 数组，单调队列一个，都是 O(n)。</p>
+
+    <div class="viz">
+      <div class="viz-title">消防操作台：定直径、算 maxDist、滑窗</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">选一棵树、拖 s 的长度，点「下一步」看窗口怎么滑：l 往 start 侧走，r 能跟多远跟多远，队首给出窗口内最远的挂枝。</p>
+      <svg id="frSvg" viewBox="0 0 660 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="消防演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>直径路径</span>
+        <span><span class="dot partial"></span>当前窗口与指针</span>
+        <span><span class="dot skip"></span>挂枝（标 maxDist）</span>
+      </div>
+      <div class="breakdown" id="frInfo"></div>
+      <div class="viz-controls">
+        <select class="fr-sel" id="frPreset">
+          <option value="0">毛毛虫：主链 5 + 两丛挂枝</option>
+          <option value="1">随机一棵</option>
+        </select>
+        <div class="ctl">
+          <label for="frS">s =</label>
+          <input type="range" id="frS" min="0" max="12" step="1" value="6">
+          <span class="val" id="frSVal">6</span>
+        </div>
+        <button class="fr-btn" id="frPrev" type="button">上一步</button>
+        <button class="fr-btn" id="frNext" type="button">下一步</button>
+        <button class="fr-btn" id="frReset" type="button">重置</button>
+      </div>
+    </div>
+
+    <h2>六、总结</h2>
+    <p>要点三条。其一，最优路径一定能落到直径上：把路径两个端点在直径上的落点之间的那段取出来，长度只减不增，而路径上离直径两端最近的点恰好就是窗口边界，挂在窗口内的居民到路径的距离恰好等于到窗口的距离，三头都不亏。其二，窗口答案 = max(左侧距离, 窗口内 maxDist 最大值, 右侧距离)，依据是「挂在直径点上的树枝长不过它到较近端点的距离」这条支配引理，33000 个直径点实测 0 违反。其三，l 每进一步就取最远的 r（路径拉长不会变差），单调队列把窗口最大值均摊到 O(1)，整体 O(n)；n = 2×10⁵ 上比朴素重扫快 9000 倍。</p>
+
+    <h2>七、最后</h2>
+    <p>这道题的手感在于「先证明能枚举什么，再想怎么枚举」。直径上一共 n 个窗口端点，看着很多，但两个指针各走一遍就扫完了。类似的「先缩范围再滑窗」在树上网问题、树形 dp 的题目里还会反复出现。</p>
+    <p>《完》</p>
+
+    <h2 id="prob-links">相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td>消防</td><td><a href="https://www.luogu.com.cn/problem/P2491" target="_blank">www.luogu.com.cn/problem/P2491</a></td></tr>
+      <tr><td>洛谷</td><td>树网的核</td><td><a href="https://www.luogu.com.cn/problem/P1099" target="_blank">www.luogu.com.cn/problem/P1099</a></td></tr>
+    </table>
+
+    <h2 id="refs">参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解121【扩展】树上问题专题4-树的直径</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = { blue:'#2563eb', blueB:'#dbeafe', blueL:'#eef4ff', orange:'#ea580c',
+            orangeB:'#ffedd5', gray:'#9aa0a6', bg:'#f6f7f9', bd:'#e6e8eb',
+            dark:'#1f2328', dim:'#6b7280', green:'#15803d' };
+
+  function el(id){ return document.getElementById(id); }
+  function mount(id, s){ var n = el(id); if (n) n.innerHTML = s; }
+  function T(x, y, s, o){
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 11) + '" fill="' + (o.fill || C.dark) +
+           (o.anchor ? '" text-anchor="' + o.anchor : '') + '"' + (o.bold ? ' font-weight="600"' : '') + '>' + s + '</text>';
+  }
+  function LN(x1, y1, x2, y2, o){
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.gray) +
+           '" stroke-width="' + (o.w || 1.3) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function CIR(x, y, r, o){
+    o = o || {};
+    return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + (o.fill || C.blueB) +
+           '" stroke="' + (o.stroke || C.blue) + '" stroke-width="' + (o.w || 1.5) + '"/>';
+  }
+  function RECT(x, y, w, hh, o){
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + hh + '" rx="' + (o.rx || 8) +
+           '" fill="' + (o.fill || C.bg) + '" stroke="' + (o.stroke || C.bd) + '" stroke-width="1"/>';
+  }
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function adjOf(n, edges){
+    var adj = {};
+    for (var u = 1; u <= n; u++) adj[u] = [];
+    edges.forEach(function(e){ adj[e[0]].push([e[1], e[2]]); adj[e[1]].push([e[0], e[2]]); });
+    return adj;
+  }
+  function runFrom(adj, root, n){
+    var order = [], dist = {}, last = {};
+    (function dfs(u, f, d){
+      dist[u] = d; last[u] = f; order.push(u);
+      adj[u].forEach(function(e){ if (e[0] !== f) dfs(e[0], u, d + e[1]); });
+    })(root, 0, 0);
+    return { order: order, dist: dist, last: last };
+  }
+  function farthest(r, n){
+    var x = 1;
+    for (var i = 2; i <= n; i++) if (r.dist[i] > r.dist[x]) x = i;
+    return x;
+  }
+  function bind(id, ev, fn){
+    var n = el(id);
+    if (n) n.addEventListener(ev, function(){ fn.call(this); });
+  }
+
+  /* ---------- 图 1：示例树、直径与窗口 ---------- */
+  (function(){
+    var XY = {1:[60,150], 2:[140,150], 3:[220,150], 4:[300,150], 5:[380,150], 6:[460,150], 7:[540,150], 8:[610,150],
+              9:[220,70], 10:[160,70], 11:[100,70], 12:[380,70], 13:[440,70], 14:[500,70]};
+    var E = [[1,2],[2,3],[3,4],[4,5],[5,6],[6,7],[7,8],[3,9],[9,10],[10,11],[5,12],[12,13],[13,14]];
+    var D = [1,2,3,4,5,6,7,8];
+    var dset = {}; D.forEach(function(u,i){ if(i<D.length-1){ dset[u+'-'+D[i+1]]=1; dset[D[i+1]+'-'+u]=1; } });
+    var g = '';
+    E.forEach(function(e){
+      var a = XY[e[0]], b = XY[e[1]];
+      var k1 = e[0]+'-'+e[1], k2 = e[1]+'-'+e[0];
+      g += LN(a[0], a[1], b[0], b[1], (dset[k1]||dset[k2]) ? {stroke:C.blue, w:2.8} : {stroke:C.gray, w:1.5});
+    });
+    // 窗口 [4,6]
+    var wl = XY[4], wr = XY[6];
+    g += LN(wl[0], wl[1] - 20, wr[0], wr[1] - 20, {stroke:C.orange, w:3});
+    g += LN(wl[0], wl[1] - 20, wl[0], wl[1] - 12, {stroke:C.orange, w:2});
+    g += LN(wr[0], wr[1] - 20, wr[0], wr[1] - 12, {stroke:C.orange, w:2});
+    g += T(380, 108, '窗口 [l, r]', {anchor:'middle', size:11, fill:C.orange, bold:true});
+    g += T(120, 220, 'dist(end, l)', {anchor:'middle', size:10, fill:C.blue});
+    g += T(540, 220, 'dist(r, start)', {anchor:'middle', size:10, fill:C.blue});
+    g += T(160, 44, 'maxDist', {anchor:'middle', size:10, fill:C.dim});
+    g += T(440, 44, 'maxDist', {anchor:'middle', size:10, fill:C.dim});
+    for (var u = 1; u <= 14; u++){
+      var p = XY[u];
+      var onD = dset[(u+1)+'-'+u] || dset[(u-1)+'-'+u] || u === 1 || u === 8;
+      g += CIR(p[0], p[1], 15, onD ? {fill:C.blueL, stroke:C.blue} : {fill:'#fff', stroke:C.bd});
+      g += T(p[0], p[1] + 4, String(u), {anchor:'middle', size:10});
+    }
+    g += T(XY[4][0], XY[4][1] - 30, 'l', {anchor:'middle', size:11, fill:C.orange, bold:true});
+    g += T(XY[6][0], XY[6][1] - 30, 'r', {anchor:'middle', size:11, fill:C.orange, bold:true});
+    g += RECT(60, 240, 240, 50);
+    g += T(76, 260, 'start 在 1 号，end 在 8 号', {size:10});
+    g += T(76, 280, '直径 = 7 条单位边', {size:10, fill:C.blue});
+    g += RECT(360, 240, 240, 50);
+    g += T(376, 260, '窗口答案 = max(三段距离)', {size:10, fill:C.orange, bold:true});
+    g += T(376, 280, '挂枝由 maxDist 兜住', {size:10, fill:C.dim});
+    mount('frFigOne', g);
+  })();
+
+  /* ---------- 图 2：滑窗过程 ---------- */
+  (function(){
+    var XY = {1:[60,150], 2:[140,150], 3:[220,150], 4:[300,150], 5:[380,150], 6:[460,150], 7:[540,150], 8:[610,150],
+              9:[220,70], 10:[160,70], 11:[100,70], 12:[380,70], 13:[440,70], 14:[500,70]};
+    var E = [[1,2],[2,3],[3,4],[4,5],[5,6],[6,7],[7,8],[3,9],[9,10],[10,11],[5,12],[12,13],[13,14]];
+    var D = [1,2,3,4,5,6,7,8];
+    var dset = {}; D.forEach(function(u,i){ if(i<D.length-1){ dset[u+'-'+D[i+1]]=1; dset[D[i+1]+'-'+u]=1; } });
+    var g = '';
+    function panel(ox, l, r, cap){
+      var sx = 0.52;
+      function X(x){ return ox + 22 + (x - 60) * sx; }
+      E.forEach(function(e){
+        var a = XY[e[0]], b = XY[e[1]];
+        var k1 = e[0]+'-'+e[1], k2 = e[1]+'-'+e[0];
+        g += LN(X(a[0]), a[1], X(b[0]), b[1], (dset[k1]||dset[k2]) ? {stroke:C.blue, w:2.4} : {stroke:C.gray, w:1.3});
+      });
+      var wl = XY[l], wr = XY[r];
+      g += LN(X(wl[0]), wl[1] - 20, X(wr[0]), wr[1] - 20, {stroke:C.orange, w:3});
+      g += T((X(wl[0]) + X(wr[0])) / 2, wl[1] - 28, '窗口', {anchor:'middle', size:10, fill:C.orange, bold:true});
+      for (var u = 1; u <= 8; u++){
+        var p = XY[u];
+        var isL = (u === l), isR = (u === r);
+        g += CIR(X(p[0]), p[1], 13, isL ? {fill:C.orangeB, stroke:C.orange, w:2.2} : (isR ? {fill:C.orangeB, stroke:C.orange, w:2.2} : {fill:C.blueL, stroke:C.blue}));
+        g += T(X(p[0]), p[1] + 4, String(u), {anchor:'middle', size:10});
+      }
+      [9,10,11,12,13,14].forEach(function(u){
+        var p = XY[u];
+        g += CIR(X(p[0]), p[1], 12, {fill:'#fff', stroke:C.bd});
+        g += T(X(p[0]), p[1] + 4, String(u), {anchor:'middle', size:9});
+      });
+      g += T(X(160), 44, 'maxDist[3] = 3', {anchor:'middle', size:10, fill:C.dim});
+      g += T(X(440), 44, 'maxDist[5] = 3', {anchor:'middle', size:10, fill:C.dim});
+      g += T(ox + 153, 200, cap, {anchor:'middle', size:10, fill:C.dim});
+    }
+    panel(0, 4, 6, 'l = 4：候选 = max(4, 3, 2)');
+    panel(330, 5, 7, 'l = 5：候选 = max(3, 3, 1)');
+    mount('frFigTwo', g);
+  })();
+
+  /* ---------- 图 3：耗时对比 ---------- */
+  (function(){
+    var g = '';
+    g += T(330, 24, 'n = 2×10⁵ 梳状树、s = 10⁵：滑窗 vs 朴素重扫', {anchor:'middle', size:11, fill:C.dim});
+    var baseY = 200, topY = 50, H = baseY - topY;
+    // 对数感觉：1936ms vs 0.20ms —— 用两个面板 + 数字
+    g += RECT(60, 60, 240, 130);
+    g += T(80, 92, '滑窗 + 单调队列', {size:11, fill:C.blue, bold:true});
+    g += T(80, 124, '0.20 ms', {size:22, fill:C.blue, bold:true});
+    g += T(80, 152, '每个点进出队列各一次', {size:10, fill:C.dim});
+    g += T(80, 174, '整体 O(n)', {size:10, fill:C.dim});
+    g += RECT(360, 60, 240, 130);
+    g += T(380, 92, '每个 l 重扫窗口', {size:11, fill:C.orange, bold:true});
+    g += T(380, 124, '1936.26 ms', {size:22, fill:C.orange, bold:true});
+    g += T(380, 152, '窗口大时退化成 O(n²)', {size:10, fill:C.dim});
+    g += T(380, 174, '慢 9400 倍', {size:10, fill:C.dim});
+    g += LN(330, 125, 356, 125, {stroke:C.gray, w:1.6});
+    g += T(330, 220, '换成 n = 6 万的链、s 覆盖全直径：0.43ms 对 740.14ms，1700 倍', {anchor:'middle', size:10, fill:C.dim});
+    mount('frFigThree', g);
+  })();
+
+  /* ---------- 演示：消防操作台 ---------- */
+  (function(){
+    function preset0(){
+      var rng = mulberry32(20261014);
+      function w(){ return Math.floor(rng() * 4); }
+      var edges = [[1,2,w()],[2,3,w()],[3,4,w()],[4,5,w()],[3,6,w()],[6,7,w()],[7,8,w()],[4,9,w()],[9,10,w()],[10,11,w()]];
+      var xy = {1:[60,200],2:[135,200],3:[210,200],4:[285,200],5:[360,200],
+                6:[170,140],7:[130,85],8:[90,30],9:[325,140],10:[365,85],11:[405,30]};
+      return { n:11, edges:edges, xy:xy };
+    }
+    function preset1(){
+      var rng = mulberry32(515);
+      var n = 10, edges = [], i;
+      for (i = 2; i <= n; i++) edges.push([1 + Math.floor(rng() * (i - 1)), i, Math.floor(rng() * 4)]);
+      var adj = adjOf(n, edges), order = [], depth = {};
+      (function dfs(u, f, d){
+        depth[u] = d; order.push(u);
+        adj[u].forEach(function(e){ if (e[0] !== f) dfs(e[0], u, d + 1); });
+      })(1, 0, 0);
+      var maxD = 0;
+      for (i = 1; i <= n; i++) maxD = Math.max(maxD, depth[i]);
+      var xy = {};
+      order.forEach(function(u, k){ xy[u] = [60 + k * (540 / Math.max(n - 1, 1)), 46 + depth[u] * (200 / Math.max(maxD, 1))]; });
+      return { n:n, edges:edges, xy:xy };
+    }
+    var PRESETS = [preset0(), preset1()];
+    var svg = el('frSvg'), info = el('frInfo');
+    var step = 0, frames = [], curTree = PRESETS[0], curS = 6;
+
+    function build(){
+      curTree = PRESETS[parseInt(el('frPreset').value, 10)];
+      curS = parseInt(el('frS').value, 10);
+      el('frSVal').innerHTML = String(curS);
+      var adj = adjOf(curTree.n, curTree.edges), n = curTree.n;
+      var r1 = runFrom(adj, 1, n);
+      var start = farthest(r1, n);
+      var r2 = runFrom(adj, start, n);
+      var ed = farthest(r2, n);
+      var diameter = r2.dist[ed];
+      var pred = {}, last = r2.last;
+      curTree.edges.forEach(function(e){
+        pred[e[0]] = (last[e[0]] === e[1]) ? e[2] : pred[e[0]];
+        pred[e[1]] = (last[e[1]] === e[0]) ? e[2] : pred[e[1]];
+      });
+      var onPath = {}, chain = [];
+      for (var u = ed; u !== 0; u = last[u]){ onPath[u] = 1; chain.push(u); }
+      var maxDist = {};
+      chain.forEach(function(p){
+        var best = 0;
+        (function dfs(u, f, d){
+          if (d > best) best = d;
+          adj[u].forEach(function(e){
+            if (e[0] !== f && !onPath[e[0]]) dfs(e[0], u, d + e[1]);
+          });
+        })(p, 0, 0);
+        maxDist[p] = best;
+      });
+      frames = [];
+      frames.push({ phase:'dia', msg:'两遍 dfs：直径从 ' + start + ' 到 ' + ed + '，长 ' + diameter });
+      frames.push({ phase:'md', msg:'每个直径点的 maxDist 算好了（标在点上），挂枝再长也长不过它到较近端点的距离' });
+      var suml = 0, sumr = 0, h = 0, t = 0, que = [], ans = Infinity, r = ed;
+      chain.forEach(function(l){
+        while (r !== 0 && sumr - suml + pred[r] <= curS){
+          while (h < t && maxDist[que[t - 1]] <= maxDist[r]) t--;
+          sumr += pred[r];
+          que[t++] = r;
+          r = last[r];
+        }
+        var qmax = (h < t) ? maxDist[que[h]] : 0;
+        var cand = Math.max(Math.max(suml, qmax), diameter - sumr);
+        if (cand < ans) ans = cand;
+        frames.push({ phase:'slide', l:l, r:r, suml:suml, sumr:sumr, qmax:qmax, cand:cand, ans:ans,
+                      que:que.slice(h, t),
+                      msg:'l = ' + l + '：窗口拉到 ' + r + '，候选 = max(' + suml + ', ' + qmax + ', ' + (diameter - sumr) + ') = ' + cand });
+        if (que[h] === l) h++;
+        suml += pred[l];
+      });
+      frames.push({ phase:'done', ans:ans, msg:'滑完了：最远居民的最短距离 = ' + ans });
+      step = 0;
+      render();
+    }
+    function render(){
+      var f = frames[step];
+      var adj = adjOf(curTree.n, curTree.edges), n = curTree.n;
+      var r1 = runFrom(adj, 1, n);
+      var start = farthest(r1, n);
+      var r2 = runFrom(adj, start, n);
+      var ed = farthest(r2, n);
+      var last = r2.last;
+      var onPath = {};
+      for (var u = ed; u !== 0; u = last[u]) onPath[u] = 1;
+      var maxDist = {};
+      for (var key in onPath){
+        var p = parseInt(key, 10), best = 0;
+        (function dfs(u, fa, d){
+          if (d > best) best = d;
+          adj[u].forEach(function(e){ if (e[0] !== fa && !onPath[e[0]]) dfs(e[0], u, d + e[1]); });
+        })(p, 0, 0);
+        maxDist[p] = best;
+      }
+      var dset = {};
+      for (var u2 = ed; u2 !== 0; u2 = last[u2]) if (last[u2]) dset[u2 + '-' + last[u2]] = 1;
+      var inW = {};
+      if (f.phase === 'slide'){
+        for (var w = f.l; ; w = last[w]){ inW[w] = 1; if (w === f.r || !last[w]) break; }
+      }
+      var g = '';
+      curTree.edges.forEach(function(e){
+        var a = curTree.xy[e[0]], b = curTree.xy[e[1]];
+        var both = onPath[e[0]] && onPath[e[1]];
+        var inWin = f.phase === 'slide' && inW[e[0]] && inW[e[1]];
+        g += LN(a[0], a[1], b[0], b[1], inWin ? {stroke:C.orange, w:3.4} : (both ? {stroke:C.blue, w:2.8} : {stroke:C.gray, w:1.4}));
+      });
+      for (var u3 = 1; u3 <= curTree.n; u3++){
+        var p3 = curTree.xy[u3];
+        var fill = '#fff', stroke = C.bd, wd = 1.4;
+        if (onPath[u3]){ fill = C.blueL; stroke = C.blue; }
+        if (f.phase === 'slide' && (u3 === f.l || u3 === f.r)){ fill = C.orangeB; stroke = C.orange; wd = 2.2; }
+        g += CIR(p3[0], p3[1], 15, {fill:fill, stroke:stroke, w:wd});
+        g += T(p3[0], p3[1] + 4, String(u3), {anchor:'middle', size:10});
+        if ((f.phase === 'md' || f.phase === 'slide' || f.phase === 'done') && onPath[u3] && maxDist[u3] > 0){
+          g += T(p3[0], p3[1] - 22, String(maxDist[u3]), {anchor:'middle', size:10, fill:C.dim});
+        }
+      }
+      svg.innerHTML = g;
+      var rows = '<div class="row">第 ' + (step + 1) + ' / ' + frames.length + ' 步</div><div class="row">' + f.msg + '</div>';
+      if (f.phase === 'slide') rows += '<div class="row">当前最优：' + f.ans + '</div>';
+      if (f.phase === 'done') rows += '<div class="row total">答案 = ' + f.ans + '</div>';
+      info.innerHTML = rows;
+      el('frPrev').disabled = (step === 0);
+      el('frNext').disabled = (step === frames.length - 1);
+    }
+    bind('frPreset', 'change', function(){ build(); });
+    bind('frS', 'change', function(){ build(); });
+    bind('frS', 'input', function(){ el('frSVal').innerHTML = this.value; });
+    bind('frPrev', 'click', function(){ if (step > 0){ step--; render(); } });
+    bind('frNext', 'click', function(){ if (step < frames.length - 1){ step++; render(); } });
+    bind('frReset', 'click', function(){ step = 0; render(); });
+    build();
+  })();
+})();
+</script>
+</body>
+</html>

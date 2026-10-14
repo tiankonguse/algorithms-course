@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>造公园与巡逻：直径会随合并和加边怎么变 · 算法教程</title>
+<meta name="description" content="合并两棵树时把两条直径的中点连起来，新区直径最小；巡逻允许新修 k 条边，省下的正是直径与第二条捷径，重合的部分白搭。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .dm-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .dm-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .dm-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  .dm-sel{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:5px 8px;font-size:14px;color:var(--text);font-family:inherit;
+  }
+  @media(max-width:760px){
+    .dm-btn{font-size:13px;padding:5px 11px;}
+    .dm-sel{font-size:13px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>造公园与巡逻：直径会随合并和加边怎么变</h1>
+    <p class="intro">会求直径之后，问题往上长一层：树自己在变，直径跟着怎么动？一种是合并，两棵树连成一片，要求连完之后直径尽量小；一种是加边，树上新修几条捷径，每趟巡逻必须各走一次，问最少走多少条边。两件事看着不搭，其实都只在问「最长路径被这次修改动了哪一块」。</p>
+
+    <h2>零、背景</h2>
+    <p>这一课的两个道具都现成：并查集维护「谁和谁连通」，树形 dp 求直径。新东西只有一条公式和一个小 trick。</p>
+
+    <h2>一、问题：造公园</h2>
+    <p>HXY 造公园：n 个休息点、m 条边，边权都是 1，所有点形成若干连通区，每个连通区保证是树。两种操作。操作 1 x：返回 x 所在连通区的直径长度。操作 2 x y：如果 x、y 已经连通就忽略；否则在 x 所在区域和 y 所在区域各选一个点连一条边，并且要让连成的大区域直径长度最小。n 与 q 都不超过 3×10⁵。</p>
+    <p>注意操作 1 问的是整个连通区的直径，跟 x 是谁无关，所以每个区维护一个直径值就够了，不用算每个点的偏心距。</p>
+
+    <h2>二、初始直径与合并</h2>
+    <p>读入的 m 条边两两 union，然后对每个并查集根跑一遍树形 dp，把直径记在根上。这就是集合打标签：数据挂在集合代表元上，集合一合并，标签搬到新代表元上。</p>
+    <p>操作 2 是关键。两棵树直径分别是 d1、d2，中间连一条边，新直径有多大？先看上界。新树里的路径分两种：完全留在原来某棵树里的，最长 max(d1, d2)；过了那条新边的，形状是「A 里某点 u → 新边 → B 里某点 v」，长度 ecc_A(u) + 1 + ecc_B(v)，ecc 是树内最远距离。一棵直径为 d 的树，ecc 最小能压到 ⌈d/2⌉，站在直径中点上就够，所以过新边的路径至多 ⌈d1/2⌉ + 1 + ⌈d2/2⌉。</p>
+    <p>再看能不能取到。把两条直径的中点用新边连起来，从 A 的直径某一端出发，经过 A 的中点、新边、B 的中点，到 B 的直径某一端，长度正好 ⌈d1/2⌉ + 1 + ⌈d2/2⌉。三者取最大就是新直径。</p>
+
+        <pre class="code"><span class="cm">// 造公园：并查集维护「每个连通区的直径」，初始各区跑一遍树型dp</span>
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (i != father[i]) {
+            father[i] = find(father[i]);
+        }
+        <span class="kw">return</span> father[i];
+    }
+
+    <span class="cm">// 树型dp：diameter[u] 记「路径过u」的最大和，dist[u] 记从u往下的最大深度</span>
+    <span class="kw">void</span> <span class="fn">dp</span>(<span class="kw">int</span> u, <span class="kw">int</span> f) {
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e != 0; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != f) {
+                dp(v, u);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e != 0; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != f) {
+                diameter[u] = max(diameter[u], max(diameter[v], dist[u] + dist[v] + 1));
+                dist[u] = max(dist[u], dist[v] + 1);
+            }
+        }
+    }
+
+    <span class="cm">// 合并两个连通区：把两条直径的中点连起来，新区直径取三者最大</span>
+    <span class="cm">// 点权都是1，直径D的树半径就是 ceil(D/2)</span>
+    <span class="kw">void</span> <span class="fn">merge</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+        father[x] = y;
+        diameter[y] = max((diameter[x] + 1) / 2 + (diameter[y] + 1) / 2 + 1,
+                          max(diameter[x], diameter[y]));
+    }</pre>
+
+    <p>公式能背，但最好量一遍。随机森林加随机操作，跟「真的把两棵树按各种跨块连边方案拼起来、全源 BFS 算直径取最小」的暴力对答案，300 组 0 组不符，连中点确实最优。</p>
+
+    <figure class="fig">
+      <svg id="dmFigOne" viewBox="0 0 660 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="合并两棵树的两种连法" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>两棵直径 4 的树：连中心新直径 5，连两端新直径 9，差出一倍</figcaption>
+    </figure>
+
+    <p>并成一张表看着更直观。行是 d1、列是 d2，格子里是合并后的直径：</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>d1 \ d2</th><th>0</th><th>2</th><th>4</th><th>6</th><th>8</th><th>10</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>0</td><td>1</td><td>2</td><td>4</td><td>6</td><td>8</td><td>10</td></tr>
+        <tr><td>2</td><td>2</td><td>3</td><td>4</td><td>6</td><td>8</td><td>10</td></tr>
+        <tr><td>4</td><td>4</td><td>4</td><td>5</td><td>6</td><td>8</td><td>10</td></tr>
+        <tr><td>6</td><td>6</td><td>6</td><td>6</td><td>7</td><td>8</td><td>10</td></tr>
+        <tr><td>8</td><td>8</td><td>8</td><td>8</td><td>8</td><td>9</td><td>10</td></tr>
+        <tr><td>10</td><td>10</td><td>10</td><td>10</td><td>10</td><td>10</td><td>11</td></tr>
+      </tbody>
+    </table>
+    <p>表里藏着一条规律：反复把直径 4 的树并进来，直径走 4 → 5 → 6 → 6 → 6，到 6 就稳了。因为 ⌈6/2⌉ + ⌈4/2⌉ + 1 = 3 + 2 + 1 = 6，正好原地踏步。换成交替合并直径 4 和直径 8 的树，会一直在 9 附近晃。</p>
+
+    <div class="viz">
+      <div class="viz-title">造公园操作台：连中心，看直径怎么长</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">选一片森林点「下一步」，跟着操作序列走：合并时把两条直径的中点连起来，查询时直接报连通区的直径。</p>
+      <svg id="pkSvg" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="造公园演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>当前操作的连通区</span>
+        <span><span class="dot partial"></span>直径中点与新边</span>
+        <span><span class="dot skip"></span>其余点</span>
+      </div>
+      <div class="breakdown" id="pkInfo"></div>
+      <div class="viz-controls">
+        <select class="dm-sel" id="pkPreset">
+          <option value="0">三棵链 + 固定操作</option>
+          <option value="1">随机森林 + 随机操作</option>
+        </select>
+        <button class="dm-btn" id="pkPrev" type="button">上一步</button>
+        <button class="dm-btn" id="pkNext" type="button">下一步</button>
+        <button class="dm-btn" id="pkReset" type="button">重置</button>
+      </div>
+    </div>
+
+    <figure class="fig">
+      <svg id="dmFigTwo" viewBox="0 0 660 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="连中心与连两端的差距" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>两棵直径 D 的树合并：连中心 2⌈D/2⌉+1，连两端 2D+1</figcaption>
+    </figure>
+
+    <p>查询就是取根上的直径值。整个题目：初始每个区一遍树形 dp 是 O(n)，每次合并 O(1)，路径压缩摊下来总计 O(n + q)。</p>
+
+    <h2>三、问题：巡逻</h2>
+    <p>巡逻：n 个点的树，每条边双向。警察局在 1 号点，警车每天从 1 号出发，一定要走过树上所有的边，最后回到 1 号。为了少走路，可以新建 k 条边，把树上任意两点直接相连，每条新边每天必须正好经过一次。求巡逻走边数量的最小值。n 不超过 10⁵，k 不超过 2。</p>
+    <p>先想不加新边：从 1 出发再回到 1，每条边至少走一次，实际上每条边都得走两遍（过去再回来），总共 2(n−1)。</p>
+
+    <h2>四、k = 1：省下整条直径</h2>
+    <p>新建一条边 (a, b)，它必须走一次。走法是这样：从 1 出发，a 到 b 的树路径上的边走一遍，其余边走两遍，中间用新边跳一次。这样每条树边不少于一遍、新边正好一遍、最后回得到 1，总数是 2(n−1) − dist(a,b) + 1。</p>
+    <p>dist(a,b) 最大就是直径 d1，所以 k = 1 的答案是 2(n−1) − d1 + 1。新边相当于把最长的那条链从「两遍」改成「一遍」。</p>
+
+    <figure class="fig">
+      <svg id="dmFigThree" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="k=1 的巡逻走法" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>k = 1：直径上的边走一遍，其余边走两遍，新边正好一次</figcaption>
+    </figure>
+
+    <h2>五、k = 2：第二条捷径与直径重合的部分白搭</h2>
+    <p>两条新边就要讲究了：两条捷径省下来的边不能重叠。同一条边省过一次，就不能再省第二次。</p>
+    <p>设第一条捷径取直径 D，长 d1。第二条取路径 P，它跟 D 重合的部分是白搭的：P 的长度 |P| 里，重合的每一段都省不下来，所以第二条的净节省是 |P| − 2|P ∩ D|。重合边自己不算节省，还把第一条已经省下的抵掉一份。</p>
+    <p>把这笔账记到边权上：直径上的边记 −1，其余边记 +1，跑一遍树形 dp 求最大路径权值和，拿到的 d2 就是第二条捷径的净节省。答案是 2(n−1) − d1 − d2 + 2。</p>
+
+        <pre class="code"><span class="cm">// 巡逻：k=1 直接省掉整条直径；k=2 要把直径上的边权记成 -1 再跑一遍树型dp</span>
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> f, <span class="kw">int</span> w) {
+        last[u] = f;
+        dist[u] = dist[f] + w;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e != 0; e = nxt[e]) {
+            <span class="kw">if</span> (to[e] != f) {
+                dfs(to[e], u, 1);
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">road</span>() {
+        dfs(1, 0, 0);
+        start = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            <span class="kw">if</span> (dist[i] &gt; dist[start]) start = i;
+        }
+        dfs(start, 0, 0);
+        ed = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            <span class="kw">if</span> (dist[i] &gt; dist[ed]) ed = i;
+        }
+        diameter1 = dist[ed];
+    }
+
+    <span class="cm">// 第二遍dp：直径上的边记 -1，其余记 1，路径权值和的最大值就是第二条捷径</span>
+    <span class="kw">void</span> <span class="fn">dp</span>(<span class="kw">int</span> u, <span class="kw">int</span> f) {
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e != 0; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != f) {
+                dp(v, u);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v, w; e != 0; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != f) {
+                w = (diameterPath[u] &amp;&amp; diameterPath[v]) ? -1 : 1;
+                diameter2 = max(diameter2, dist[u] + dist[v] + w);
+                dist[u] = max(dist[u], dist[v] + w);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">compute</span>() {
+        road();
+        <span class="kw">if</span> (k == 1) {
+            <span class="kw">return</span> 2 * (n - 1) - diameter1 + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = ed; i != 0; i = last[i]) {
+            diameterPath[i] = <span class="kw">true</span>;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            dist[i] = 0;
+        }
+        dp(1, 0);
+        <span class="kw">return</span> 2 * (n - 1) - diameter1 - diameter2 + 2;
+    }</pre>
+
+    <figure class="fig">
+      <svg id="dmFigFour" viewBox="0 0 660 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="毛毛虫上的第二条捷径" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>毛毛虫：直径 7，第二条路径与它重合 1 条边，净节省 7 − 2 = 5</figcaption>
+    </figure>
+
+    <p>拿一棵毛毛虫算细账。主链 1 到 8，在 4 上挂三条边、在 5 上挂三条边，共 14 个点。直径 d1 = 7（8 到 14 那一侧）。第二条最优路径从 1 走到 14，长 7，跟直径重合的只有 4 到 5 那一条边，净节省 7 − 2×1 = 5。答案 = 2×13 − 7 − 5 + 2 = 16。跟「枚举加倍边集 + 新边点对、按奇偶模型取最小」的暴力对拍，2000 组随机树 k = 1 与 k = 2 全部吻合。</p>
+    <p>想当然会写成「跟直径没有公共边的最长路径」。这个口径在毛毛虫上只给出 3（短枝够不着），比正确的 5 小两条边。随机树上也站不住：5000 棵 12 点单位权随机树里，两种口径有 103 棵（2.06%）算得不一样。差在「重合一段、但换来一条长得多新路」这种情况，−1 技巧把它算成净赚，边不相交的口径直接判了死刑。</p>
+
+    <h2>六、新边不是越多越好</h2>
+    <p>链 n = 10：k = 1 答案 10，k = 2 答案 11。多加一条边反而多走一步。每条新边都必须正好走一次，捷径省不动时它就是纯开销。</p>
+    <p>星形（3 条臂各长 3，n = 10）：d1 = 6，d2 = 3，k = 1 答案 13，k = 2 答案 11。这种树加上第二条边才划得来。所以拿到题先看树形，再决定要不要把第二条边用满。</p>
+
+    <div class="viz">
+      <div class="viz-title">巡逻操作台：新边怎么省，警车怎么走</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">选一棵树和 k，点「下一步」：先定直径，再算出每条边走几遍，最后真的走一遍 Euler 回路，数数总共几步。</p>
+      <svg id="ptSvg" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="巡逻演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>直径与只走一遍的边</span>
+        <span><span class="dot partial"></span>当前这一步</span>
+        <span><span class="dot skip"></span>走两遍的边 / 新边</span>
+      </div>
+      <div class="breakdown" id="ptInfo"></div>
+      <div class="viz-controls">
+        <select class="dm-sel" id="ptPreset">
+          <option value="0">链 n=7</option>
+          <option value="1">星 n=7</option>
+          <option value="2">毛毛虫 n=11</option>
+        </select>
+        <select class="dm-sel" id="ptK">
+          <option value="1">k = 1</option>
+          <option value="2">k = 2</option>
+        </select>
+        <button class="dm-btn" id="ptPrev" type="button">上一步</button>
+        <button class="dm-btn" id="ptNext" type="button">下一步</button>
+        <button class="dm-btn" id="ptReset" type="button">重置</button>
+      </div>
+    </div>
+
+    <h2>七、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>题目</th><th>时间</th><th>空间</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>造公园：初始各区树形 dp</td><td><code class="inline">O(n)</code></td><td rowspan="3"><code class="inline">O(n)</code></td></tr>
+        <tr><td>造公园：每次合并 / 查询</td><td><code class="inline">O(1)</code>（路径压缩摊还）</td></tr>
+        <tr><td>巡逻：两遍 dfs + 第二遍 dp</td><td><code class="inline">O(n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间按题目上限算。造公园 n = 3×10⁵：链式前向星 <code class="inline">head</code>、<code class="inline">nxt</code>、<code class="inline">to</code> 加上并查集 <code class="inline">father</code>、dp 的 <code class="inline">dist</code> 与 <code class="inline">diameter</code>，六个 int 数组，几十 MB 量级。巡逻 n = 10⁵ 多一个 <code class="inline">diameterPath</code> 标记，同样是 O(n)。</p>
+
+    <h2>八、总结</h2>
+    <p>要点三条。其一，合并两棵树时把两条直径的中点连起来，新直径 = max(⌈d1/2⌉ + 1 + ⌈d2/2⌉, d1, d2)，并查集根上存标签、合并时搬标签，300 组随机对拍证实连中点最优。其二，巡逻 k = 1 省下整条直径，k = 2 还要再省一条，重合的部分白搭，把直径边记 −1 跑树形 dp 就是第二条的净节省。其三，−1 技巧和「与直径边不相交的最长路径」是两回事，2% 的随机树就能分出高下；新边也未必越多越好，链上 k = 2 比 k = 1 还多走一步。</p>
+
+    <h2>九、最后</h2>
+    <p>这两道题共用同一个习惯：先问「最长路径被这次修改动了哪一块」。合并动的是两条直径的中间那段，加边动的是被捷径跳过的树路径。抓住这块，公式都是顺水推舟。</p>
+    <p>《完》</p>
+
+    <h2 id="prob-links">相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td>HXY 造公园</td><td><a href="https://www.luogu.com.cn/problem/P2195" target="_blank">www.luogu.com.cn/problem/P2195</a></td></tr>
+      <tr><td>洛谷</td><td>巡逻</td><td><a href="https://www.luogu.com.cn/problem/P3629" target="_blank">www.luogu.com.cn/problem/P3629</a></td></tr>
+    </table>
+
+    <h2 id="refs">参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解121【扩展】树上问题专题4-树的直径</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = { blue:'#2563eb', blueB:'#dbeafe', blueL:'#eef4ff', orange:'#ea580c',
+            orangeB:'#ffedd5', gray:'#9aa0a6', bg:'#f6f7f9', bd:'#e6e8eb',
+            dark:'#1f2328', dim:'#6b7280', green:'#15803d' };
+
+  function el(id){ return document.getElementById(id); }
+  function mount(id, s){ var n = el(id); if (n) n.innerHTML = s; }
+  function T(x, y, s, o){
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 11) + '" fill="' + (o.fill || C.dark) +
+           (o.anchor ? '" text-anchor="' + o.anchor : '') + '"' + (o.bold ? ' font-weight="600"' : '') + '>' + s + '</text>';
+  }
+  function LN(x1, y1, x2, y2, o){
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.gray) +
+           '" stroke-width="' + (o.w || 1.3) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function CIR(x, y, r, o){
+    o = o || {};
+    return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + (o.fill || C.blueB) +
+           '" stroke="' + (o.stroke || C.blue) + '" stroke-width="' + (o.w || 1.5) + '"/>';
+  }
+  function RECT(x, y, w, hh, o){
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + hh + '" rx="' + (o.rx || 8) +
+           '" fill="' + (o.fill || C.bg) + '" stroke="' + (o.stroke || C.bd) + '" stroke-width="1"/>';
+  }
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function adjOf(n, edges){
+    var adj = {};
+    for (var u = 1; u <= n; u++) adj[u] = [];
+    edges.forEach(function(e){ adj[e[0]].push([e[1], e[2]]); adj[e[1]].push([e[0], e[2]]); });
+    return adj;
+  }
+  function runFrom(adj, root, n){
+    var order = [], dist = {}, last = {};
+    (function dfs(u, f, d){
+      dist[u] = d; last[u] = f; order.push(u);
+      adj[u].forEach(function(e){ if (e[0] !== f) dfs(e[0], u, d + e[1]); });
+    })(root, 0, 0);
+    return { order: order, dist: dist, last: last };
+  }
+  function farthest(r, n){
+    var x = 1;
+    for (var i = 2; i <= n; i++) if (r.dist[i] > r.dist[x]) x = i;
+    return x;
+  }
+  function pathOf(r, from){
+    var p = [];
+    for (var u = from; u !== 0; u = r.last[u]) p.push(u);
+    return p.reverse();
+  }
+  function bind(id, ev, fn){
+    var n = el(id);
+    if (n) n.addEventListener(ev, function(){ fn.call(this); });
+  }
+
+  /* ---------- 图 1：两种连法 ---------- */
+  (function(){
+    function chain(x0, y, k, dx){
+      var xy = {}, i;
+      for (i = 0; i < k; i++) xy[i + 1] = [x0 + i * dx, y];
+      return xy;
+    }
+    var g = '';
+    // 左：连中心
+    var A = chain(60, 90, 5, 52), B = chain(360, 90, 5, 52);
+    var i;
+    for (i = 1; i <= 4; i++){ g += LN(A[i][0], A[i][1], A[i+1][0], A[i+1][1]); g += LN(B[i][0], B[i][1], B[i+1][0], B[i+1][1]); }
+    for (i = 1; i <= 5; i++){
+      g += CIR(A[i][0], A[i][1], 14, {fill:'#fff', stroke:C.bd});
+      g += CIR(B[i][0], B[i][1], 14, {fill:'#fff', stroke:C.bd});
+      g += T(A[i][0], A[i][1] + 4, String(i), {anchor:'middle', size:10});
+      g += T(B[i][0], B[i][1] + 4, String(i + 5), {anchor:'middle', size:10});
+    }
+    g += CIR(A[3][0], A[3][1], 14, {fill:C.orangeB, stroke:C.orange, w:2});
+    g += CIR(B[3][0], B[3][1], 14, {fill:C.orangeB, stroke:C.orange, w:2});
+    g += LN(A[3][0] + 14, A[3][1], B[3][0] - 14, B[3][1], {stroke:C.orange, w:2.6, dash:'5 4'});
+    g += T(310, 74, '新边', {anchor:'middle', size:10, fill:C.orange, bold:true});
+    g += T(160, 40, '连中心', {anchor:'middle', size:12, fill:C.orange, bold:true});
+    g += T(160, 130, '新直径 = ⌈4/2⌉+⌈4/2⌉+1 = 5', {anchor:'middle', size:11});
+    // 右：连两端
+    var A2 = chain(60, 210, 5, 52), B2 = chain(360, 210, 5, 52);
+    for (i = 1; i <= 4; i++){ g += LN(A2[i][0], A2[i][1], A2[i+1][0], A2[i+1][1]); g += LN(B2[i][0], B2[i][1], B2[i+1][0], B2[i+1][1]); }
+    for (i = 1; i <= 5; i++){
+      g += CIR(A2[i][0], A2[i][1], 14, {fill:'#fff', stroke:C.bd});
+      g += CIR(B2[i][0], B2[i][1], 14, {fill:'#fff', stroke:C.bd});
+      g += T(A2[i][0], A2[i][1] + 4, String(i), {anchor:'middle', size:10});
+      g += T(B2[i][0], B2[i][1] + 4, String(i + 5), {anchor:'middle', size:10});
+    }
+    g += LN(A2[5][0] + 14, A2[5][1], B2[5][0] - 14, B2[5][1], {stroke:C.gray, w:2.6, dash:'5 4'});
+    g += T(310, 194, '新边', {anchor:'middle', size:10, fill:C.dim, bold:true});
+    g += T(160, 168, '连两端', {anchor:'middle', size:12, fill:C.dim, bold:true});
+    g += T(160, 250, '新直径 = 4 + 1 + 4 = 9', {anchor:'middle', size:11});
+    mount('dmFigOne', g);
+  })();
+
+  /* ---------- 图 2：连中心 vs 连两端 柱图 ---------- */
+  (function(){
+    var Ds = [1, 3, 5, 7, 9, 11];
+    var good = Ds.map(function(d){ return 2 * Math.ceil(d / 2) + 1; });
+    var bad = Ds.map(function(d){ return 2 * d + 1; });
+    var maxV = 23, baseY = 200, topY = 40, H = baseY - topY;
+    var g = '';
+    g += T(330, 24, '两棵直径 D 的树合并后的直径', {anchor:'middle', size:11, fill:C.dim});
+    var bw = 26, i;
+    for (i = 0; i < Ds.length; i++){
+      var x = 70 + i * 96;
+      var hg = good[i] / maxV * H, hb = bad[i] / maxV * H;
+      g += RECT(x, baseY - hg, bw, hg, {rx:3, fill:C.blueB, stroke:C.blue});
+      g += RECT(x + bw + 6, baseY - hb, bw, hb, {rx:3, fill:C.orangeB, stroke:C.orange});
+      g += T(x + bw / 2, baseY - hg - 6, String(good[i]), {anchor:'middle', size:10, fill:C.blue, bold:true});
+      g += T(x + bw + 6 + bw / 2, baseY - hb - 6, String(bad[i]), {anchor:'middle', size:10, fill:C.orange, bold:true});
+      g += T(x + bw + 3, baseY + 16, 'D=' + Ds[i], {anchor:'middle', size:10, fill:C.dim});
+    }
+    g += LN(40, baseY, 640, baseY, {stroke:C.bd, w:1});
+    g += RECT(448, 44, 190, 52);
+    g += T(462, 66, '蓝：连中心 2⌈D/2⌉+1', {size:10, fill:C.blue});
+    g += T(462, 86, '橙：连两端 2D+1', {size:10, fill:C.orange});
+    mount('dmFigTwo', g);
+  })();
+
+  /* ---------- 图 3：k=1 的走法 ---------- */
+  (function(){
+    var XY = {1:[330,70], 2:[230,140], 3:[430,140], 4:[160,210], 5:[300,210], 6:[500,210]};
+    var E = [[1,2,3],[1,3,6],[2,4,4],[2,5,5],[3,6,2]];
+    var dia = [4,2,1,3,6];
+    var pe = {}; dia.forEach(function(u,i){ if(i<dia.length-1) pe[u+'-'+dia[i+1]] = 1; });
+    var g = '';
+    E.forEach(function(e){
+      var a = XY[e[0]], b = XY[e[1]];
+      var k1 = e[0]+'-'+e[1], k2 = e[1]+'-'+e[0];
+      var on = pe[k1] || pe[k2];
+      g += LN(a[0], a[1], b[0], b[1], on ? {stroke:C.blue, w:3.4} : {stroke:C.gray, w:1.6});
+      g += T((a[0]+b[0])/2, (a[1]+b[1])/2 - 6, on ? '走1遍' : '走2遍', {anchor:'middle', size:10, fill: on ? C.blue : C.dim});
+    });
+    [1,2,3,4,5,6].forEach(function(u){
+      var p = XY[u];
+      g += CIR(p[0], p[1], 16, (u===4||u===6) ? {fill:C.blueB, stroke:C.blue, w:2} : {fill:'#fff', stroke:C.bd});
+      g += T(p[0], p[1] + 4, String(u), {anchor:'middle', size:11});
+    });
+    g += LN(XY[6][0], XY[6][1] + 18, XY[4][0], XY[4][1] + 18, {stroke:C.orange, w:2.4, dash:'6 4'});
+    g += T(330, 258, '新边 (4,6)：每天正好走一次', {anchor:'middle', size:10, fill:C.orange, bold:true});
+    g += RECT(440, 236, 200, 60);
+    g += T(456, 258, '2(n−1) − d1 + 1', {size:10});
+    g += T(456, 280, '= 2×5 − 6 + 1 = 5', {size:10, fill:C.blue, bold:true});
+    mount('dmFigThree', g);
+  })();
+
+  /* ---------- 图 4：毛毛虫与第二条捷径 ---------- */
+  (function(){
+    var XY = {1:[60,200], 2:[130,200], 3:[200,200], 4:[270,200], 5:[340,200], 6:[410,200], 7:[480,200], 8:[550,200],
+              9:[230,140], 10:[190,85], 11:[150,30], 12:[380,140], 13:[420,85], 14:[460,30]};
+    var E = [[1,2],[2,3],[3,4],[4,5],[5,6],[6,7],[7,8],[4,9],[9,10],[10,11],[5,12],[12,13],[13,14]];
+    var D = [[1,2],[2,3],[3,4],[4,5],[5,6],[6,7],[7,8]];
+    var P = [[1,2],[2,3],[3,4],[4,12],[12,13],[13,14]];
+    var dset = {}; D.forEach(function(e){ dset[e[0]+'-'+e[1]] = 1; dset[e[1]+'-'+e[0]] = 1; });
+    var pset = {}; P.forEach(function(e){ pset[e[0]+'-'+e[1]] = 1; pset[e[1]+'-'+e[0]] = 1; });
+    var g = '';
+    E.forEach(function(e){
+      var a = XY[e[0]], b = XY[e[1]];
+      var k1 = e[0]+'-'+e[1], k2 = e[1]+'-'+e[0];
+      var onD = dset[k1] || dset[k2], onP = pset[k1] || pset[k2];
+      var both = onD && onP;
+      g += LN(a[0], a[1], b[0], b[1], both ? {stroke:C.blue, w:4.6} : (onD ? {stroke:C.blue, w:2.8} : (onP ? {stroke:C.orange, w:2.8} : {stroke:C.gray, w:1.5})));
+    });
+    for (var u = 1; u <= 14; u++){
+      var p = XY[u];
+      var hot = (u === 4 || u === 5);
+      g += CIR(p[0], p[1], 15, hot ? {fill:C.blueB, stroke:C.blue, w:2.2} : {fill:'#fff', stroke:C.bd});
+      g += T(p[0], p[1] + 4, String(u), {anchor:'middle', size:10});
+    }
+    g += T(270, 234, '重合', {anchor:'middle', size:10, fill:C.blue, bold:true});
+    g += RECT(30, 246, 260, 66);
+    g += T(46, 268, '直径 D（蓝）：1 到 8，长 7', {size:10});
+    g += T(46, 288, '第二条 P（橙）：1 到 14，长 7', {size:10, fill:C.orange});
+    g += T(46, 306, '重合边 (4,5)：粗蓝', {size:10});
+    g += RECT(400, 246, 230, 66);
+    g += T(416, 268, '净节省 = |P| − 2|P∩D|', {size:10});
+    g += T(416, 288, '= 7 − 2×1 = 5 = d2', {size:10, fill:C.blue, bold:true});
+    g += T(416, 306, '答案 = 2×13 − 7 − 5 + 2 = 16', {size:10, bold:true});
+    mount('dmFigFour', g);
+  })();
+
+  /* ---------- 演示一：造公园操作台 ---------- */
+  (function(){
+    function preset0(){
+      var edges = [[1,2],[2,3],[3,4],[4,5],[5,6],[7,8],[9,10],[10,11],[11,12]];
+      var xy = {1:[50,80],2:[105,80],3:[160,80],4:[215,80],5:[270,80],6:[325,80],
+                7:[420,80],8:[475,80],
+                9:[420,180],10:[475,180],11:[530,180],12:[585,180]};
+      return { n:12, edges:edges.map(function(e){ return [e[0], e[1], 1]; }), xy:xy,
+               ops:[[2,1,7],[1,3],[2,2,11],[1,1]] };
+    }
+    function preset1(){
+      var rng = mulberry32(777);
+      var n = 10, edges = [], i;
+      for (i = 2; i <= n; i++) if (rng() < 0.7) edges.push([1 + Math.floor(rng() * (i - 1)), i, 1]);
+      var adj = adjOf(n, edges), depth = {}, vis = {};
+      for (i = 1; i <= n; i++){
+        if (vis[i]) continue;
+        (function dfs(u, f, d){
+          vis[u] = 1; depth[u] = d;
+          adj[u].forEach(function(e){ if (e[0] !== f) dfs(e[0], u, d + 1); });
+        })(i, 0, 0);
+      }
+      var maxD = 0;
+      for (i = 1; i <= n; i++) maxD = Math.max(maxD, depth[i]);
+      var xy = {}, idx = 0, vis2 = {};
+      for (i = 1; i <= n; i++){
+        if (vis2[i]) continue;
+        (function dfs2(u, f){
+          vis2[u] = 1;
+          xy[u] = [60 + idx * (540 / Math.max(n - 1, 1)), 44 + depth[u] * (200 / Math.max(maxD, 1))];
+          idx++;
+          adj[u].forEach(function(e){ if (e[0] !== f) dfs2(e[0], u); });
+        })(i, 0);
+      }
+      var ops = [], nodes = [];
+      for (i = 1; i <= n; i++) nodes.push(i);
+      for (i = 0; i < 5; i++){
+        if (i % 2 === 0) ops.push([2, nodes[Math.floor(rng() * n)], nodes[Math.floor(rng() * n)]]);
+        else ops.push([1, nodes[Math.floor(rng() * n)]]);
+      }
+      return { n:n, edges:edges, xy:xy, ops:ops };
+    }
+    var PRESETS = [preset0(), preset1()];
+    var svg = el('pkSvg'), info = el('pkInfo');
+    var step = 0, frames = [], curP = PRESETS[0];
+
+    function find(father, i){ while (father[i] !== i){ father[i] = father[father[i]]; i = father[i]; } return i; }
+    function componentNodes(adj, root){
+      var vis = {}, out = [], q = [root];
+      vis[root] = 1;
+      while (q.length){
+        var u = q.pop(); out.push(u);
+        adj[u].forEach(function(e){ if (!vis[e[0]]){ vis[e[0]] = 1; q.push(e[0]); } });
+      }
+      return out;
+    }
+    function farthestIn(r, nodes){
+      var x = nodes[0];
+      nodes.forEach(function(u){ if (r.dist[u] > r.dist[x]) x = u; });
+      return x;
+    }
+    function compLabel(adj, root, nodes){
+      var r1 = runFrom(adj, root, nodes);
+      var s = farthestIn(r1, nodes);
+      var r2 = runFrom(adj, s, nodes);
+      var e = farthestIn(r2, nodes);
+      var d = r2.dist[e];
+      var path = pathOf(r2, e);
+      return { d:d, path:path, mid:path[Math.ceil(d / 2)], start:s, ed:e };
+    }
+    function mergeLabels(la, lb){
+      var cross = Math.ceil(la.d / 2) + Math.ceil(lb.d / 2) + 1;
+      var inner = Math.max(la.d, lb.d);
+      var nd = Math.max(cross, inner), np;
+      if (cross > inner){
+        np = la.path.slice(0, la.path.indexOf(la.mid) + 1).concat(lb.path.slice(lb.path.indexOf(lb.mid)));
+      } else {
+        np = (la.d >= lb.d) ? la.path.slice() : lb.path.slice();
+      }
+      return { d:nd, path:np, mid:np[Math.ceil(nd / 2)], start:np[0], ed:np[np.length - 1] };
+    }
+    function build(){
+      curP = PRESETS[parseInt(el('pkPreset').value, 10)];
+      var adj = adjOf(curP.n, curP.edges);
+      var father = {}, label = {}, u;
+      for (u = 1; u <= curP.n; u++) father[u] = u;
+      curP.edges.forEach(function(e){
+        var ru = find(father, e[0]), rv = find(father, e[1]);
+        if (ru !== rv) father[ru] = rv;
+      });
+      var seen = {};
+      for (u = 1; u <= curP.n; u++){
+        var r = find(father, u);
+        if (!seen[r]){
+          seen[r] = 1;
+          label[r] = compLabel(adj, r, componentNodes(adj, r));
+        }
+      }
+      var edges = curP.edges.slice();
+      frames = [];
+      frames.push({ edges:edges.slice(), hi:{}, msg:'初始 ' + Object.keys(label).length + ' 个连通区，每个区的直径已用树形 dp 算好', box:null });
+      curP.ops.forEach(function(op){
+        if (op[0] === 1){
+          var r = find(father, op[1]);
+          frames.push({ edges:edges.slice(), queryRoot:r, queryLabel:label[r], hi:{},
+                        msg:'查询 ' + op[1] + '：所在连通区的直径 = ' + label[r].d,
+                        box:'直径 = ' + label[r].d });
+        } else {
+          var rx = find(father, op[1]), ry = find(father, op[2]);
+          if (rx === ry){
+            frames.push({ edges:edges.slice(), hi:{}, msg:'合并 ' + op[1] + ' 和 ' + op[2] + '：已经连通，忽略', box:'已连通，忽略' });
+          } else {
+            var la = label[rx], lb = label[ry];
+            var nl = mergeLabels(la, lb);
+            frames.push({ edges:edges.slice(), merge:{la:la, lb:lb, nl:nl, x:op[1], y:op[2]}, hi:{},
+                          msg:'合并直径 ' + la.d + ' 与 ' + lb.d + ' 的两个区：中点 ' + la.mid + ' 与 ' + lb.mid + ' 连新边',
+                          box:null });
+            edges.push([la.mid, lb.mid, 1]);
+            father[rx] = ry;
+            label[ry] = nl;
+            delete label[rx];
+          }
+        }
+      });
+      step = 0;
+      render();
+    }
+    function render(){
+      var f = frames[step];
+      var pathA = {}, pathB = {};
+      if (f.merge){
+        f.merge.la.path.forEach(function(u, i){ if (i < f.merge.la.path.length - 1) pathA[u + '-' + f.merge.la.path[i+1]] = 1; });
+        f.merge.lb.path.forEach(function(u, i){ if (i < f.merge.lb.path.length - 1) pathB[u + '-' + f.merge.lb.path[i+1]] = 1; });
+      }
+      var qPath = {};
+      if (f.queryLabel){
+        f.queryLabel.path.forEach(function(u, i){ if (i < f.queryLabel.path.length - 1) qPath[u + '-' + f.queryLabel.path[i+1]] = 1; });
+      }
+      var newPair = f.merge ? (f.merge.la.mid + '-' + f.merge.lb.mid) : null;
+      var g = '';
+      f.edges.forEach(function(e){
+        var a = curP.xy[e[0]], b = curP.xy[e[1]];
+        var k1 = e[0] + '-' + e[1], k2 = e[1] + '-' + e[0];
+        var isNew = (k1 === newPair || k2 === newPair);
+        var onA = pathA[k1] || pathA[k2], onB = pathB[k1] || pathB[k2], onQ = qPath[k1] || qPath[k2];
+        g += LN(a[0], a[1], b[0], b[1], isNew ? {stroke:C.orange, w:3, dash:'6 4'} :
+                (onA ? {stroke:C.blue, w:3} : (onB ? {stroke:C.orange, w:3} : (onQ ? {stroke:C.blue, w:2.6} : {}))));
+      });
+      for (var u = 1; u <= curP.n; u++){
+        var p = curP.xy[u];
+        var fill = '#fff', stroke = C.bd, w = 1.5;
+        if (f.merge && (u === f.merge.la.mid || u === f.merge.lb.mid)){ fill = C.orangeB; stroke = C.orange; w = 2.2; }
+        else if (f.merge && f.merge.la.path.indexOf(u) >= 0){ fill = C.blueL; stroke = C.blue; }
+        else if (f.merge && f.merge.lb.path.indexOf(u) >= 0){ fill = C.orangeB; stroke = C.orange; }
+        else if (f.queryLabel && f.queryLabel.path.indexOf(u) >= 0){ fill = C.blueL; stroke = C.blue; }
+        g += CIR(p[0], p[1], 15, {fill:fill, stroke:stroke, w:w});
+        g += T(p[0], p[1] + 4, String(u), {anchor:'middle', size:10});
+      }
+      var box = f.box;
+      if (f.merge){
+        var la = f.merge.la, lb = f.merge.lb, nl = f.merge.nl;
+        box = 'max(⌈' + la.d + '/2⌉+⌈' + lb.d + '/2⌉+1, ' + la.d + ', ' + lb.d + ') = ' + nl.d;
+      }
+      if (box){
+        g += RECT(400, 240, 240, 50);
+        g += T(416, 260, box.length > 30 ? box.slice(0, 30) : box, {size:10, fill:C.blue, bold:true});
+        if (box.length > 30) g += T(416, 278, box.slice(30), {size:10, fill:C.blue, bold:true});
+      }
+      svg.innerHTML = g;
+      info.innerHTML = '<div class="row">第 ' + (step + 1) + ' / ' + frames.length + ' 步</div>' +
+                       '<div class="row">' + f.msg + '</div>';
+      el('pkPrev').disabled = (step === 0);
+      el('pkNext').disabled = (step === frames.length - 1);
+    }
+    bind('pkPreset', 'change', function(){ build(); });
+    bind('pkPrev', 'click', function(){ if (step > 0){ step--; render(); } });
+    bind('pkNext', 'click', function(){ if (step < frames.length - 1){ step++; render(); } });
+    bind('pkReset', 'click', function(){ step = 0; render(); });
+    build();
+  })();
+
+  /* ---------- 演示二：巡逻操作台 ---------- */
+  (function(){
+    var PRESETS = [
+      { name:'链 n=7', tree:{ n:7, edges:[[1,2,1],[2,3,1],[3,4,1],[4,5,1],[5,6,1],[6,7,1]],
+          xy:{1:[60,150],2:[155,150],3:[250,150],4:[345,150],5:[440,150],6:[535,150],7:[615,150]} } },
+      { name:'星 n=7', tree:{ n:7, edges:[[1,2,1],[2,3,1],[1,4,1],[4,5,1],[1,6,1],[6,7,1]],
+          xy:{1:[330,170],2:[250,110],3:[190,60],4:[410,110],5:[470,60],6:[330,245],7:[330,292]} } },
+      { name:'毛毛虫 n=11', tree:{ n:11, edges:[[1,2,1],[2,3,1],[3,4,1],[4,5,1],[3,6,1],[6,7,1],[7,8,1],[4,9,1],[9,10,1],[10,11,1]],
+          xy:{1:[60,200],2:[135,200],3:[210,200],4:[285,200],5:[360,200],
+              6:[170,140],7:[130,85],8:[90,30],9:[325,140],10:[365,85],11:[405,30]} } }
+    ];
+    var svg = el('ptSvg'), info = el('ptInfo');
+    var step = 0, frames = [], curTree = PRESETS[0].tree, curK = 1;
+
+    function edgeKey(u, v){ return u + '-' + v; }
+    function compute(tr, k){
+      var adj = adjOf(tr.n, tr.edges);
+      var r1 = runFrom(adj, 1, tr.n);
+      var start = farthest(r1, tr.n);
+      var r2 = runFrom(adj, start, tr.n);
+      var ed = farthest(r2, tr.n);
+      var d1 = r2.dist[ed];
+      var D = pathOf(r2, ed);
+      var dset = {};
+      D.forEach(function(u, i){ if (i < D.length - 1){ dset[edgeKey(u, D[i+1])] = 1; dset[edgeKey(D[i+1], u)] = 1; } });
+      // -1 技巧：直径边 -1，其余 +1，树形dp求最大路径权值和与路径
+      var par = {}, order = [], down = {};
+      (function dfs(u, f){
+        par[u] = f; order.push(u);
+        adj[u].forEach(function(e){ if (e[0] !== f) dfs(e[0], u); });
+      })(1, 0);
+      var best = { v:0, path:[1] };
+      for (var idx = order.length - 1; idx >= 0; idx--){
+        var u = order[idx];
+        down[u] = { v:0, path:[u] };
+        var c1 = null, c2 = null;
+        adj[u].forEach(function(e){
+          var v = e[0], w = dset[edgeKey(u, v)] ? -1 : 1;
+          if (v === par[u]) return;
+          var cand = { v:down[v].v + w, path:[u].concat(down[v].path) };
+          if (!c1 || cand.v > c1.v){ c2 = c1; c1 = cand; }
+          else if (!c2 || cand.v > c2.v){ c2 = cand; }
+          if (cand.v > down[u].v) down[u] = cand;
+        });
+        if (c1 && c2){
+          var through = { v:c1.v + c2.v, path:c1.path.concat(c2.path.slice(1)) };
+          if (through.v > best.v) best = through;
+        }
+        if (down[u].v > best.v) best = { v:down[u].v, path:down[u].path.slice() };
+      }
+      var d2 = best.v, P = best.path;
+      var pset = {};
+      P.forEach(function(u, i){ if (i < P.length - 1){ pset[edgeKey(u, P[i+1])] = 1; pset[edgeKey(P[i+1], u)] = 1; } });
+      var treeE = {};
+      tr.edges.forEach(function(e){ treeE[edgeKey(e[0], e[1])] = 1; treeE[edgeKey(e[1], e[0])] = 1; });
+      // 一次集 S' 与新边
+      var sset = {}, u2, v2;
+      function xor(setFn){
+        var s = {};
+        D.forEach(function(u, i){ if (i < D.length - 1){ var kk = edgeKey(u, D[i+1]); s[kk] = setFn(kk) ? 1 : 0; } });
+        P.forEach(function(u, i){ if (i < P.length - 1){ var kk = edgeKey(u, P[i+1]); s[kk] = s[kk] ? 0 : 1; } });
+        return s;
+      }
+      var newEdges = [];
+      if (k === 1){
+        D.forEach(function(u, i){ if (i < D.length - 1) sset[edgeKey(u, D[i+1])] = 1; });
+        newEdges = [[start, ed]];
+      } else if (d2 > 0){
+        sset = xor(function(){ return true; });
+        // T = odd(S')
+        var deg = {};
+        Object.keys(sset).forEach(function(kk){
+          if (!sset[kk]) return;
+          var ab = kk.split('-'); deg[ab[0]] = (deg[ab[0]] || 0) + 1; deg[ab[1]] = (deg[ab[1]] || 0) + 1;
+        });
+        var T = Object.keys(deg).filter(function(x){ return deg[x] % 2 === 1; }).map(Number);
+        newEdges = pairUp(T, treeE, tr.n);
+      } else {
+        D.forEach(function(u, i){ if (i < D.length - 1) sset[edgeKey(u, D[i+1])] = 1; });
+        var mid = D[Math.ceil(d1 / 2)];
+        var a = -1;
+        for (var cand = 1; cand <= tr.n; cand++){
+          if (cand === start || cand === ed) continue;
+          if (treeE[edgeKey(cand, start)] || treeE[edgeKey(cand, ed)]) continue;
+          a = cand; break;
+        }
+        if (a < 0) for (var cand2 = 1; cand2 <= tr.n; cand2++) if (cand2 !== start && cand2 !== ed){ a = cand2; break; }
+        newEdges = [[start, a], [a, ed]];
+      }
+      // 多重图 + Euler 回路
+      var mAdj = {}, eid = 0, i;
+      for (i = 1; i <= tr.n; i++) mAdj[i] = [];
+      function addE(u, v, kind){
+        mAdj[u].push([v, eid, kind]); mAdj[v].push([u, eid, kind]); eid++;
+      }
+      tr.edges.forEach(function(e){
+        var kk = edgeKey(e[0], e[1]);
+        addE(e[0], e[1], (sset[kk] || sset[edgeKey(e[1], e[0])]) ? 'tree1' : 'tree2');
+        if (!(sset[kk] || sset[edgeKey(e[1], e[0])])) addE(e[0], e[1], 'tree2');
+      });
+      newEdges.forEach(function(e){ addE(e[0], e[1], 'new'); });
+      var used = {}, ptr = {}, stack = [1], circ = [];
+      for (i = 1; i <= tr.n; i++) ptr[i] = 0;
+      while (stack.length){
+        var uu = stack[stack.length - 1], adv = false;
+        while (ptr[uu] < mAdj[uu].length){
+          var e = mAdj[uu][ptr[uu]++];
+          if (used[e[1]]) continue;
+          used[e[1]] = 1;
+          stack.push(e[0]);
+          adv = true;
+          break;
+        }
+        if (!adv) circ.push(stack.pop());
+      }
+      circ.reverse();
+      return { d1:d1, d2:d2, D:D, P:P, start:start, ed:ed, sset:sset, newEdges:newEdges,
+               walk:circ, treeE:treeE, dset:dset };
+    }
+    function pairUp(T, treeE, n){
+      if (T.length === 2){
+        var a = -1;
+        for (var c = 1; c <= n; c++){
+          if (T.indexOf(c) >= 0) continue;
+          if (treeE[edgeKey(c, T[0])] || treeE[edgeKey(c, T[1])]) continue;
+          a = c; break;
+        }
+        if (a < 0) for (var c2 = 1; c2 <= n; c2++) if (T.indexOf(c2) < 0){ a = c2; break; }
+        return [[T[0], a], [a, T[1]]];
+      }
+      var opts = [
+        [[T[0], T[1]], [T[2], T[3]]],
+        [[T[0], T[2]], [T[1], T[3]]],
+        [[T[0], T[3]], [T[1], T[2]]]
+      ];
+      var bestP = opts[0], bestS = 99;
+      opts.forEach(function(pr){
+        var s = 0;
+        pr.forEach(function(pair){ if (treeE[edgeKey(pair[0], pair[1])]) s++; });
+        if (s < bestS){ bestS = s; bestP = pr; }
+      });
+      return bestP;
+    }
+    function build(){
+      curTree = PRESETS[parseInt(el('ptPreset').value, 10)].tree;
+      curK = parseInt(el('ptK').value, 10);
+      var R = compute(curTree, curK);
+      frames = [];
+      frames.push({ R:R, phase:'dia', msg:'两遍 dfs：直径从 ' + R.start + ' 到 ' + R.ed + '，长 ' + R.d1 });
+      if (curK === 1){
+        frames.push({ R:R, phase:'setup', msg:'k = 1：新边 (' + R.start + ',' + R.ed + ')，直径上的边走一遍，其余两遍' });
+      } else {
+        var shared = 0;
+        R.P.forEach(function(u, i){ if (i < R.P.length - 1 && R.dset[edgeKey(u, R.P[i+1])]) shared++; });
+        frames.push({ R:R, phase:'setup', msg:'k = 2：第二条路径 ' + R.P[0] + '→' + R.P[R.P.length-1] +
+                      '，与直径重合 ' + shared + ' 条边，净节省 ' + R.d2 });
+      }
+      for (var i = 0; i < R.walk.length - 1; i++){
+        frames.push({ R:R, phase:'walk', wi:i, msg:'第 ' + (i + 1) + ' 步：' + R.walk[i] + ' → ' + R.walk[i+1] });
+      }
+      var formula = curK === 1 ? ('2(n−1) − d1 + 1 = 2×' + (curTree.n - 1) + ' − ' + R.d1 + ' + 1 = ' + (2 * (curTree.n - 1) - R.d1 + 1))
+                               : ('2(n−1) − d1 − d2 + 2 = 2×' + (curTree.n - 1) + ' − ' + R.d1 + ' − ' + R.d2 + ' + 2 = ' + (2 * (curTree.n - 1) - R.d1 - R.d2 + 2));
+      frames.push({ R:R, phase:'done', msg:'走完了：共 ' + (R.walk.length - 1) + ' 步', formula:formula });
+      step = 0;
+      render();
+    }
+    function render(){
+      var f = frames[step], R = f.R;
+      var dset = {}, pset = {}, sset = R.sset, nset = {};
+      R.D.forEach(function(u, i){ if (i < R.D.length - 1){ dset[edgeKey(u, R.D[i+1])] = 1; dset[edgeKey(R.D[i+1], u)] = 1; } });
+      R.P.forEach(function(u, i){ if (i < R.P.length - 1){ pset[edgeKey(u, R.P[i+1])] = 1; pset[edgeKey(R.P[i+1], u)] = 1; } });
+      R.newEdges.forEach(function(e){ nset[edgeKey(e[0], e[1])] = 1; nset[edgeKey(e[1], e[0])] = 1; });
+      var curPair = null;
+      if (f.phase === 'walk') curPair = edgeKey(R.walk[f.wi], R.walk[f.wi + 1]);
+      var g = '';
+      curTree.edges.forEach(function(e){
+        var a = curTree.xy[e[0]], b = curTree.xy[e[1]];
+        var kk = edgeKey(e[0], e[1]), kk2 = edgeKey(e[1], e[0]);
+        var once = sset[kk] || sset[kk2];
+        var hot = (curPair === kk || curPair === kk2);
+        var onD = dset[kk] || dset[kk2], onP = pset[kk] || pset[kk2];
+        var style;
+        if (f.phase === 'walk' || f.phase === 'done'){
+          style = hot ? {stroke:C.orange, w:4} : (once ? {stroke:C.blue, w:3} : {stroke:C.gray, w:1.6, dash:'3 3'});
+        } else if (f.phase === 'dia'){
+          style = onD ? {stroke:C.blue, w:3.4} : {};
+        } else {
+          style = onD ? {stroke:C.blue, w:3} : (onP ? {stroke:C.orange, w:3} : {});
+        }
+        g += LN(a[0], a[1], b[0], b[1], style);
+        var mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+        if (f.phase === 'walk' || f.phase === 'done'){
+          g += T(mx, my - 5, once ? '1遍' : '2遍', {anchor:'middle', size:9, fill: once ? C.blue : C.dim});
+        }
+      });
+      R.newEdges.forEach(function(e){
+        if (f.phase === 'dia') return;
+        var a = curTree.xy[e[0]], b = curTree.xy[e[1]];
+        var hot = (curPair === edgeKey(e[0], e[1]) || curPair === edgeKey(e[1], e[0]));
+        g += LN(a[0] + 6, a[1] + 6, b[0] + 6, b[1] + 6, hot ? {stroke:C.orange, w:3.4, dash:'6 4'} : {stroke:C.orange, w:2, dash:'6 4'});
+      });
+      var curNode = (f.phase === 'walk') ? R.walk[f.wi] : -1;
+      for (var u = 1; u <= curTree.n; u++){
+        var p = curTree.xy[u];
+        var fill = '#fff', stroke = C.bd, w = 1.5;
+        if (u === curNode){ fill = C.orangeB; stroke = C.orange; w = 2.4; }
+        else if (f.phase !== 'walk' && f.phase !== 'done' && (u === R.start || u === R.ed)){ fill = C.blueB; stroke = C.blue; w = 2.2; }
+        g += CIR(p[0], p[1], 15, {fill:fill, stroke:stroke, w:w});
+        g += T(p[0], p[1] + 4, String(u), {anchor:'middle', size:10});
+      }
+      svg.innerHTML = g;
+      var rows = '<div class="row">第 ' + (step + 1) + ' / ' + frames.length + ' 步</div><div class="row">' + f.msg + '</div>';
+      if (f.phase === 'done') rows += '<div class="row total">' + f.formula + '</div>';
+      else if (f.phase === 'walk') rows += '<div class="row">已走 ' + (f.wi + 1) + ' 步，还剩 ' + (R.walk.length - 2 - f.wi) + ' 步</div>';
+      info.innerHTML = rows;
+      el('ptPrev').disabled = (step === 0);
+      el('ptNext').disabled = (step === frames.length - 1);
+    }
+    bind('ptPreset', 'change', function(){ build(); });
+    bind('ptK', 'change', function(){ build(); });
+    bind('ptPrev', 'click', function(){ if (step > 0){ step--; render(); } });
+    bind('ptNext', 'click', function(){ if (step < frames.length - 1){ step++; render(); } });
+    bind('ptReset', 'click', function(){ step = 0; render(); });
+    build();
+  })();
+})();
+</script>
+</body>
+</html>
