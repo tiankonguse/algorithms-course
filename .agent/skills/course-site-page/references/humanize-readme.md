@@ -1,21 +1,22 @@
-# Humanizer
+# Humanizer（内联副本，无需安装）
 
-A Clawdbot skill that removes signs of AI-generated writing from text, making it sound more natural and human.
+去掉文本里的 AI 写作痕迹，让它读起来像人写的。
 
 ## Installation
 
-Install via ClawdHub:
+**不用安装。** 这里是原 `humanizer` 技能（v2.1.1）内容的内联副本，`course-site-page` 自带的写作规则就在旁边两个文件里：
 
-```bash
-clawdhub install humanizer
-```
+- `references/humanize.md` —— 完整 24 条模式与改法（收口扫描时查这份）
+- `SKILL.md`「写作风格」块 —— 本站落地的精简版
+
+本技能不依赖项目外的任何技能，别再去装 `humanizer` 或调 `去AI味`。
 
 ## Usage
 
-Ask your agent to humanize text:
+写作或收口时按这两个文件自查，不单独触发别的技能：
 
 ```
-Please humanize this text: [your text]
+按 references/humanize.md 过一遍这段正文
 ```
 
 Or invoke directly when editing documents.

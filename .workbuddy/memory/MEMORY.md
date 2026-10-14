@@ -45,7 +45,7 @@
 - 站点根 `~/project/github/AIProject/algorithms-course`，课件根 `~/.../algorithm-journey`。**用户目录一律写 `~/`**，禁写 `/Users/<用户名>/...`；node 用 `~/.workbuddy/binaries/node/versions/$(cat .../current)/bin/node`。
 - 材料：`ppt/算法讲解0NN【难度】标题.pptx`（zipfile + ElementTree 遍历 `ppt/slides/slideN.xml` 拼 `a:t`）+ `src/classNNN/`。**低号课只有一份 Java**（无 `Code0X_`、无 C++ 版），要自己改写成 C++ 再对拍；**中高号偶数 java 里藏着 C++**：`awk '/^\/\/#include/{f=1} f&&/^\/\//{sub(/^\/\//,"");print;next} f{print}' X.java > X.cpp`。
 - 拼页先 Write 带 `@@片段名@@` 的占位版，再用 `apply_placeholders.py` 替换（占位名 = 片段文件名，只含 `[A-Za-z0-9_]`，**占位符别套 `<pre class="code">`**，要单独一行）。省上下文：PPT 抽到 `/tmp/pptNNN.txt` 后按段取，**别把新页面 HTML 读回来**。
-- **技能装两个物理副本**：仓库 `.agent/skills/course-site-page/` + 用户级 `~/.workbuddy/skills/course-site-page/`，改完必须 cp 同步 + `diff -rq` 确认。**`~/.agents/` 那份与 `~/.workbuddy` 共享 inode，不是第三份**。CDP 类脚本依赖同目录 `cdp_page.js`。
+- **技能只有一份且自包含（2026-10-14 收敛）**：唯一副本是仓库 `.agent/skills/course-site-page/`，**不依赖项目外的任何技能**：截图/越界用自带 `scripts/shot_*.js` + `verify_pages.js`（不再调 `ui-verify-cdp`），去 AI 味规则已内联为 `references/humanize.md`（不再调 `去AI味`/`humanizer`）；脚本只用 node 内置模块 + 同目录 `cdp_page.js`。**改完不用 cp 同步**（旧规矩作废：`~/.workbuddy/skills/` 那份已不存在，`~/.agents/skills/course-site-page/` 已删除，备份 `/tmp/course-site-page-home-backup-20261014.tar.gz`）。`grep -c 'tools/build_nav.py' SKILL.md` 得 8 处 = 当前版。CDP 类脚本依赖同目录 `cdp_page.js`，别单搬一个文件用。
 
 ## 自检（全自动，别只靠截图）
 - **「起 Chrome + 跑 node」写在同一条命令里**（Chrome 随 Bash 结束被回收）；端口读 `CDP_PORT`（默认 9333）；**并发会话别 `pkill` 别人的 Chrome**，用空闲端口 + 独立 `--user-data-dir`。`--allow-file-access-from-files` 必带，别加 `--window-size`。
@@ -57,7 +57,7 @@
   $N $SKILL/scripts/verify_viz_steps.js a.html b.html  # 逐帧点到按钮 disabled（上限 40 帧，跑满 ≠ 失败）
   $N $SKILL/scripts/verify_home.js                     # 入口两页（index + catalog）
   ```
-- 必查四项：① 无 JS 错误 ② `figure.fig` 数 == 其中 svg 数 ③ nav/toc/每个 `.viz` 有内容 ④ 每个 svg 用 `getBBox()` 比对 viewBox。pager 链最灵敏（非末页 2、末页 1）。收口前跑杂字 / AI 味扫描 + 逐图比 `text` 的 `getBBox()`。
+- 必查四项：① 无 JS 错误 ② `figure.fig` 数 == 其中 svg 数 ③ nav/toc/每个 `.viz` 有内容 ④ 每个 svg 用 `getBBox()` 比对 viewBox。pager 链最灵敏（非末页 2、末页 1）。收口前跑杂字 / AI 味扫描 + 逐图比 `text` 的 `getBBox()`。**两扫描已抽成脚本**（2026-10-14），别再手敲内联 python：`python3 $SKILL/scripts/scan_typos.py [页...]`（杂字 / 占位符残留 / 代码块真嵌套）、`python3 $SKILL/scripts/scan_ai_style.py [页...]`（套话 / 否定并列 / 破折号 / strong / emoji），不带参数扫全站。
 - 页列表从 **nav** 生成（zsh 用 `${=PAGES}`）：`PAGES=$(python3 -c "import json,glob;print(' '.join(i['file'] for p in sorted(glob.glob('nav/*/*/index.json')) for i in json.load(open(p, encoding='utf-8'))))")`
 - **三个脚本的参数都只传文件名**，它们自己拼 `algorithms/`。
 - **「全 0 / no viz」几乎都是路径拼错**（2026-10-14 定论）：传 `algorithms/x.html` 会拼成 `algorithms/algorithms/x.html`，Chrome 开的是自己的「无法访问您的文件」报错页——正文 41KB、0 个 `figure`、0 个 `.viz`、还不抛 JS 错，于是每项检查都静默通过只剩全 0。两个脚本已加参数归一化 + `chrome-error` 显式报 FAIL；再看到 0/0，先读那行报错，别去怀疑脚本。
@@ -68,7 +68,7 @@
 - **耗时数字不能在 load 高时重测**：多个 headless Chrome 留在后台时 load 能到 65，同一份代码连跑三次读数差 3~10 倍。判定改用「正文与图互相自洽 + 定性结论稳定」，别拿噪声覆盖站上已有的数字。
 - **收工时顺手清掉自己起的 Chrome**：实测泄漏过 213 个主进程 + `/tmp/cdp*` 34 GB（2026-10-14 清过一次）。`ps` 在沙箱里被禁（`operation not permitted`），**用 pgrep**：主进程取 `pgrep -fl 'MacOS/Google Chrome' | grep -v Helper`（Helper 路径里也含 `MacOS/Google Chrome`，不滤会多算上千个），日常浏览器是那个不带 `--headless` 的，**只杀带 `--headless` 的**。删 `/tmp/cdp*` 时：zsh 不对变量分词（`for d in $LIST` 会整体传给 `rm` 报 File name too long，用 `while IFS= read -r`）；里面混着 `cdp_page.js` / `cdpqa.js` / `*.log`，按扩展名跳过，只删含 `Local State` / `Default` / `SingletonLock` / `Crashpad` 的目录。`/tmp/cpp*` 与 `/tmp/hl*` 是对拍与高亮产物，按约定可复用，别清。
 
-## 踩过的坑（完整实录在技能 `references/pitfalls.md`，按节组织：§4 代码高亮 / §5 拼页与演示 / §8 自检 / §11 对拍 / §12 页面改写）
+## 踩过的坑（技能 `references/` 下按节拆的坑录，**按需读单节别整份读**：`pitfalls-build.md` §5 拼页演示 / `pitfalls-selfcheck.md` §8 自检截图 / `pitfalls-verify.md` §11 对拍 / `pitfalls-rewrite.md` §12 页面改写，`pitfalls.md` 是 1KB 索引）
 
 **演示与页面 JS**：演示按钮**用 id 显式点击**并同步 `disabled`，漏加会一直点到 40 帧上限；**`var el` 循环挂 handler 会闭包串味**（`el.value` 恒空串 → 演示整块空白），统一 `bind(id, ev, fn)` + `this.value`，改完用 CDP 抓 `Runtime.exceptionThrown`；**别用单个大写字母当维度变量**（`var W=660,H=300` 的 `H` 撞哈希函数，图全空而自检照样 PASS，画布高写 `HH`）；探针设下拉用 `selectedIndex`，**别缓存会被 `innerHTML` 换掉的节点**；MOD ≥ 1e6 的乘法取模用 BigInt（越过 2^53 静默丢精度）；演示随机数一律 mulberry32；`rebuild()` 里别把 step 设成末帧。
 

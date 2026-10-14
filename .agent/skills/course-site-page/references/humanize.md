@@ -1,6 +1,6 @@
 # Humanizer: Remove AI Writing Patterns（去 AI 味清单）
 
-> 本文件由原「去AI味 / humanizer」技能（v2.1.1）整体搬进 `course-site-page` 技能的 `references/`，供写作与收口时查阅。原始出处：[Wikipedia: Signs of AI writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing)（WikiProject AI Cleanup）。
+> 本文件是原「去AI味 / humanizer」技能（v2.1.1）的**内联副本**，整体搬进 `course-site-page` 技能的 `references/`，供写作与收口时查阅——**本技能不再依赖项目外的 `humanizer` / `去AI味` 技能**，需要时直接读这份。原始出处：[Wikipedia: Signs of AI writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing)（WikiProject AI Cleanup）。
 >
 > 与本站约定冲突时，**以 `SKILL.md`「五、拼页面 → 写作风格」和 `algorithms-course/.workbuddy/memory/MEMORY.md` 为准**：中文正文用「」而不是直引号，章节标题是「零、一、二…」而不是 Title Case，结尾要有具体要点的「总结」段。其余各条（意义拔高、-ing 伪分析、宣传腔、AI 高频词、copula 规避、否定并列、三段式、破折号、通篇加粗、emoji、套话结语）全部适用。
 >

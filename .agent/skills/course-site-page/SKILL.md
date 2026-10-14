@@ -12,6 +12,8 @@ agent_created: true
 
 - 站点根：`~/project/github/AIProject/algorithms-course`；课件根：`~/project/github/AIProject/algorithm-journey`
 - **开工前必读**：`algorithms-course/prompt.md`（进度/下一课/约定权威）与 `algorithms-course/.workbuddy/memory/MEMORY.md`（站点约定权威），缺一不可，别凭印象写。本文件是流程，prompt.md 是状态，互相关联。
+- **本文件是唯一自动加载的那份**（2026-10-14 瘦身后 27KB），细节全在 `references/`，**按需读**：读哪份看文末「按需读索引」表，不要一次把 `references/` 全读进来。
+- **本技能自包含（2026-10-14）**：脚本、参考资料（写作范本四篇、`humanize.md` 去 AI 味规则、分节坑录 `pitfalls-*.md`）全在本目录下，跑流程**不依赖项目外的任何技能**——不再调用 `ui-verify-cdp`（截图与越界用本目录 `scripts/shot_*.js` / `verify_pages.js`）、不再调用 `去AI味` / `humanizer`（规则已内联在 `references/humanize.md`）。脚本也只用 node 内置模块 + 同目录 `cdp_page.js`，不读 `node_modules`。
 
 ## 〇、进度与触发
 
@@ -22,7 +24,7 @@ agent_created: true
   - **方法论课要产页**（判据是「有没有可讲的方法」不是「有没有算法」：005 对数器、007 复杂度、008、019 IO、020 递归、026 容器、029 排序总结先例）。别一看到 PPT 薄、代码不是算法就记「跳过」。
   - **讲数据/概率的页面，正文数字必须自己跑实验量出来**（005 先例：抓取率、命中轮数等都是 /tmp/cppNNN 跑出来的），顺带验证代码能跑。
 - **开工先查半成品**（不只查自己中断的残留）：`ls -lT algorithms/ | tail -20` + 可疑页 `grep -o '@@[A-Za-z0-9_]*@@'`、`grep -c 'figure class="fig"'`、`grep -r '<页名>.html' nav/*/*/index.json` 看是否已入 nav。中断残留往往很完整，判断归属后走「复用 + 补占位符 + 自检」，比重写省一大截。
-- **同课并发互斥（抢锁，2026-10-07 恢复）**：所有「转换下一课」实例都读同一个「下一课」编号，写作期没有互斥，容易重复做同一课白烧 token。**开工第一步（读完 prompt.md 立刻）抢锁**，规则与可直接粘贴的脚本全文在 prompt.md 头部「并发防重」小节（第 9 行起）。要点：**锁的凭据是 `<lockdir>/owner` 文件、不是目录**——`mkdir -p` 幂等建容器，抢锁靠 noclobber 下 `printf ... > owner`（等价 O_EXCL，唯一成功者开工），抢不到且 owner 年龄 ≤ 60 分钟就打印「NNN 正在被另一会话转换」退出；收口最后一步只 `rm -f /tmp/algo-course-lock-<课号>/owner`（**别 rmdir，也别删目录**；目录留着是正常状态）；死锁 = `find owner -mmin +60` 命中（只看 owner mtime，见 pitfalls §8）；锁失效时兜底双查：`grep -r '<页名>.html' nav/*/*/index.json` 命中 → 已完成跳过；页面文件 mtime 60 分钟内 → 有人在做，等对方收口后只做复核（复用 + 核验，不重写、不抢写 nav/prompt.md）。
+- **同课并发互斥（抢锁）**：开工第一步（读完 prompt.md 立刻）抢锁，**可直接粘贴的脚本全文在 prompt.md 头部「并发防重」小节（第 9 行起），照抄那段，别自己写**。三条要点：凭据是 `/tmp/algo-course-lock-<课号>/owner` 文件不是目录（`mkdir -p` 建容器，noclobber 下 `printf > owner` 抢）；抢不到且 owner ≤ 60 分钟就退出；收口只 `rm -f owner`（别 rmdir）。死锁判定与兜底双查见 `pitfalls-selfcheck.md`。
 - 「转换下一课」→ **主循环直接做，不开子智能体**（见十一节）；「连转 N 课」串行，一课收口干净（nav 条目 + 重新生成的 json + prompt.md 都更新过）再开下一课。
 
 ## 一、定位材料
@@ -101,34 +103,14 @@ HL_OUT=/tmp/hlNNN/out python3 $SKILL/apply_placeholders.py algorithms/xxx.html
 
 侧边栏、目录、翻页、代码复制全由 `shared.js` 注入，页面里**一行都不要自带**。
 
-**页面完全独立（2026-10-06 用户定，三条都要落实）**：
+**页面完全独立（2026-10-06 用户定，三条都要落实）**：正文不写相邻算法链接/指代（「上一篇/下一篇」都不写，翻页由 shared.js 按 nav 顺序生成）；侧边栏分组默认折叠（只展开当前组，shared.js 负责，页面不写标记）；pager 链自检照跑（验的是 shared.js 生成的文本）。
 
-- **正文不写相邻算法链接/指代**：不写「上一篇/下一篇」「上一节/下一节」等指向相邻页的链接，页面结尾也不插任何翻页标记。相邻关系由 `nav/` 三层的数组顺序决定，`shared.js` 在每页底部按索引自动生成「上一篇/下一篇」。
-- **侧边栏分组默认折叠**：`shared.js` 打开页面时只展开当前算法所在组、并把高亮项自动滚动定位到侧边栏可视区**正中**（手动算 `scrollTop` 并钳位到顶/底边界；页面内容很短无法物理居中时钳位到顶属正常）；其余分组默认收起，点击分组标题可展开/收起（用户手动展开的组会记住）。生成页面不需要为侧边栏写任何标记，也不用管分组展开状态。
-- **pager 链自检照跑**：验证的是 `shared.js` 按 nav 铺平顺序生成的翻页文本，不是页面里写死的内容。
+**演示与绘图四条硬规则**（完整场景与修法在 `references/pitfalls-build.md`，踩了再去查）：
 
-**第二批体验细节（2026-10-06 用户验收后补，实现都在共享层、页面无需任何标记）**：
-
-- **上一篇/下一篇同一行**：`shared.js` 在每页底部渲染**一个** `nav.pager`，里面两个 `.pager-item`（上一篇/下一篇）并排同一行；只有单侧链接时渲染单个卡片（下一篇靠右对齐）。旧的「每链一个 nav」已废弃，别回退。
-- **首页左侧专题目录**：`index.html` 的 `<aside id="homeNav">` 由 `shared.js`（8b-0 段）按导航数据（nav 生成的 groups）渲染——`#group-<i>` 锚点 + 序号/组名/篇数，点击平滑定位（`.group{scroll-margin-top:76px}`），滚动时 scrollspy 高亮当前组；首页分组区 `#index-list .group` 带 `id="group-<i>"`。900px 以下 `.home-nav` 自动隐藏。
-
-**演示的控制按钮容器统一写 `class="viz-controls"`**：shot_element.js 按 `.viz-controls button` 索引点击，自造名字会点空、截图停在初始帧。shared.css 已有该样式。
-
-**演示里要用随机数时，一律用 mulberry32，整段照抄勿默写**（005 起反复踩，027 默错一次把种子清零）：
-
-```js
-seed = (seed + 0x6D2B79F5) | 0; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-```
-
-经典 LCG（`seed * 1103515245 + 12345`）在 JS 双精度下丢低位（3000 轮重复 1144 vs mulberry32 只 683）。固定 seed 让截图/逐帧可复现，页面上配「重置」把 seed 打回去。
-
-**演示要展示「某种结论」时，先让数据现形**（029）：改随机种子别瞎碰，用 Node 把页面同款随机流与算法原样仿真一遍，遍历种子找出让所有想展示现象都出现的那个，再写回页面（029 用 mulberry32(1) 让选择/快排/堆排全现形不稳定）。固定种子意义不只是可复现，还要保证「演示剧本」成立。
-
-**演示出「算出来的结果」时配自写 CDP 脚本**（005）：控制区是 select/滑块时 shot_steps 点不到——先 `select.value = ...; dispatchEvent(new Event('change'))`，再按文字找按钮点击，最后截图。判断标色别只信缩略图（005 把橙色看成蓝色），读回 DOM 属性（`rect.getAttribute('fill')`）逐格核对最稳。
-
-**绘图 helper 的命名遮蔽是最高频的一类 bug（115/116/117 连踩三次）**：画图 helper 名字极短（`T()` 写字、`R()` 矩形、`LN()` 线、`mount()` 挂载），演示变量一撞名就整块空白，而 verify_pages 只数 svg 数量、照样 PASS。区间端点一律带前缀（`QL/QR`、`curL/curR`），别用裸 `L/R/T/W/H`（`H` 还会撞哈希函数，画布高写 `HH`）。**出了 bug 别全局批量改名**：`\bL\b` 会把 SVG `path` 的 `d="M 114 86 L 114 80"` 里的 `L` 命令一起换掉，只在 `<script>` 段内改名，改完用 CDP 抓一次 `Runtime.exceptionThrown`。
-
-**画图预算按「最长预设」算，不按默认预设**（116 的 n/k 演示 k ≥ 4 越界、117 的复制段画到 `16+m=28` 而 `unit` 按 24 算）——默认预设看不出问题，官方自检也放行，必须把 select **全组合**跑一遍。文字自重叠（尤其「同一句表头写了两遍」造成的 100% 重合，截图完全看不出）只有逐对 `getBBox()` 比对能发现，overlap 脚本要覆盖演示末帧。
+- 控制按钮容器统一 `class="viz-controls"`（脚本按索引点击，自造名字会点空）。
+- 随机数一律 mulberry32（整段照抄勿默写，027 默错过一次），固定 seed + 配「重置」。
+- 绘图 helper 名字极短（`T/R/LN/mount`），**变量别撞名**（`L/R/T/W/H` 全禁用，`H` 还会撞哈希函数，画布高写 `HH`）；撞名时整块空白而自检照样 PASS。
+- 画图预算按**最长预设**算，select 全组合跑一遍；文字重叠只有逐对 `getBBox()` 能发现。
 
 ### 写作风格（去 AI 味）——写每一段时就照这个来
 
@@ -174,7 +156,7 @@ python3 tools/build_nav.py --stats      # 打印 406 / 77 / 9 与难度分布
 - 新页插到对应组的**正确顺序位置**（组内按课程编号排，即首页卡片/侧栏/翻页顺序）。**页面正文不需要也不允许写相邻页链接或指代**——上一节/下一节的翻页由 shared.js 按铺平顺序自动生成（2026-10-06 用户定：页面完全独立）。首页不用动，卡片由 json 生成。
 - **显示顺序看 `nav/` 三层 json 的数组顺序**：`nav/index.json` 定一级 → `nav/<cat>/index.json` 定二级 → 组内 `index.json` 定页面。生成物里 `algorithms` 数组的下标没有意义（生成器按组输出，必然重排），**定位页面按 `(group, file)`，不要按下标**。
 - 改完**必须重新生成并一起提交**生成物，否则线上不生效：`python3 tools/build_nav.py`。
-- **nav 文件并发写保护**（多会话可能同时读写）：写前 `cp` 备份到 /tmp，`json.load` → `splice` 插入 → `json.dump`，中间不夹长命令。比旧的大 json 安全得多——各会话通常写各自组目录下的小文件，但仍要：写完核对 `len(items) == 原数 + 新增数` 并重读确认自己的条目还在；核对改动用 `diff` 对比写前备份，别用 `git diff HEAD`。**开新组先写父层 `index.json` 再建目录**（反过来会被生成器报「野目录」）。忘了写 nav 的页面不会静默丢失——下次生成会报「孤儿页」。
+- **nav 文件并发写保护**：写前 `cp` 备份到 /tmp，`json.load` → 插入 → `json.dump`，中间不夹长命令；写完核对 `len(items) == 原数 + 新增数` 并重读确认自己的条目还在；核改动用 `diff` 对比写前备份，**别用 `git diff HEAD`**（整份重写会报上千行假改动）。**开新组先写父层 `index.json` 再建目录**（反过来报「野目录」）。忘了写 nav 不会静默丢——下次生成报「孤儿页」。
 
 **加一页的标准动作**（三步，别的层一个字都不用碰）：
 
@@ -197,9 +179,8 @@ python3 tools/build_nav.py --check && python3 tools/build_nav.py && git add nav 
 ## 八、自检（必做）
 
 ```bash
-# 技能装两处：仓库 .agent/skills（随本仓库走）与 ~/.workbuddy/skills（用户级），脚本取当前加载的那份
+# 技能只有一份：仓库 .agent/skills（随 git 走）。2026-10-14 起 ~/.agents/skills 那份已删除
 SKILL=~/project/github/AIProject/algorithms-course/.agent/skills/course-site-page/scripts
-[ -d "$SKILL" ] || SKILL=~/.workbuddy/skills/course-site-page/scripts
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 N=~/.workbuddy/binaries/node/versions/$(cat ~/.workbuddy/binaries/node/versions/current)/bin/node   # 版本号随机器，读 current 拼出
 
@@ -216,51 +197,22 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 ```
 
 - 用 `file://` + `--allow-file-access-from-files`，shared.js 才能 fetch json；沙箱 Chrome 连不上 localhost。
-- **CDP 端口从环境变量 `CDP_PORT` 读**：换端口必须成对写 `--remote-debugging-port=940X` 与 `CDP_PORT=940X`，否则 ECONNREFUSED 易误判「Chrome 没起来」。默认用 9333（脚本默认端口）、`--user-data-dir=/tmp/cdpX`；**并发会话同跑时不要 `pkill -f "remote-debugging-port="`**（会把别人会话的 Chrome 一起杀掉），改用没人占的端口 + 独立 `--user-data-dir`；只有确认站内没有别的会话时清残留才用 pkill。
-- **报全 0 /「no viz」= 路径没拼对，不是环境怪癖**（2026-10-14 定论，推翻下面这条旧记录）。传 `algorithms/x.html` 会被拼成 `algorithms/algorithms/x.html`，Chrome 打开的是自己的「无法访问您的文件」报错页：`location.href` 变 `chrome-error://chromewebdata/`，正文 41KB、`figure.fig` 0 个、`.viz` 0 个、**还不抛 JS 错**——于是四项检查全部静默通过，只剩一堆 0。同环境 `verify_home.js` 正常，是因为它不接受文件名参数、路径自己拼。
-  两个脚本已修好（2026-10-14）：参数归一化（`algorithms/x.html`、`x.html`、`x` 都收）+ 认出 `chrome-error` 后直接打 `!! 打不开这个页面（文件不存在）：<完整 url>`。再遇到 0/0 先看这一行，别自写脚本绕过去。
-- 首页要单独查（verify_pages 只跑 algorithms/ 下页）→ 直接 verify_home.js；**首页没有侧边栏**，navGroups 为 0 正常，不要当 FAIL 去修。它不查字段齐全/类型对，插过新条目另跑 `python3 tools/build_nav.py --check`（13 条硬错全在这，比 Counter 管用）。
+- **CDP 端口从环境变量 `CDP_PORT` 读**：换端口必须成对写 `--remote-debugging-port=940X` 与 `CDP_PORT=940X`，否则 ECONNREFUSED 易误判「Chrome 没起来」。**并发会话同跑时不要 `pkill -f "remote-debugging-port="`**（会把别人的 Chrome 一起杀掉），改用没人占的端口 + 独立 `--user-data-dir`；收工时清自己起的 headless Chrome（`pgrep -fl 'MacOS/Google Chrome' | grep -v Helper`，只杀带 `--headless` 的）。
+- **报全 0 /「no viz」= 路径没拼对**（传 `algorithms/x.html` 会被拼成 `algorithms/algorithms/x.html`，Chrome 打开的是自己的报错页，四项检查全部静默通过只剩一堆 0）。脚本已能认出 `chrome-error` 并直接打印打不开的 url，看到 0/0 先读那一行。
+- 首页要单独查（verify_pages 只跑 algorithms/ 下页）→ 直接 verify_home.js；**首页没有侧边栏**，navGroups 为 0 正常，不要当 FAIL 去修。它不查字段齐全/类型对，插过新条目另跑 `python3 tools/build_nav.py --check`（13 条硬错全在这）。
 - 全站页列表直接从 nav 生成别手敲（生成物下标无意义，扫 nav 才是真值）：
   ```bash
   PAGES=$(python3 -c "import json,glob;print(' '.join(i['file'] for p in sorted(glob.glob('nav/*/*/index.json')) for i in json.load(open(p, encoding='utf-8'))))")
   $N $SKILL/verify_pages.js ${PAGES}     # zsh 要写 ${=PAGES} 才会按空格拆词
   ```
   **只传文件名，别带 `algorithms/` 前缀**（脚本自己会拼）：带上前缀会拼出重复路径，见上一条。
-- **拼完页面先跑「杂字扫描」**（003 实测出现过俄文/英文杂字与同音错字）：
+- **拼完页面先跑杂字扫描，收口前再跑 AI 味扫描**（两个脚本，2026-10-14 从本文内联块抽出来的，别再手敲 python）：
   ```bash
-  python3 - <<'PY'
-  import glob, re
-  for f in glob.glob('algorithms/*.html'):
-      s = open(f, encoding='utf-8').read()
-      bad = sorted({c for c in s if not c.isascii() and c.isalpha() and ord(c) < 0x4E00})
-      flag = []
-      if bad: flag.append('杂字' + str(bad))                      # 只看 ASCII 区间外文字母
-      if re.search(r'<pre class="code">\s*<pre class="code">', s): flag.append('代码块真嵌套')
-      if re.search(r'@@[A-Za-z0-9_]*@@', s): flag.append('占位符')
-      if flag: print(f, flag)
-  PY
+  python3 $SKILL/scan_typos.py a.html b.html      # 杂字 / 占位符残留 / 代码块真嵌套（不带参数 = 全站）
+  python3 $SKILL/scan_ai_style.py a.html b.html   # 中文套话 / 「不是X是Y」否定并列 / 破折号 / strong / emoji
   ```
-  说明：老页常见 `ᵢ Σ α ⁿ` 这类下标/符号会一起被扫出，属正常忽略；单独的 `</pre></pre>` 多闭合在 40 多个老页上都有、浏览器忽略，**不是自己这课的问题就别动别人的页**。
-- **收口前跑「AI 味扫描」**（词表只覆盖中文套话，英文类痕迹照 humanize.md 自己读一遍；必然误报技术对比，那种留）：
-  ```bash
-  python3 - <<'PY'
-  import glob, re, sys
-  BAD = ['总而言之','毫无疑问','不可否认','综上所述','双刃剑','首先','其次','再者',
-         '值得注意的是','我们可以看到','不难发现','由此可见','总体而言','基于以上',
-         '不仅','赋能','底层逻辑','降维打击','矩阵','值得一提','换句话说']
-  for f in sorted(glob.glob('algorithms/*.html')):
-      s = open(f, encoding='utf-8').read()
-      m = s[s.find('<main'):s.find('</main>')] or s
-      t = re.sub(r'<[^>]+>', '', m)
-      hits = [w for w in BAD if w in t]
-      neg = [x.strip() for x in re.findall(r'[^。；！？\n]*?(?:不是|而是|并非)[^。；！？\n]*。', t)]
-      if hits or neg:
-          print(f, '| 套话:', hits or '-', '| 否定并列:', len(neg))
-          for x in neg: print('    ·', x[:80])
-  PY
-  ```
-  顺带扫：`——`（破折号）、`<strong`（通篇加粗）、emoji（正则 `[\U0001F300-\U0001FAFF]`）。**站点老页面大量存在这些问题，别顺手去改别人的页**，只对自己这轮产出的页面负责。
-- 其余自检坑录（越界口径、第二演示、标注压线、末帧、截图白图、CDP 自写细节等）→ **references/pitfalls.md 第八节**，按需查。
+  老页自带的 `ᵢ Σ α ⁿ` 与 `</pre></pre>` 会被扫出来，属正常忽略；**只对自己这轮产出的页面负责，别顺手改别人的页**。否定并列必然误报技术对比（「写 `1u << i` 而不是 `1 << i`」这种留着）。
+- 其余自检坑录（越界口径、第二演示、标注压线、末帧、截图白图、CDP 自写细节等）→ **按需读 `references/pitfalls-selfcheck.md`**，别整份读坑录。
 
 ## 九、收尾
 
@@ -268,21 +220,17 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 - **python 替换锚点截断会把旧句残留成重复**（029 实测）：锚点只写到「* 下一课：**029**。」就整行换掉，行尾原有「003~028 已产页…」留在原地变一句两半。替换后 `grep -n '下一课：' prompt.md` 整行看一遍。
 - 往 `algorithms-course/.workbuddy/memory/YYYY-MM-DD.md` 追加一条：本次建了哪几页、源自第几课、页码/组的位置。共享层有改动（shared.css/js）时写进 `memory/MEMORY.md`。
 
-## 十、对拍与课程代码语义（2026-10-01 增）
+## 十、对拍与课程代码语义
 
-- **课程代码 ≠ 题面直觉，先做语义假设检验，别急着改代码**（实例：BZOJ2870 虚点把单点链算进答案——先写假设检验脚本跑几百组随机小用例确认真实语义，再按它写暴力；网上题解与课程代码一致，页面按课程代码呈现，正文一句「这里有个细节」点出）。
-- **强制在线的题（如 CF757G 异或 lastAns）不能随机喂原始参数对拍**：解码依赖上轮输出，随机值会解出越界下标跑崩（表现「code 输出空、brute 输出 0」的假 mismatch）。正确做法是**交互编码**——以暴力为参考实现，逐条喂解码后的操作、读输出当 lastAns、再把 `值 ^ lastAns` 写进输入，最后拿完整输入跑被测程序逐行比对。暴力输出用 `endl` 不用 `"\n"`（否则管道块缓冲卡死）。
-- **沙箱本机没有 `bits/stdc++.h`**：自建 shim（/tmp/cppNNN/inc/bits/stdc++.h 里 include 常用头），编译加 `-I inc` 和 `-std=c++17`（缺后者报 `>>` 与初始化列表语法错误）。
-- **课程代码把树状数组上界写成 n 的题，随机数据把值限制在 ≤ n**（171 实测：值域超 n 时写入被静默丢、判出假 MISMATCH，代码没问题；页面正文顺手点明「上界用 n，因为本题值域与 n 同阶」）。**先怀疑数据，再怀疑代码**。
-- 跑对拍把输出 `grep -E 'OK|MISMATCH|FAIL'`，别只看 tail（失败详情在末尾几行）。
-- **写对拍器先怀疑自己的生成器**（162 两条都踩）：节点编号基准对齐题面（P1505 是 0 基准，读入 `x++`，生成器按 1..n 会一半操作越界）；算「子树内」的 DFS 起点父亲要显式给 `par[u]`（u 是根给 0），否则真实父节点被当儿子扫进来、答案整片偏大。**MISMATCH 成片、随机、换种子复现率稳定 = 生成器形状问题，不是代码边界问题**。
-- **DAG 最长路 / 最长链的暴力参考必须按拓扑序扫**（072 踩：信封、数对链、K 递增三题的暴力都是「枚举前驱取 max + 1」，随手按输入顺序扫会报成片假 MISMATCH，如 `n=7 2 vs 3`、`k=5 -2 vs 0`）。信封按「宽度升序、同宽高度升序」扫，数对链按右端点升序扫，分组题空组先 `if(size==0) return 0`。**看到 MISMATCH 先确认暴力的枚举顺序是不是一个合法拓扑序，再回头改实现**。
-- **错法演示的抓取率随值域单调下降，挑小值域才现形**（072 实测：写反等号 V=3 → 86.78%、V=10 → 63.81%、V=50 → 20.30%、V=1000 → 1.10%、V=10⁶ → 0.00%；信封同宽排序、K 递增选哪个 bs 同规律）。演示里的「错误率」档位要覆盖小值域，别只给一组大随机数据——那样错版和正解答案一样，演示看着像没区别。
-- **探针报 FAIL 先怀疑探针自己的参考实现**（108 实测连着踩两次）：① 「范围加 + 单点查」的答案就是差分数组的前缀和，探针又对 `a` 求了一次前缀和当期望，末帧永远差一截；② 探针重放随机算子时从 mulberry32 流里取 `v` 的位置与页面不一致，同一组算子被铺成两条不同的序列。**先用一组手算的固定小用例把「页面末帧打印值」和「参考实现的期望值」对齐，再上随机**；随机算子只写一份生成逻辑给两边共用，别各写一份。
-- **演示网格要把哨兵行 / 列一并画进来**（108：二维 `tree` 是 0 基准且带第 0 行第 0 列哨兵，渲染 `a` 用 off=0、`tree` 用 off=1，混用整行显示 0；二维差分的 4 个角会落在第 n+1 行 / 列，网格不铺到 n+2 就出现「图上找不到这个更新点」）。行列的 `py(i) = Y0 + i*CS` 别从 `i-1` 起算，否则第一行 y 为负、`getBBox()` 越界。
-- **降序 ends 的二分不是换个符号就行**（072：求「以 arr[j] 开头的最长不下降」时 ends 是降序，要找 `< num` 最左，和升序版找 `>=` 最左不是同一段代码改个比较符）。写这类「倒着扫」的预处理时把方向单独立一个函数（如 `bsDesc`），别复用升序版。
-- **性能数字要连同 `-O0` 一起量，别只报 `-O2`**（031 实测：clang 把 BK 的 `while(n){n&=n-1;c++;}` 识别成 popcount 编成 NEON `cnt` 指令（`-S` 能看到），一千万次 0.53ms 比手写 SWAR 3.16ms 快 6 倍；关优化后 SWAR 恒 36.59ms、BK 随 1 的个数 32.15~235.08ms）。想确认是否被识别成内在函数：`-S` 后 grep 指令名。
+七条要点，完整场景与修法在 `references/pitfalls-verify.md`（写对拍器或报 MISMATCH 时读那一份）：
 
+- **课程代码 ≠ 题面直觉**，先跑几百组随机小用例确认真实语义，再按它写暴力；页面按课程代码呈现，正文一句「这里有个细节」点出。
+- **强制在线的题（CF757G 异或 lastAns）要交互编码**：以暴力为参考实现逐条喂解码后的操作、读输出当 lastAns，暴力输出用 `endl` 不用 `"\n"`。
+- **先怀疑数据，再怀疑代码**（树状数组上界写成 n 的题，随机值要限制在 ≤ n），**再怀疑自己的生成器**（编号基准、DFS 起点父亲），最后才回头看实现。
+- **DAG 最长路 / 最长链的暴力必须按拓扑序扫**，看到 MISMATCH 先确认暴力的枚举顺序是不是合法拓扑序。
+- 跑对拍把输出 `grep -E 'OK|MISMATCH|FAIL'`，别只看 tail。
+- **错法演示挑小值域才现形**（抓取率随值域单调下降），演示的「错误率」档位要覆盖小值域。
+- **探针报 FAIL 先怀疑探针自己**：先用一组手算固定小用例对齐「页面末帧值」与「参考实现期望值」，再上随机；随机算子只写一份给两边共用。
 ## 十一、主循环直做模式（默认，单课与「连转N课」都走这里）
 
 > **2026-10-02 用户定调：转换一节课不开子智能体，太浪费 token。** 现在改为**主循环直接做**。
@@ -291,39 +239,38 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 
 **控制上下文的小技巧**：PPT 文本别整篇 cat 进上下文（抽到 /tmp/pptNNN.txt 再 grep/sed 按段取）；源码同理（编译跑对拍、不整份读）；页面用「先 Write 带占位符 + 脚本替换」避免手写转义；收口核验只用 grep -c / ls -lT / find -newermt 这类不进上下文的检查。
 
-**就地改写页面 HTML 的坑（016/031 实测）**：别用 `s.index(a):s.index(b)` 切片段（b 若在 a 之前先命中会切出空串，`str.replace('', new)` 把新块插进每两个字符之间，59KB 页面瞬间 80MB；写成 `i = s.index(a); j = s.index(b, i); assert i < j`，替换完立刻 `wc -c` 查体积；真炸了 `s.replace(NEW, '')` 能还原）；演示的 `rebuild()` 里**不要写 `st.step = st.steps.length - 1`**（切 select 触发 rebuild 会把演示停末帧，verify_viz_steps 只跑 1 帧看起来像没生效，rebuild 固定回第 0 步）；自写链表/数组模拟器要带保护（取不到节点置 `broken = true` 显示「链已经断了」而不是真崩）；演示随机序列要加权别等概率（016：六操作等概率 16 步整条序列一个 deleteFront 都没落到，改 40% 插/40% 删/20% 查后每个 bug 版本都能现形）。
+**就地改写页面 HTML 前先读 `references/pitfalls-rewrite.md`**（016/031 实测：`s.index(a):s.index(b)` 顺序写反会把 59KB 页面撑到 80MB；`rebuild()` 里设末帧会让演示只跑 1 帧；演示随机序列要加权不等概率）。三条都在那份里。
 
 ## 十二、多会话共存的几条纪律（锁只挡同课，跨课并发仍要注意）
 
 同一站点可能同时有几个会话在转不同的课，共享 `nav/` 目录树、生成物 `assets/data/algorithms.json` 与 `prompt.md`：
 
-- **别人的半成品页面不要动**（哪怕占位符还没替换），等它自己收口；先确认自己这课的边界，别顺手「修好」。
-- **组可能已经被别人建好**：插入前扫一遍 `grep -h '"name"' nav/*/index.json` 与各组的 `title`，同主题新课**插到组内对应位置**，不要重复建组（重复组名会让首页出现两张一样的卡片头）。
-- 收口时 verify_home.js 可能因别人的中间态报 FAIL（某组还没页、组名对不上）→ 先看差异是不是自己那组，不是就放过并在 memory 记一笔。
-- 写 nav 的安全纪律（cp 备份、最小改动、核条数、别用 `git diff HEAD`）见七节。**收口必须 `python3 tools/build_nav.py` 重新生成并把生成物一起提交**，否则线上不生效；别人的中间态可能让 `--check` 报 FAIL，只看自己那组。
+- **别人的半成品页面不要动**（哪怕占位符还没替换），等它自己收口。
+- **组可能已经被别人建好**：插入前扫一遍 `grep -h '"name"' nav/*/index.json` 与各组的 `title`，同主题新课插到组内对应位置，不重复建组。
+- 收口时 verify_home.js 可能因别人的中间态报 FAIL → 先看差异是不是自己那组，不是就放过并在 memory 记一笔。
+- **收口必须 `python3 tools/build_nav.py` 重新生成并把生成物一起提交**（写 nav 的安全纪律见七节）。
 
-## 十三、技能自身装多处，改完要同步
+## 十三、技能只装一份（2026-10-14 收敛）
 
-本技能有**两个物理副本**，调用时命中哪份不一定：
+本技能**唯一副本**在仓库里，随 git 走：
 
 | 副本 | 路径 |
 |---|---|
-| 仓库版（随 git 走） | `~/project/github/AIProject/algorithms-course/.agent/skills/course-site-page/` |
-| 用户级 | `~/.workbuddy/skills/course-site-page/` |
+| 仓库版（唯一） | `~/project/github/AIProject/algorithms-course/.agent/skills/course-site-page/` |
 
-**`~/.agents/skills/course-site-page/` 不是第三份**——它与 `~/.workbuddy/skills/course-site-page/` 共享同一批 inode（每个文件都是硬链接，在其中一边新建/改文件，另一边立刻可见）。所以真正要同步的只有「仓库版 ↔ 用户级」这一次 `cp`；同步完 `~/.agents` 自动跟着一致，不用再管。
+改 SKILL.md / scripts **直接改这份就行，不用再 cp 同步**（历史上挂过 `~/DoubaoWork/skills/` → `~/.agents/skills/` → 仓库+用户级两份，2026-10-14 已全部收敛，home 那份备份在 `/tmp/course-site-page-home-backup-20261014.tar.gz`）。本技能**不依赖项目外的任何技能**（见开头「本技能自包含」），整个目录打包带走就能用。
 
-改了 SKILL.md 或 scripts，**两份都要落**（`cp` 过去再 `diff -rq` 确认），否则下次会话可能读到旧版，按已废弃的流程手改 json 或跑旧的自检脚本。
+CDP 类脚本依赖同目录 `cdp_page.js`，别单独搬走一个文件用。**怀疑读到了旧版时**：`grep -c 'tools/build_nav.py' <本 SKILL.md>` 得 8 处即当前 nav 版。
 
-```bash
-R=~/project/github/AIProject/algorithms-course/.agent/skills/course-site-page
-U=~/.workbuddy/skills/course-site-page
-cp $R/SKILL.md $U/SKILL.md            # 改哪个文件 cp 哪个
-diff -rq $R $U                         # 应只剩 .DS_Store
-```
+## 附：按需读索引（本文件是瘦身版，细节都在 `references/`）
 
-CDP 类脚本（verify_pages / verify_viz_steps / shot_* / check_branch / example_controls_check）依赖同目录的 `cdp_page.js`，复制时别漏。**不知道当前会话加载的是哪份时**：`grep -n 'tools/build_nav.py' <路径>/SKILL.md` 有 7 处命中就是 nav 版。
+**别一次把 `references/` 全读进来**（全读约 80KB）。只在下面这一步真需要时读对应那一份：
 
-## 附：详细坑录索引
-
-本文件为瘦身版，完整踩坑实录（每条的完整场景与修法）在 `references/pitfalls.md`，按节组织：§4 代码高亮、§5 拼页与演示、§8 自检与截图（最长）、§11 对拍、§12 页面改写。执行中遇到本文件未展开的细节先查 pitfalls.md。
+| 什么时候 | 读哪个 |
+|---|---|
+| 写正文前（风格） | `2025-12-20-ds-st-rmq.md` 等范本四篇挑一篇翻；`humanize.md` 是完整 24 类 AI 味清单（收口前查） |
+| 拼页面 / 做演示 | `pitfalls-build.md`（§5） |
+| 跑 CDP 自检 / 截图出怪事 | `pitfalls-selfcheck.md`（§8） |
+| 写对拍器 / 报 MISMATCH | `pitfalls-verify.md`（§11） |
+| 就地改写已有页面 | `pitfalls-rewrite.md`（§12） |
+| 不确定读哪个 | `pitfalls.md`（索引表，1KB） |

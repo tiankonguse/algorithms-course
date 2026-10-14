@@ -89,7 +89,7 @@ python3 tools/build_nav.py --stats          # 打印 406 / 77 / 9 与难度分�
 * 代码部分**不提「Java」「JDK」**等语言来源，直接给 C++ 实现（013 的「Java 课里的 Queue1」改成「标准库 vs 数组版」的对比）。
 * 结尾要有**「总结」段**：参考 tiankonguse.github.io 博客的「最后」写法（具体要点列出来 + 一句前瞻，如 ST-RMQ 那篇的「两个注意事项」），不空谈升华。013 在复杂度分析后补了「七、总结」。
 * **页面完全独立（2026-10-06 用户定）**：正文不写指向相邻算法的链接或「上一节/下一节/上一篇/下一篇」指代，页面结尾也不插入翻页链接；上一篇/下一篇由 shared.js 按 json 顺序在页面底部生成。侧边栏分组默认折叠：打开页面只展开当前算法所在组并自动定位高亮，其余组收起，生成页面不用管这些。收口时 pager 链自检照跑（验证的是 JS 生成的翻页文本）。2026-10-06 第二批：翻页渲染成一个 nav.pager 内两个 pager-item（上一篇/下一篇同一行）；打开页时当前算法滚动到侧边栏正中（钳位到顶/底属正常）；首页左侧 #homeNav 专题目录由 shared.js 按 groups 渲染（#group-<i> 锚点 + scrollspy 高亮），点击平滑定位到对应主题。以上全部在共享层实现，生成页面不需要任何额外标记。
-* 范本四篇（写作前先翻）：已收录在技能 `~/.agents/skills/course-site-page/references/`（`2025-12-20-ds-st-rmq.md`、`2025-12-23-oi-dfs-seq.md`、`2025-12-25-oi-lca.md`、`2025-12-29-oi-virtual-tree.md`）。完整风格要点在 SKILL.md「写作风格 → 范本对齐」块。
+* 范本四篇（写作前先翻）：已收录在技能 `~/project/github/AIProject/algorithms-course/.agent/skills/course-site-page/references/`（`2025-12-20-ds-st-rmq.md`、`2025-12-23-oi-dfs-seq.md`、`2025-12-25-oi-lca.md`、`2025-12-29-oi-virtual-tree.md`）。完整风格要点在 SKILL.md「写作风格 → 范本对齐」块。
 
 ## 转换进度
 
