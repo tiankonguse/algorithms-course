@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>树上倍增：跳表、k 级祖先与 LCA · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .td-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .td-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .td-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  .td-sel{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:5px 10px;font-size:14px;color:var(--text);font-family:inherit;
+  }
+  @media(max-width:760px){
+    .td-btn{font-size:13px;padding:5px 11px;}
+    .td-sel{font-size:13px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>树上倍增：跳表、k 级祖先与 LCA</h1>
+    <p class="intro">树上一个点往上走 k 步落在哪、两个点的最低公共祖先是谁，这两个问题共用同一张表：stjump[u][p] 记「从 u 往上跳 2^p 步落在哪个节点」。表建一次 O(n log n)，两个问题都压成 O(log n) 一次查询。</p>
+
+    <h2>零、背景</h2>
+    <p>parent 数组只回答「上一级是谁」。顺着 parent 一路往上，问「第 k 个祖先」要走 k 次，问「两点的最低公共祖先」要先爬到同一层再一起往上挪。n = 5 × 10⁵ 的链上，一次查询平均要爬 25 万层，m = 5 × 10⁵ 条查询就是 1.25 × 10¹¹ 次跳跃。</p>
+    <p>跳表把「一步一步走」换成「按 2 的幂整块跳」。这和 ST 表是同一个想法：预处理所有长度为 2 的幂的区间，查询时把跨度拆成二进制，最多 log n 块拼出来。</p>
+
+    <h2>一、问题</h2>
+    <p>题目一，树节点的第 K 个祖先：n 个节点编号 0 到 n − 1，根节点是 0 号，parent 数组给出每个点的父亲。反复调用 getKthAncestor(i, k)，返回从 i 往上跳 k 步到的节点，不存在返回 −1。n 上限 5 × 10⁴。</p>
+    <p>题目二，最近公共祖先：n 个点、n − 1 条边、指定根 root，m 条查询 u v，每条打印 u 和 v 的最低公共祖先。n、m 上限都是 5 × 10⁵。</p>
+    <p>两道题的输入形态不一样（一个给 parent 数组、一个给边表），但解法的核心完全是一张表。</p>
+
+    <h2>二、朴素做法的真实代价</h2>
+    <p>先把「一步步往上爬」的账算清楚，才知道跳表到底省在哪。链形数据 n = 5 × 10⁵，随机 m 组点对，逐格爬 405.57 微秒一次，跳表 1.43 微秒一次，283.5 倍；n = 10⁵ 的链是 98.72 对 0.16 微秒，627 倍。</p>
+    <p>换个树形结论就翻过来了。星形（所有点都挂在根下）n = 5 × 10⁵，逐格只要 0.0063 微秒，跳表要 0.1791 微秒，反过来慢 28 倍。原因很直接：星上所有点都在第 2 层，逐格只走一步；跳表不管树多深，每档都老老实实试一遍，power = 18 就是 19 次判断。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="四种树形上跳表与逐格爬的单次查询耗时" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <rect x="0" y="0" width="660" height="300" fill="none"/>
+        <text x="20" y="20" font-size="11" fill="#6b7280">n = 5 × 10⁵，随机点对，单次查询耗时（对数刻度，微秒）</text>
+        <g stroke="#e6e8eb" stroke-width="1">
+          <line x1="60" y1="240" x2="640" y2="240"/>
+          <line x1="60" y1="205" x2="640" y2="205"/>
+          <line x1="60" y1="170" x2="640" y2="170"/>
+          <line x1="60" y1="135" x2="640" y2="135"/>
+          <line x1="60" y1="100" x2="640" y2="100"/>
+          <line x1="60" y1="65" x2="640" y2="65"/>
+          <line x1="60" y1="30" x2="640" y2="30"/>
+        </g>
+        <g font-size="9" fill="#9aa0a6" text-anchor="end">
+          <text x="54" y="243">0.001</text>
+          <text x="54" y="208">0.01</text>
+          <text x="54" y="173">0.1</text>
+          <text x="54" y="138">1</text>
+          <text x="54" y="103">10</text>
+          <text x="54" y="68">100</text>
+          <text x="54" y="33">1000</text>
+        </g>
+        <g font-size="10" text-anchor="middle">
+          <rect x="105" y="129.6" width="40" height="110.4" fill="#2563eb"/>
+          <rect x="155" y="43.7" width="40" height="196.3" fill="#ea580c"/>
+          <text x="125" y="124" font-size="9" fill="#2563eb">1.43</text>
+          <text x="175" y="38" font-size="9" fill="#ea580c">405.57</text>
+          <text x="150" y="258" fill="#374151">链</text>
+          <text x="150" y="272" font-size="9" fill="#9aa0a6">平均深度 25 万</text>
+
+          <rect x="245" y="161.1" width="40" height="78.9" fill="#2563eb"/>
+          <rect x="295" y="212.0" width="40" height="28.0" fill="#ea580c"/>
+          <text x="265" y="155" font-size="9" fill="#2563eb">0.179</text>
+          <text x="315" y="206" font-size="9" fill="#ea580c">0.0063</text>
+          <text x="290" y="258" fill="#374151">星</text>
+          <text x="290" y="272" font-size="9" fill="#9aa0a6">深度全是 2</text>
+
+          <rect x="385" y="156.5" width="40" height="83.5" fill="#2563eb"/>
+          <rect x="435" y="168.2" width="40" height="71.8" fill="#ea580c"/>
+          <text x="405" y="150" font-size="9" fill="#2563eb">0.242</text>
+          <text x="455" y="162" font-size="9" fill="#ea580c">0.113</text>
+          <text x="430" y="258" fill="#374151">随机</text>
+          <text x="430" y="272" font-size="9" fill="#9aa0a6">平均深度 13.3</text>
+
+          <rect x="525" y="154.4" width="40" height="85.6" fill="#2563eb"/>
+          <rect x="575" y="171.5" width="40" height="68.5" fill="#ea580c"/>
+          <text x="545" y="148" font-size="9" fill="#2563eb">0.279</text>
+          <text x="595" y="165" font-size="9" fill="#ea580c">0.091</text>
+          <text x="570" y="258" fill="#374151">完全二叉</text>
+          <text x="570" y="272" font-size="9" fill="#9aa0a6">深度 18 到 19</text>
+        </g>
+        <g font-size="10">
+          <rect x="440" y="10" width="12" height="10" fill="#2563eb"/>
+          <text x="458" y="19" fill="#374151">跳表</text>
+          <rect x="516" y="10" width="12" height="10" fill="#ea580c"/>
+          <text x="534" y="19" fill="#374151">逐格爬</text>
+        </g>
+      </svg>
+      <figcaption>跳表赢在深树；树一浅，「每档都试一遍」的固定开销反而让逐格爬更快</figcaption>
+    </figure>
+
+    <p>这条结论值得记住：跳表换来的是 O(log n) 这个上界，代价是每档都要试一遍。深度本身就小于 log n 的时候，这笔账是亏的。</p>
+
+    <h2>三、跳表长什么样</h2>
+    <p>两张表。deep[u] 记 u 在第几层，根算第 1 层。stjump[u][p] 记从 u 往上跳 2^p 步落在哪个节点。</p>
+    <p>第 0 列就是父亲：stjump[u][0] = parent[u]。后面的列递推：往上跳 2^p 步，等于先跳 2^(p−1) 步落到一个中间点，再从中间点跳 2^(p−1) 步。写成式子就是 stjump[u][p] = stjump[ stjump[u][p−1] ][p−1]。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="跳表的递推式" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#9aa0a6" stroke-width="1.3">
+          <line x1="90" y1="53" x2="90" y2="67"/>
+          <line x1="90" y1="83" x2="90" y2="97"/>
+          <line x1="90" y1="113" x2="90" y2="127"/>
+          <line x1="90" y1="143" x2="90" y2="157"/>
+          <line x1="90" y1="173" x2="90" y2="187"/>
+          <line x1="90" y1="203" x2="90" y2="217"/>
+          <line x1="90" y1="233" x2="90" y2="237"/>
+        </g>
+        <g fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.4">
+          <circle cx="90" cy="40" r="13"/>
+          <circle cx="90" cy="70" r="13"/>
+          <circle cx="90" cy="100" r="13"/>
+          <circle cx="90" cy="130" r="13"/>
+          <circle cx="90" cy="160" r="13"/>
+          <circle cx="90" cy="190" r="13"/>
+          <circle cx="90" cy="220" r="13"/>
+        </g>
+        <circle cx="90" cy="250" r="13" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="90" y="44">1</text>
+          <text x="90" y="74">2</text>
+          <text x="90" y="104">3</text>
+          <text x="90" y="134">4</text>
+          <text x="90" y="164">5</text>
+          <text x="90" y="194">6</text>
+          <text x="90" y="224">7</text>
+          <text x="90" y="254" fill="#ea580c">8</text>
+        </g>
+        <g fill="none" stroke-width="1.4">
+          <path d="M 77 250 Q 52 235 77 220" stroke="#2563eb"/>
+          <path d="M 77 250 Q 30 220 77 190" stroke="#2563eb"/>
+          <path d="M 77 250 Q 8 190 77 130" stroke="#2563eb"/>
+        </g>
+        <g font-size="10" fill="#2563eb">
+          <text x="62" y="234">2⁰</text>
+          <text x="42" y="220">2¹</text>
+          <text x="26" y="192">2²</text>
+        </g>
+        <text x="90" y="278" font-size="10" fill="#6b7280" text-anchor="middle">一条 8 个点的链</text>
+
+        <rect x="250" y="25" width="395" height="250" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="272" y="50" font-size="11" fill="#374151">递推式：u 的表必须在儿子之前算完</text>
+        <text x="272" y="80" font-size="11" fill="#1f2328">stjump[u][0] = u 的父亲（已知）</text>
+        <text x="272" y="110" font-size="11" fill="#1f2328">stjump[u][1] = stjump[ stjump[u][0] ][0]</text>
+        <text x="272" y="140" font-size="11" fill="#1f2328">stjump[u][2] = stjump[ stjump[u][1] ][1]</text>
+        <text x="272" y="170" font-size="11" fill="#1f2328">stjump[u][3] = stjump[ stjump[u][2] ][2]</text>
+        <text x="272" y="208" font-size="11" fill="#ea580c">以 8 号为例：往上 7 步拆成 4 + 2 + 1</text>
+        <text x="272" y="236" font-size="11" fill="#ea580c">先跳 4 步到 4，再跳 2 步到 2，最后 1 步到 1</text>
+        <text x="272" y="264" font-size="10" fill="#6b7280">每一档都只在「跳过去不掉出目标层」时才跳</text>
+      </svg>
+      <figcaption>跳表第 p 列由第 p − 1 列的两格拼出来，一次 dfs 就能把整张表填完</figcaption>
+    </figure>
+
+    <h2>四、power 取多少</h2>
+    <p>列数 = power + 1，power 取 ⌊log₂ n⌋。写成代码是这样：</p>
+
+    <pre class="code"><span class="cm">// 一个数用二进制表示需要几位，反过来问：&lt;= n 的最大 2 的幂是 2 的几次方</span>
+    <span class="cm">// 它就是跳表的列数减一，整个预处理只算这一次</span>
+    <span class="kw">int</span> <span class="fn">floorLog</span>(<span class="kw">int</span> n) {
+        <span class="kw">int</span> ans = 0;
+        <span class="cm">// 判据必须写成 (1 &lt;&lt; ans) &lt;= (n &gt;&gt; 1)</span>
+        <span class="cm">// 写成 &lt;= n 会溢出：ans 涨到 31 时 1 &lt;&lt; 31 在 int 里是负数，照样满足判据</span>
+        <span class="kw">while</span> ((1 &lt;&lt; ans) &lt;= (n &gt;&gt; 1)) {
+            ans++;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+    <p>判据里为什么是 (n &gt;&gt; 1) 而不是 n？ans 涨到 31 时 1 &lt;&lt; 31 在 int 里是 −2147483648，照样满足「≤ n」，循环停不下来。先右移一位就把最高位空出来了。</p>
+    <p>实测取值：n = 8 得 3、n = 50000 得 15、n = 500000 得 18、n = 10⁶ 得 19。注意 n = 500000 时 2¹⁸ = 262144 比 n 小，但这够用：任何 k ≤ n 的二进制最高位不会超过 ⌊log₂ n⌋，拼得出来。</p>
+    <p>题目二上限 n = 5 × 10⁵，power = 18，19 列。stjump 就是 500001 × 19 × 4 B = 36.24 MB，加 deep 1.91 MB、建图 9.54 MB，一共 47.69 MB。</p>
+
+    <h2>五、存图与一次 dfs 填两张表</h2>
+    <p>树是无向图，用链式前向星存：head[u] 是 u 的边链表的头，nxt 指向下一条边，边从 1 号开始编号，0 表示没有下一条。</p>
+
+    <pre class="code"><span class="cm">// 链式前向星：同一个点的所有边串成一条链，head[u] 是链头，nxt 指向下一条</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> LIMIT = 21;
+
+    <span class="kw">int</span> head[MAXN], nxt[MAXN &lt;&lt; 1], to[MAXN &lt;&lt; 1], cnt;
+    <span class="kw">int</span> deep[MAXN];             <span class="cm">// deep[i] : 节点 i 在第几层，根节点是第 1 层</span>
+    <span class="kw">int</span> stjump[MAXN][LIMIT];    <span class="cm">// stjump[i][p] : 从 i 往上跳 2^p 步到的节点</span>
+    <span class="kw">int</span> power;
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n) {
+        power = floorLog(n);
+        cnt = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            head[i] = 0;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[cnt] = head[u];
+        to[cnt] = v;
+        head[u] = cnt++;
+    }</pre>
+
+    <p>填表的一次 dfs 顺手把 deep 也算了。三行：先定层号，再填第 0 列，然后从第 1 列滚到第 power 列，最后才往下走儿子。</p>
+
+    <pre class="code"><span class="cm">// 一次 dfs 同时把深度表和跳表都填上</span>
+    <span class="cm">// 当前来到 u 节点，u 的父亲是 f</span>
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">int</span> f) {
+        deep[u] = deep[f] + 1;
+        stjump[u][0] = f;
+        <span class="cm">// 跳 2^p 步 = 先跳 2^(p-1) 步，落到中间点，再从中间点跳 2^(p-1) 步</span>
+        <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt;= power; p++) {
+            stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e != 0; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != f) {
+                dfs(v, u);
+            }
+        }
+    }</pre>
+
+    <p>这里有个细节：根的父亲记成 0，deep[0] 保持 0。这样「跳出去」的落点是 0 号，deep[0] = 0 比任何合法层号都小，后面所有「deep[落点] ≥ s」的判据都会自动把它挡住，不必单独写越界判断。</p>
+
+    <h2>六、第 k 个祖先</h2>
+    <p>目标是第 s = deep[i] − k 层。从大到小试每一档，跳过去还在第 s 层或更深就跳，否则留着。</p>
+
+    <pre class="code"><span class="cm">// 返回 i 的第 k 个祖先，不存在返回 -1</span>
+    <span class="kw">int</span> <span class="fn">getKthAncestor</span>(<span class="kw">int</span> i, <span class="kw">int</span> k) {
+        <span class="cm">// deep 从 1 起算，往上最多只能走 deep[i] - 1 步</span>
+        <span class="kw">if</span> (deep[i] &lt;= k) {
+            <span class="kw">return</span> -1;
+        }
+        <span class="kw">int</span> s = deep[i] - k;            <span class="cm">// 目标层号</span>
+        <span class="kw">for</span> (<span class="kw">int</span> p = power; p &gt;= 0; p--) {
+            <span class="cm">// 跳过去不能越过第 s 层：跳完还在 s 层或更深才跳</span>
+            <span class="kw">if</span> (deep[stjump[i][p]] &gt;= s) {
+                i = stjump[i][p];
+            }
+        }
+        <span class="kw">return</span> i;
+    }</pre>
+
+    <p>为什么从大到小？每档都是「能跳就跳」，大的先挑走，剩下的用小档补齐，这正是二进制拆分。反过来从小档开始试会先把小步数用掉，大档反而跳不过去。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 290" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="第 k 个祖先的逐档试跳" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#9aa0a6" stroke-width="1.2">
+          <line x1="70" y1="50" x2="70" y2="230"/>
+        </g>
+        <g fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.3">
+          <circle cx="70" cy="40" r="10"/>
+          <circle cx="70" cy="60" r="10"/>
+          <circle cx="70" cy="80" r="10"/>
+          <circle cx="70" cy="100" r="10"/>
+          <circle cx="70" cy="120" r="10"/>
+          <circle cx="70" cy="140" r="10"/>
+          <circle cx="70" cy="160" r="10"/>
+          <circle cx="70" cy="180" r="10"/>
+          <circle cx="70" cy="200" r="10"/>
+          <circle cx="70" cy="220" r="10"/>
+        </g>
+        <circle cx="70" cy="240" r="10" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+        <g font-size="9" fill="#1f2328" text-anchor="middle">
+          <text x="70" y="43">0</text><text x="70" y="63">1</text><text x="70" y="83">2</text>
+          <text x="70" y="103">3</text><text x="70" y="123">4</text><text x="70" y="143">5</text>
+          <text x="70" y="163">6</text><text x="70" y="183">7</text><text x="70" y="203">8</text>
+          <text x="70" y="223">9</text><text x="70" y="243" fill="#ea580c">10</text>
+        </g>
+        <g font-size="9" fill="#9aa0a6" text-anchor="end">
+          <text x="40" y="43">1</text><text x="40" y="63">2</text><text x="40" y="83">3</text>
+          <text x="40" y="103">4</text><text x="40" y="123">5</text><text x="40" y="143">6</text>
+          <text x="40" y="163">7</text><text x="40" y="183">8</text><text x="40" y="203">9</text>
+          <text x="40" y="223">10</text><text x="40" y="243">11</text>
+        </g>
+        <g fill="none" stroke-width="1.5">
+          <path d="M 80 240 Q 140 160 80 80" stroke="#9aa0a6" stroke-dasharray="4 3"/>
+          <path d="M 80 240 Q 108 200 80 160" stroke="#2563eb"/>
+          <path d="M 80 160 Q 100 140 80 120" stroke="#2563eb"/>
+          <path d="M 80 120 Q 92 110 80 100" stroke="#2563eb"/>
+        </g>
+        <g font-size="9">
+          <text x="114" y="157" fill="#9aa0a6">8 步 不跳</text>
+          <text x="98" y="200" fill="#2563eb">4 步</text>
+          <text x="94" y="140" fill="#2563eb">2 步</text>
+          <text x="90" y="110" fill="#2563eb">1 步</text>
+        </g>
+        <line x1="30" y1="100" x2="185" y2="100" stroke="#ea580c" stroke-width="1" stroke-dasharray="5 4"/>
+        <text x="150" y="96" font-size="9" fill="#ea580c" text-anchor="end">目标层 s = 4</text>
+
+        <rect x="200" y="25" width="450" height="250" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="218" y="48" font-size="11" fill="#374151">起点 i = 10（第 11 层），k = 7，目标层 s = 11 − 7 = 4</text>
+        <g font-size="10" fill="#6b7280">
+          <text x="218" y="76">p</text><text x="268" y="76">跳几步</text><text x="330" y="76">从哪到哪</text><text x="440" y="76">deep[落点]</text><text x="530" y="76">结果</text>
+        </g>
+        <line x1="214" y1="86" x2="634" y2="86" stroke="#e6e8eb"/>
+        <g font-size="11" fill="#1f2328">
+          <text x="218" y="108">3</text><text x="268" y="108">8</text><text x="330" y="108">10 → 2</text><text x="440" y="108">3</text>
+          <text x="530" y="108" fill="#9aa0a6">不跳</text>
+          <text x="218" y="136">2</text><text x="268" y="136">4</text><text x="330" y="136">10 → 6</text><text x="440" y="136">7</text>
+          <text x="530" y="136" fill="#2563eb">跳</text>
+          <text x="218" y="164">1</text><text x="268" y="164">2</text><text x="330" y="164">6 → 4</text><text x="440" y="164">5</text>
+          <text x="530" y="164" fill="#2563eb">跳</text>
+          <text x="218" y="192">0</text><text x="268" y="192">1</text><text x="330" y="192">4 → 3</text><text x="440" y="192">4</text>
+          <text x="530" y="192" fill="#2563eb">跳</text>
+        </g>
+        <line x1="214" y1="206" x2="634" y2="206" stroke="#e6e8eb"/>
+        <text x="218" y="228" font-size="11" fill="#1f2328">四档走完落在 3，deep[3] = 4 = s，第 7 个祖先就是它</text>
+        <text x="218" y="254" font-size="10" fill="#6b7280">跳的步数 4 + 2 + 1 = 7，正好等于 k</text>
+      </svg>
+      <figcaption>从大到小试每一档，跳过去不能掉出第 s 层，四档试完就落在目标层上</figcaption>
+    </figure>
+
+    <div class="viz">
+      <div class="viz-title">从某个点往上跳 k 步</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">题目一的口径：根是 0 号，deep[0] = 1。选起点和 k，逐档看哪几档真的跳了。</p>
+      <svg id="tdSvg1" viewBox="0 0 660 350" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="第 k 个祖先演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>橙色是当前所在的点</span>
+        <span><span class="dot partial"></span>蓝色是目标层</span>
+        <span><span class="dot skip"></span>灰色是试过但没跳的档</span>
+      </div>
+      <div class="breakdown" id="tdInfo1"></div>
+      <div class="viz-controls">
+        <select class="td-sel" id="tdNode"></select>
+        <select class="td-sel" id="tdK"></select>
+        <button class="td-btn" id="tdPrev1" type="button">上一步</button>
+        <button class="td-btn" id="tdNext1" type="button">下一步</button>
+        <button class="td-btn" id="tdReset1" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>七、LCA 的两阶段</h2>
+    <p>第一步对齐：把深的那个抬到和浅的同一层，用的就是上一段那一句判据，只是 s 换成了 deep[b]。</p>
+    <p>第二步同步跳：a 和 b 同层之后，从大到小试每一档，只要两者的 2^p 级祖先不一样就一起跳。跳到两个祖先相同为止，此时 a、b 的父亲就是答案。</p>
+
+    <pre class="code"><span class="kw">int</span> <span class="fn">lca</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="cm">// 先保证 a 是更深的那个</span>
+        <span class="kw">if</span> (deep[a] &lt; deep[b]) {
+            <span class="kw">int</span> tmp = a; a = b; b = tmp;
+        }
+        <span class="cm">// 第一阶段：把 a 抬到和 b 同一层</span>
+        <span class="cm">// 从大到小试，跳过去不能比 b 还浅</span>
+        <span class="kw">for</span> (<span class="kw">int</span> p = power; p &gt;= 0; p--) {
+            <span class="kw">if</span> (deep[stjump[a][p]] &gt;= deep[b]) {
+                a = stjump[a][p];
+            }
+        }
+        <span class="kw">if</span> (a == b) {
+            <span class="kw">return</span> a;                  <span class="cm">// b 本来就是 a 的祖先</span>
+        }
+        <span class="cm">// 第二阶段：a 和 b 同深度，一起往上跳</span>
+        <span class="cm">// 只要 2^p 级祖先还不一样就跳，说明答案还在更上面</span>
+        <span class="kw">for</span> (<span class="kw">int</span> p = power; p &gt;= 0; p--) {
+            <span class="kw">if</span> (stjump[a][p] != stjump[b][p]) {
+                a = stjump[a][p];
+                b = stjump[b][p];
+            }
+        }
+        <span class="cm">// 循环结束时 a、b 的父节点是同一个，那就是答案</span>
+        <span class="kw">return</span> stjump[a][0];
+    }</pre>
+
+    <p>「不一样就跳」这个判据怎么理解？如果 a、b 的 2^p 级祖先相同，说明答案在它们下面（或者就是它），这一档跳上去会越过答案，不跳；如果不同，说明答案还在更上面，跳上去不会跨过答案。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LCA 查询的两个阶段" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g stroke="#9aa0a6" stroke-width="1.3">
+          <line x1="225" y1="60" x2="155" y2="90"/>
+          <line x1="225" y1="60" x2="305" y2="90"/>
+          <line x1="155" y1="120" x2="110" y2="150"/>
+          <line x1="155" y1="120" x2="200" y2="150"/>
+          <line x1="305" y1="120" x2="305" y2="150"/>
+          <line x1="305" y1="120" x2="370" y2="150"/>
+          <line x1="110" y1="180" x2="85" y2="210"/>
+          <line x1="110" y1="180" x2="135" y2="210"/>
+          <line x1="200" y1="180" x2="200" y2="210"/>
+          <line x1="370" y1="180" x2="370" y2="210"/>
+        </g>
+        <line x1="26" y1="165" x2="400" y2="165" stroke="#ea580c" stroke-width="1" stroke-dasharray="5 4"/>
+        <text x="30" y="182" font-size="9" fill="#ea580c">目标层 3</text>
+        <g fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.5">
+          <circle cx="225" cy="45" r="15"/>
+          <circle cx="155" cy="105" r="15"/>
+          <circle cx="110" cy="165" r="15"/>
+          <circle cx="85" cy="225" r="15"/>
+          <circle cx="135" cy="225" r="15"/>
+          <circle cx="200" cy="165" r="15"/>
+          <circle cx="200" cy="225" r="15"/>
+        </g>
+        <circle cx="305" cy="105" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+        <circle cx="370" cy="165" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <circle cx="370" cy="225" r="15" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+        <circle cx="305" cy="165" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="2.4"/>
+        <g font-size="11" fill="#1f2328" text-anchor="middle">
+          <text x="225" y="50">1</text>
+          <text x="155" y="110">2</text>
+          <text x="110" y="170">4</text>
+          <text x="85" y="230">8</text>
+          <text x="135" y="230">9</text>
+          <text x="200" y="170">5</text>
+          <text x="200" y="230">10</text>
+          <text x="305" y="110" fill="#2563eb">3</text>
+          <text x="370" y="170" fill="#ea580c">7</text>
+          <text x="370" y="230" fill="#ea580c">11</text>
+          <text x="305" y="170" fill="#2563eb">6</text>
+        </g>
+        <g font-size="9" fill="#9aa0a6">
+          <text x="24" y="48">层1</text><text x="24" y="108">层2</text><text x="24" y="168">层3</text><text x="24" y="228">层4</text>
+        </g>
+        <path d="M 386 218 Q 404 196 386 172" fill="none" stroke="#ea580c" stroke-width="1.5"/>
+        <text x="395" y="190" font-size="9" fill="#ea580c" text-anchor="end">抬一层到 7</text>
+
+        <rect x="420" y="30" width="225" height="250" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>
+        <text x="436" y="56" font-size="11" fill="#374151">查询 LCA(11, 6)</text>
+        <text x="436" y="88" font-size="11" fill="#ea580c">阶段一：对齐</text>
+        <text x="436" y="112" font-size="10" fill="#6b7280">deep[11] = 4，deep[6] = 3</text>
+        <text x="436" y="136" font-size="10" fill="#6b7280">把 11 抬到第 3 层，落在 7</text>
+        <text x="436" y="176" font-size="11" fill="#2563eb">阶段二：同步跳</text>
+        <text x="436" y="200" font-size="10" fill="#6b7280">7 和 6 每档的祖先都一样</text>
+        <text x="436" y="224" font-size="10" fill="#6b7280">四档一次都没跳</text>
+        <text x="436" y="262" font-size="11" fill="#1f2328">答案：stjump[7][0] = 3</text>
+      </svg>
+      <figcaption>先对齐到同一层，再整块往上跳；跳到两者父亲相同，那个父亲就是 LCA</figcaption>
+    </figure>
+
+    <p>阶段一结束时如果 a 已经等于 b，直接返回 b 就行：说明 b 本来就是 a 的祖先。漏掉这一句不会算错，只是白跑一遍阶段二。</p>
+
+    <div class="viz">
+      <div class="viz-title">挑两个点，看 LCA 的两阶段怎么走</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">11 个点的例子，power = 3。换一对查询点，点「下一步」逐档看阶段一怎么抬、阶段二怎么跳。</p>
+      <svg id="tdSvg2" viewBox="0 0 660 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LCA 两阶段演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>橙色是 a（深的那个）</span>
+        <span><span class="dot partial"></span>蓝色是 b</span>
+        <span><span class="dot skip"></span>粗蓝圈是答案</span>
+      </div>
+      <div class="breakdown" id="tdInfo2"></div>
+      <div class="viz-controls">
+        <select class="td-sel" id="tdPair"></select>
+        <button class="td-btn" id="tdPrev2" type="button">上一步</button>
+        <button class="td-btn" id="tdNext2" type="button">下一步</button>
+        <button class="td-btn" id="tdReset2" type="button">重来</button>
+      </div>
+    </div>
+
+    <h2>八、递归改迭代</h2>
+    <p>题目二的 n 上限是 5 × 10⁵，链形数据递归必然爆栈。实测：这条 dfs 在链上 13 万层还能正常返回，13.05 万层就段错误（exit 139）。本机栈上限 8176 KB，一帧约 64 字节。</p>
+    <p>改成迭代的办法是自己在数组里开栈，栈里压三样东西：当前处理的点 u、它的父亲 f、处理到第几号边 e。e = −1 是「第一次来到 u」，e = 某个边号是「回来接着走」，e = 0 是「边都走完了」。</p>
+
+    <pre class="code"><span class="cm">// 栈里压三样东西：u 当前处理的点、f 它的父亲、e 处理到几号边了</span>
+    <span class="cm">// e == -1 表示 u 的边一条都没处理过，e == 0 表示 u 的边都处理完了</span>
+    <span class="kw">int</span> ufe[MAXN][3];
+    <span class="kw">int</span> stackSize, u, f, e;
+
+    <span class="kw">void</span> <span class="fn">push</span>(<span class="kw">int</span> uu, <span class="kw">int</span> ff, <span class="kw">int</span> ee) {
+        ufe[stackSize][0] = uu;
+        ufe[stackSize][1] = ff;
+        ufe[stackSize][2] = ee;
+        stackSize++;
+    }
+
+    <span class="kw">void</span> <span class="fn">pop</span>() {
+        --stackSize;
+        u = ufe[stackSize][0];
+        f = ufe[stackSize][1];
+        e = ufe[stackSize][2];
+    }
+
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> root) {
+        stackSize = 0;
+        push(root, 0, -1);
+        <span class="kw">while</span> (stackSize &gt; 0) {
+            pop();
+            <span class="kw">if</span> (e == -1) {
+                deep[u] = deep[f] + 1;                 <span class="cm">// 第一次来到 u，干进递归前该干的事</span>
+                stjump[u][0] = f;
+                <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt;= power; p++) {
+                    stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+                }
+                e = head[u];                           <span class="cm">// 接下来从 u 的第一条边开始</span>
+            } <span class="kw">else</span> {
+                e = nxt[e];                            <span class="cm">// 回来一次，往下挪一条边</span>
+            }
+            <span class="kw">if</span> (e != 0) {
+                push(u, f, e);                         <span class="cm">// 这条边还要用，先把自己压回去</span>
+                <span class="kw">if</span> (to[e] != f) {
+                    push(to[e], u, -1);                <span class="cm">// 儿子是新点，e 用 -1 标记「第一次来」</span>
+                }
+            }
+            <span class="cm">// e == 0 时什么都不压，等价于递归里函数返回</span>
+        }
+    }</pre>
+
+    <p>对照递归版看：递归里「进函数先干的事」放在 e = −1 那一支，「函数返回」对应 e = 0 时不把 u 压回去。e 从 −1 变成 head[u]，再每次回来变成 nxt[e]，和递归里 for 循环的推进一模一样。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 660 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="迭代版栈里压的三样东西" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+        <g font-size="11" fill="#374151">
+          <text x="20" y="26">第一次来到 1</text>
+          <text x="240" y="26">顺着 3 号边下去</text>
+          <text x="460" y="26">2 的边走完，不压回</text>
+        </g>
+        <g font-size="10" fill="#6b7280">
+          <text x="20" y="44">push(1, 0, −1)</text>
+          <text x="240" y="44">push(1, 0, 3) 再 push(2, 1, −1)</text>
+          <text x="460" y="44">pop 后 e = 0，等于递归返回</text>
+        </g>
+        <g>
+          <rect x="50" y="168" width="120" height="32" rx="4" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+          <text x="72" y="189" font-size="11" fill="#1f2328">1</text>
+          <text x="110" y="189" font-size="11" fill="#1f2328">0</text>
+          <text x="148" y="189" font-size="11" fill="#ea580c">−1</text>
+        </g>
+        <g>
+          <rect x="270" y="136" width="120" height="32" rx="4" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4"/>
+          <text x="292" y="157" font-size="11" fill="#1f2328">2</text>
+          <text x="330" y="157" font-size="11" fill="#1f2328">1</text>
+          <text x="368" y="157" font-size="11" fill="#ea580c">−1</text>
+          <rect x="270" y="176" width="120" height="32" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="292" y="197" font-size="11" fill="#1f2328">1</text>
+          <text x="330" y="197" font-size="11" fill="#1f2328">0</text>
+          <text x="368" y="197" font-size="11" fill="#1f2328">3</text>
+        </g>
+        <g>
+          <rect x="490" y="176" width="120" height="32" rx="4" fill="#f6f7f9" stroke="#e6e8eb" stroke-width="1.4"/>
+          <text x="512" y="197" font-size="11" fill="#1f2328">1</text>
+          <text x="550" y="197" font-size="11" fill="#1f2328">0</text>
+          <text x="588" y="197" font-size="11" fill="#1f2328">3</text>
+        </g>
+        <g font-size="9" fill="#9aa0a6">
+          <text x="60" y="218">u</text><text x="103" y="218">f</text><text x="140" y="218">e</text>
+          <text x="280" y="226">u</text><text x="323" y="226">f</text><text x="360" y="226">e</text>
+        </g>
+        <text x="20" y="248" font-size="10" fill="#6b7280">e = −1 干「进递归前」的事；e = 边号说明还要接着走；e = 0 就是递归返回</text>
+      </svg>
+      <figcaption>栈格只有三个字段，靠 e 的取值区分「第一次来」「回来接着走」「走完了」三种状态</figcaption>
+    </figure>
+
+    <p>迭代版跑同样的数据不会爆栈，因为栈开在全局数组里。n = 5 × 10⁵ 的链，ufe 数组 500001 × 3 × 4 B = 5.72 MB，和跳表比是小头。</p>
+
+    <h2>九、几处写错就全错的地方</h2>
+    <p>把常见笔误单独注入跳表版 LCA，每组 2000 组随机数据、全部点对，看有多少比例和正解答案不一致：</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>写法</th><th>n = 8</th><th>n = 20</th><th>n = 60</th><th>n = 200</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>建表时只跳一半（递推漏掉第二下）</td><td>6.50%</td><td>15.35%</td><td>25.75%</td><td>30.70%</td></tr>
+        <tr><td>power 少算一档</td><td>0.00%</td><td>1.80%</td><td>6.85%</td><td>4.15%</td></tr>
+        <tr><td>对齐判据用 &gt; 而不是 ≥</td><td>74.15%</td><td>82.30%</td><td>83.35%</td><td>85.45%</td></tr>
+        <tr><td>开头不交换 a、b</td><td>37.50%</td><td>40.15%</td><td>41.95%</td><td>43.70%</td></tr>
+        <tr><td>阶段二结束返回 a 而不是它的父亲</td><td>31.15%</td><td>46.10%</td><td>56.70%</td><td>63.95%</td></tr>
+        <tr><td>阶段二判据改成「深度不等」</td><td>8.50%</td><td>25.35%</td><td>44.25%</td><td>56.50%</td></tr>
+        <tr><td>阶段二 p 从小到大试</td><td>0.50%</td><td>8.45%</td><td>18.45%</td><td>33.85%</td></tr>
+      </tbody>
+    </table>
+    <p>「power 少一档」在 n = 8 上是 0.00%：2² = 4 已经盖得住 8 个点的树，缺的那一列根本没被用到。这种「在小数据上试不出来、上线就挂」的错，只能靠边界数据（链、n 恰好是 2 的幂）去撞。</p>
+    <p>第 k 个祖先那道题同样测了一遍：</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>写法</th><th>n = 8</th><th>n = 20</th><th>n = 60</th><th>n = 200</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>存在性判定用 &lt; 而不是 ≤</td><td>10.55%</td><td>4.95%</td><td>1.70%</td><td>0.55%</td></tr>
+        <tr><td>目标层多算 1</td><td>24.90%</td><td>24.90%</td><td>19.80%</td><td>17.80%</td></tr>
+        <tr><td>判据用 &gt; 而不是 ≥</td><td>24.30%</td><td>22.75%</td><td>20.10%</td><td>17.40%</td></tr>
+        <tr><td>p 从小到大试</td><td>11.40%</td><td>14.25%</td><td>16.20%</td><td>17.60%</td></tr>
+      </tbody>
+    </table>
+    <p>「p 从小到大」在两道题里都能被抓出来，抓取率还随 n 上升。这一点和 ST 表那边的直觉相反：ST 表的两个区间谁左谁右无所谓，跳表的档位是有方向的，先试小档会把大档该走的路堵死。</p>
+
+    <h2>十、复杂度分析</h2>
+    <table class="complexity">
+      <thead>
+        <tr><th>步骤</th><th>时间复杂度</th><th>空间复杂度</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>一次 dfs 填 deep 与第 0 列</td><td><code class="inline">O(n)</code></td><td rowspan="2"><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>跳表逐列递推</td><td><code class="inline">O(n log n)</code></td></tr>
+        <tr><td>第 k 个祖先单次查询</td><td><code class="inline">O(log n)</code></td><td><code class="inline">O(1)</code></td></tr>
+        <tr><td>LCA 单次查询</td><td><code class="inline">O(log n)</code></td><td><code class="inline">O(1)</code></td></tr>
+        <tr><td>题目二整体（n 点 m 查）</td><td><code class="inline">O((n + m) log n)</code></td><td><code class="inline">O(n log n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间按题目上限算（n = m = 5 × 10⁵，power = 18）：跳表 500001 × 19 × 4 B = 36.24 MB，deep 1.91 MB，建图 head 1.91 MB 加 nxt/to 两条 7.63 MB，合计 47.69 MB。题目一上限 n = 5 × 10⁴，power = 15，跳表只有 3.05 MB。</p>
+    <p>查询侧没有额外分配，两个函数都只用几个临时变量，所以单次查询的空间是 O(1)。</p>
+
+    <h2>十一、总结</h2>
+    <p>跳表把「往上走」这件事从按步数计价改成按二进制位数计价，第 k 个祖先和 LCA 是同一张表的两种用法。三件事值得单独记住：power 取 ⌊log₂ n⌋ 就够，不必凑到不小于 n；判据里的等号（deep[落点] ≥ s）不能换成大于，换掉之后对齐阶段就会停在答案下一层；递归版在链形数据上会爆栈，线上要交迭代版。</p>
+    <p>这一节的做法是在线的：查询可以一条一条来，来一条答一条。下一节换个设定，m 条查询一次给全，换取 O(n + m) 的总代价。</p>
+
+    <h2 id="prob-links">相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>LeetCode</td><td><a href="https://leetcode.cn/problems/kth-ancestor-of-a-tree-node/" target="_blank">树节点的第 K 个祖先</a></td><td>leetcode.cn/problems/kth-ancestor-of-a-tree-node</td></tr>
+      <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P3379" target="_blank">【模板】最近公共祖先（LCA）</a></td><td>www.luogu.com.cn/problem/P3379</td></tr>
+    </table>
+
+    <h2 id="refs">参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解118【扩展】树上问题专题1-树上倍增和LCA-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var PAR = [-1, 0, 1, 2, 3, 4, 5, 3, 7, 5, 8, 10, 11];
+  var NN = 13;
+  var PW = 3;
+  var deepArr = [], stj = [];
+  var ii, pp;
+  for (ii = 0; ii < NN; ii++) { deepArr[ii] = 0; stj[ii] = []; for (pp = 0; pp <= PW; pp++) stj[ii][pp] = 0; }
+  for (ii = 0; ii < NN; ii++) {
+    if (ii === 0) { deepArr[ii] = 1; stj[ii][0] = 0; }
+    else { deepArr[ii] = deepArr[PAR[ii]] + 1; stj[ii][0] = PAR[ii]; }
+    for (pp = 1; pp <= PW; pp++) stj[ii][pp] = stj[stj[ii][pp - 1]][pp - 1];
+  }
+
+  var POS = { 0:[150,32], 1:[150,68], 2:[150,104], 3:[150,140], 4:[100,176], 5:[100,212],
+              6:[60,248], 7:[215,176], 8:[215,212], 9:[130,248], 10:[215,248], 11:[215,284], 12:[215,320] };
+  var EDG = [[0,1],[1,2],[2,3],[3,4],[3,7],[4,5],[5,6],[5,9],[7,8],[8,10],[10,11],[11,12]];
+  var LVY = [32, 68, 104, 140, 176, 212, 248, 284, 320];
+
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T(x, y, s, fz, fill, anc){ return '<text x="' + x + '" y="' + y + '" font-size="' + fz + '" fill="' + fill + '"' + (anc ? ' text-anchor="' + anc + '"' : '') + '>' + esc(s) + '</text>'; }
+  function C(cx, cy, r, fill, stroke, sw){ return '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"/>'; }
+
+  var svg = document.getElementById('tdSvg1');
+  var info = document.getElementById('tdInfo1');
+  var selN = document.getElementById('tdNode');
+  var selK = document.getElementById('tdK');
+  var bPrev = document.getElementById('tdPrev1');
+  var bNext = document.getElementById('tdNext1');
+  var bReset = document.getElementById('tdReset1');
+  var at = 0, steps = [];
+
+  for (ii = 0; ii < NN; ii++) {
+    var op = document.createElement('option');
+    op.value = String(ii); op.textContent = '起点 ' + ii + '（第 ' + deepArr[ii] + ' 层）';
+    selN.appendChild(op);
+  }
+  for (ii = 0; ii <= 10; ii++) {
+    var ok = document.createElement('option');
+    ok.value = String(ii); ok.textContent = 'k = ' + ii;
+    selK.appendChild(ok);
+  }
+
+  function build(i0, k0){
+    var out = [], cur = i0, p;
+    var s = deepArr[i0] - k0;
+    out.push({ p:-1, from:i0, to:i0, ok:false, cur:i0, s:s, none:false, tot:0 });
+    if (deepArr[i0] <= k0) { out.push({ p:-2, from:i0, to:i0, ok:false, cur:i0, s:s, none:true, tot:0 }); return out; }
+    var tot = 0;
+    for (p = PW; p >= 0; p--) {
+      var to = stj[cur][p];
+      var good = deepArr[to] >= s;
+      var nt = tot;
+      if (good) { nt = tot + (1 << p); }
+      out.push({ p:p, from:cur, to:to, ok:good, cur:good ? to : cur, s:s, none:false, tot:nt });
+      tot = nt;
+      if (good) cur = to;
+    }
+    out.push({ p:-3, from:cur, to:cur, ok:false, cur:cur, s:s, none:false, tot:tot });
+    return out;
+  }
+
+  function drawTree(st){
+    var g = [], k;
+    for (k = 0; k < LVY.length; k++) {
+      g.push('<line x1="30" y1="' + LVY[k] + '" x2="278" y2="' + LVY[k] + '" stroke="#e6e8eb" stroke-width="1"/>');
+      g.push(T(24, LVY[k] + 3, String(k + 1), 9, '#9aa0a6'));
+    }
+    for (k = 0; k < EDG.length; k++) {
+      var a = POS[EDG[k][0]], b = POS[EDG[k][1]];
+      g.push('<line x1="' + a[0] + '" y1="' + a[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke="#9aa0a6" stroke-width="1.3"/>');
+    }
+    for (k = 0; k < NN; k++) {
+      var q = POS[k], isCur = (st.cur === k), isTgt = (deepArr[k] === st.s && st.p !== -1);
+      if (isCur) g.push(C(q[0], q[1], 14, '#ffedd5', '#ea580c', 1.8));
+      else if (isTgt) g.push(C(q[0], q[1], 14, '#dbeafe', '#2563eb', 1.8));
+      else g.push(C(q[0], q[1], 14, '#f6f7f9', '#e6e8eb', 1.3));
+      g.push(T(q[0], q[1] + 4, String(k), 10, isCur ? '#ea580c' : (isTgt ? '#2563eb' : '#1f2328'), 'middle'));
+    }
+    if (st.p >= 0) {
+      var f = POS[st.from], t = POS[st.to];
+      var midx = Math.max(f[0], t[0]) + 34;
+      var d = 'M ' + (f[0] + 14) + ' ' + f[1] + ' Q ' + midx + ' ' + ((f[1] + t[1]) / 2) + ' ' + (t[0] + 14) + ' ' + t[1];
+      g.push('<path d="' + d + '" fill="none" stroke="' + (st.ok ? '#2563eb' : '#9aa0a6') + '" stroke-width="1.6"' + (st.ok ? '' : ' stroke-dasharray="4 3"') + '/>');
+    }
+    return g.join('');
+  }
+
+  function render(){
+    var st = steps[at], g = [];
+    g.push(drawTree(st));
+    g.push('<rect x="300" y="25" width="345" height="315" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>');
+    g.push(T(318, 48, '起点 ' + st.from + '，k = ' + selK.value + '，deep = ' + deepArr[+selN.value], 11, '#374151'));
+    g.push(T(318, 70, '目标层 s = deep − k = ' + deepArr[+selN.value] + ' − ' + selK.value + ' = ' + st.s, 11, '#374151'));
+    g.push(T(318, 98, 'p', 10, '#6b7280'));
+    g.push(T(372, 98, '2^p', 10, '#6b7280'));
+    g.push(T(425, 98, '落点', 10, '#6b7280'));
+    g.push(T(520, 98, 'deep', 10, '#6b7280'));
+    g.push(T(585, 98, '结果', 10, '#6b7280'));
+    g.push('<line x1="314" y1="106" x2="630" y2="106" stroke="#e6e8eb"/>');
+    var rows = [[3,'8'],[2,'4'],[1,'2'],[0,'1']], r;
+    for (r = 0; r < 4; r++) {
+      var pv = rows[r][0], y = 132 + r * 30;
+      var seen = false, cell = null;
+      for (var q = 1; q < steps.length && q <= at; q++) { if (steps[q].p === pv) { seen = true; cell = steps[q]; } }
+      if (!seen) { g.push(T(318, y, String(pv), 11, '#c9ced4')); g.push(T(372, y, rows[r][1], 11, '#c9ced4')); continue; }
+      g.push(T(318, y, String(pv), 11, '#1f2328'));
+      g.push(T(372, y, rows[r][1], 11, '#1f2328'));
+      g.push(T(425, y, cell.from + ' → ' + cell.to, 11, '#1f2328'));
+      g.push(T(520, y, String(deepArr[cell.to]), 11, '#1f2328'));
+      g.push(T(585, y, cell.ok ? '跳' : '不跳', 11, cell.ok ? '#2563eb' : '#9aa0a6'));
+    }
+    g.push('<line x1="314" y1="256" x2="630" y2="256" stroke="#e6e8eb"/>');
+    if (st.none) {
+      g.push(T(318, 280, 'deep[' + st.from + '] = ' + deepArr[+selN.value] + ' ≤ k，不存在', 11, '#ea580c'));
+      g.push(T(318, 308, '往上最多只能走 deep − 1 步', 10, '#6b7280'));
+    } else if (st.p === -3) {
+      g.push(T(318, 280, '答案 ' + st.cur + '，deep = ' + deepArr[st.cur] + ' = s', 11, '#2563eb'));
+      g.push(T(318, 308, '累计跳了 ' + st.tot + ' 步，正好等于 k', 10, '#6b7280'));
+    } else if (st.p === -1) {
+      g.push(T(318, 280, '点「下一步」开始逐档试跳', 11, '#6b7280'));
+      g.push(T(318, 308, '从 p = ' + PW + ' 往下，每档只试一次', 10, '#6b7280'));
+    } else {
+      g.push(T(318, 280, 'p = ' + st.p + '：deep[' + st.to + '] = ' + deepArr[st.to] + (st.ok ? ' ≥ ' : ' < ') + st.s, 11, st.ok ? '#2563eb' : '#9aa0a6'));
+      g.push(T(318, 308, '当前在第 ' + deepArr[st.cur] + ' 层，已跳 ' + st.tot + ' 步', 10, '#6b7280'));
+    }
+    svg.innerHTML = g.join('');
+
+    var msg = '';
+    if (st.none) msg = '<div><strong>不存在</strong></div><div>从第 ' + deepArr[+selN.value] + ' 层往上 ' + selK.value + ' 步会越过根，题目约定返回 −1。</div>';
+    else if (st.p === -3) msg = '<div><strong>第 ' + selK.value + ' 个祖先是 ' + st.cur + '</strong></div><div>四档试完，当前点正好在第 ' + st.s + ' 层上。</div>';
+    else if (st.p === -1) msg = '<div><strong>准备开始</strong></div><div>起点 ' + selN.value + '，目标层 s = ' + st.s + '。</div>';
+    else msg = '<div><strong>档位 p = ' + st.p + '（跳 ' + (1 << st.p) + ' 步）</strong></div><div>从 ' + st.from + ' 跳到 ' + st.to + '，deep[' + st.to + '] = ' + deepArr[st.to] + '，' + (st.ok ? '没掉出第 ' + st.s + ' 层，跳过去' : '比第 ' + st.s + ' 层还浅，这一档留着') + '。</div>';
+    info.innerHTML = msg;
+
+    bPrev.disabled = (at === 0);
+    bNext.disabled = (at >= steps.length - 1);
+  }
+
+  function rebuild(){
+    steps = build(+selN.value, +selK.value);
+    at = 0;
+    render();
+  }
+
+  selN.addEventListener('change', rebuild);
+  selK.addEventListener('change', rebuild);
+  bPrev.addEventListener('click', function(){ if (at > 0) { at--; render(); } });
+  bNext.addEventListener('click', function(){ if (at < steps.length - 1) { at++; render(); } });
+  bReset.addEventListener('click', function(){ at = 0; render(); });
+
+  selN.value = '12';
+  selK.value = '4';
+  rebuild();
+})();
+
+(function(){
+  var ED = [[1,2],[1,3],[2,4],[2,5],[3,6],[3,7],[4,8],[4,9],[5,10],[7,11]];
+  var NN2 = 11, PW2 = 3;
+  var XY2 = { 1:[180,45], 2:[120,105], 3:[245,105], 4:[75,165], 5:[145,165],
+              6:[245,165], 7:[300,165], 8:[50,225], 9:[100,225], 10:[145,225], 11:[300,225] };
+  var dep2 = [], up2 = [], kids = {}, ord = [], q = [1], hd = 0, i, p, u, v;
+  for (i = 0; i <= NN2; i++) { dep2[i] = 0; up2[i] = []; for (p = 0; p <= PW2; p++) up2[i][p] = 0; kids[i] = []; }
+  for (i = 0; i < ED.length; i++) { kids[ED[i][0]].push(ED[i][1]); kids[ED[i][1]].push(ED[i][0]); }
+  while (hd < q.length) {
+    u = q[hd++]; ord.push(u);
+    for (i = 0; i < kids[u].length; i++) { v = kids[u][i]; if (v === up2[u][0]) continue; up2[v][0] = u; dep2[v] = dep2[u] + 1; q.push(v); }
+  }
+  dep2[0] = 0;
+  for (i = 0; i < ord.length; i++) {
+    u = ord[i];
+    for (p = 1; p <= PW2; p++) up2[u][p] = up2[up2[u][p - 1]][p - 1];
+  }
+
+  function esc2(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function T2(x, y, s, fz, fill, anc){ return '<text x="' + x + '" y="' + y + '" font-size="' + fz + '" fill="' + fill + '"' + (anc ? ' text-anchor="' + anc + '"' : '') + '>' + esc2(s) + '</text>'; }
+  function C2(cx, cy, r, fill, stroke, sw){ return '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"/>'; }
+
+  var PAIRS = [[8,11],[9,10],[11,6],[4,9],[6,6]];
+  var svg2 = document.getElementById('tdSvg2');
+  var info2 = document.getElementById('tdInfo2');
+  var selP = document.getElementById('tdPair');
+  var bP = document.getElementById('tdPrev2'), bN = document.getElementById('tdNext2'), bR = document.getElementById('tdReset2');
+  var at2 = 0, steps2 = [];
+
+  for (i = 0; i < PAIRS.length; i++) {
+    var oo = document.createElement('option');
+    oo.value = String(i);
+    oo.textContent = 'LCA(' + PAIRS[i][0] + ', ' + PAIRS[i][1] + ')';
+    selP.appendChild(oo);
+  }
+
+  function build2(a0, b0){
+    var out = [], curA = a0, curB = b0, p;
+    if (dep2[curA] < dep2[curB]) { var tmp = curA; curA = curB; curB = tmp; }
+    out.push({ ph:0, p:-1, a:curA, b:curB, ok:false, ans:0 });
+    var moved = false;
+    for (p = PW2; p >= 0; p--) {
+      var ta = up2[curA][p];
+      var good = dep2[ta] >= dep2[curB];
+      moved = moved || good;
+      out.push({ ph:1, p:p, a:curA, b:curB, to:ta, ok:good, na: good ? ta : curA, nb: curB, ans:0 });
+      if (good) curA = ta;
+    }
+    if (curA === curB) { out.push({ ph:3, p:-1, a:curA, b:curB, ok:false, ans:curA }); return out; }
+    for (p = PW2; p >= 0; p--) {
+      var xa = up2[curA][p], xb = up2[curB][p];
+      var diff = (xa !== xb);
+      out.push({ ph:2, p:p, a:curA, b:curB, toa:xa, tob:xb, ok:diff, na: diff ? xa : curA, nb: diff ? xb : curB, ans:0 });
+      if (diff) { curA = xa; curB = xb; }
+    }
+    out.push({ ph:3, p:-1, a:curA, b:curB, ok:false, ans:up2[curA][0] });
+    return out;
+  }
+
+  function render2(){
+    var st = steps2[at2], g = [], k;
+    for (k = 0; k < ED.length; k++) {
+      var s1 = XY2[ED[k][0]], s2 = XY2[ED[k][1]];
+      g.push('<line x1="' + s1[0] + '" y1="' + s1[1] + '" x2="' + s2[0] + '" y2="' + s2[1] + '" stroke="#9aa0a6" stroke-width="1.3"/>');
+    }
+    for (k = 1; k <= NN2; k++) {
+      var q2 = XY2[k];
+      var isAns = (st.ph === 3 && st.ans === k);
+      var isA = (st.a === k), isB = (st.b === k);
+      if (isAns) g.push(C2(q2[0], q2[1], 15, '#dbeafe', '#2563eb', 2.6));
+      else if (isA) g.push(C2(q2[0], q2[1], 14, '#ffedd5', '#ea580c', 1.8));
+      else if (isB) g.push(C2(q2[0], q2[1], 14, '#dbeafe', '#2563eb', 1.8));
+      else g.push(C2(q2[0], q2[1], 14, '#f6f7f9', '#e6e8eb', 1.3));
+      g.push(T2(q2[0], q2[1] + 4, String(k), 11, (isA && !isAns) ? '#ea580c' : ((isB || isAns) ? '#2563eb' : '#1f2328'), 'middle'));
+    }
+    g.push('<rect x="350" y="30" width="296" height="262" rx="8" fill="#f6f7f9" stroke="#e6e8eb"/>');
+    var pr = PAIRS[+selP.value];
+    g.push(T2(366, 54, '查询 LCA(' + pr[0] + ', ' + pr[1] + ')', 11, '#374151'));
+    var lines = [], j;
+    for (j = 1; j <= at2; j++) {
+      var s3 = steps2[j];
+      if (s3.ph === 1) {
+        lines.push('阶段一 p=' + s3.p + '：' + s3.a + ' 跳 2^' + s3.p + ' 步到 ' + s3.to +
+                   '，deep=' + dep2[s3.to] + (s3.ok ? ' ≥ ' : ' < ') + dep2[s3.b] + (s3.ok ? '，跳' : '，不跳'));
+      } else if (s3.ph === 2) {
+        lines.push('阶段二 p=' + s3.p + '：' + s3.toa + ' ' + (s3.ok ? '≠' : '=') + ' ' + s3.tob + (s3.ok ? '，一起跳' : '，不动'));
+      }
+    }
+    if (lines.length === 0) lines.push('deep[' + st.a + '] = ' + dep2[st.a] + '，deep[' + st.b + '] = ' + dep2[st.b]);
+    var yy = 82;
+    for (j = 0; j < lines.length && j < 7; j++) { g.push(T2(366, yy, lines[j], 11, j === lines.length - 1 ? '#1f2328' : '#6b7280')); yy += 25; }
+    if (st.ph === 3) {
+      g.push('<line x1="362" y1="252" x2="634" y2="252" stroke="#e6e8eb"/>');
+      g.push(T2(366, 274, '答案 ' + st.ans, 12, '#2563eb'));
+    }
+    svg2.innerHTML = g.join('');
+
+    var msg = '';
+    if (st.ph === 0) msg = '<div><strong>准备对齐</strong></div><div>a = ' + st.a + '（第 ' + dep2[st.a] + ' 层），b = ' + st.b + '（第 ' + dep2[st.b] + ' 层）。</div>';
+    else if (st.ph === 1) msg = '<div><strong>阶段一，档位 p = ' + st.p + '</strong></div><div>' + st.a + ' 的 2^' + st.p + ' 级祖先是 ' + st.to + '，deep = ' + dep2[st.to] + '，' + (st.ok ? '不比 b 浅，跳过去' : '比 b 还浅，这一档留着') + '。</div>';
+    else if (st.ph === 2) msg = '<div><strong>阶段二，档位 p = ' + st.p + '</strong></div><div>' + st.a + ' 和 ' + st.b + ' 的 2^' + st.p + ' 级祖先分别是 ' + st.toa + ' 和 ' + st.tob + '，' + (st.ok ? '不一样，一起跳上去' : '相同，跳上去会越过答案') + '。</div>';
+    else msg = '<div><strong>LCA = ' + st.ans + '</strong></div><div>' + (st.a === st.b ? '对齐之后两点重合，浅的那个本来就是祖先' : '两者的父亲相同，那个父亲就是最低公共祖先') + '。</div>';
+    info2.innerHTML = msg;
+    bP.disabled = (at2 === 0);
+    bN.disabled = (at2 >= steps2.length - 1);
+  }
+
+  function rebuild2(){ steps2 = build2(PAIRS[+selP.value][0], PAIRS[+selP.value][1]); at2 = 0; render2(); }
+  selP.addEventListener('change', rebuild2);
+  bP.addEventListener('click', function(){ if (at2 > 0) { at2--; render2(); } });
+  bN.addEventListener('click', function(){ if (at2 < steps2.length - 1) { at2++; render2(); } });
+  bR.addEventListener('click', function(){ at2 = 0; render2(); });
+  rebuild2();
+})();
+</script>
+</body>
+</html>
