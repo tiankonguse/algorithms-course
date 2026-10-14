@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Morris 遍历：原理与先序中序 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.mb-sel,.mb-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.mb-sel:focus{outline:none;border-color:var(--accent);}
+.mb-btn{cursor:pointer;}
+.mb-btn:hover{border-color:var(--accent);color:var(--accent);}
+.mb-btn:disabled{opacity:.4;cursor:default;}
+.mb-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.mb-ctl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>Morris 遍历：原理与先序中序</h1>
+      <p class="intro">递归和自己拿栈的写法，额外空间都跟着树高走。Morris 遍历把节点自己的空闲右指针借来当线索，用完就还原，全程不开栈也不递归。代价是每个节点最多被到达两次，时间仍然是 O(n)。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>前两种写法的额外空间都是 O(h)，h 是树高。链上 h = n，本机系统栈 8176 KB，递归一帧约 93 字节，实测一路向左的链 85000 个节点能跑完，90000 个直接段错误。</p>
+      <p>一路向右的链反倒不崩：递归函数里第二个调用 <code class="inline">f(cur-&gt;right)</code> 处在尾位置，开了 -O2 编译器把它换成循环，110 万个节点的右偏链照样跑完。把优化关掉（<code class="inline">-O0</code>）立刻现原形，25 万层能过、30 万层段错误。这份便宜是编译器给的，跟算法没关系。</p>
+      <p>Morris 遍历压根不碰栈。递归不用，显式栈也不开，全程只有 <code class="inline">cur</code> 和 <code class="inline">mostRight</code> 两个指针变量，代价是遍历过程中会临时改树，走完再改回来。</p>
+      <p>节点定义沿用前面，三个字段，没孩子写 <code class="inline">nullptr</code>。</p>
+
+        <pre class="code"><span class="kw">struct</span> TreeNode {
+        <span class="kw">int</span> val;
+        TreeNode* left;
+        TreeNode* right;
+        TreeNode(<span class="kw">int</span> v) : val(v), left(<span class="kw">nullptr</span>), right(<span class="kw">nullptr</span>) {}
+    };</pre>
+
+      <p>下面全程用这棵 7 节点满二叉树做例子，节点值就是 1 到 7。</p>
+
+      <figure class="fig" id="figTree"></figure>
+
+      <h2 id="free">一、空闲指针藏在哪</h2>
+      <p>一棵 n 个节点的二叉树有 2n 个指针字段，其中 n−1 个指着孩子，剩下 n+1 个是空的。Morris 只用得上其中一类，而且这类空指针一定有：有左子树的节点，它左子树的那个最右节点，右指针必然是空的，否则它就不是最右了。</p>
+      <p>把这个空指针临时指回当前节点，等于在树上留一根线，写着「往左下去的这棵子树走完，顺着这根线能爬回来」。爬回来之后把线拆掉，树跟没动过一样。</p>
+      <p>顺着这根线回来的时候，当前节点就被到达了第二次。这就是整套方法的全部机关。</p>
+
+      <figure class="fig" id="figTwice"></figure>
+
+      <p>7 个节点里，1、2、3 有左子树，各被到达两次；4、5、6、7 没有左子树，只可能被顺着父节点的指针到达一次。合计 10 次，正好是 n 加上「有左子树的节点个数」。</p>
+
+      <h2 id="branch">二、三条分支</h2>
+      <p>整个循环只有三个出口，把它们摆在一起看最清楚。</p>
+
+      <figure class="fig" id="figBranch"></figure>
+
+      <p>写成代码就是下面这样。判断第二次到达的依据是 <code class="inline">mostRight-&gt;right</code> 已经等于 <code class="inline">cur</code>，而不是等于空。</p>
+
+            <pre class="code"><span class="cm">// Morris 遍历的骨架：cur 为空时停，其余只有三条分支</span>
+    <span class="cm">// 借左子树最右节点的右指针当线索，用完立刻还原</span>
+    <span class="kw">void</span> <span class="fn">morris</span>(TreeNode* head) {
+        TreeNode* cur = head;
+        TreeNode* mostRight = <span class="kw">nullptr</span>;
+        <span class="kw">while</span> (cur != <span class="kw">nullptr</span>) {
+            mostRight = cur-&gt;left;
+            <span class="kw">if</span> (mostRight != <span class="kw">nullptr</span>) {                 <span class="cm">// cur 有左树</span>
+                <span class="kw">while</span> (mostRight-&gt;right != <span class="kw">nullptr</span> &amp;&amp; mostRight-&gt;right != cur) {
+                    mostRight = mostRight-&gt;right;       <span class="cm">// 一路向右找到底</span>
+                }
+                <span class="kw">if</span> (mostRight-&gt;right == <span class="kw">nullptr</span>) {      <span class="cm">// 第一次到达 cur</span>
+                    mostRight-&gt;right = cur;             <span class="cm">// 把空指针借来指回 cur</span>
+                    cur = cur-&gt;left;
+                    <span class="kw">continue</span>;
+                } <span class="kw">else</span> {                                <span class="cm">// 第二次到达 cur</span>
+                    mostRight-&gt;right = <span class="kw">nullptr</span>;         <span class="cm">// 用完必须还原</span>
+                }
+            }
+            cur = cur-&gt;right;                           <span class="cm">// 无左树、或第二次到达，都往右</span>
+        }
+    }</pre>
+
+      <p>还原那一步不能省。省了以后 <code class="inline">mostRight-&gt;right</code> 一直指着 <code class="inline">cur</code>，下一轮找最右节点时又走到它，又把它指回 <code class="inline">cur</code>，循环再也出不来。这个错法不用测错误率，跑起来就卡死。</p>
+      <p>内圈那个 <code class="inline">while</code> 的条件也要写全。<code class="inline">mostRight-&gt;right != nullptr</code> 单独用会在第二次到达时一路绕回 <code class="inline">cur</code> 再往下走，同样停不下来。<code class="inline">&& mostRight-&gt;right != cur</code> 这半句是刹车。</p>
+
+      <h2 id="pre">三、先序：打印放在第一次到达</h2>
+      <p>先序是「根 左 右」，根要在进左子树之前打印。Morris 里正好有两个落脚点：有左子树的节点在第一次到达时打印，没有左子树的节点只有那一次机会，也得打印。</p>
+
+            <pre class="code"><span class="cm">// 先序：有左树的节点在第一次到达时打印，无左树的节点只能到这一次</span>
+    vector&lt;<span class="kw">int</span>&gt; <span class="fn">preorderTraversal</span>(TreeNode* head) {
+        vector&lt;<span class="kw">int</span>&gt; ans;
+        TreeNode* cur = head;
+        TreeNode* mostRight = <span class="kw">nullptr</span>;
+        <span class="kw">while</span> (cur != <span class="kw">nullptr</span>) {
+            mostRight = cur-&gt;left;
+            <span class="kw">if</span> (mostRight != <span class="kw">nullptr</span>) {
+                <span class="kw">while</span> (mostRight-&gt;right != <span class="kw">nullptr</span> &amp;&amp; mostRight-&gt;right != cur) {
+                    mostRight = mostRight-&gt;right;
+                }
+                <span class="kw">if</span> (mostRight-&gt;right == <span class="kw">nullptr</span>) {
+                    ans.push_back(cur-&gt;val);
+                    mostRight-&gt;right = cur;
+                    cur = cur-&gt;left;
+                    <span class="kw">continue</span>;
+                } <span class="kw">else</span> {
+                    mostRight-&gt;right = <span class="kw">nullptr</span>;
+                }
+            } <span class="kw">else</span> {
+                ans.push_back(cur-&gt;val);
+            }
+            cur = cur-&gt;right;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <p>漏掉 <code class="inline">else</code> 那一支是最常见的写法错误：所有没有左子树的节点都不会进答案，而任何一棵非空树的最右节点一定没有左子树。2 万组随机小树（n 取 1 到 9）实测，这个错法 100% 被抓。把打印挪到第二次到达处，抓取率 82.03%。</p>
+
+      <h2 id="in">四、中序：写在循环体末尾</h2>
+      <p>中序是「左 根 右」，根要在左子树走完之后打印。在 Morris 里这对应两个时机：有左子树的节点在第二次到达时，以及没有左子树的节点在被到达时。</p>
+      <p>这两个时机可以合并。第一次到达走的是 <code class="inline">continue</code>，不会落到循环体末尾，所以把 <code class="inline">push_back</code> 写在 <code class="inline">cur = cur-&gt;right</code> 前面，两个时机就自动都覆盖了。</p>
+
+            <pre class="code"><span class="cm">// 中序：写在循环体末尾，第二次到达与「无左树直达」都从这里过</span>
+    vector&lt;<span class="kw">int</span>&gt; <span class="fn">inorderTraversal</span>(TreeNode* head) {
+        vector&lt;<span class="kw">int</span>&gt; ans;
+        TreeNode* cur = head;
+        TreeNode* mostRight = <span class="kw">nullptr</span>;
+        <span class="kw">while</span> (cur != <span class="kw">nullptr</span>) {
+            mostRight = cur-&gt;left;
+            <span class="kw">if</span> (mostRight != <span class="kw">nullptr</span>) {
+                <span class="kw">while</span> (mostRight-&gt;right != <span class="kw">nullptr</span> &amp;&amp; mostRight-&gt;right != cur) {
+                    mostRight = mostRight-&gt;right;
+                }
+                <span class="kw">if</span> (mostRight-&gt;right == <span class="kw">nullptr</span>) {
+                    mostRight-&gt;right = cur;
+                    cur = cur-&gt;left;
+                    <span class="kw">continue</span>;                           <span class="cm">// 第一次到达不打印</span>
+                } <span class="kw">else</span> {
+                    mostRight-&gt;right = <span class="kw">nullptr</span>;
+                }
+            }
+            ans.push_back(cur-&gt;val);                    <span class="cm">// 中序位置：左树已走完</span>
+            cur = cur-&gt;right;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <p>反过来把打印写在第一次到达处，得到的就是先序，2 万组里 76.78% 能对上差别。写在第二次到达处与写在末尾完全等价，2 万组一组都不差，这两种写法随便挑。</p>
+      <p>顺带说一句，<code class="inline">else</code> 那一支同样不能省，漏了也是 100% 被抓。</p>
+
+      <h2 id="cost">五、为什么还是 O(n)</h2>
+      <p>内圈 <code class="inline">while</code> 看着像每个节点要花 O(h)，这是最容易误判的地方。实际上每条向右的边最多被走两遍：一遍是顺着往下找 <code class="inline">mostRight</code>，另一遍是从线索爬回来时经过它。总步数有 2n 的上界。</p>
+
+      <figure class="fig" id="figCount"></figure>
+
+      <p>链状树是个极端：所有节点都没有左子树，内圈一次都不进，总到达次数就是 n。完全二叉树和随机树都稳定在 1.5n 附近，因为有左子树的节点大约占一半。</p>
+      <p>速度上没有惊喜。n = 10⁶ 的随机树上，递归先序 23.41ms、显式栈 18.59ms、Morris 22.84ms，同一个量级。链状 n = 10⁶ 上 Morris 1.96ms、显式栈 2.38ms。买 Morris 是为了那 O(1) 的空间，别指望它更快。</p>
+
+      <h2 id="cx">复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>写法</th><th>时间</th><th>额外空间</th><th>空间花在哪</th></tr>
+        <tr><td>递归三序遍历</td><td>O(n)</td><td>O(h)</td><td>系统栈，深度等于树高，链上 n 层会崩</td></tr>
+        <tr><td>显式栈三序遍历</td><td>O(n)</td><td>O(h)</td><td>自己开的栈，n = 10⁶ 随机树上峰值 28 个指针</td></tr>
+        <tr><td>Morris 遍历</td><td>O(n)</td><td>O(1)</td><td>只有 cur 与 mostRight 两个指针变量</td></tr>
+      </table>
+      <p>时间那栏的常数要拆开看：Morris 里每个节点被到达 1 到 2 次，总到达次数在 n 到 2n 之间，具体是 n 加上有左子树的节点个数；内圈 <code class="inline">while</code> 的累计步数不超过 2n。所以 O(n) 前面那个常数在 3 附近，比递归的 1 大，实测下来两者耗时同量级。</p>
+      <p>空间是严格的 O(1)，与树高无关。改的是树上已有的指针字段，没有新开节点，也没有新开数组。</p>
+
+      <h2 id="viz1">演示一：Morris 遍历操作台</h2>
+      <div class="viz" id="vizRun">
+        <p class="viz-title">Morris 遍历操作台：cur、被借用的右指针、输出序列</p>
+        <div id="vizRunBody"></div>
+        <div class="viz-controls" id="vizRunCtl"></div>
+      </div>
+
+      <h2 id="sum">总结</h2>
+      <p>Morris 遍历的全部机关只有一句：有左子树的节点，它左子树的最右节点右指针必定空着，把这个空指针临时指回自己，就能判断是第几次到达。</p>
+      <p>要点列一下：循环三个出口，无左树直接右移、第一次到达借指针往左、第二次到达拆指针往右；先序打印在第一次到达与无左树处，中序打印在循环体末尾；还原和内圈的 <code class="inline">!= cur</code> 刹车漏一个就死循环；总到达次数是 n 加有左子树的节点个数，内圈累计不超过 2n。</p>
+      <p>先序和中序都能在「到达时顺手记一笔」解决。后序要等左右两边都处理完，Morris 只到两次，那里得换一套办法。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>二叉树的前序遍历</td><td><a href="https://leetcode.cn/problems/binary-tree-preorder-traversal/" target="_blank">leetcode.cn/problems/binary-tree-preorder-traversal/</a></td></tr>
+        <tr><td>LeetCode</td><td>二叉树的中序遍历</td><td><a href="https://leetcode.cn/problems/binary-tree-inorder-traversal/" target="_blank">leetcode.cn/problems/binary-tree-inorder-traversal/</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解124【扩展】Morris遍历</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+</section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = {
+    blue: '#2563eb', blueBg: '#dbeafe', blueSoft: '#eef4ff',
+    orange: '#ea580c', orangeBg: '#ffedd5',
+    gray: '#9aa0a6', grayBg: '#f6f7f9', border: '#e6e8eb',
+    text: '#333', dim: '#6b7280'
+  };
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/ /g, '\u00a0');
+  }
+  function svg(inner, w, h) {
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" ' +
+      'style="width:100%;height:auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif">' +
+      '<style>text{font-size:12px;fill:' + C.text + '}</style>' + inner + '</svg>';
+  }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '"' +
+      (o.anchor ? ' text-anchor="' + o.anchor + '"' : '') +
+      (o.size ? ' font-size="' + o.size + '"' : '') +
+      (o.fill ? ' fill="' + o.fill + '"' : '') +
+      (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function box(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" ' +
+      'fill="' + (o.fill || C.grayBg) + '" stroke="' + (o.stroke || C.border) + '" stroke-width="1"' +
+      (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function line(x1, y1, x2, y2, o) {
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' +
+      (o.stroke || C.border) + '" stroke-width="' + (o.sw || 1.3) + '"' +
+      (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function path(d, o) {
+    o = o || {};
+    return '<path d="' + d + '" fill="none" stroke="' + (o.stroke || C.orange) +
+      '" stroke-width="' + (o.sw || 1.6) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function nd(x, y, label, o) {
+    o = o || {};
+    return '<circle cx="' + x + '" cy="' + y + '" r="15" fill="' + (o.fill || C.grayBg) +
+      '" stroke="' + (o.stroke || C.border) + '" stroke-width="' + (o.sw || 1.4) + '"/>' +
+      txt(x, y + 4, String(label), { anchor: 'middle', size: 12, fill: o.textFill || C.text });
+  }
+  function put(id, html) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  }
+
+  // 树：ch[节点] = [左孩子, 右孩子]，0 表示空
+  function layout(T) {
+    var pos = {}, dep = {}, cnt = 0;
+    (function dfs(u, d) {
+      if (!u) return;
+      dfs(T.ch[u][0], d + 1);
+      pos[u] = cnt++;
+      dep[u] = d;
+      dfs(T.ch[u][1], d + 1);
+    })(T.root, 0);
+    return { pos: pos, dep: dep, w: cnt };
+  }
+
+  var T7 = {
+    root: 1,
+    ch: { 1: [2, 3], 2: [4, 5], 3: [6, 7], 4: [0, 0], 5: [0, 0], 6: [0, 0], 7: [0, 0] }
+  };
+
+  // ---------- 图1：示例树 ----------
+  (function () {
+    var T = T7, L = layout(T), W = 660, topY = 32, lh = 54;
+    var cw = Math.min(78, 560 / L.w), off = (W - L.w * cw) / 2;
+    function px(id) { return off + (L.pos[id] + 0.5) * cw; }
+    function py(id) { return topY + L.dep[id] * lh; }
+    var g = '';
+    Object.keys(T.ch).forEach(function (p) {
+      var c = T.ch[p];
+      [0, 1].forEach(function (k) {
+        if (c[k] > 0) g += line(px(+p), py(+p), px(c[k]), py(c[k]));
+      });
+    });
+    Object.keys(L.pos).forEach(function (k) {
+      var id = +k;
+      g += nd(px(id), py(id), id);
+    });
+    var by = topY + 2 * lh + 34;
+    g += txt(W / 2, by, '7 节点满二叉树，下面全程用它做例子', { anchor: 'middle', size: 12, fill: C.dim });
+    put('figTree', svg(g, W, by + 18));
+  })();
+
+  // ---------- 图2：到达次数 ----------
+  (function () {
+    var T = T7, L = layout(T), W = 660, topY = 32, lh = 54;
+    var cw = Math.min(78, 520 / L.w), off = (W - L.w * cw) / 2;
+    function px(id) { return off + (L.pos[id] + 0.5) * cw; }
+    function py(id) { return topY + L.dep[id] * lh; }
+    var g = '';
+    Object.keys(T.ch).forEach(function (p) {
+      var c = T.ch[p];
+      [0, 1].forEach(function (k) {
+        if (c[k] > 0) g += line(px(+p), py(+p), px(c[k]), py(c[k]));
+      });
+    });
+    var twice = 0;
+    Object.keys(L.pos).forEach(function (k) {
+      var id = +k;
+      var has = T.ch[id][0] > 0;
+      if (has) twice++;
+      g += nd(px(id), py(id), id, has ? { fill: C.orangeBg, stroke: C.orange, sw: 1.8 } : { fill: C.blueBg, stroke: C.blue, sw: 1.8 });
+      g += txt(px(id), py(id) + 29, has ? '到 2 次' : '到 1 次', {
+        anchor: 'middle', size: 11, fill: has ? C.orange : C.blue
+      });
+    });
+    var ty = topY + 2 * lh + 30;
+    g += box(off, ty, 250, 26, { fill: C.orangeBg, stroke: C.orange });
+    g += txt(off + 125, ty + 17, '有左子树：被线索引回来，到 2 次', { anchor: 'middle', size: 11, fill: C.orange });
+    g += box(off + 270, ty, 250, 26, { fill: C.blueBg, stroke: C.blue });
+    g += txt(off + 395, ty + 17, '无左子树：只能顺着父指针来，到 1 次', { anchor: 'middle', size: 11, fill: C.blue });
+    var sy = ty + 48;
+    g += txt(W / 2, sy, '橙色的 ' + twice + ' 个各到 2 次、蓝色的 ' + (L.w - twice) + ' 个各到 1 次，合计 ' + (L.w + twice) + ' 次 = n + 有左子树的节点数',
+      { anchor: 'middle', size: 12, fill: C.text });
+    put('figTwice', svg(g, W, sy + 18));
+  })();
+
+  // ---------- 图3：三条分支 ----------
+  (function () {
+    var W = 660, HH = 250, g = '';
+    var titles = ['cur 没有左树', '第一次到达：右指针空着', '第二次到达：右指针指着 cur'];
+    for (var i = 0; i < 3; i++) {
+      var x0 = 10 + i * 214;
+      g += box(x0, 12, 202, HH - 26, { fill: '#fcfcfd' });
+      g += txt(x0 + 101, 32, titles[i], { anchor: 'middle', size: 12, fill: C.text, weight: '600' });
+      if (i === 0) {
+        var ax = x0 + 70, ay = 66, bx = x0 + 138, byy = 112;
+        g += line(ax, ay, bx, byy);
+        g += nd(ax, ay, 1, { fill: C.orangeBg, stroke: C.orange, sw: 2 });
+        g += nd(bx, byy, 2, {});
+        g += txt(ax - 20, ay + 4, 'cur', { anchor: 'end', size: 11, fill: C.orange });
+        g += txt(x0 + 101, 152, '只有这一次机会', { anchor: 'middle', size: 11, fill: C.dim });
+        g += txt(x0 + 101, 176, 'cur = cur->right', { anchor: 'middle', size: 12, fill: C.text });
+      } else {
+        var cx0 = x0 + 82, cy0 = 58;
+        var lx = x0 + 40, ly = 108;
+        var mx = x0 + 82, my = 150;
+        var rx = x0 + 162, ry = 104;
+        g += line(cx0, cy0, lx, ly);
+        g += line(lx, ly, mx, my);
+        g += line(cx0, cy0, rx, ry);
+        g += nd(cx0, cy0, 1, i === 1 ? { fill: C.orangeBg, stroke: C.orange, sw: 2 } : { fill: C.orangeBg, stroke: C.orange, sw: 2 });
+        g += nd(lx, ly, 2, {});
+        g += nd(mx, my, 3, { fill: C.blueBg, stroke: C.blue, sw: 1.8 });
+        g += nd(rx, ry, 4, {});
+        g += txt(mx + 22, my + 5, '最右', { anchor: 'start', size: 11, fill: C.blue });
+        var d = 'M ' + (mx + 14) + ',' + (my - 8) + ' C ' + (mx + 46) + ',' + (my - 26) +
+          ' ' + (cx0 + 40) + ',' + (cy0 + 30) + ' ' + (cx0 + 15) + ',' + (cy0 + 14);
+        if (i === 1) {
+          g += path(d, { stroke: C.orange, dash: '4 3', sw: 1.8 });
+          g += txt(x0 + 101, 190, '借空指针指回 cur，cur 往左', { anchor: 'middle', size: 11, fill: C.orange });
+          g += txt(x0 + 101, 212, 'cur = cur->left', { anchor: 'middle', size: 12, fill: C.text });
+        } else {
+          g += path(d, { stroke: C.orange, sw: 2 });
+          g += line(mx + 40, my - 44, mx + 56, my - 28, { stroke: C.orange, sw: 2 });
+          g += line(mx + 56, my - 44, mx + 40, my - 28, { stroke: C.orange, sw: 2 });
+          g += txt(x0 + 101, 190, '拆掉还原成空，cur 往右', { anchor: 'middle', size: 11, fill: C.orange });
+          g += txt(x0 + 101, 212, 'cur = cur->right', { anchor: 'middle', size: 12, fill: C.text });
+        }
+      }
+    }
+    g += txt(W / 2, HH - 6, '三个出口：往右走、借指针往左、拆指针往右', { anchor: 'middle', size: 12, fill: C.dim });
+    put('figBranch', svg(g, W, HH));
+  })();
+
+  // ---------- 图4：计数柱图 ----------
+  (function () {
+    var W = 660, HH = 250, g = '';
+    var ax = 70, ay = 190, aw = 540, ah = 140;
+    var vmax = 2.0;
+    function vy(v) { return ay - v / vmax * ah; }
+    for (var t = 0; t <= 4; t++) {
+      var v = t * 0.5;
+      g += line(ax, vy(v), ax + aw, vy(v), { stroke: '#eef0f2' });
+      g += txt(ax - 10, vy(v) + 4, v.toFixed(1), { anchor: 'end', size: 11, fill: C.dim });
+    }
+    g += line(ax, ay, ax + aw, ay, { stroke: C.border, sw: 1.4 });
+    var names = ['随机树', '链状树', '完全二叉树'];
+    var data = [[1.50, 1.00], [1.00, 0.00], [1.50, 1.00]];
+    var gw = aw / 3, bw = 46;
+    for (var i = 0; i < 3; i++) {
+      var gx = ax + gw * i + gw / 2;
+      for (var k = 0; k < 2; k++) {
+        var bx = gx - 52 + k * 56;
+        var h = Math.max(1, data[i][k] / vmax * ah);
+        g += box(bx, ay - h, bw, h, {
+          fill: k === 0 ? C.blueBg : C.orangeBg,
+          stroke: k === 0 ? C.blue : C.orange
+        });
+        g += txt(bx + bw / 2, ay - h - 6, data[i][k].toFixed(2), {
+          anchor: 'middle', size: 11, fill: k === 0 ? C.blue : C.orange
+        });
+      }
+      g += txt(gx, ay + 20, names[i], { anchor: 'middle', size: 12, fill: C.text });
+    }
+    g += txt(ax, 24, 'n = 10⁶ 时，Morris 遍历的两个计数（都除以 n）', { anchor: 'start', size: 12, fill: C.text, weight: '600' });
+    g += box(ax, 36, 150, 22, { fill: C.blueBg, stroke: C.blue });
+    g += txt(ax + 75, 51, '到达总数 / n', { anchor: 'middle', size: 11, fill: C.blue });
+    g += box(ax + 162, 36, 168, 22, { fill: C.orangeBg, stroke: C.orange });
+    g += txt(ax + 246, 51, '内圈 while 总步数 / n', { anchor: 'middle', size: 11, fill: C.orange });
+    g += txt(W / 2, HH - 8, '到达总数最多 2n，内圈累计步数不超过 2n，两项都是 O(n)', { anchor: 'middle', size: 12, fill: C.dim });
+    put('figCount', svg(g, W, HH));
+  })();
+})();
+</script>
+<script>
+(function () {
+  // ---------- 演示一：Morris 遍历操作台 ----------
+  var C = {
+    blue: '#2563eb', blueBg: '#dbeafe', blueSoft: '#eef4ff',
+    orange: '#ea580c', orangeBg: '#ffedd5',
+    gray: '#9aa0a6', grayBg: '#f6f7f9', border: '#e6e8eb',
+    text: '#333', dim: '#6b7280'
+  };
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/ /g, '\u00a0');
+  }
+  function svg(inner, w, h) {
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" ' +
+      'style="width:100%;height:auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif">' +
+      '<style>text{font-size:12px;fill:' + C.text + '}</style>' + inner + '</svg>';
+  }
+  function txt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '"' +
+      (o.anchor ? ' text-anchor="' + o.anchor + '"' : '') +
+      (o.size ? ' font-size="' + o.size + '"' : '') +
+      (o.fill ? ' fill="' + o.fill + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function box(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" ' +
+      'fill="' + (o.fill || C.grayBg) + '" stroke="' + (o.stroke || C.border) + '" stroke-width="1"' +
+      (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function line(x1, y1, x2, y2, o) {
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' +
+      (o.stroke || C.border) + '" stroke-width="' + (o.sw || 1.3) + '"' +
+      (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function path(d, o) {
+    o = o || {};
+    return '<path d="' + d + '" fill="none" stroke="' + (o.stroke || C.orange) +
+      '" stroke-width="' + (o.sw || 1.6) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function nd(x, y, label, o) {
+    o = o || {};
+    return '<circle cx="' + x + '" cy="' + y + '" r="15" fill="' + (o.fill || C.grayBg) +
+      '" stroke="' + (o.stroke || C.border) + '" stroke-width="' + (o.sw || 1.4) + '"/>' +
+      txt(x, y + 4, String(label), { anchor: 'middle', size: 12, fill: o.textFill || C.text });
+  }
+  function layout(T) {
+    var pos = {}, dep = {}, cnt = 0;
+    (function dfs(u, d) {
+      if (!u) return;
+      dfs(T.ch[u][0], d + 1);
+      pos[u] = cnt++;
+      dep[u] = d;
+      dfs(T.ch[u][1], d + 1);
+    })(T.root, 0);
+    return { pos: pos, dep: dep, w: cnt };
+  }
+  function maxDep(T, L) {
+    var m = 0;
+    Object.keys(L.dep).forEach(function (k) { m = Math.max(m, L.dep[k]); });
+    return m;
+  }
+
+  var TREES = {
+    full: {
+      name: '7 点满二叉树',
+      root: 1,
+      ch: { 1: [2, 3], 2: [4, 5], 3: [6, 7], 4: [0, 0], 5: [0, 0], 6: [0, 0], 7: [0, 0] }
+    },
+    nine: {
+      name: '9 点非完全树',
+      root: 1,
+      ch: { 1: [2, 3], 2: [4, 5], 3: [6, 0], 4: [0, 0], 5: [0, 8], 6: [9, 0], 7: [0, 0], 8: [0, 0], 9: [0, 0] }
+    },
+    lchain: {
+      name: '5 点左偏链',
+      root: 1,
+      ch: { 1: [2, 0], 2: [3, 0], 3: [4, 0], 4: [5, 0], 5: [0, 0] }
+    },
+    rchain: {
+      name: '5 点右偏链',
+      root: 1,
+      ch: { 1: [0, 2], 2: [0, 3], 3: [0, 4], 4: [0, 5], 5: [0, 0] }
+    }
+  };
+  var ORDERS = {
+    none: { name: '只看序（不打印）' },
+    pre: { name: '先序' },
+    in: { name: '中序' }
+  };
+
+  function genSteps(T, ord) {
+    var steps = [];
+    var tmp = {};
+    function R(u) { return (tmp[u] !== undefined) ? tmp[u] : T.ch[u][1]; }
+    function snap() { var o = {}; Object.keys(tmp).forEach(function (k) { o[k] = tmp[k]; }); return o; }
+    function push(cur, mr, out, msg) {
+      steps.push({ cur: cur, mr: mr, out: out.slice(), th: snap(), msg: msg });
+    }
+    var out = [];
+    var cur = T.root;
+    push(cur, 0, out, '开始：cur 来到头节点 ' + cur);
+    var guard = 0;
+    while (cur > 0 && guard++ < 500) {
+      var mr = T.ch[cur][0];
+      if (mr > 0) {
+        var walk = 0;
+        while (R(mr) > 0 && R(mr) !== cur && walk++ < 100) mr = R(mr);
+        if (R(mr) === 0) {
+          if (ord === 'pre') out.push(cur);
+          tmp[mr] = cur;
+          if (ord === 'pre') {
+            push(cur, mr, out, '第一次到达 ' + cur + '，先序在这里打印；左树最右节点是 ' + mr + '，把它的空右指针借来指回 ' + cur + '，cur 往左');
+          } else {
+            push(cur, mr, out, '第一次到达 ' + cur + '，左树还没走，不打印；左树最右节点是 ' + mr + '，把它的空右指针借来指回 ' + cur + '，cur 往左');
+          }
+          cur = T.ch[cur][0];
+          continue;
+        } else {
+          delete tmp[mr];
+          if (ord === 'in') out.push(cur);
+          if (ord === 'in') {
+            push(cur, mr, out, '第二次到达 ' + cur + '，左树已走完，中序在这里打印；' + mr + ' 的右指针本来指着 ' + cur + '，拆掉还原，cur 往右');
+          } else {
+            push(cur, mr, out, '第二次到达 ' + cur + '，' + mr + ' 的右指针正指着 ' + cur + '，说明左树走完了；拆掉还原，cur 往右');
+          }
+        }
+      } else {
+        if (ord === 'pre' || ord === 'in') out.push(cur);
+        push(cur, 0, out, 'cur 在 ' + cur + '，它没有左树，只能到这一次' + ((ord === 'none') ? '' : '，打印') + '，然后往右');
+      }
+      cur = R(cur);
+    }
+    push(0, 0, out, 'cur 为空，结束。共到达 ' + (steps.length - 1) + ' 次' + (ord === 'none' ? '' : '，输出 ' + out.length + ' 个'));
+    return steps;
+  }
+
+  (function () {
+    var body = document.getElementById('vizRunBody');
+    var ctl = document.getElementById('vizRunCtl');
+    if (!body || !ctl) return;
+    var selT = document.createElement('select'); selT.className = 'mb-sel';
+    Object.keys(TREES).forEach(function (k) {
+      var o = document.createElement('option'); o.value = k; o.textContent = TREES[k].name; selT.appendChild(o);
+    });
+    var selO = document.createElement('select'); selO.className = 'mb-sel';
+    Object.keys(ORDERS).forEach(function (k) {
+      var o = document.createElement('option'); o.value = k; o.textContent = ORDERS[k].name; selO.appendChild(o);
+    });
+    function mkBtn(t) { var b = document.createElement('button'); b.className = 'mb-btn'; b.textContent = t; return b; }
+    var bPrev = mkBtn('上一步'), bNext = mkBtn('下一步'), bReset = mkBtn('重置'), bAuto = mkBtn('自动播放');
+    var c1 = document.createElement('div'); c1.className = 'mb-ctl';
+    c1.appendChild(document.createTextNode('树')); c1.appendChild(selT);
+    var c2 = document.createElement('div'); c2.className = 'mb-ctl';
+    c2.appendChild(document.createTextNode('序')); c2.appendChild(selO);
+    ctl.appendChild(c1); ctl.appendChild(c2);
+    ctl.appendChild(bPrev); ctl.appendChild(bNext); ctl.appendChild(bReset); ctl.appendChild(bAuto);
+
+    var steps = [], cur = 0, timer = null;
+    function build() {
+      steps = genSteps(TREES[selT.value], selO.value);
+      cur = 0;
+    }
+    function render() {
+      var T = TREES[selT.value], L = layout(T), s = steps[cur];
+      var W = 660, topY = 32, lh = 52;
+      var cw = Math.min(74, 560 / L.w), off = (W - L.w * cw) / 2;
+      function px(id) { return off + (L.pos[id] + 0.5) * cw; }
+      function py(id) { return topY + L.dep[id] * lh; }
+      var g = '';
+      Object.keys(T.ch).forEach(function (p) {
+        var c = T.ch[p];
+        [0, 1].forEach(function (k) {
+          if (c[k] > 0) g += line(px(+p), py(+p), px(c[k]), py(c[k]));
+        });
+      });
+      Object.keys(s.th).forEach(function (from) {
+        var fx = px(+from), fy = py(+from), tx = px(s.th[from]), ty = py(s.th[from]);
+        var d = 'M ' + (fx + 13) + ',' + fy + ' C ' + (fx + 52) + ',' + (fy - 14) +
+          ' ' + (tx - 34) + ',' + (ty + 34) + ' ' + (tx - 12) + ',' + (ty + 12);
+        g += path(d, { stroke: C.orange, dash: '5 3', sw: 1.8 });
+      });
+      var outed = {};
+      s.out.forEach(function (v) { outed[v] = 1; });
+      Object.keys(L.pos).forEach(function (k) {
+        var id = +k, o = {};
+        if (s.cur === id) o = { fill: C.orangeBg, stroke: C.orange, sw: 2.2 };
+        else if (s.mr === id) o = { fill: C.blueBg, stroke: C.blue, sw: 2.2 };
+        else if (outed[id]) o = { fill: C.blueSoft, stroke: C.blue };
+        g += nd(px(id), py(id), id, o);
+      });
+      var sy = topY + (maxDep(T, L) + 1) * lh + 6;
+      g += txt(30, sy + 4, '输出', { anchor: 'start', size: 12, fill: C.dim });
+      if (!s.out.length) g += txt(78, sy + 4, '（空）', { anchor: 'start', size: 12, fill: C.gray });
+      for (var q = 0; q < s.out.length; q++) {
+        g += box(78 + q * 32, sy - 14, 28, 24, { fill: C.blueSoft, stroke: C.blue });
+        g += txt(92 + q * 32, sy + 3, String(s.out[q]), { anchor: 'middle', size: 12, fill: C.blue });
+      }
+      var my = sy + 30;
+      g += txt(30, my, s.msg, { anchor: 'start', size: 12, fill: C.text });
+      var ly = my + 22;
+      g += txt(30, ly, '橙点 = cur　蓝点 = 本次找到的 mostRight　橙色虚线 = 借用的右指针　浅蓝 = 已输出',
+        { anchor: 'start', size: 11, fill: C.dim });
+      var HH = ly + 16;
+      var extra = '<div class="breakdown">' +
+        '<div class="row">第 <span class="num">' + cur + '</span> / ' + (steps.length - 1) + ' 步　' +
+        'cur = <span class="num">' + (s.cur || '空') + '</span>　' +
+        'mostRight = <span class="num">' + (s.mr || '无') + '</span>　' +
+        '已输出 <span class="num">' + s.out.length + '</span> 个</div></div>';
+      body.innerHTML = svg(g, W, HH) + extra;
+      bPrev.disabled = (cur === 0);
+      bNext.disabled = (cur === steps.length - 1);
+    }
+    function stopAuto() { if (timer) { clearInterval(timer); timer = null; bAuto.textContent = '自动播放'; } }
+    bNext.addEventListener('click', function () { if (cur < steps.length - 1) { cur++; render(); } });
+    bPrev.addEventListener('click', function () { if (cur > 0) { cur--; render(); } });
+    bReset.addEventListener('click', function () { stopAuto(); cur = 0; render(); });
+    selT.addEventListener('change', function () { stopAuto(); build(); render(); });
+    selO.addEventListener('change', function () { stopAuto(); build(); render(); });
+    bAuto.addEventListener('click', function () {
+      if (timer) { stopAuto(); return; }
+      bAuto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (cur < steps.length - 1) { cur++; render(); } else stopAuto();
+      }, 800);
+    });
+    build();
+    render();
+  })();
+})();
+</script>
+</body>
+</html>
