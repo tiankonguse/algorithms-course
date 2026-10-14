@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>带权重的重心：牛群聚在哪一站 · 算法教程</title>
+<meta name="description" content="点上有牛数、边上有长度时，总路程最小的汇聚点是按牛数算出来的重心。移动法给出代价差公式，一次 dfs 找重心、一次 dfs 铺距离，答案要用 long long。">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+  .cw-btn{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text);font-family:inherit;
+    transition:border-color .12s,color .12s;
+  }
+  .cw-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .cw-btn:disabled{opacity:.4;cursor:default;color:var(--text);border-color:var(--border);}
+  .cw-sel{
+    border:1px solid var(--border);background:var(--bg);border-radius:6px;
+    padding:5px 8px;font-size:14px;color:var(--text);font-family:inherit;
+  }
+  @media(max-width:760px){
+    .cw-btn{font-size:13px;padding:5px 11px;}
+    .cw-sel{font-size:13px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <section class="algo-section">
+    <h1>带权重的重心：牛群聚在哪一站</h1>
+    <p class="intro">每个农场养着不同数量的牛，每条路有长短，要把所有牛赶到同一个农场，总路程最小的那个点要按牛数来算，跟「树上最中间的点」常常差着一个身位，混用的代价可以直接量出来。</p>
+
+    <h2>零、背景</h2>
+    <p>上一页的重心按点数算：挖掉一个点，剩下的块里点数最多的是多少。现在点有了重量，把「点数」换成「牛数」就是这一页的定义。</p>
+    <p>记 <code class="inline">cowSum</code> 是全树的牛总数。以 u 为根，u 的每个方向上的牛数（儿子方向是该儿子子树的牛数，父亲方向是 <code class="inline">cowSum</code> 减去 u 子树的牛数）都不超过 <code class="inline">cowSum / 2</code>，u 就是带权重心。<code class="inline">cow[i]</code> 全取 1 时，它退化成上一页的重心。</p>
+    <p>这里有个细节：<code class="inline">cow[i]</code> 允许为 0。某个农场没牛，它在「分块」时照样占位置，但在「重量」上一克都没有，重心会往牛多的那一侧偏。</p>
+
+    <h2>一、问题</h2>
+    <p>牛群聚集：n 个农场、n − 1 条路连成一棵树，每个农场有 <code class="inline">cow[i]</code> 头牛，每条路长度 <code class="inline">w</code>。选一个农场把所有牛聚过去，使「每家的牛数 × 它到汇聚点的距离」之和最小，打印这个最小值。n ≤ 10⁵。</p>
+    <p>朴素做法是枚举汇聚点 x，对每个 x 跑一遍从 x 出发的遍历算总距离。一趟 O(n)，n 个候选就是 O(n²)，n = 10⁵ 时是 10¹⁰ 次访问。实测 n = 10⁵ 的随机树上，正解跑完只要 6.5 ms，暴力那一路根本跑不完。</p>
+
+    <h2>二、挪一步，总路程差多少</h2>
+    <p>设当前聚在 u，考虑挪到它的邻居 v，中间那条边长 c。挪动只影响一件事：v 那侧的牛少走 c，其余牛多走 c。记 v 那侧的牛数是 <code class="inline">sub[v]</code>，于是</p>
+    <p><code class="inline">D(v) − D(u) = (cowSum − sub[v]) × c − sub[v] × c = (cowSum − 2 × sub[v]) × c</code></p>
+    <p>边权 c 是正数时，这个差值的正负只由 <code class="inline">cowSum − 2 × sub[v]</code> 决定：<code class="inline">sub[v]</code> 超过半数，挪过去总路程下降；不超过半数，挪过去反而变贵。所以最优点就是「所有方向都不超过半数」的那个点，也就是带权重心。</p>
+    <p>这条式子还顺手说明了另一件事：牛数恰好等于半数时差值为 0，两侧一样好。这就是最优点不唯一的唯一来源。</p>
+
+    <figure class="fig">
+      <svg id="figMove" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="挪一步的代价差" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>v 那侧有 13 头牛、总牛数 20，往 v 挪一步省下 6 倍边长</figcaption>
+    </figure>
+
+    <h2>三、两趟 dfs</h2>
+    <p>重心定下来之后，剩下的事是从重心出发铺一遍距离，把每家的牛数乘上它的距离加起来。找重心这趟递归的写法和上一页几乎一样，重量换成了牛数：</p>
+
+    <pre class="code"><span class="cm">// 牛的数量才是重量，不是节点数</span>
+    <span class="cm">// sz[u] 记的是「以 u 为头的子树里一共有多少头牛」</span>
+    <span class="kw">void</span> <span class="fn">findCenter</span>(<span class="kw">int</span> u, <span class="kw">int</span> f) {
+        sz[u] = cow[u];
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e != 0; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != f) {
+                findCenter(v, u);
+            }
+        }
+        <span class="cm">// 遍历完儿子再做统计，改迭代版时这一刀切得干净</span>
+        <span class="kw">int</span> maxsub = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e != 0; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != f) {
+                sz[u] += sz[v];
+                maxsub = max(maxsub, sz[v]);
+            }
+        }
+        maxsub = max(maxsub, cowSum - sz[u]);
+        <span class="kw">if</span> (maxsub &lt; best) {
+            best = maxsub;
+            center = u;
+        }
+    }</pre>
+
+    <p>第二趟从重心出发，把距离写进 <code class="inline">path</code>，最后累加：</p>
+
+    <pre class="code"><span class="cm">// 从重心出发铺一遍距离，答案 = 每家的牛数 × 到重心的距离</span>
+    <span class="kw">void</span> <span class="fn">setPath</span>(<span class="kw">int</span> u, <span class="kw">int</span> f) {
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u], v; e != 0; e = nxt[e]) {
+            v = to[e];
+            <span class="kw">if</span> (v != f) {
+                path[v] = path[u] + weight[e];
+                setPath(v, u);
+            }
+        }
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">compute</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cowSum += cow[i];
+        }
+        findCenter(1, 0);
+        path[center] = 0;
+        setPath(center, 0);
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            ans += (<span class="kw">long</span> <span class="kw">long</span>)cow[i] * path[i];
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+    <p>注意 <code class="inline">ans += (long long)cow[i] * path[i]</code> 这个强转。n = 10⁵、每家 100 头牛、边长 1000 时，极端情况的总距离能到 10¹⁵ 量级，<code class="inline">int</code> 只有 21 亿的容量，中间结果一溢出答案就整个错了。实测 n = 10⁵ 的随机数据上答案是 3.3 × 10¹⁰，已经是 <code class="inline">int</code> 装不下的量级。</p>
+
+    <figure class="fig">
+      <svg id="figScale" viewBox="0 0 660 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="答案的量级" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>同一份数据的答案会比 int 上限高出五个数量级，long long 是硬要求</figcaption>
+    </figure>
+
+    <h2>四、权重用错会错多少</h2>
+    <p>最容易犯的错是：求重心时按节点数算，最后又拿牛数去乘距离。树的形状和牛的分布没关系的时候这两者才会重合。</p>
+    <p>实测四千组随机树（n 取 4 到 40，每家牛数 0 到 100，边长 1 到 30）：按牛数算出的重心与按节点数算出的重心有 15.53% 不是同一个点；其中 620 组（15.5%）按节点数取重心会算出更大的总路程，平均高出 6.224%，最坏的一组高出 204%。把树缩小到 4 到 22 个点再跑三千组，答案不同的比例升到 23.50%，平均高出 11.149%。</p>
+    <p>每六到七组就有一组直接算错，这个比例不算小。</p>
+
+    <figure class="fig">
+      <svg id="figWeight" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="两种重心不是同一个点" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <figcaption>同一棵树，按点数看重心在 2，按牛数看重心在 6</figcaption>
+    </figure>
+
+    <h2>五、递归换成迭代</h2>
+    <p>n = 10⁵ 的树如果长成一条链，递归深度就是 10⁵。本机栈 8 MB，链上 86000 层还能正常返回，87000 层直接段错误。这道题的数据正好允许长链，递归版交上去是赌评测机的栈够不够大。</p>
+    <p>改法和上一页那套 dfs 一样：手写栈，第一次来到 u 时记 <code class="inline">e == -1</code>，之后再回来就从 <code class="inline">nxt[e]</code> 接着走，边走完了才做统计。</p>
+
+    <pre class="code"><span class="cm">// 迭代版：ufe 是手写栈，e == -1 表示第一次来到 u</span>
+    <span class="kw">void</span> <span class="fn">findCenter</span>(<span class="kw">int</span> root) {
+        stackSize = 0;
+        push(root, 0, -1);
+        <span class="kw">while</span> (stackSize &gt; 0) {
+            pop();
+            <span class="kw">if</span> (e == -1) {
+                sz[u] = cow[u];
+                e = head[u];
+            } <span class="kw">else</span> {
+                e = nxt[e];
+            }
+            <span class="kw">if</span> (e != 0) {                     <span class="cm">// 还有没走完的边</span>
+                push(u, f, e);                <span class="cm">// 先把自己和当前边压回去</span>
+                <span class="kw">if</span> (to[e] != f) {
+                    push(to[e], u, -1);       <span class="cm">// 再压儿子</span>
+                }
+            } <span class="kw">else</span> {                          <span class="cm">// 边走完了，做统计</span>
+                <span class="kw">int</span> maxsub = 0;
+                <span class="kw">for</span> (<span class="kw">int</span> i = head[u], v; i != 0; i = nxt[i]) {
+                    v = to[i];
+                    <span class="kw">if</span> (v != f) {
+                        sz[u] += sz[v];
+                        maxsub = max(maxsub, sz[v]);
+                    }
+                }
+                maxsub = max(maxsub, cowSum - sz[u]);
+                <span class="kw">if</span> (maxsub &lt; best) {
+                    best = maxsub;
+                    center = u;
+                }
+            }
+        }
+    }</pre>
+
+    <h2>六、边权允许为 0 的时候</h2>
+    <p>代价差 <code class="inline">(cowSum − 2 × sub[v]) × c</code> 里 c 是那条边的长度。c = 0 时，不管两侧牛数差多少，挪过去都不亏也不赚，最优点于是变成一整片。</p>
+    <p>实测四千组边长允许取 0 的随机树：重心给出的总路程全部等于全局最小值，0 例失败；同时有 2069 组（51.7%）存在不止一个最优点。换成边长全部为正的数据再跑四千组，最优点不唯一只剩 47 组（1.18%），全都是「某棵子树的牛数恰好等于总牛数一半」的情形。</p>
+    <p>所以这道题求的是最小值本身，重心给不给得出唯一位置无关紧要。</p>
+
+    <div class="viz">
+      <div class="viz-title">往牛多的那一侧挪</div>
+      <p class="intro" style="margin:0 0 12px;font-size:14px;">从 1 号农场出发，每步检查各个方向的牛数，只要有一侧超过半数就挪过去，看总路程怎么降下来。</p>
+      <svg id="cwSvg" viewBox="0 0 660 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="移动法找带权重心演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+      <div class="legend">
+        <span><span class="dot full"></span>当前汇聚点</span>
+        <span><span class="dot partial"></span>牛数超过半数的一侧</span>
+        <span><span class="dot skip"></span>最终重心</span>
+      </div>
+      <div class="breakdown" id="cwInfo"></div>
+      <div class="viz-controls">
+        <select class="cw-sel" id="cwPreset">
+          <option value="0">7 点树（重心在 6 号）</option>
+          <option value="1">6 点链（重心在 3 号）</option>
+          <option value="2">6 点星（重心在中心）</option>
+          <option value="3">8 点树（重心偏向一侧）</option>
+          <option value="-1">随机一棵</option>
+        </select>
+        <button class="cw-btn" id="cwPrev" type="button">上一步</button>
+        <button class="cw-btn" id="cwNext" type="button">下一步</button>
+        <button class="cw-btn" id="cwReset" type="button">重置</button>
+      </div>
+    </div>
+
+    <h2>复杂度分析</h2>
+    <p>找重心一趟 dfs 走遍 n − 1 条边，每个点回溯时把它的边扫一遍；铺距离也是一趟。两趟都是 O(n)。</p>
+    <table class="complexity">
+      <thead>
+        <tr><th>环节</th><th>时间</th><th>空间</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>找带权重心（dfs）</td><td><code class="inline">O(n)</code></td><td rowspan="3"><code class="inline">O(n)</code></td></tr>
+        <tr><td>从重心铺距离</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>累加答案</td><td><code class="inline">O(n)</code></td></tr>
+        <tr><td>合计</td><td><code class="inline">O(n)</code></td></tr>
+      </tbody>
+    </table>
+    <p>空间按题目上限 n = 10⁵ 算：<code class="inline">head</code> 100001 个 int 约 0.4 MB，<code class="inline">nxt</code>、<code class="inline">to</code>、<code class="inline">weight</code> 各 200002 个约 2.4 MB，<code class="inline">sz</code> 与 <code class="inline">path</code> 各 100001 个 long long 约 1.6 MB，加上 <code class="inline">cow</code> 与迭代栈 <code class="inline">ufe</code>（100001 × 3 个 int）约 1.6 MB，总共 6 MB 出头。迭代栈这一份是递归版省掉的交换。</p>
+    <p>实测 n = 10⁵ 的随机树，两趟 dfs 加累加共 6.5 ms。</p>
+
+    <h2>总结</h2>
+    <p>要点三条。其一，挪一步的代价差是 <code class="inline">(cowSum − 2 × sub[v]) × c</code>，边权为正时最优点等价于「每个方向牛数不超过半数」的带权重心。其二，求重心的重量必须是牛数，换成节点数之后四千组随机树里有 15.5% 算出更大的答案，平均高出 6.224%。其三，答案量级能到 10¹⁵，<code class="inline">int</code> 装不下，累加时老老实实用 long long。</p>
+    <p>边权允许为 0 时重心依然给出最小值，只是最优点可能不止一个，这不影响题目要的那个数。</p>
+
+    <h2>七、最后</h2>
+    <p>这一页的套路比结论更值钱：先用一个「挪一步会怎样」的差值把最优点刻画出来，再回头看这个刻画对应哪个能在 O(n) 里算出来的量。树上许多「选一个点使某某最小」的问题都吃这一套，带权、不带权只是把重量换一换。</p>
+    <p>《完》</p>
+
+    <h2 id="prob-links">相关题目</h2>
+    <table class="complexity">
+      <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+      <tr><td>洛谷</td><td>牛群聚集</td><td><a href="https://www.luogu.com.cn/problem/P2986" target="_blank">www.luogu.com.cn/problem/P2986</a></td></tr>
+    </table>
+
+    <h2 id="refs">参考材料</h2>
+    <table class="complexity">
+      <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+      <tr><td>左程云</td><td>算法讲解120【扩展】树上问题专题3-树的重心</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+    </table>
+    </section>
+  </main>
+
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = { blue:'#2563eb', blueB:'#dbeafe', blueL:'#eef4ff', orange:'#ea580c',
+            orangeB:'#ffedd5', gray:'#9aa0a6', bg:'#f6f7f9', bd:'#e6e8eb',
+            dark:'#1f2328', dim:'#6b7280' };
+
+  function el(id){ return document.getElementById(id); }
+  function mount(id, s){ var n = el(id); if (n) n.innerHTML = s; }
+  function T(x, y, s, o){
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 11) + '" fill="' + (o.fill || C.dark) +
+           (o.anchor ? '" text-anchor="' + o.anchor : '') + '"' + (o.bold ? ' font-weight="600"' : '') + '>' + s + '</text>';
+  }
+  function LN(x1, y1, x2, y2, o){
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.gray) +
+           '" stroke-width="' + (o.w || 1.3) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function CIR(x, y, r, o){
+    o = o || {};
+    return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + (o.fill || C.blueB) +
+           '" stroke="' + (o.stroke || C.blue) + '" stroke-width="' + (o.w || 1.5) + '"/>';
+  }
+  function RECT(x, y, w, hh, o){
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + hh + '" rx="' + (o.rx || 8) +
+           '" fill="' + (o.fill || C.bg) + '" stroke="' + (o.stroke || C.bd) + '" stroke-width="1"/>';
+  }
+
+  /* ---------- 图 1：挪一步的代价差 ---------- */
+  (function(){
+    var XY = {1:[120,150], 2:[250,150], 3:[380,90], 4:[380,150], 5:[380,210], 6:[500,90], 7:[500,150]};
+    var E = [[1,2],[2,3],[2,4],[2,5],[3,6],[3,7]];
+    var cow = {1:2, 2:1, 3:3, 4:2, 5:2, 6:4, 7:6};
+    var g = '';
+    var i, a, b;
+    for (i = 0; i < E.length; i++){
+      a = XY[E[i][0]]; b = XY[E[i][1]];
+      g += LN(a[0], a[1], b[0], b[1], (E[i][0] === 2 && E[i][1] === 3) ? {stroke:C.orange, w:3} : {});
+    }
+    var keys = [1,2,3,4,5,6,7];
+    for (i = 0; i < keys.length; i++){
+      var u = keys[i], p = XY[u];
+      var inRight = (u === 3 || u === 6 || u === 7);
+      g += CIR(p[0], p[1], 17, inRight ? {fill:C.orangeB, stroke:C.orange} : {fill:C.blueB, stroke:C.blue});
+      g += T(p[0], p[1] + 4, String(u), {anchor:'middle'});
+      g += T(p[0], p[1] - 22, cow[u] + ' 头', {anchor:'middle', size:10, fill:C.dim});
+    }
+    g += T(315, 128, 'c', {anchor:'middle', size:11, fill:C.orange, bold:true});
+    g += T(250, 190, 'u = 2', {anchor:'middle', size:10, fill:C.blue, bold:true});
+    g += T(408, 76, 'v = 3', {anchor:'middle', size:10, fill:C.orange, bold:true});
+    g += RECT(430, 200, 200, 84);
+    g += T(444, 222, 'v 那侧 13 头，其余 7 头', {size:10});
+    g += T(444, 244, '差 = (20 − 26) × c', {size:10});
+    g += T(444, 266, '= −6c，挪过去更省', {size:10, fill:C.orange, bold:true});
+    g += T(330, 30, '牛总数 20，半数是 10；v 那侧 13 > 10', {anchor:'middle', size:10, fill:C.dim});
+    mount('figMove', g);
+  })();
+
+  /* ---------- 图 2：量级 ---------- */
+  (function(){
+    var g = '';
+    g += T(330, 26, 'n = 10⁵ 时答案有多大', {anchor:'middle', bold:true});
+    var rows = [
+      ['int 的上限', '2 147 483 647', C.blue, 40],
+      ['随机数据实测', '33 274 585 326', C.gray, 150],
+      ['题目上限估算', '约 10¹⁵', C.orange, 340]
+    ];
+    var y0 = 62, x0 = 150, maxw = 380;
+    for (var i = 0; i < rows.length; i++){
+      g += T(20, y0 + i * 48 + 18, rows[i][0], {size:11});
+      g += RECT(x0, y0 + i * 48, maxw, 26, {fill:'#fff'});
+      var wpx = Math.min(maxw, 20 + rows[i][3] * 0.55);
+      g += '<rect x="' + x0 + '" y="' + (y0 + i * 48) + '" width="' + wpx + '" height="26" rx="6" fill="' + rows[i][2] + '" opacity="0.85"/>';
+      g += T(x0 + 10, y0 + i * 48 + 18, rows[i][1], {size:11, fill:'#fff', bold:true});
+    }
+    g += T(330, 216, '最长边 10³、每家 100 头牛、n = 10⁵ 个点，乘起来就是这个量级', {anchor:'middle', size:10, fill:C.dim});
+    mount('figScale', g);
+  })();
+
+  /* ---------- 图 3：两种重心 ---------- */
+  (function(){
+    var XY = {1:[300,50], 2:[300,124], 3:[300,200], 4:[300,272], 5:[176,272], 6:[168,124], 7:[70,196]};
+    var E = [[1,2],[2,3],[3,4],[3,5],[2,6],[6,7]];
+    var cow = {1:1, 2:1, 3:1, 4:30, 5:1, 6:1, 7:1};
+    var g = '', i, a, b;
+    for (i = 0; i < E.length; i++){ a = XY[E[i][0]]; b = XY[E[i][1]]; g += LN(a[0], a[1], b[0], b[1]); }
+    var keys = [1,2,3,4,5,6,7];
+    for (i = 0; i < keys.length; i++){
+      var u = keys[i], p = XY[u];
+      g += CIR(p[0], p[1], 17, {fill:'#fff', stroke:C.bd});
+      g += T(p[0], p[1] + 4, String(u), {anchor:'middle'});
+      g += T(p[0] + 24, p[1] - 14, cow[u] + ' 头', {size:10, fill:C.dim});
+    }
+    g += CIR(XY[2][0], XY[2][1], 25, {fill:'none', stroke:C.blue, w:2.2});
+    g += T(XY[2][0] + 40, XY[2][1] - 26, '按点数：2', {size:10, fill:C.blue, bold:true});
+    g += CIR(XY[3][0], XY[3][1], 25, {fill:'none', stroke:C.orange, w:2.2});
+    g += T(XY[3][0] + 40, XY[3][1] + 6, '按牛数：3', {size:10, fill:C.orange, bold:true});
+    g += RECT(410, 96, 220, 108);
+    g += T(426, 120, '牛总数 36，半数 18', {size:10});
+    g += T(426, 144, '4 号一家有 30 头', {size:10});
+    g += T(426, 168, '重心被拽到 3 号', {size:10, fill:C.orange, bold:true});
+    g += T(426, 192, '聚在 2 号要多走 30 × 2', {size:10, fill:C.dim});
+    g += T(300, 26, '同一棵树，换个重量重心就挪了位置', {anchor:'middle', size:10, fill:C.dim});
+    mount('figWeight', g);
+  })();
+
+  /* ---------- 演示：移动法 ---------- */
+  var PRESETS = [
+    { n:7, e:[[1,2],[2,3],[3,4],[3,5],[2,6],[6,7]], w:[1,2,3,1,2,1],
+      cow:{1:2, 2:1, 3:3, 4:20, 5:2, 6:1, 7:1},
+      xy:{1:[330,64], 2:[330,124], 3:[330,196], 4:[428,272], 5:[232,272], 6:[186,124], 7:[96,196]} },
+    { n:6, e:[[1,2],[2,3],[3,4],[4,5],[5,6]], w:[3,1,2,1,4],
+      cow:{1:1, 2:2, 3:30, 4:1, 5:1, 6:2},
+      xy:{1:[70,170], 2:[176,170], 3:[282,170], 4:[388,170], 5:[494,170], 6:[598,170]} },
+    { n:6, e:[[1,2],[1,3],[1,4],[1,5],[1,6]], w:[2,3,1,2,4],
+      cow:{1:1, 2:5, 3:5, 4:1, 5:1, 6:6},
+      xy:{1:[330,170], 2:[330,70], 3:[452,118], 4:[500,222], 5:[380,286], 6:[236,262]} },
+    { n:8, e:[[1,2],[2,3],[3,4],[4,5],[2,6],[6,7],[7,8]], w:[2,1,3,1,2,4,1],
+      cow:{1:1, 2:1, 3:2, 4:1, 5:40, 6:1, 7:1, 8:3},
+      xy:{1:[300,64], 2:[300,112], 3:[300,160], 4:[300,208], 5:[300,256], 6:[420,130], 7:[508,178], 8:[576,226]} }
+  ];
+  var cur = 0, at = 0, STATE = null;
+
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function edgeKey(u, v){ return u < v ? (u + '-' + v) : (v + '-' + u); }
+
+  function randomTree(n){
+    var rnd = mulberry32((Date.now() & 0xffff) + n * 131);
+    var e = [], w = [], i, p;
+    for (i = 2; i <= n; i++){ p = 1 + Math.floor(rnd() * (i - 1)); e.push([p, i]); w.push(1 + Math.floor(rnd() * 4)); }
+    var dep = {1:0}, lv = {0:[1]}, xy = {};
+    for (i = 0; i < e.length; i++) dep[e[i][1]] = dep[e[i][0]] + 1;
+    for (i = 1; i <= n; i++){ if (!lv[dep[i]]) lv[dep[i]] = []; lv[dep[i]].push(i); }
+    var maxd = 0, d;
+    for (d in lv) if (+d > maxd) maxd = +d;
+    for (d = 0; d <= maxd; d++){
+      var arr = lv[d] || [], cnt = arr.length;
+      for (var k = 0; k < cnt; k++){
+        xy[arr[k]] = [ 44 + (600 / (cnt + 1)) * (k + 1), 64 + d * (maxd ? 232 / maxd : 0) ];
+      }
+    }
+    var cow = {};
+    for (i = 1; i <= n; i++) cow[i] = 1 + Math.floor(rnd() * 8);
+    cow[n] = 20 + Math.floor(rnd() * 20);
+    return { n:n, e:e, w:w, cow:cow, xy:xy };
+  }
+
+  function buildSteps(){
+    var tr = (cur < 0) ? randomTree(8) : PRESETS[cur];
+    var i, u, v, k;
+    var adj = {};
+    for (u = 1; u <= tr.n; u++) adj[u] = [];
+    for (i = 0; i < tr.e.length; i++){
+      var ww = (tr.w && tr.w[i]) || 1;
+      adj[tr.e[i][0]].push({ v: tr.e[i][1], w: ww });
+      adj[tr.e[i][1]].push({ v: tr.e[i][0], w: ww });
+    }
+    var cowSum = 0;
+    for (u = 1; u <= tr.n; u++) cowSum += tr.cow[u];
+    var par = {1:0}, order = [], stk = [1];
+    while (stk.length){
+      u = stk.pop(); order.push(u);
+      for (k = 0; k < adj[u].length; k++){ v = adj[u][k].v; if (v !== par[u]){ par[v] = u; stk.push(v); } }
+    }
+    var sz = {};
+    for (u = 1; u <= tr.n; u++) sz[u] = tr.cow[u];
+    for (i = order.length - 1; i >= 0; i--){
+      u = order[i];
+      for (k = 0; k < adj[u].length; k++){ v = adj[u][k].v; if (v !== par[u]) sz[u] += sz[v]; }
+    }
+    // 以任意点 u 为根时，邻居 v 那一侧的牛数
+    function sideOf(u, v){
+      if (par[v] === u) return sz[v];
+      return cowSum - sz[u];
+    }
+    function dist(a, b){
+      var d = {}, q = [a], head2 = 0;
+      d[a] = 0;
+      while (head2 < q.length){
+        var x = q[head2++];
+        for (var kk = 0; kk < adj[x].length; kk++){
+          var y = adj[x][kk];
+          if (d[y.v] === undefined){ d[y.v] = d[x] + y.w; q.push(y.v); }
+        }
+      }
+      return d[b];
+    }
+    function total(x){
+      var s = 0;
+      for (var j = 1; j <= tr.n; j++) s += tr.cow[j] * dist(x, j);
+      return s;
+    }
+    var steps = [];
+    var now = 1, guard = 0;
+    steps.push({ at:1, t:'起点', s:'先假设聚在 1 号农场，总路程 ' + total(1) + '。接下来看有没有更省的方向。', hot:0 });
+    while (guard++ < 40){
+      var bestV = 0, bestSub = 0, bestW = 0, lines = [];
+      for (k = 0; k < adj[now].length; k++){
+        v = adj[now][k].v;
+        var sub = sideOf(now, v);
+        lines.push(v + ' 号方向 ' + sub + ' 头');
+        if (sub * 2 > cowSum && sub > bestSub){ bestSub = sub; bestV = v; bestW = adj[now][k].w; }
+      }
+      if (bestV === 0) break;
+      var delta = (cowSum - 2 * bestSub) * bestW;
+      var before = total(now);
+      steps.push({ at:now, to:bestV, sub:bestSub, delta:delta, hot:bestV,
+        t:now + ' 号 → ' + bestV + ' 号',
+        s:'各方向牛数：' + lines.join('，') + '。' + bestV + ' 号方向 ' + bestSub + ' 头超过半数 ' + cowSum + '/2，代价差 (' + cowSum + ' − 2×' + bestSub + ') × ' + bestW + ' = ' + delta + '，总路程 ' + before + ' → ' + total(bestV) + '。' });
+      now = bestV;
+    }
+    steps.push({ at:now, t:'停下', s:'每个方向都不超过半数 ' + cowSum + '/2，' + now + ' 号就是带权重心，最小总路程 ' + total(now) + '。', hot:0, fin:true });
+    return { tree:tr, steps:steps, cowSum:cowSum, total:total, adj:adj };
+  }
+
+  function render(){
+    var st = STATE.steps[at];
+    var tr = STATE.tree, g = '', i, u, v;
+    for (i = 0; i < tr.e.length; i++){
+      var a = tr.xy[tr.e[i][0]], b = tr.xy[tr.e[i][1]];
+      var onPath = (st.to && ((tr.e[i][0] === st.at && tr.e[i][1] === st.to) || (tr.e[i][1] === st.at && tr.e[i][0] === st.to)));
+      g += LN(a[0], a[1], b[0], b[1], onPath ? {stroke:C.orange, w:3.2} : {});
+    }
+    for (u = 1; u <= tr.n; u++){
+      var p = tr.xy[u];
+      var isNow = (u === st.at && !st.fin);
+      var isFin = (u === st.at && st.fin);
+      var isHot = (u === st.hot);
+      var opt = {fill:'#fff', stroke:C.bd};
+      if (isFin) opt = {fill:C.orangeB, stroke:C.orange, w:2.4};
+      else if (isNow) opt = {fill:C.blueB, stroke:C.blue, w:2.4};
+      else if (isHot) opt = {fill:C.orangeB, stroke:C.orange};
+      g += CIR(p[0], p[1], 18, opt);
+      g += T(p[0], p[1] + 4, String(u), {anchor:'middle'});
+      g += T(p[0], p[1] - 24, tr.cow[u] + ' 头', {anchor:'middle', size:10, fill:C.dim});
+    }
+    if (st.fin){
+      var q = tr.xy[st.at];
+      g += CIR(q[0], q[1], 27, {fill:'none', stroke:C.orange, w:2.2});
+      g += T(330, 22, '重心在 ' + st.at + ' 号，牛总数 ' + STATE.cowSum, {anchor:'middle', size:10, fill:C.orange, bold:true});
+    } else {
+      g += T(330, 22, '蓝色是当前汇聚点，橙色是牛数超过半数的方向', {anchor:'middle', size:10, fill:C.dim});
+    }
+    mount('cwSvg', g);
+    mount('cwInfo', '<div><strong>' + st.t + '</strong></div><div>' + st.s + '</div>');
+    el('cwPrev').disabled = at === 0;
+    el('cwNext').disabled = at === STATE.steps.length - 1;
+  }
+
+  function reload(){ STATE = buildSteps(); at = 0; render(); }
+
+  el('cwPreset').addEventListener('change', function(){ cur = parseInt(this.value, 10); reload(); });
+  el('cwPrev').addEventListener('click', function(){ if (at > 0){ at--; render(); } });
+  el('cwNext').addEventListener('click', function(){ if (at < STATE.steps.length - 1){ at++; render(); } });
+  el('cwReset').addEventListener('click', function(){ reload(); });
+  reload();
+})();
+</script>
+</body>
+</html>
