@@ -1,8 +1,11 @@
-// Chrome 155 起，浏览器级 WS 上的 Target.attachToTarget({flatten:true}) 返回的会话
-// 不再支持 Log/Runtime/Page 等 domain 调用（一律报 "'Xxx.enable' wasn't found"），
-// 自检脚本会因此把所有页面判成「全 0」。
-// 本模块改成：用 HTTP PUT /json/new 开标签页，再连这个页自己的 webSocketDebuggerUrl，
-// 对外仍暴露 send(method, params, sessionId)，改动面只有各脚本里取 target 的那两行。
+// 开页面标签的两种方式，本模块选的是后者（页面级 WS）：
+//   ① 浏览器级 WS：Target.createTarget + Target.attachToTarget({flatten:true})
+//   ② 页面级 WS  ：HTTP PUT /json/new?<url>，再连这个页自己的 webSocketDebuggerUrl
+// 2026-10-14 实测 Chrome 155.0.8059.39：两条路都通，① 并没有失效。
+// 之前把①判成「失效」，根因是自己的 send 包装漏传了 sessionId——浏览器级 WS 上
+// 不带 sessionId 发 Log.enable 就会报 "'Log.enable' wasn't found"，看着像 Chrome 不支持。
+// 遇到这个报错先查：sessionId 传了没、WS 连的是不是 /json/version 给的浏览器端点。
+// 本模块仍然有用：它不依赖浏览器级 WS，且 events 直接灌进调用方的数组。
 // 用法：const { send, openTab, closeTab } = require('./cdp_page.js')(PORT, { events, browserSend });
 // events 是脚本原本用于筛 JS 错误的数组（页面级事件会继续灌进去），
 // browserSend 是原浏览器级 WS 的 send，用于 Target.* 之类命令兜底。

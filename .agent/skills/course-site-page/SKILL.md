@@ -217,13 +217,15 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 
 - 用 `file://` + `--allow-file-access-from-files`，shared.js 才能 fetch json；沙箱 Chrome 连不上 localhost。
 - **CDP 端口从环境变量 `CDP_PORT` 读**：换端口必须成对写 `--remote-debugging-port=940X` 与 `CDP_PORT=940X`，否则 ECONNREFUSED 易误判「Chrome 没起来」。默认用 9333（脚本默认端口）、`--user-data-dir=/tmp/cdpX`；**并发会话同跑时不要 `pkill -f "remote-debugging-port="`**（会把别人会话的 Chrome 一起杀掉），改用没人占的端口 + 独立 `--user-data-dir`；只有确认站内没有别的会话时清残留才用 pkill。
-- **`verify_pages.js` / `verify_viz_steps.js` 在某些环境对任何页报全 0**（2026-10-05，028 实测，macOS 桌面端豆包 + 特定 Chrome：navigate 后 location.href 变 `chrome-error://chromewebdata/`，换端口/换 user-data-dir 都一样，同环境 verify_home.js 却正常）→ **环境怪癖不是页面问题**。自救：自写 CDP 脚本按「先 `Page.enable` 再 `Page.navigate`、轮询 `readyState` 到 complete、再 `Runtime.evaluate`」顺序连页面，检查项照抄 verify_pages 的 FRAME（figs/svg/nav/toc/viz/code/bbox），实测等价覆盖。
+- **报全 0 /「no viz」= 路径没拼对，不是环境怪癖**（2026-10-14 定论，推翻下面这条旧记录）。传 `algorithms/x.html` 会被拼成 `algorithms/algorithms/x.html`，Chrome 打开的是自己的「无法访问您的文件」报错页：`location.href` 变 `chrome-error://chromewebdata/`，正文 41KB、`figure.fig` 0 个、`.viz` 0 个、**还不抛 JS 错**——于是四项检查全部静默通过，只剩一堆 0。同环境 `verify_home.js` 正常，是因为它不接受文件名参数、路径自己拼。
+  两个脚本已修好（2026-10-14）：参数归一化（`algorithms/x.html`、`x.html`、`x` 都收）+ 认出 `chrome-error` 后直接打 `!! 打不开这个页面（文件不存在）：<完整 url>`。再遇到 0/0 先看这一行，别自写脚本绕过去。
 - 首页要单独查（verify_pages 只跑 algorithms/ 下页）→ 直接 verify_home.js；**首页没有侧边栏**，navGroups 为 0 正常，不要当 FAIL 去修。它不查字段齐全/类型对，插过新条目另跑 `python3 tools/build_nav.py --check`（13 条硬错全在这，比 Counter 管用）。
 - 全站页列表直接从 nav 生成别手敲（生成物下标无意义，扫 nav 才是真值）：
   ```bash
   PAGES=$(python3 -c "import json,glob;print(' '.join(i['file'] for p in sorted(glob.glob('nav/*/*/index.json')) for i in json.load(open(p, encoding='utf-8'))))")
-  $N $SKILL/verify_pages.js ${PAGES}
+  $N $SKILL/verify_pages.js ${PAGES}     # zsh 要写 ${=PAGES} 才会按空格拆词
   ```
+  **只传文件名，别带 `algorithms/` 前缀**（脚本自己会拼）：带上前缀会拼出重复路径，见上一条。
 - **拼完页面先跑「杂字扫描」**（003 实测出现过俄文/英文杂字与同音错字）：
   ```bash
   python3 - <<'PY'

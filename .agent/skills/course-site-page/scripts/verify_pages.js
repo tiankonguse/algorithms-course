@@ -1,12 +1,28 @@
 // 用 CDP 校验页面：JS 错误、figure/svg 数量、nav/toc/viz、svg 越界
+// 用法：node verify_pages.js 页1.html 页2.html   （只传文件名，文件都在 algorithms/ 下）
+// 2026-10-14：参数写成 algorithms/xxx.html 会让路径拼成 algorithms/algorithms/xxx.html，
+// Chrome 打开的是自己的「无法访问您的文件」报错页（正文 41KB、0 个 figure、0 个 .viz、且不报 JS 错），
+// 于是每项检查都静默通过、只剩一堆 0，看上去像「脚本坏了」。现在参数会归一化，且打不开时显式报 FAIL。
 const PORT = process.env.CDP_PORT || '9333';
 const os = require('os');
 const SITE = (process.env.SITE_DIR || '~/project/github/AIProject/algorithms-course').replace(/^~(?=\/|$)/, os.homedir());
 const BASE = SITE.replace(/\/$/, '') + '/algorithms/';
 
+// 允许 algorithms/xxx.html、xxx.html、xxx 三种写法，一律归一成裸文件名
+function normFile(f) {
+  f = String(f).split('/').pop();
+  return /\.html?$/.test(f) ? f : f + '.html';
+}
+
 const CHECK = `(function(){
   var out = {};
   out.ready = document.readyState;
+  // 文件不存在时 Chrome 会开一张自己的报错页：正文几十 KB、一个 figure 都没有、
+  // 也不抛 JS 错——不单独认出来的话，整页就会静默地报成「全 0」。
+  out.href = location.href;
+  out.title = document.title;
+  out.notFound = /^chrome-error:/.test(location.href) ||
+    !!(document.body && /ERR_FILE_NOT_FOUND|无法访问您的文件/.test(document.body.innerText.slice(0, 300)));
   var figs = Array.prototype.slice.call(document.querySelectorAll('figure.fig'));
   out.figs = figs.length;
   out.figSvg = figs.filter(function(f){ return f.querySelector('svg'); }).length;
@@ -97,7 +113,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     ws.addEventListener('error', e => rej(new Error('ws error')));
   });
   const { send: rawSend, events } = cdp(ws);
-  // Chrome 155 起 flatten 会话失效，改用页面级 WS（详见 cdp_page.js 头部注释）
+  // 开标签走页面级 WS（见 cdp_page.js 头部注释，浏览器级 flatten 那条路也能用）
   const pg = require('./cdp_page.js')(PORT, { events: events, browserSend: rawSend });
   const send = pg.send;
 
@@ -122,7 +138,8 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
   ws.close();
   process.exit(fails ? 1 : 0);
 
-  async function runOne(f) {
+  async function runOne(raw) {
+    const f = normFile(raw);
     const url = 'file://' + BASE + f;
     let sessionId = null;
     try {
@@ -133,11 +150,14 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
       await send('Page.enable', {}, sessionId);
       const before = events.length;
       await send('Page.navigate', { url }, sessionId);
+      // 等的是「about:blank 已经被换掉」：about:blank 一上来 readyState 就是 complete，
+      // 只看 complete 会在导航提交前就退出、把 CHECK 打在空白页上。
       for (let i = 0; i < 40; i++) {
         await sleep(250);
         try {
-          const r = await send('Runtime.evaluate', { expression: 'document.readyState', returnByValue: true }, sessionId);
-          if (r.result.value === 'complete') break;
+          const r = await send('Runtime.evaluate', { expression: 'document.readyState + " ~~" + location.href', returnByValue: true }, sessionId);
+          const s = (r.result.value || '');
+          if (s.indexOf('complete ~~') === 0 && s.indexOf('about:blank') < 0) break;
         } catch (e) { /* ignore */ }
       }
       await sleep(1600);
@@ -150,6 +170,12 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
         ? (m.params.exceptionDetails.exception && m.params.exceptionDetails.exception.description || m.params.exceptionDetails.text)
         : m.params.entry.text).slice(0, 3);
 
+      if (v.notFound) {
+        console.log('---', f, 'FAIL');
+        console.log('   !! 打不开这个页面（文件不存在）：' + url);
+        console.log('      参数只传文件名即可，本脚本会自动拼上 algorithms/。你传的是：' + raw);
+        return 1;
+      }
       const ok = v.figs === v.figSvg && v.figSvg >= 2 && v.navLinks > 0 && v.toc > 0 &&
                  v.viz === v.vizEmpty + v.viz && vizOk(v) && v.bad.length === 0 && errText.length === 0;
       console.log('---', f, ok ? 'PASS' : 'FAIL');
