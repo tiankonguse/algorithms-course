@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>尝试方式与状态压缩 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.ac-sel,.ac-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.ac-sel:focus{outline:none;border-color:var(--accent);}
+.ac-btn{cursor:pointer;}
+.ac-btn:hover{border-color:var(--accent);color:var(--accent);}
+.ac-btn:disabled{opacity:.4;cursor:default;}
+.ac-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.ac-sli{width:150px;vertical-align:middle;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>尝试方式与状态压缩</h1>
+      <p class="intro">DP 的两笔关键改动：摆盘子按末尾两盘分情况，把 2^n 级的枚举压成线性递推，n 到 5e8 再上矩阵快速幂；过河把上亿的坐标轴压到一万以内，O(n·t) 变 9 万次转移。</p>
+
+      <h2>零、背景</h2>
+      <p>这两题都来自同一个小专题：怎么试，和状态里存什么。摆盘子示范「尝试方式」：按末尾两盘是否相同分情况，而不是按盘子颜色枚举；过河示范「状态压缩」：坐标轴上没石头的长段不用一格一格存。</p>
+
+      <h2>一、问题：摆盘子</h2>
+      <p>有 n 个盘子、k 道菜，任意相邻最多两个盘子相同。问有多少种摆法，答案对 1e9 + 7 取模。n 可以到 5e8，k 小。</p>
+      <p>直接枚举盘子的颜色是 k^n 种，摆不下。这题的入口是末尾两盘的关系：相同，或者不同。只有这两种，各自的计数都能从前面的结果里接出来。</p>
+
+      <h2>二、末尾两盘分情况</h2>
+      <p>先加一把锁：固定一道菜 X，要求第 1 个盘子不许用 X，记 f(i) 为这种约束下摆 i 个盘子的方法数。按末尾两盘分情况：</p>
+      <p>1）末两盘不同：去掉最后一盘，剩下 i−1 个盘子的合法排列，f(i−1) 种；最后一盘要和它左边那盘不同，k−1 道菜可选。</p>
+      <p>2）末两盘相同：这两盘要合起来和再左边那盘不同，去掉这两盘，剩下 i−2 个盘子的合法排列，f(i−2) 种；这两盘共享一道菜，k−1 道菜可选。</p>
+      <p>所以 f(i) = (f(i−1) + f(i−2)) · (k−1)，f(0) = 1，f(1) = k−1。k = 3 时 f 的前 9 项：1 2 6 16 44 120 328 896 2448。</p>
+      <p>解锁：对任意一道菜 X，合法的 n 盘排列里第 1 盘恰好是 X 的占 1/k（对称性），所以原题答案 n = 1 时是 k，n ≥ 2 时是 (f(n−1) + f(n−2)) · k。</p>
+
+      <figure class="fig">
+        <svg id="acFig1" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="末尾两盘分情况" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+        <figcaption>图1：末尾两盘分两种情况，各自的自由菜数都是 k−1，f 的递推一行成立</figcaption>
+      </figure>
+
+      <div class="viz">
+        <div class="viz-title">摆盘子：f 序列与答案</div>
+        <svg id="acSvg" viewBox="0 0 660 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="摆盘子 f 序列演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+        <div class="breakdown" id="acInfo"></div>
+        <div class="viz-controls">
+          <select class="ac-sel" id="acK">
+            <option value="2">k = 2</option>
+            <option value="3" selected>k = 3</option>
+            <option value="4">k = 4</option>
+            <option value="5">k = 5</option>
+          </select>
+          <span>n = <input class="ac-sli" id="acN" type="range" min="1" max="20" value="12"></span>
+          <span id="acNLabel">12</span>
+          <button class="ac-btn" id="acPrev" type="button">上一步</button>
+          <button class="ac-btn" id="acNext" type="button">下一步</button>
+          <button class="ac-btn" id="acReset" type="button">重置</button>
+        </div>
+      </div>
+
+      <p>「下一步」把 f 从 0 推到当前 n。柱子是 f(0..i)，信息行给出第 i 步的 f(i) 和原题答案 dp(i)。</p>
+
+      <div class="code-wrap">
+    <pre class="code"><span class="cm">// 摆盘子：按末尾两个盘子分情况</span>
+    <span class="cm">// f(i) 表示「第一个盘子不许用某一道菜」时，摆 i 个盘子的方法数</span>
+    <span class="cm">// 末尾两盘相同 → 去掉两个，新末尾 i-2 不能等于新末尾 i-3 已经保证；</span>
+    <span class="cm">// 末尾两盘不同 → 去掉一个。两种情况新末尾都有 k-1 种菜可选</span>
+    <span class="kw">const</span> <span class="kw">long</span> <span class="kw">long</span> MOD = 1000000007;
+    <span class="kw">long</span> <span class="kw">long</span> f[MAXN];
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">platesLinear</span>(<span class="kw">int</span> n, <span class="kw">int</span> k) {
+        f[0] = 1;
+        f[1] = k - 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            f[i] = (f[i - 1] + f[i - 2]) * (k - 1) % MOD;
+        }
+        <span class="kw">if</span> (n == 1) {
+            <span class="kw">return</span> k;
+        }
+        <span class="kw">return</span> (f[n - 1] + f[n - 2]) * k % MOD;
+    }</pre>
+      </div>
+
+      <h2>三、n 到 5e8：矩阵快速幂</h2>
+      <p>f 的递推是二阶线性常系数，写成矩阵：向量 [f(i), f(i+1)] 乘 base = [[0, s], [1, s]]（s = k−1）得到 [f(i+1), f(i+2)]。初始 [f(0), f(1)] = [1, s]，乘 base 的 n−2 次方就得到 [f(n−2), f(n−1)]。</p>
+      <p>n = 5e8 时指数 n−2 = 499999998，二进制 29 位，快速幂循环 29 次。实测 k = 3、n = 5e8 答案是 458968814，k = 2 是 440242810，线性版和矩阵版对拍 n ≤ 20 完全一致。</p>
+      <p>k = 2 时 s = 1，f 就是斐波那契：1 1 2 3 5 8 13 21 34，一个自然对照。</p>
+
+      <div class="code-wrap">
+    <pre class="code"><span class="cm">// 摆盘子：n 到 5e8 时 O(n) 跑不动，把递推写成矩阵再快速幂</span>
+    <span class="cm">// [f(i), f(i+1)] * [[0, s], [1, s]] = [f(i+1), f(i+2)]，s = k - 1</span>
+    <span class="cm">// 指数 n-2 有 29 位，矩阵平方 29 次，log n 搞定</span>
+    <span class="kw">const</span> <span class="kw">long</span> <span class="kw">long</span> MOD = 1000000007;
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">platesMatrix</span>(<span class="kw">int</span> n, <span class="kw">int</span> k) {
+        <span class="kw">long</span> <span class="kw">long</span> s = k - 1;
+        <span class="kw">long</span> <span class="kw">long</span> base[2][2] = {{0, s}, {1, s}};
+        <span class="kw">long</span> <span class="kw">long</span> res[2][2] = {{1, 0}, {0, 1}};
+        <span class="kw">int</span> e = n - 2;
+        <span class="kw">while</span> (e &gt; 0) {
+            <span class="kw">if</span> (e &amp; 1) {
+                <span class="kw">long</span> <span class="kw">long</span> t[2][2] = {};
+                <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 2; i++)
+                    <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; 2; j++)
+                        <span class="kw">for</span> (<span class="kw">int</span> c = 0; c &lt; 2; c++)
+                            t[i][j] = (t[i][j] + res[i][c] * base[c][j]) % MOD;
+                memcpy(res, t, <span class="kw">sizeof</span>(t));
+            }
+            <span class="kw">long</span> <span class="kw">long</span> t[2][2] = {};
+            <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 2; i++)
+                <span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; 2; j++)
+                    <span class="kw">for</span> (<span class="kw">int</span> c = 0; c &lt; 2; c++)
+                        t[i][j] = (t[i][j] + base[i][c] * base[c][j]) % MOD;
+            memcpy(base, t, <span class="kw">sizeof</span>(t));
+            e &gt;&gt;= 1;
+        }
+        <span class="cm">// 初始向量 [f(0), f(1)] = [1, k-1]，乘完是 [f(n-2), f(n-1)]</span>
+        <span class="kw">long</span> <span class="kw">long</span> a = (res[0][0] + s * res[1][0]) % MOD;
+        <span class="kw">long</span> <span class="kw">long</span> b = (res[0][1] + s * res[1][1]) % MOD;
+        <span class="kw">if</span> (n == 1) {
+            <span class="kw">return</span> k;
+        }
+        <span class="kw">return</span> (a + b) * k % MOD;
+    }</pre>
+      </div>
+
+      <h2>四、问题：过河</h2>
+      <p>桥从 0 到 n，n 最大 1e7，桥上最多 100 个石子。青蛙一次能跳 [s, t] 的任意距离，踩到石子代价 +1，从 0 出发，可以落在任何位置，求到桥对岸的最小踩石子数。</p>
+      <p>直接 dp：dp[i] = min(dp[i−t..i−s]) + 踩没踩石子。O(n·t)，n = 1e7、t = 10 就是 1e8 次转移，dp 数组要开 1e7 个 int，时间空间都悬。</p>
+
+      <h2>五、坐标压缩：safe = 90</h2>
+      <p>石子只有 100 个，问题卡在石头之间的大空白段。s < t 时，空白段足够长之后，落脚位置的可达图案就稳定了：只要有一段连续 t 个位置全部可达，之后每个位置都能从它前面 t 个里挑一个跳过来，图案整体平移，dp 值也跟着平移。</p>
+      <p>所以两枚石子间距超过某个 safe 就压成 safe。安全上界由最大跳距组合决定：跳距 (s, t) = (9, 10) 时，最大不可达位置是弗罗贝尼乌斯数 9×10 − 9 − 10 = 71，取 safe = 90 一定够。</p>
+
+      <figure class="fig">
+        <svg id="acFig2" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="过河坐标压缩" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+        <figcaption>图2：间距超过 safe 的段压成 safe，石子顺序不变，位置总数被 m·safe + safe 框住</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg id="acFig3" viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="可达图案平移" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+        <figcaption>图3：跳距 (5, 6) 从位置 20 起全部可达，连续 6 个可达位置之后图案整体平移</figcaption>
+      </figure>
+
+      <h2>六、压完的复杂度与 s == t</h2>
+      <p>压完的位置数 nn ≤ m·safe + safe ≤ 100×90 + 90 = 9090，每格 t 次转移，约 9 万次，秒出。</p>
+      <p>s == t 时每次跳固定距离，只能落在 s 的倍数上，直接数石子位置里有多少个 s 的倍数。实测 n = 10、s = t = 2、石子 [2,4,5,8,10] 答案是 4。长桥 n = 1e7、石子 [100, 2000, 5000000, 9000000] 答案是 0：跳着跳着全躲开了。</p>
+
+      <div class="viz">
+        <div class="viz-title">过河：压缩后的桥</div>
+        <svg id="acSvg2" viewBox="0 0 660 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="过河压缩后 dp 演示" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif"></svg>
+        <div class="breakdown" id="acInfo2"></div>
+        <div class="viz-controls">
+          <select class="ac-sel" id="acPreset2">
+            <option value="0">桥 24 · 石子 [2,5,9,17,21]</option>
+            <option value="1">桥 30 · 石子 [3,6,10,13,20,27]</option>
+            <option value="2">桥 12 · 石子 [2,3,4,5,8,9,10]</option>
+          </select>
+          <select class="ac-sel" id="acS">s=<option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select>
+          <select class="ac-sel" id="acT">t=<option value="3">3</option><option value="4" selected>4</option><option value="5">5</option><option value="6">6</option></select>
+          <button class="ac-btn" id="acPrev2" type="button">上一步</button>
+          <button class="ac-btn" id="acNext2" type="button">下一步</button>
+          <button class="ac-btn" id="acReset2" type="button">重置</button>
+          <button class="ac-btn" id="acRandom2" type="button">随机</button>
+        </div>
+      </div>
+
+      <p>上面一条轴是原桥，下面一条是压完的坐标轴，石子标橙。「下一步」逐个位置算 dp[i]，信息行给出从哪个位置跳来、踩没踩石子。</p>
+
+      <div class="code-wrap">
+    <pre class="code"><span class="cm">// 过河：n 到 1e7，直接对每个位置做 dp 是 O(n * t)，存不下也跑不完</span>
+    <span class="cm">// 石子在长桥上只有 100 个，关键是石头之间的大段空白怎么跳</span>
+    <span class="cm">// s &lt; t 时，两枚石子间距超过 safe 就压成 safe：</span>
+    <span class="cm">// 空白段足够长之后，青蛙能落脚的位置图案就完整了，dp 值只跟「到末尾多远」有关</span>
+    <span class="kw">int</span> <span class="fn">compute</span>() {
+        sort(arr + 1, arr + m + 1);
+        <span class="kw">if</span> (s == t) { <span class="cm">// 只能落在 s 的倍数上，直接数</span>
+            <span class="kw">int</span> ans = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+                <span class="kw">if</span> (arr[i] % s == 0) {
+                    ans++;
+                }
+            }
+            <span class="kw">return</span> ans;
+        }
+        <span class="cm">// s、t &lt;= 10 时 safe = 90 一定够</span>
+        <span class="cm">// 最大不可达位置来自跳距 {9, 10}，是弗罗贝尼乌斯数 9*10-9-10 = 71</span>
+        <span class="kw">const</span> <span class="kw">int</span> safe = 90;
+        arr[0] = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            where[i] = where[i - 1] + min(arr[i] - arr[i - 1], safe);
+            stone[where[i]] = <span class="kw">true</span>;
+        }
+        <span class="kw">int</span> nn = where[m] + safe;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= nn; i++) {
+            dp[i] = MAXN;
+        }
+        dp[0] = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= nn; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = max(i - t, 0); j &lt;= i - s; j++) {
+                dp[i] = min(dp[i], dp[j] + (stone[i] ? 1 : 0));
+            }
+        }
+        <span class="kw">int</span> ans = MAXN;
+        <span class="kw">for</span> (<span class="kw">int</span> i = where[m] + 1; i &lt;= nn; i++) {
+            ans = min(ans, dp[i]);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      </div>
+
+      <h2>七、一个怪细节</h2>
+      <p>课上的实验先试过把间距压成 s + t − 1，这是按「从任意位置都能跳」的数法估的。密集石子间距下有真实反例：13.6 万组混合随机错了 8 组，比如 (s, t) = (9, 10) 时 s + t − 1 = 18，可最大不可达位置是 71，18 不够，会漏答案。页面直接用 safe = 90 保底，零错误。</p>
+
+      <h2>复杂度分析</h2>
+      <p>摆盘子：线性版 O(n)，矩阵版 O(log n)，空间都 O(1)。过河：压完后位置数 ≤ 9090，O(nn·t) ≈ 9×10⁴ 次转移，空间 O(nn)。</p>
+
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>空间</th></tr>
+        <tr><td>摆盘子：末尾两盘分情况</td><td>O(n) 或 O(log n)</td><td>O(1)</td></tr>
+        <tr><td>过河：坐标压缩 + dp</td><td>O(9090·t)</td><td>O(9090)</td></tr>
+      </table>
+
+      <h2>总结</h2>
+      <p>摆盘子的关键是尝试方式：按末尾两盘是否相同分情况，而不是按颜色枚举；锁住第一盘定义 f 让递推有干净的边界，解锁用对称性乘回去。过河的关键是状态压缩：s < t 时空白段的可达图案会平移，间距压到 90 不丢信息，1e7 的坐标轴缩成 9090。两个题改的是不同的地方，共同点是先问一句「到底什么在决定下一个状态」。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P1052" target="_blank">过河</a></td><td><a href="https://www.luogu.com.cn/problem/P1052" target="_blank">luogu.com.cn/problem/P1052</a></td></tr>
+        <tr><td>笔试</td><td>摆盘子（无测试链接）</td><td>无</td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解127【扩展】动态规划优化专题1-优化尝试和状态设计-上</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">github.com/algorithmzuo/algorithm-journey</a></td></tr>
+      </table>
+
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function(){
+  var C = { blue:'#2563eb', blueB:'#dbeafe', blueL:'#eef4ff', orange:'#ea580c',
+            orangeB:'#ffedd5', gray:'#9aa0a6', bg:'#f6f7f9', bd:'#e6e8eb',
+            dark:'#1f2328', dim:'#6b7280', green:'#15803d', greenB:'#dcfce7', red:'#b91c1c' };
+
+  function TX(x, y, s, o){
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 11) + '" fill="' + (o.fill || C.dark) +
+           (o.anchor ? '" text-anchor="' + o.anchor : '') + '"' + (o.bold ? ' font-weight="600"' : '') + '>' + s + '</text>';
+  }
+  function R(x, y, w, h, o){
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" fill="' + (o.fill || C.bg) + '"' +
+           (o.stroke ? ' stroke="' + o.stroke + '"' : '') + (o.rx ? ' rx="' + o.rx + '"' : '') + '></rect>';
+  }
+  function LN(x1, y1, x2, y2, o){
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + (o.stroke || C.gray) + '"' +
+           (o.w ? ' stroke-width="' + o.w + '"' : '') + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '></line>';
+  }
+  function mount(id, g){ var n = document.getElementById(id); if (n) n.innerHTML = g; }
+  function bind(id, ev, fn){ var n = document.getElementById(id); if (n) n.addEventListener(ev, fn); }
+  function setDis(id, d){ var n = document.getElementById(id); if (n) n.disabled = !!d; }
+
+  var seed = 20261015;
+  function rnd(){ seed = (seed + 0x6D2B79F5) | 0; var t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
+
+  /* ============ 图1：末尾两盘分情况 ============ */
+  (function(){
+    var g = '';
+    g += R(255, 30, 150, 34, {fill:C.bg, stroke:C.dark, rx:6});
+    g += TX(330, 51, '第 i 个盘子的摆法', {anchor:'middle', size:13, fill:C.dark, bold:true});
+    g += LN(330, 64, 200, 96, {stroke:C.gray});
+    g += LN(330, 64, 460, 96, {stroke:C.gray});
+    g += R(120, 96, 160, 34, {fill:C.blueB, stroke:C.blue, rx:6});
+    g += TX(200, 117, '末两盘不同', {anchor:'middle', size:12, fill:C.blue, bold:true});
+    g += R(380, 96, 160, 34, {fill:C.orangeB, stroke:C.orange, rx:6});
+    g += TX(460, 117, '末两盘相同', {anchor:'middle', size:12, fill:C.orange, bold:true});
+    g += TX(200, 152, '去掉最后一盘', {anchor:'middle', size:11, fill:C.dim});
+    g += TX(200, 172, '剩 i−1 盘合法排列：f(i−1)', {anchor:'middle', size:11, fill:C.blue});
+    g += TX(200, 194, '末盘与左边不同：k−1 种菜', {anchor:'middle', size:11, fill:C.blue});
+    g += TX(460, 152, '去掉末两盘', {anchor:'middle', size:11, fill:C.dim});
+    g += TX(460, 172, '剩 i−2 盘合法排列：f(i−2)', {anchor:'middle', size:11, fill:C.orange});
+    g += TX(460, 194, '两盘共享一道菜：k−1 种菜', {anchor:'middle', size:11, fill:C.orange});
+    g += R(160, 226, 340, 42, {fill:C.greenB, stroke:C.green, rx:6});
+    g += TX(330, 252, 'f(i) = (f(i−1) + f(i−2)) · (k−1)', {anchor:'middle', size:15, fill:C.green, bold:true});
+    g += TX(330, 286, 'f(0) = 1，f(1) = k−1；答案 n=1 时 k，否则 (f(n−1)+f(n−2))·k', {anchor:'middle', size:11, fill:C.dim});
+    mount('acFig1', g);
+  })();
+
+  /* ============ 演示1：摆盘子 ============ */
+  var plK = 3, plN = 12, plIdx = 0, plF = [1];
+  function plBuildF(){
+    plF = [1];
+    for (var i = 1; i <= plN; i++) plF.push((plF[i-1] + (i >= 2 ? plF[i-2] : 0)) * (plK - 1) % 1000000007);
+  }
+  function plDp(i){
+    if (i === 1) return plK;
+    return (plF[i-1] + plF[i-2]) * plK % 1000000007;
+  }
+  function plDraw(){
+    var g = '', bw = 22, step = 30, x0 = 30, base = 240;
+    g += LN(x0 - 8, base, x0 + (plN + 1) * step, base, {stroke:C.gray, w:2});
+    var maxF = 1;
+    for (var i = 0; i <= plN; i++) maxF = Math.max(maxF, plF[i]);
+    for (var i2 = 0; i2 <= plIdx; i2++) {
+      var hh = Math.max(4, Math.round(plF[i2] / maxF * 140));
+      var done = i2 < plIdx, cur = i2 === plIdx;
+      g += R(x0 + i2 * step, base - hh, bw, hh, {fill: cur ? C.orangeB : C.blueL, stroke: cur ? C.orange : C.blue});
+      g += TX(x0 + i2 * step + bw/2, base - hh - 6, '' + plF[i2], {anchor:'middle', size:9, fill: cur ? C.orange : C.blue, bold:true});
+      g += TX(x0 + i2 * step + bw/2, base + 14, 'f' + i2, {anchor:'middle', size:9, fill:C.dim});
+    }
+    g += TX(315, 40, 'k = ' + plK + '，推进到 f' + plIdx, {anchor:'middle', size:13, fill:C.dark, bold:true});
+    g += TX(500, 70, 'f(' + plIdx + ') = ' + plF[plIdx], {size:12, fill:C.blue, bold:true});
+    if (plIdx === 0) {
+      g += TX(500, 94, 'f(0) = 1：锁住第 1 盘的边界', {size:11, fill:C.dim});
+    } else {
+      g += TX(500, 94, 'f(' + plIdx + ') = (f(' + (plIdx-1) + ') + f(' + (plIdx-2 < 0 ? '0' : plIdx-2) + '))·(k−1)', {size:11, fill:C.dim});
+    }
+    if (plIdx >= 1) {
+      g += TX(500, 124, '原题答案 dp(' + plIdx + ')', {size:12, fill:C.dark, bold:true});
+      g += TX(500, 146, '= ' + (plIdx === 1 ? 'k = ' + plK : '(f(' + (plIdx-1) + ') + f(' + (plIdx-2 < 0 ? '0' : plIdx-2) + '))·' + plK), {size:11, fill:C.dim});
+      g += TX(500, 172, '= ' + plDp(plIdx), {size:16, fill:C.orange, bold:true});
+    }
+    if (plIdx === plN) {
+      g += TX(315, 286, '推完：dp(' + plN + ') = ' + plDp(plN), {anchor:'middle', size:14, fill:C.orange, bold:true});
+    }
+    mount('acSvg', g);
+    var el = document.getElementById('acInfo');
+    if (el) {
+      el.textContent = 'k = ' + plK + '，f(' + plIdx + ') = ' + plF[plIdx] +
+        (plIdx >= 1 ? '，原题答案 dp(' + plIdx + ') = ' + plDp(plIdx) : '（f(0) 是锁住第 1 盘的边界）') +
+        (plIdx === plN ? '，推到 n = ' + plN + ' 结束。' : '。');
+    }
+    setDis('acPrev', plIdx === 0);
+    setDis('acNext', plIdx >= plN);
+  }
+  function plSet(ki, ni){
+    plK = ki; plN = ni;
+    var el = document.getElementById('acNLabel'); if (el) el.textContent = '' + ni;
+    plIdx = 0; plBuildF(); plDraw();
+  }
+  bind('acK', 'change', function(){ plSet(parseInt(this.value, 10), plN); });
+  bind('acN', 'change', function(){ plSet(plK, parseInt(this.value, 10) || 12); });
+  bind('acPrev', 'click', function(){ if (plIdx > 0) { plIdx--; plDraw(); } });
+  bind('acNext', 'click', function(){ if (plIdx < plN) { plIdx++; plDraw(); } });
+  bind('acReset', 'click', function(){ plIdx = 0; plDraw(); });
+  plSet(3, 12);
+
+  /* ============ 图2：坐标压缩 ============ */
+  (function(){
+    var g = '';
+    // 原桥
+    g += LN(50, 70, 600, 70, {stroke:C.gray, w:2});
+    g += TX(315, 50, '原桥：n = 5000', {anchor:'middle', size:12, fill:C.dark, bold:true});
+    var top = [[0, 50], [2, 60], [5, 75], [100, 130], [5000, 570]];
+    for (var i = 0; i < top.length; i++) {
+      var isStone = i > 0;
+      g += LN(top[i][1], 62, top[i][1], 78, {stroke: isStone ? C.orange : C.gray, w: isStone ? 3 : 2});
+      g += TX(top[i][1], 94, '' + top[i][0], {anchor:'middle', size:10, fill: isStone ? C.orange : C.dim, bold:isStone});
+    }
+    g += TX(300, 80, '⋯', {anchor:'middle', size:14, fill:C.dim});
+    g += R(130, 40, 440, 3, {fill:'none', stroke:C.orange, w:1.5});
+    g += TX(315, 34, '间距 4900', {anchor:'middle', size:10, fill:C.orange});
+    // 箭头
+    g += LN(200, 120, 200, 150, {stroke:C.gray, w:2});
+    g += LN(193, 143, 200, 150, {stroke:C.gray, w:2});
+    g += LN(207, 143, 200, 150, {stroke:C.gray, w:2});
+    g += TX(280, 140, '间距 > safe = 90 → 压成 90', {size:12, fill:C.dark, bold:true});
+    // 压后桥
+    g += LN(50, 190, 600, 190, {stroke:C.gray, w:2});
+    g += TX(315, 172, '压完：位置数 275 = 4×90 + 90 以内', {anchor:'middle', size:12, fill:C.dark, bold:true});
+    var bot = [[0, 50], [2, 60], [5, 75], [95, 165], [185, 255]];
+    for (var j = 0; j < bot.length; j++) {
+      var isStone2 = j > 0;
+      g += LN(bot[j][1], 182, bot[j][1], 198, {stroke: isStone2 ? C.orange : C.gray, w: isStone2 ? 3 : 2});
+      g += TX(bot[j][1], 214, '' + bot[j][0], {anchor:'middle', size:10, fill: isStone2 ? C.orange : C.dim, bold:isStone2});
+    }
+    g += LN(255, 182, 315, 182, {stroke:C.dim, dash:'4 4'});
+    g += TX(285, 176, '末尾 +safe', {anchor:'middle', size:10, fill:C.dim});
+    g += TX(315, 240, '石子顺序不变，相对远近不变，位置总数被 m·safe + safe 框住', {anchor:'middle', size:12, fill:C.dim});
+    mount('acFig2', g);
+  })();
+
+  /* ============ 图3：可达图案平移 ============ */
+  (function(){
+    var g = '', s = 5, t = 6, n = 48;
+    var reach = [true];
+    for (var i = 1; i <= n; i++) {
+      var ok = false;
+      for (var d = s; d <= t; d++) if (i - d >= 0 && reach[i - d]) ok = true;
+      reach.push(ok);
+    }
+    var dx = 12.5, x0 = 40, y0 = 110;
+    for (var i2 = 0; i2 <= n; i2++) {
+      var x = x0 + i2 * dx;
+      var on = reach[i2];
+      g += '<circle cx="' + x + '" cy="' + y0 + '" r="4.5" fill="' + (on ? C.orange : '#fff') + '" stroke="' + (on ? C.orange : C.gray) + '"></circle>';
+      if (i2 % 10 === 0) g += TX(x, y0 + 22, '' + i2, {anchor:'middle', size:9, fill:C.dim});
+    }
+    g += TX(x0 + 24 * dx, 70, '跳距 (5, 6) 的可达位置：实心可达，空心不可达', {anchor:'middle', size:12, fill:C.dark, bold:true});
+    // 20..25 连续窗口
+    g += R(x0 + 20 * dx, y0 + 10, 6 * dx, 18, {fill:'none', stroke:C.blue, w:2, rx:3});
+    g += TX(x0 + 23 * dx, y0 + 52, '连续 6 个可达', {anchor:'middle', size:10, fill:C.blue, bold:true});
+    // 平移箭头
+    g += LN(x0 + 32 * dx, y0 + 20, x0 + 44 * dx, y0 + 20, {stroke:C.gray, w:2});
+    g += LN(x0 + 41 * dx, y0 + 15, x0 + 44 * dx, y0 + 20, {stroke:C.gray, w:2});
+    g += LN(x0 + 41 * dx, y0 + 25, x0 + 44 * dx, y0 + 20, {stroke:C.gray, w:2});
+    g += TX(x0 + 38 * dx, y0 + 14, '平移', {anchor:'middle', size:10, fill:C.dim});
+    g += TX(315, 250, '20 = 5×6 − 5 − 6 + 1 起全部可达（弗罗贝尼乌斯数 19）', {anchor:'middle', size:12, fill:C.dark, bold:true});
+    g += TX(315, 274, '连续 t 个可达之后，每个新位置都能从前面 t 个里挑一个跳过来', {anchor:'middle', size:11, fill:C.dim});
+    mount('acFig3', g);
+  })();
+
+  /* ============ 演示2：过河 ============ */
+  var frN = 24, frStones = [2,5,9,17,21], frS = 2, frT = 4;
+  var frWhere = [], frStone = {}, frDp = [], frIdx = 0, frAns = 0;
+  function frBuild(){
+    var m = frStones.length;
+    frWhere = [0];
+    frStone = {};
+    for (var i = 1; i <= m; i++) {
+      var gap = frStones[i-1] - (i === 1 ? 0 : frStones[i-2]);
+      frWhere.push(frWhere[i-1] + Math.min(gap, 90));
+      frStone[frWhere[i]] = true;
+    }
+    var nn = frWhere[m] + frT;
+    frDp = new Array(nn + 1).fill(0);
+    frDp[0] = 0;
+    for (var i2 = 1; i2 <= nn; i2++) {
+      var best = 1e9;
+      for (var j = Math.max(i2 - frT, 0); j <= i2 - frS; j++) best = Math.min(best, frDp[j]);
+      frDp[i2] = best + (frStone[i2] ? 1 : 0);
+    }
+    frAns = 1e9;
+    for (var k = frWhere[m] + 1; k <= nn; k++) frAns = Math.min(frAns, frDp[k]);
+    frIdx = 0;
+    frNN = nn;
+  }
+  var frNN = 0;
+  function frDraw(){
+    var m = frStones.length, nn = frNN;
+    var g = '';
+    // 原桥轴
+    var ox1 = 30, w1 = 600;
+    g += LN(ox1, 60, ox1 + w1, 60, {stroke:C.gray, w:2});
+    g += TX(ox1 + w1/2, 42, '原桥 0..' + frN, {anchor:'middle', size:11, fill:C.dark, bold:true});
+    for (var i = 0; i < m; i++) {
+      var x = ox1 + Math.round(frStones[i] / frN * w1);
+      g += LN(x, 54, x, 66, {stroke:C.orange, w:3});
+      g += TX(x, 78, '' + frStones[i], {anchor:'middle', size:9, fill:C.orange, bold:true});
+    }
+    // 压后轴
+    var y2 = 120, ox2 = 30, w2 = 360;
+    var maxW = Math.max(frWhere[m], 1);
+    g += LN(ox2, y2, ox2 + w2, y2, {stroke:C.gray, w:2});
+    g += TX(ox2 + w2/2, y2 - 18, '压后坐标', {anchor:'middle', size:11, fill:C.dark, bold:true});
+    for (var j = 1; j <= m; j++) {
+      var x2 = ox2 + Math.round(frWhere[j] / maxW * (w2 - 30)) + 15;
+      g += '<rect x="' + (x2 - 5) + '" y="' + (y2 - 6) + '" width="10" height="12" fill="' + C.orange + '"></rect>';
+      g += TX(x2, y2 + 20, '' + frWhere[j], {anchor:'middle', size:9, fill:C.orange, bold:true});
+    }
+    g += TX(ox2 + w2 + 60, y2, 'nn = ' + nn, {size:11, fill:C.dim});
+    // dp 条
+    var base = 250, bw = Math.min(6, 330 / (nn + 1)), step = bw + 2, x0 = 30;
+    var maxDp = 1;
+    for (var d = 0; d <= nn; d++) if (frDp[d] < 1e9) maxDp = Math.max(maxDp, frDp[d]);
+    for (var d2 = 0; d2 <= nn; d2++) {
+      var cur = d2 === frIdx;
+      var isStone = frStone[d2];
+      if (frDp[d2] >= 1e9) {
+        g += '<rect x="' + (x0 + d2 * step) + '" y="' + (base - 2) + '" width="' + bw + '" height="2" fill="#d7dbe2"></rect>';
+        if (cur) g += LN(x0 + d2 * step + bw/2, base - 12, x0 + d2 * step + bw/2, base - 2, {stroke:C.orange, w:2});
+      } else {
+        var hh = Math.max(2, Math.round(frDp[d2] / maxDp * 90));
+        g += R(x0 + d2 * step, base - hh, bw, hh, {fill: cur ? C.orangeB : (isStone ? '#fde68a' : C.blueL), stroke: cur ? C.orange : (isStone ? '#d97706' : C.blue)});
+        if (cur) g += LN(x0 + d2 * step + bw/2, base - hh - 8, x0 + d2 * step + bw/2, base - hh - 2, {stroke:C.orange, w:2});
+      }
+    }
+    g += LN(x0 - 6, base, x0 + (nn + 1) * step, base, {stroke:C.gray, w:2});
+    // 右侧信息
+    var ix = 480;
+    g += TX(ix, 50, '位置 i = ' + frIdx, {size:13, fill:C.dark, bold:true});
+    if (frIdx === 0) {
+      g += TX(ix, 74, '起点，没踩石子', {size:11, fill:C.dim});
+    } else {
+      var best = 1e9, from = -1;
+      for (var j2 = Math.max(frIdx - frT, 0); j2 <= frIdx - frS; j2++) if (frDp[j2] < best) { best = frDp[j2]; from = j2; }
+      if (best >= 1e9) {
+        g += TX(ix, 74, '位置 ' + frIdx + ' 跳不到', {size:11, fill:C.dim});
+        g += TX(ix, 96, 'dp[' + frIdx + '] = 不可达', {size:12, fill:C.dim});
+      } else {
+        g += TX(ix, 74, '从 ' + from + ' 跳来', {size:11, fill:C.dim});
+        g += TX(ix, 96, 'dp[' + frIdx + '] = dp[' + from + '] + ' + (frStone[frIdx] ? '1' : '0'), {size:12, fill:C.dark});
+        g += TX(ix, 118, '= ' + frDp[frIdx], {size:14, fill:C.orange, bold:true});
+        if (frStone[frIdx]) g += TX(ix, 138, '这里踩到石子', {size:11, fill:C.red, bold:true});
+      }
+    }
+    g += TX(ix, 170, '目前最小 = ' + frAns, {size:12, fill:C.blue, bold:true});
+    if (frIdx === nn) g += TX(ix, 194, '答案 = ' + frAns, {size:16, fill:C.orange, bold:true});
+    mount('acSvg2', g);
+    var el = document.getElementById('acInfo2');
+    if (el) {
+      if (frIdx === 0) {
+        el.textContent = '起点位置 0。dp 只算到 ' + nn + '（最后一枚石子 + t），答案取最后这 t 个位置里的最小值。';
+      } else {
+        var best = 1e9, from = -1;
+        for (var j2 = Math.max(frIdx - frT, 0); j2 <= frIdx - frS; j2++) if (frDp[j2] < best) { best = frDp[j2]; from = j2; }
+        if (best >= 1e9) {
+          el.textContent = '位置 ' + frIdx + ' 跳不到（起点最远只能跳 ' + frT + '）。目前末尾窗口最小 ' + frAns + '。';
+        } else {
+          el.textContent = '位置 ' + frIdx + '：从 ' + from + ' 跳来，dp = dp[' + from + '] + ' + (frStone[frIdx] ? 1 : 0) + ' = ' + frDp[frIdx] +
+            (frStone[frIdx] ? '（踩到石子）' : '') + '。目前末尾窗口最小 ' + frAns + '。';
+        }
+      }
+    }
+    setDis('acPrev2', frIdx === 0);
+    setDis('acNext2', frIdx >= nn);
+  }
+  function frSetup(presetIdx, s, t){
+    var presets = [
+      {n: 24, st: [2,5,9,17,21]},
+      {n: 30, st: [3,6,10,13,20,27]},
+      {n: 12, st: [2,3,4,5,8,9,10]}
+    ];
+    var p = presets[presetIdx % presets.length];
+    frN = p.n; frStones = p.st.slice();
+    frS = Math.max(1, Math.min(s, 3));
+    frT = Math.max(frS + 1, Math.min(t, 6));
+    frBuild(); frDraw();
+  }
+  bind('acPreset2', 'change', function(){ frSetup(parseInt(this.value, 10) || 0, frS, frT); });
+  bind('acS', 'change', function(){ frSetup(0, parseInt(this.value, 10) || 2, frT); });
+  bind('acT', 'change', function(){ frSetup(0, frS, parseInt(this.value, 10) || 4); });
+  bind('acPrev2', 'click', function(){ if (frIdx > 0) { frIdx--; frDraw(); } });
+  bind('acNext2', 'click', function(){ if (frIdx < frNN) { frIdx++; frDraw(); } });
+  bind('acReset2', 'click', function(){ frIdx = 0; frDraw(); });
+  bind('acRandom2', 'click', function(){
+    var n = 15 + Math.floor(rnd() * 16), st = [];
+    var pos = 0;
+    for (var i = 0; i < 5; i++) { pos += 1 + Math.floor(rnd() * 6); if (pos < n) st.push(pos); }
+    frN = n; frStones = st;
+    frS = 1 + Math.floor(rnd() * 3);
+    frT = Math.min(6, frS + 1 + Math.floor(rnd() * 3));
+    frBuild(); frDraw();
+  });
+  frSetup(0, 2, 4);
+
+})();
+</script>
+</body>
+</html>
