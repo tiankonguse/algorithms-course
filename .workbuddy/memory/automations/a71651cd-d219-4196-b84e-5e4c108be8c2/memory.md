@@ -8,3 +8,11 @@
 - 自检：结构 / 逐帧探针 308 项 / 全覆盖 bbox 659 帧 / 入口页 全绿；错法抓取率三十余项重跑与页面表格逐格一致。
 - 值得留意的经验（已沉淀进 MEMORY.md）：① 演示的期望值要从边表反推，不能复用页面自己的父亲数组；② load 高（后台留着多个 headless Chrome）时耗时重测不可信，只用「正文—图自洽 + 定性结论」判断；③ index.html 的兜底数字出现两处，容易漏改。
 - 本次没做部署（站点上线走「发布为应用」，不在本任务范围）。
+
+## 2026-10-15（第 124 课《算法讲解124【扩展】Morris遍历》）
+
+- 05:02 自动会话抢到 124 锁（`LOCK_OK sess124-050204`），无死锁、无残留，全新开工。
+- 产出 3 页**并入已有「二叉树」组**（`nav/ds/binary-tree/`），插在 `binary-tree-iterative.html` 之后（该页结尾本就预告了 Morris），难度 2/3/4：morris-basic / morris-postorder / morris-advanced。json 438 → 441 条，83 组不变。
+- 收口动作：prompt.md 补 124 条目并把指针推到 125、分两笔提交（生成物单列）、释放 124 锁、清掉自己起的 headless Chrome 与 `/tmp/cdp124`、补 memory 日志。
+- 自检：verify_pages 三页 PASS（figs/svg 4/4、4/4、3/3）、verify_viz_steps 逐帧无空帧、verify_home PASS（441/9/83，高阶 270，数据结构 118 卡片）、自写 overlap 探针三页全预设全帧 ALL CLEAN、自写 assert 探针把五个演示末帧答案与 node 侧独立实现逐项比对 ALL OK。
+- 本次没做部署（不在本任务范围）。
