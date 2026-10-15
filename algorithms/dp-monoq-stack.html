@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>单调栈优化：管辖区间与变序和</title>
+<meta name="description" content="单调栈在 dp 里干两件事：给每个元素找出它当最值的管辖区间，以及压住「递减公差」的段。两道题：巫师力量和、子数组最大变序和。">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>单调栈优化：管辖区间与变序和</h1>
+      <p class="intro">单调队列管的是「下标区间随 i 平移」，栈管的是另一件事：谁在哪一段里当最值、一段递减的公差能压住多长。这一节两道题，一道用栈划出每个元素的管辖区间，把 O(n²) 个子数组按最小值归类；另一道用栈压住变序后的递减段，把 O(n × V) 的 dp 压到 O(n)。</p>
+
+      <h2>零、栈在这里管的是「管辖区间」</h2>
+      <p>先回顾一个基本操作：对每个下标 m，找出左边第一个比 <code>arr[m]</code> 小的位置 l，和右边第一个不大于 <code>arr[m]</code> 的位置 r。那么所有满足 <code>l &lt; i ≤ m ≤ j &lt; r</code> 的子数组 <code>[i, j]</code>，最小值恰好是 <code>arr[m]</code>。这个 <code>(l, r)</code> 就是 m 的管辖区间。</p>
+      <p>单调递增栈一次扫描就能把所有 m 的管辖区间都找出来：扫到 i 时，所有栈顶比 <code>arr[i]</code> 大的元素，它们的右边界就是 i，弹出来结算；弹完之后的新栈顶就是左边界。</p>
+      <p>相等的时候怎么办？左边用「严格小于」、右边用「不大于」，也就是弹出条件写 <code>&gt;=</code>。这样两个相等的值不会互相抢对方的子数组，每个子数组只会被算一次。写成 <code>&gt;</code> 和 <code>&gt;=</code> 的其它组合也能过，只要左右两边一个是严格一个是宽松。</p>
+
+      <h2>一、巫师力量和</h2>
+      <p>给一个长度为 n 的数组，一个子数组的指标定义为「子数组的累加和 × 子数组里的最小值」，求所有子数组的指标之和，对 10⁹ + 7 取模。n 到 10⁵，值到 10⁹。</p>
+      <p>子数组有 n(n+1)/2 个，逐个算是 O(n²)。换成贡献法：不枚举子数组，而是枚举「谁当最小值」。m 的管辖区间 <code>(l, r)</code> 一旦定下来，以 <code>arr[m]</code> 为最小值的子数组就是左端点在 <code>[l+1, m]</code>、右端点在 <code>[m, r−1]</code> 的所有组合，一共 <code>(m − l) × (r − m)</code> 个。</p>
+      <figure class="fig" id="figRange"></figure>
+      <p>剩下的问题是怎么把这些子数组的累加和一次性加起来。设 <code>pre[k]</code> 是前 k 个数的前缀和，那么子数组 <code>[i, j]</code> 的和是 <code>pre[j] − pre[i−1]</code>。对固定的 m 求所有 <code>i ∈ [l+1, m]</code>、<code>j ∈ [m, r−1]</code> 的 <code>pre[j] − pre[i−1]</code> 之和：</p>
+      <p>所有 <code>pre[j]</code> 各被加了 <code>(m − l)</code> 次，所有 <code>pre[i−1]</code> 各被减了 <code>(r − m)</code> 次。于是只要能快速求「<code>pre</code> 在一段区间上的和」，就完事了。这就是前缀和的前缀和：<code>ss[k] = pre[0] + pre[1] + ... + pre[k]</code>。</p>
+      <p>记 <code>A = ss[r−1] − ss[m−1]</code>（右半边 pre 的和）、<code>B = ss[m−1] − ss[l−1]</code>（左半边 pre 的和），m 的贡献就是 <code>(A × (m − l) − B × (r − m)) × arr[m]</code>。</p>
+    <pre class="code"><span class="cm">// arr[m] 当最小值的管辖范围是 (l, r)：左边第一个更小的在 l，右边第一个不大于的在 r</span>
+    <span class="kw">int</span> <span class="fn">totalStrength</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr) {
+        <span class="kw">int</span> n = arr.size();
+        <span class="kw">const</span> <span class="kw">int</span> MOD = 1000000007;
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">ss</span>(n);                                      <span class="cm">// ss[i] = 前 i+1 个前缀和的和</span>
+        <span class="kw">long</span> <span class="kw">long</span> pre = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            pre = (pre + arr[i]) % MOD;
+            ss[i] = ((i ? ss[i - 1] : 0) + pre) % MOD;
+        }
+        auto gain = [&amp;](<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) -&gt; <span class="kw">long</span> <span class="kw">long</span> {
+            <span class="kw">long</span> <span class="kw">long</span> L = ((ss[r - 1] - (m &gt;= 1 ? ss[m - 1] : 0) + MOD) % MOD) * (m - l) % MOD;
+            <span class="kw">long</span> <span class="kw">long</span> R = (((m &gt;= 1 ? ss[m - 1] : 0) - (l &gt;= 1 ? ss[l - 1] : 0) + MOD) % MOD) * (r - m) % MOD;
+            <span class="kw">return</span> ((L - R + MOD) % MOD) * (arr[m] % MOD) % MOD;
+        };
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">st</span>(n);
+        <span class="kw">int</span> top = 0;
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">while</span> (top &gt; 0 &amp;&amp; arr[st[top - 1]] &gt;= arr[i]) {     <span class="cm">// 相等也弹：右边界取「不大于」</span>
+                <span class="kw">int</span> m = st[--top];
+                ans = (ans + gain(top ? st[top - 1] : -1, m, i)) % MOD;
+            }
+            st[top++] = i;
+        }
+        <span class="kw">while</span> (top &gt; 0) {                                       <span class="cm">// 剩下的以 n 为右边界</span>
+            <span class="kw">int</span> m = st[--top];
+            ans = (ans + gain(top ? st[top - 1] : -1, m, n)) % MOD;
+        }
+        <span class="kw">return</span> (<span class="kw">int</span>)ans;
+    }</pre>
+      <p>下标为 −1 的那些项当 0 处理，这是三处三元表达式的全部作用。取模要在每一步做，特别是 <code>A</code> 和 <code>B</code> 相减之后要先加一次 MOD 再取。</p>
+      <p>拿 <code>arr = [1, 3, 1, 2]</code> 手算一遍。四个位置的管辖区间和贡献：</p>
+      <table class="complexity">
+        <tr><th>m</th><th>arr[m]</th><th>管辖区间 (l, r)</th><th>覆盖的子数组</th><th>贡献</th></tr>
+        <tr><td>0</td><td>1</td><td>(−1, 2)</td><td>[0,0]、[0,1]</td><td>1 + 4 = 5</td></tr>
+        <tr><td>1</td><td>3</td><td>(0, 2)</td><td>[1,1]</td><td>9</td></tr>
+        <tr><td>2</td><td>1</td><td>(−1, 4)</td><td>[0,2]、[0,3]、[1,2]、[1,3]、[2,2]、[2,3]</td><td>5 + 7 + 4 + 6 + 1 + 3 = 26</td></tr>
+        <tr><td>3</td><td>2</td><td>(2, 4)</td><td>[3,3]</td><td>4</td></tr>
+      </table>
+      <p>加起来 5 + 9 + 26 + 4 = 44。把十个子数组逐个算一遍也是 44。注意 0 号和 2 号的值相等，0 号的右边界停在 2，2 号的右边界一直到 4，这就是弹出条件写 <code>&gt;=</code> 的效果：相等的两个位置各自管一半，不重不漏。</p>
+
+      <h2>二、子数组最大变序和</h2>
+      <p>第二题来自一道大厂笔试。定义一个数组的变序和：每个数只能减小或者不变，要求整个数组变成严格升序，问变完之后的累加和最大是多少。比如 <code>[1, 100, 7]</code> 变成 <code>[1, 6, 7]</code>，变序和 14；<code>[5, 4, 9]</code> 变成 <code>[3, 4, 9]</code>，变序和 16。要求的是所有子数组的变序和里最大的那个。</p>
+      <figure class="fig" id="figOrder"></figure>
+      <p>先解决单个数组怎么算。从右往左贪心：最后一个数不动，往前每个数取「原值」和「后一个数减 1」里较小的那个，一旦上界掉到 0 就停。这个贪心是对的，因为每个位置只会给左边留下一个上界，让它尽量大不吃亏。</p>
+      <p>于是 dp 就出来了：<code>dp[i]</code> 是以 i 结尾的子数组的最大变序和。从 i 往左，值按 <code>arr[i]</code>、<code>arr[i] − 1</code>、<code>arr[i] − 2</code> 一路递减，遇到一个原值比这个上界小的位置就被卡住，从那里开始改用它的原值继续递减。</p>
+      <p>朴素写法是二维的 <code>dp[i][p]</code>（p 是上界），复杂度 O(n × V)，V 到 10⁶ 直接爆掉。观察一下被卡住的位置有什么规律：如果 <code>arr[p] &lt; arr[i] − (i − p)</code>，那 p 会截断这一段；否则这一段一路递减下来都能盖过 p。而「<code>arr[p] ≥ arr[i] − (i − p)</code>」这个条件整理一下是 <code>arr[p] + p ≥ arr[i] − i</code>，或者说 <code>arr[p] + p</code> 随 p 递减。用单调栈维护那些「<code>arr[p] + p</code> 递增」的位置，就只会留下真正能截断的候选。</p>
+    <pre class="code"><span class="cm">// seg(mx, cnt) : mx + (mx-1) + ... 一共 min(mx, cnt) 项</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">seg</span>(<span class="kw">long</span> <span class="kw">long</span> mx, <span class="kw">long</span> <span class="kw">long</span> cnt) {
+        cnt = min(mx, cnt);
+        <span class="kw">return</span> ((mx * 2 - cnt + 1) * cnt) / 2;
+    }
+
+    <span class="cm">// dp[i] : 以 i 结尾的子数组，最大变序和</span>
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">maxOrderSum</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr) {
+        <span class="kw">int</span> n = arr.size();
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">st</span>(n);
+        <span class="kw">int</span> top = 0;
+        vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt; <span class="fn">dp</span>(n, 0);
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            <span class="kw">int</span> curIdx = i, curVal = arr[i];
+            <span class="kw">while</span> (curVal &gt; 0 &amp;&amp; top &gt; 0) {
+                <span class="kw">int</span> preIdx = st[top - 1];
+                <span class="kw">if</span> (arr[preIdx] &gt;= curVal) {
+                    top--;                                      <span class="cm">// 这一段被 curVal 整个压住</span>
+                    <span class="kw">continue</span>;
+                }
+                <span class="kw">int</span> gapIdx = curIdx - preIdx, gapVal = curVal - arr[preIdx];
+                <span class="kw">if</span> (gapVal &gt;= gapIdx) {                         <span class="cm">// 递减还没到底就能接上</span>
+                    dp[i] += seg(curVal, gapIdx) + dp[preIdx];
+                    curVal = 0;
+                    <span class="kw">break</span>;
+                }
+                dp[i] += seg(curVal, gapIdx);                   <span class="cm">// 先吃掉往下 gapIdx 个</span>
+                curVal -= gapIdx;
+                curIdx = preIdx;
+                top--;
+            }
+            <span class="kw">if</span> (curVal &gt; 0) dp[i] += seg(curVal, curIdx + 1);   <span class="cm">// 一路减到只剩自己</span>
+            st[top++] = i;
+            ans = max(ans, dp[i]);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>循环里的三种分支对上三种情况：栈顶原值比当前上界还大，说明这一段被当前值整个压住，弹掉；差值 <code>gapVal</code> 够跨过 <code>gapIdx</code> 个位置，说明递减到栈顶时还没低于栈顶原值，可以接上 <code>dp[preIdx]</code>，收工；否则先吃掉这一段的部分和，把上界和位置挪到栈顶，继续下一轮。</p>
+      <p><code>seg(mx, cnt)</code> 是等差数列求和，取 <code>min(mx, cnt)</code> 项，因为值减到 0 就停了，不能再减成负数。</p>
+      <p>跑一下 <code>[1, 4, 2]</code>：<code>dp[0] = 1</code>；<code>dp[1]</code> 接上位置 0，得 4 + 1 = 5（变序 [1, 4]）；<code>dp[2]</code> 时栈顶 4 被弹掉，从位置 0 跨过来，<code>gapVal = 1 &lt; gapIdx = 2</code>，只能吃掉 2 + 1 = 3，接不上 dp[0]，得 3（变序 [0, 1, 2]）。答案是三个里的最大值 5，来自子数组 [1, 4]。</p>
+      <p>这里有个容易误解的地方：<code>dp[i]</code> 是「以 i 结尾的子数组」，不要求从头开始，所以 <code>[1, 100, 7]</code> 的答案是 101（子数组 [1, 100]），比整个数组的 14 大得多。</p>
+
+      <h2>三、演示：巫师力量逐个弹栈</h2>
+      <p>橙色是刚扫到的 i，蓝色是它的管辖区间，下面一行是累计的贡献。演示里数值都很小，取模不会触发，公式和正文里完全一致。</p>
+      <div class="viz" id="vizStrength">
+        <p class="viz-title">巫师力量和：管辖区间与贡献</p>
+        <div id="strBody"></div>
+        <p class="viz-note" id="strNote"></p>
+        <p class="viz-answer" id="strAns"></p>
+        <div class="viz-controls">
+          <button id="strNext">下一步</button>
+          <button id="strAuto">自动播放</button>
+          <button id="strReset">重置</button>
+          <label>数据 <select id="strCase">
+            <option value="0">[1, 3, 1, 2]</option>
+            <option value="1">[2, 1, 4, 3]</option>
+            <option value="2">[3, 1, 3, 2, 1]</option>
+          </select></label>
+        </div>
+      </div>
+
+      <h2>四、演示：变序和的栈怎么压缩</h2>
+      <p>上排是原数组，下排是「以当前 i 结尾、变序之后的样子」。栈里剩下的是可能截断递减段的位置。绿色是这一轮接上的部分，橙色是刚算出的 dp[i]。</p>
+      <div class="viz" id="vizOrder">
+        <p class="viz-title">变序和：栈里只留能截断的位置</p>
+        <div id="ordBody"></div>
+        <p class="viz-note" id="ordNote"></p>
+        <p class="viz-answer" id="ordAns"></p>
+        <div class="viz-controls">
+          <button id="ordNext">下一步</button>
+          <button id="ordAuto">自动播放</button>
+          <button id="ordReset">重置</button>
+          <label>数据 <select id="ordCase">
+            <option value="0">[1, 4, 2]</option>
+            <option value="1">[5, 4, 9]</option>
+            <option value="2">[1, 100, 7]</option>
+          </select></label>
+        </div>
+      </div>
+
+      <h2>五、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>朴素写法</th><th>栈写法</th><th>空间</th><th>说明</th></tr>
+        <tr><td>巫师力量和</td><td>O(n²)</td><td>O(n)</td><td>O(n)</td><td>栈、ss、pre 各一份</td></tr>
+        <tr><td>最大变序和</td><td>O(n × V)</td><td>O(n)</td><td>O(n)</td><td>栈与 dp 各一份，V 是值域</td></tr>
+      </table>
+      <p>空间按题目上限算：巫师力量 n ≤ 10⁵，ss 与栈各一个数组，约 0.8 MB；变序和 n、值域都到 10⁶，dp 是 long long 数组约 8 MB，栈是 int 数组约 4 MB。</p>
+      <p>两道题的 O(n) 都来自「每个下标进栈一次、出栈一次」。变序和那题的 while 循环看着有三层嵌套，但每次迭代要么弹出一个元素、要么直接 break，总次数还是 O(n)。</p>
+
+      <h2>六、总结</h2>
+      <p>栈在 dp 里的用法可以概括成一句话：把「哪些下标还有资格影响后面」压成一个单调序列。巫师力量那题，有资格的是还没找到右边界的最小值候选；变序和那题，有资格的是还能截断递减段的位置。想清楚「资格」是什么，弹出条件就出来了。</p>
+      <p>实现上两个坑：相等元素的处理要一边严格一边宽松，否则子数组会被重复计算或者漏掉；变序和的 <code>seg</code> 要在值减到 0 时截断，不能减成负数。</p>
+      <p>这两题的栈还可以往下滑：把「求 max」换成「求一条直线在一堆点上的最大截距」，就走到斜率优化了，栈变成凸包。那条路上的分析和这里的管辖区间是同一套思路，只是比较的对象从数值变成了斜率。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>巫师力量和</td><td><a href="https://leetcode.cn/problems/sum-of-total-strength-of-wizards/" target="_blank">2281. Sum of Total Strength of Wizards</a></td></tr>
+        <tr><td>大厂笔试</td><td>子数组最大变序和（无公开链接）</td><td>—</td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解130【扩展】动态规划优化专题4-单调队列和单调栈优化</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280', green: '#16a34a' };
+  var MOD = 1000000007;
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function T(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function R(x, y, w, h, fill, stroke, rx) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx == null ? 4 : rx) +
+      '" fill="' + fill + '" stroke="' + (stroke || 'none') + '"/>';
+  }
+  function LN(x1, y1, x2, y2, stroke, w, dash) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke +
+      '" stroke-width="' + (w || 1) + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
+  }
+  function mount(id, inner) { var el = document.getElementById(id); if (el) el.innerHTML = inner; }
+  function wrap(hh, body) { return '<svg viewBox="0 0 680 ' + hh + '" role="img">' + body + '</svg>'; }
+  function bind(id, ev, fn) { var el = document.getElementById(id); if (el) el.addEventListener(ev, fn); return el; }
+
+  // ---------- 图 1：管辖区间 ----------
+  (function () {
+    var a = [1, 3, 1, 2];
+    var n = 4, m = 1, l = 0, r = 2;
+    var g = '';
+    var cw = 76, ch = 38, x0 = 100, y0 = 76;
+    g += T(24, 32, 'arr = [1, 3, 1, 2]：m = 1 的管辖区间是 (0, 2)', { size: 12, fill: C.text, weight: '600', anchor: 'start' });
+    for (var i = 0; i < n; i++) {
+      var x = x0 + i * (cw + 6);
+      var ism = (i === m);
+      g += R(x, y0, cw, ch, ism ? C.orangeBg : C.bg, ism ? C.orange : C.border);
+      g += T(x + cw / 2, y0 + 24, String(a[i]), { size: 13 });
+      g += T(x + cw / 2, y0 - 8, String(i), { size: 10, fill: C.dim });
+    }
+    var lo = l + 1, hi = m;
+    var bx = x0 + lo * (cw + 6) - 4;
+    var bw = (hi - lo + 1) * (cw + 6) - 6 + 8;
+    g += R(bx, y0 + ch + 12, bw, 6, C.blue, C.blue);
+    g += T(bx + bw / 2, y0 + ch + 34, '左端点 ∈ [' + lo + ', ' + hi + ']', { size: 11, fill: C.blue });
+    var bx2 = x0 + m * (cw + 6) - 4;
+    var bw2 = (r - 1 - m + 1) * (cw + 6) - 6 + 8;
+    g += R(bx2, y0 + ch + 48, bw2, 6, C.blue, C.blue);
+    g += T(bx2 + bw2 / 2, y0 + ch + 70, '右端点 ∈ [' + m + ', ' + (r - 1) + ']', { size: 11, fill: C.blue });
+    g += LN(x0 + l * (cw + 6) + cw / 2, y0 - 2, x0 + l * (cw + 6) + cw / 2, y0 - 14, C.gray, 1.2, '3 3');
+    g += T(x0 + l * (cw + 6) + cw / 2, y0 - 20, 'l = 0（左边第一个更小的）', { size: 10, fill: C.dim });
+    var yb = y0 + ch + 92;
+    g += T(24, yb, '一共 (m − l) × (r − m) = 1 × 1 = 1 个子数组，最小值都是 arr[1] = 3', { size: 12, fill: C.dim, anchor: 'start' });
+    mount('figRange', wrap(yb + 22, g));
+  })();
+
+  // ---------- 图 2：变序和 ----------
+  (function () {
+    var src = [1, 100, 7], dst = [1, 6, 7];
+    var g = '';
+    var cw = 84, ch = 40, x0 = 150, y0 = 78;
+    g += T(24, 32, '[1, 100, 7] 变序成 [1, 6, 7]：从右往左定，每个位置取「原值」和「右边−1」里较小的', { size: 12, fill: C.text, weight: '600', anchor: 'start' });
+    for (var i = 0; i < 3; i++) {
+      var x = x0 + i * (cw + 10);
+      g += R(x, y0, cw, ch, C.bg, C.border);
+      g += T(x + cw / 2, y0 + 25, String(src[i]), { size: 13 });
+      g += R(x, y0 + ch + 40, cw, ch, C.orangeBg, C.orange);
+      g += T(x + cw / 2, y0 + ch + 65, String(dst[i]), { size: 13, fill: C.orange });
+      g += LN(x + cw / 2, y0 + ch + 4, x + cw / 2, y0 + ch + 36, C.gray, 1.2, '3 3');
+    }
+    g += T(x0 - 16, y0 + 25, '原值', { size: 11, fill: C.dim, anchor: 'end' });
+    g += T(x0 - 16, y0 + ch + 65, '变后', { size: 11, fill: C.dim, anchor: 'end' });
+    var yb = y0 + 2 * ch + 66;
+    g += T(24, yb, '7 不动；6 = 7 − 1，比 100 小所以取 6；1 和 min(1, 5) 比，取 1。变序和 1 + 6 + 7 = 14', { size: 12, fill: C.dim, anchor: 'start' });
+    g += T(24, yb + 22, '这是整个数组的变序和；所有子数组里最大的是 [1, 100] 的 101', { size: 12, fill: C.dim, anchor: 'start' });
+    mount('figOrder', wrap(yb + 40, g));
+  })();
+
+  // ---------- 演示 1：巫师力量 ----------
+  (function () {
+    var cases = [[1, 3, 1, 2], [2, 1, 4, 3], [3, 1, 3, 2, 1]];
+    var body = document.getElementById('strBody');
+    var note = document.getElementById('strNote');
+    var ansEl = document.getElementById('strAns');
+    var nxt = document.getElementById('strNext');
+    var auto = document.getElementById('strAuto');
+    var rst = document.getElementById('strReset');
+    var sel = document.getElementById('strCase');
+    var st = null, timer = null;
+
+    function frames() {
+      var a = cases[+sel.value].slice();
+      var n = a.length;
+      var ss = [], pre = 0;
+      for (var i = 0; i < n; i++) { pre = (pre + a[i]) % MOD; ss.push(((i ? ss[i - 1] : 0) + pre) % MOD); }
+      function gain(l, m, r) {
+        var A = ((ss[r - 1] - (m >= 1 ? ss[m - 1] : 0)) % MOD + MOD) % MOD;
+        var B = (((m >= 1 ? ss[m - 1] : 0) - (l >= 1 ? ss[l - 1] : 0)) % MOD + MOD) % MOD;
+        return ((A * (m - l) - B * (r - m)) % MOD + MOD) % MOD * (a[m] % MOD) % MOD;
+      }
+      var out = [];
+      out.push({ i: -1, stack: [], gain: null, acc: 0, msg: '从左边开始扫，栈里存还没找到右边界的位置。' });
+      var stack = [], acc = 0;
+      for (var i2 = 0; i2 < n; i2++) {
+        var popped = [];
+        while (stack.length > 0 && a[stack[stack.length - 1]] >= a[i2]) {
+          var m = stack.pop();
+          var l = stack.length > 0 ? stack[stack.length - 1] : -1;
+          var gv = gain(l, m, i2);
+          acc = (acc + gv) % MOD;
+          popped.push({ m: m, l: l, r: i2, g: gv });
+        }
+        stack.push(i2);
+        out.push({ i: i2, stack: stack.slice(), popped: popped, acc: acc,
+          msg: popped.length === 0
+            ? ('扫到 i = ' + i2 + '（值 ' + a[i2] + '）：没有元素被弹，直接入栈。')
+            : ('扫到 i = ' + i2 + '（值 ' + a[i2] + '）：弹出 ' + popped.map(function (p) {
+                return p.m + '（区间 (' + p.l + ', ' + p.r + ')，贡献 ' + p.g + '）';
+              }).join('、') + '。') });
+      }
+      var last = [];
+      while (stack.length > 0) {
+        var m2 = stack.pop();
+        var l2 = stack.length > 0 ? stack[stack.length - 1] : -1;
+        var gv2 = gain(l2, m2, n);
+        acc = (acc + gv2) % MOD;
+        last.push({ m: m2, l: l2, r: n, g: gv2 });
+      }
+      out.push({ i: -2, stack: [], popped: last, acc: acc, msg: '收尾：栈里剩下的右边界都是 n，弹出 ' + last.map(function (p) {
+        return p.m + '（区间 (' + p.l + ', ' + p.r + ')，贡献 ' + p.g + '）';
+      }).join('、') + '。' });
+      return { a: a, n: n, ss: ss, fr: out };
+    }
+
+    function draw() {
+      var a = st.a, n = st.n, fr = st.fr[st.step];
+      var cw = Math.min(74, Math.floor(560 / (n + 1))), ch = 36, x0 = 90, y0 = 60;
+      var g = '';
+      for (var i = 0; i < n; i++) {
+        var x = x0 + i * (cw + 6);
+        var cur = (i === fr.i);
+        var inSt = fr.stack.indexOf(i) >= 0;
+        g += R(x, y0, cw, ch, cur ? C.orangeBg : (inSt ? C.blueBg : C.bg), cur ? C.orange : (inSt ? C.blue : C.border));
+        g += T(x + cw / 2, y0 + 24, String(a[i]), { size: 13 });
+        g += T(x + cw / 2, y0 - 8, String(i), { size: 10, fill: C.dim });
+      }
+      var yb = y0 + ch + 30;
+      g += T(24, yb - 14, '本轮弹出的位置与管辖区间', { size: 11, fill: C.dim, anchor: 'start' });
+      if (!fr.popped || fr.popped.length === 0) {
+        g += T(24, yb + 4, '（无）', { size: 11, fill: C.gray, anchor: 'start' });
+      } else {
+        for (var k = 0; k < fr.popped.length; k++) {
+          var p = fr.popped[k];
+          var x1 = x0 + Math.max(0, p.l + 1) * (cw + 6) - 3;
+          var w1 = (p.r - 1 - Math.max(0, p.l + 1) + 1) * (cw + 6) - 6 + 6;
+          var yy = yb + k * 26;
+          g += R(x1, yy - 12, w1, 18, C.blueBg, C.blue);
+          g += T(x1 + w1 + 10, yy + 2, 'm = ' + p.m + '，(' + p.l + ', ' + p.r + ')，贡献 ' + p.g, { size: 11, fill: C.blue, anchor: 'start' });
+        }
+      }
+      var yc = yb + Math.max(1, fr.popped ? fr.popped.length : 1) * 26 + 16;
+      g += T(24, yc, '累计贡献 ' + fr.acc, { size: 12, fill: C.text, weight: '600', anchor: 'start' });
+      body.innerHTML = wrap(yc + 22, g);
+      note.innerHTML = fr.msg;
+      ansEl.textContent = (fr.i === -2) ? ('答案 = ' + fr.acc) : '';
+      nxt.disabled = (st.step >= st.fr.length - 1);
+      if (nxt.disabled && timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+    }
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      st = frames(); st.step = 0; draw();
+    }
+    bind('strNext', 'click', function () { if (st.step < st.fr.length - 1) { st.step++; draw(); } });
+    bind('strAuto', 'click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step < st.fr.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 800);
+    });
+    bind('strReset', 'click', reset);
+    bind('strCase', 'change', reset);
+    reset();
+  })();
+
+  // ---------- 演示 2：变序和 ----------
+  (function () {
+    var cases = [[1, 4, 2], [5, 4, 9], [1, 100, 7]];
+    var body = document.getElementById('ordBody');
+    var note = document.getElementById('ordNote');
+    var ansEl = document.getElementById('ordAns');
+    var nxt = document.getElementById('ordNext');
+    var auto = document.getElementById('ordAuto');
+    var rst = document.getElementById('ordReset');
+    var sel = document.getElementById('ordCase');
+    var st = null, timer = null;
+
+    function seg(mx, cnt) { cnt = Math.min(mx, cnt); return ((mx * 2 - cnt + 1) * cnt) / 2; }
+
+    function frames() {
+      var a = cases[+sel.value].slice();
+      var n = a.length;
+      var out = [];
+      out.push({ i: -1, dp: [], stack: [], msg: 'dp[i] 是以 i 结尾的子数组的最大变序和，栈里存还能截断递减段的位置。' });
+      var stack = [], dp = [];
+      for (var i = 0; i < n; i++) {
+        var curIdx = i, curVal = a[i], acc = 0, steps = [];
+        var res = [];
+        while (curVal > 0 && stack.length > 0) {
+          var preIdx = stack[stack.length - 1];
+          if (a[preIdx] >= curVal) {
+            stack.pop();
+            steps.push('栈顶 ' + preIdx + '（值 ' + a[preIdx] + '）≥ 上界 ' + curVal + '，压不住，弹掉');
+            continue;
+          }
+          var gapIdx = curIdx - preIdx, gapVal = curVal - a[preIdx];
+          if (gapVal >= gapIdx) {
+            acc += seg(curVal, gapIdx) + dp[preIdx];
+            res = rebuild(a, i, preIdx + 1);
+            steps.push('差值 ' + gapVal + ' ≥ 距离 ' + gapIdx + '，接上 dp[' + preIdx + ']，得到 ' + acc);
+            curVal = 0;
+            break;
+          }
+          acc += seg(curVal, gapIdx);
+          res = res.concat([]);
+          steps.push('差值 ' + gapVal + ' < 距离 ' + gapIdx + '，先吃掉 ' + seg(curVal, gapIdx) + '，上界降到 ' + (curVal - gapIdx) + '，跳到位置 ' + preIdx);
+          curVal -= gapIdx;
+          curIdx = preIdx;
+          stack.pop();
+        }
+        if (curVal > 0) {
+          acc += seg(curVal, curIdx + 1);
+          steps.push('一路减到只剩自己这一段，加 ' + seg(curVal, curIdx + 1));
+        }
+        dp[i] = acc;
+        stack.push(i);
+        out.push({ i: i, dp: dp.slice(), stack: stack.slice(), steps: steps, val: acc,
+          best: Math.max.apply(null, dp.slice(0, i + 1)) });
+      }
+      out.push({ i: -2, dp: dp.slice(), stack: stack.slice(), ans: Math.max.apply(null, dp),
+        msg: '填完。所有 dp[i] 里最大的是 ' + Math.max.apply(null, dp) + '。' });
+      return { a: a, n: n, fr: out };
+    }
+
+    // 反推以 i 结尾、变序后的具体数组
+    function rebuild(a, i, from) {
+      var seg2 = [];
+      var up = a[i];
+      seg2.unshift(up);
+      for (var k = i - 1; k >= 0; k--) {
+        up = Math.min(a[k], up - 1);
+        if (up <= 0) break;
+        seg2.unshift(up);
+      }
+      return seg2;
+    }
+
+    function draw() {
+      var a = st.a, n = st.n, fr = st.fr[st.step];
+      var cw = Math.min(84, Math.floor(580 / (n + 1))), ch = 36, x0 = 100, y0 = 58;
+      var g = '';
+      for (var i = 0; i < n; i++) {
+        var x = x0 + i * (cw + 8);
+        var cur = (i === fr.i);
+        var inSt = (fr.stack.indexOf(i) >= 0);
+        g += R(x, y0, cw, ch, cur ? C.orangeBg : (inSt ? C.blueBg : C.bg), cur ? C.orange : (inSt ? C.blue : C.border));
+        g += T(x + cw / 2, y0 + 24, String(a[i]), { size: 13 });
+        g += T(x + cw / 2, y0 - 8, String(i), { size: 10, fill: C.dim });
+      }
+      var yb = y0 + ch + 40;
+      g += T(24, yb - 12, 'dp（以该位置结尾的最大变序和）', { size: 11, fill: C.dim, anchor: 'start' });
+      for (var j = 0; j < n; j++) {
+        var x2 = x0 + j * (cw + 8);
+        var v = fr.dp[j];
+        var cur2 = (j === fr.i);
+        g += R(x2, yb, cw, ch, cur2 ? C.orangeBg : C.bg, cur2 ? C.orange : C.border);
+        g += T(x2 + cw / 2, yb + 24, v === undefined ? '' : String(v), { size: 13, fill: cur2 ? C.orange : C.text });
+      }
+      var yc = yb + ch + 26;
+      if (fr.i >= 0) {
+        var seq = rebuild(a, fr.i, 0);
+        g += T(24, yc, '变序后：[' + seq.join(', ') + ']  累加和 ' + fr.val, { size: 12, fill: C.text, anchor: 'start' });
+      }
+      var yd = yc + 24;
+      if (fr.steps && fr.steps.length) {
+        for (var k2 = 0; k2 < fr.steps.length && k2 < 3; k2++) {
+          g += T(24, yd + k2 * 18, '· ' + fr.steps[k2], { size: 11, fill: C.dim, anchor: 'start' });
+        }
+      }
+      body.innerHTML = wrap(yd + 70, g);
+      note.innerHTML = (fr.i === -1) ? fr.msg : ((fr.i === -2) ? fr.msg
+        : ('i = ' + fr.i + '：dp[' + fr.i + '] = ' + fr.val + '，目前最大 ' + fr.best + '。'));
+      ansEl.textContent = (fr.i === -2) ? ('答案 = ' + fr.ans) : '';
+      nxt.disabled = (st.step >= st.fr.length - 1);
+      if (nxt.disabled && timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+    }
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      st = frames(); st.step = 0; draw();
+    }
+    bind('ordNext', 'click', function () { if (st.step < st.fr.length - 1) { st.step++; draw(); } });
+    bind('ordAuto', 'click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step < st.fr.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 800);
+    });
+    bind('ordReset', 'click', reset);
+    bind('ordCase', 'change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>单调队列优化：跳跃与收集</title>
+<meta name="description" content="转移写成 dp[i] = max(dp[j]) + w(i) 且 j 落在一个随 i 平移的区间里时，用一个递减队列把整层枚举换成 O(1) 取队首。两道入门题：向右跳跃与向下收集。">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 18px 0; background: var(--bg-soft); }
+.viz-title { font-weight: 600; margin: 0 0 12px; font-size: 15px; }
+.viz-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-dim); }
+.viz-answer { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.viz-controls { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.viz-controls button { margin-right: 4px; }
+.viz-controls select { margin-right: 6px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>单调队列优化：跳跃与收集</h1>
+      <p class="intro">有一类 dp 的转移长成 <code>dp[i] = max(dp[j]) + w(i)</code>，j 的取值范围是一个区间，而且这个区间随 i 只往右挪一格。这个时候内层那层枚举是浪费的：候选集合在滑动，用一个队列记住「谁还可能当最大值」就够了。两道题看下来，这个结构怎么认、队列怎么维护，就清楚了。</p>
+
+      <h2>零、转移里那层 max</h2>
+      <p>先看一个具体的转移。位置从 0 开始排到 n，一开始站在 0，每次可以往右跳 a 到 b 之间的任意整数格，落到 i 就拿到 arr[i] 的分，跳过 n 就停下。问最多能拿多少分。</p>
+      <p>设 <code>dp[i]</code> 是「恰好落在 i 位置时，累计的最大得分」。能跳到 i 的前一个位置 j 必须满足 <code>i − b ≤ j ≤ i − a</code>，于是：</p>
+      <p><code>dp[i] = max{ dp[j] } + arr[i]</code>，j 走遍 <code>[i − b, i − a]</code> 里所有合法落点。</p>
+      <p>区间长度是 <code>b − a + 1</code>，n 到 2 × 10⁵、b − a 也能到 2 × 10⁵，直接枚举是 O(n × (b − a))，跑不动。</p>
+      <p>关键在于 i 加 1 的时候，这个区间的两个端点同时加 1。里面大部分元素没变，只是右边进来一个、左边出去一个。</p>
+      <figure class="fig" id="figWindow"></figure>
+      <p>滑动窗口的最大值是个老问题，解法也是老解法：队列里存下标，让对应的 dp 值从队首到队尾严格递减。新来的 j 如果 dp 值比队尾大，队尾就永远不可能再当最大值了，直接弹掉；队首滑出窗口就丢掉。取答案只看队首。</p>
+
+      <h2>一、向右跳跃：队列里留什么</h2>
+      <p>先写枚举版，对照着看更清楚。</p>
+    <pre class="code"><span class="cm">// dp[i] : 到达 i 位置时，能拿到的最大得分；到不了的位置记负无穷</span>
+    <span class="kw">int</span> <span class="fn">jumpRight1</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr, <span class="kw">int</span> n, <span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">const</span> <span class="kw">int</span> NA = -1000000000;
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(n + 1, NA);
+        dp[0] = arr[0];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = i - b; j &lt;= i - a; j++) {              <span class="cm">// 枚举上一跳的落点</span>
+                <span class="kw">if</span> (j &lt; 0 || dp[j] == NA) <span class="kw">continue</span>;
+                dp[i] = max(dp[i], dp[j] + arr[i]);
+            }
+        }
+        <span class="kw">int</span> ans = NA;
+        <span class="kw">for</span> (<span class="kw">int</span> i = n + 1 - b; i &lt;= n; i++) ans = max(ans, dp[i]);
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>三个边界要提前想好：<code>dp[0] = arr[0]</code>（起点就站着，先拿一份）；<code>i &lt; a</code> 的位置跳不到，保持负无穷；答案不是 <code>dp[n]</code>，而是所有「再跳一次能出界」的位置里的最大值，也就是 <code>i</code> 从 <code>n + 1 − b</code> 到 n。</p>
+      <p>最后这一点容易写错。能出界的条件是存在某个 <code>d ∈ [a, b]</code> 让 <code>i + d &gt; n</code>，取最大的 b 最容易满足，所以判据是 <code>i + b &gt; n</code>，不是 <code>i + a &gt; n</code>。</p>
+      <p>改成单调队列，外层不变，内层那层枚举换成「一端进、一端出、取队首」：</p>
+    <pre class="code"><span class="cm">// dp[i] : 到达 i 位置时，能拿到的最大得分</span>
+    <span class="cm">// 队列里存落点，对应的 dp 值从队首到队尾递减</span>
+    <span class="kw">int</span> <span class="fn">jumpRight2</span>(vector&lt;<span class="kw">int</span>&gt;&amp; arr, <span class="kw">int</span> n, <span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">const</span> <span class="kw">int</span> NA = -1000000000;
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">dp</span>(n + 1, NA), q(n + 1);
+        <span class="kw">int</span> l = 0, r = 0;
+        dp[0] = arr[0];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">int</span> come = i - a;                                   <span class="cm">// 这一轮进窗口的落点</span>
+            <span class="kw">if</span> (come &gt;= 0 &amp;&amp; dp[come] != NA) {
+                <span class="kw">while</span> (l &lt; r &amp;&amp; dp[q[r - 1]] &lt;= dp[come]) r--;  <span class="cm">// 比它小的全弹出</span>
+                q[r++] = come;
+            }
+            <span class="kw">if</span> (l &lt; r &amp;&amp; q[l] == i - b - 1) l++;                <span class="cm">// 滑出窗口的落点</span>
+            <span class="kw">if</span> (l &lt; r) dp[i] = dp[q[l]] + arr[i];
+        }
+        <span class="kw">int</span> ans = NA;
+        <span class="kw">for</span> (<span class="kw">int</span> i = n + 1 - b; i &lt;= n; i++) ans = max(ans, dp[i]);
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>这里有个细节：进出队都只看队首队尾，所以过期判断写成 <code>q[l] == i − b − 1</code> 就够了。因为入队的 j 是递增的，窗口左端每轮最多跨过一个下标，队首最多有一个过期。写成 while 也对，只是没必要。</p>
+      <p>还有一个细节：<code>dp[come] == NA</code> 的位置不入队。它们不是「值很小」，而是「根本到不了」，放进去会污染队首。</p>
+
+      <h2>二、跟朴素写法对一遍</h2>
+      <p>拿 <code>n = 7, a = 2, b = 3</code>，<code>arr = [1, 3, −2, 5, −1, 4, 2, −3]</code> 走一遍。dp 依次是：</p>
+      <table class="complexity">
+        <tr><th>i</th><td>0</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td><td>6</td><td>7</td></tr>
+        <tr><th>dp[i]</th><td>1</td><td>到不了</td><td>−1</td><td>6</td><td>−2</td><td>10</td><td>8</td><td>7</td></tr>
+      </table>
+      <p>i = 4 这一格值得看：窗口是 <code>[1, 3]</code>，队列里当时只有落点 2（dp = −1），因为落点 0 已经被 <code>i − b − 1 = 0</code> 弹出去了。所以 <code>dp[4] = −1 + (−1) = −2</code>。手算容易把 0 算进去，那就得到 1 + (−1) = 0，是错的。</p>
+      <p>答案是 dp[5]、dp[6]、dp[7] 里的最大值 10，对应路线 0 → 3 → 5 → 出界，得分 1 + 5 + 4 = 10。</p>
+      <p>随机 2 万组（n ≤ 12，a、b 各自随机，arr 取 −20 到 20）实测，队列版与枚举版的结果一次都没对不上。</p>
+
+      <h2>三、向下收集：一行也是一个数组</h2>
+      <p>第二题把一维换成二维：n 行 m 列的区域，一些格子上放着能量点。从第 1 行任意位置出发，每步必须往下一行，横向偏移不能超过 t，也就是从 (i−1, p) 能走到 (i, j) 当且仅当 <code>|p − j| ≤ t</code>。走到最后一行停下，问最多能收集多少能量。</p>
+      <p>设 <code>dp[i][j]</code> 是走到 i 行 j 列的最大能量，那么：</p>
+      <p><code>dp[i][j] = val[i][j] + max{ dp[i−1][p] }</code>，p 走遍 <code>[j − t, j + t]</code> 并且不越界。</p>
+      <p>j 加 1，区间两个端点同时加 1，还是同一个形状。n、m、t 都到 4000，朴素写法 O(n × m × t) 是 640 亿次，队列版把 t 这一层拿掉，变成 O(n × m)。</p>
+      <figure class="fig" id="figRow"></figure>
+      <p>代码上唯一的区别是窗口两端都要动，而上一行是现成的，所以每行的队列重新建一次：</p>
+    <pre class="code"><span class="cm">// dp[i][j] : 走到 i 行 j 列时，能收集到的最大能量</span>
+    <span class="kw">int</span> <span class="fn">collect1</span>(<span class="kw">int</span> n, <span class="kw">int</span> m, <span class="kw">int</span> t, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; dp) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= m; j++) {
+                <span class="kw">int</span> best = 0;
+                <span class="kw">for</span> (<span class="kw">int</span> p = max(1, j - t); p &lt;= min(m, j + t); p++) {
+                    best = max(best, dp[i - 1][p]);             <span class="cm">// 枚举上一行能来的列</span>
+                }
+                dp[i][j] += best;
+            }
+        }
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= m; j++) ans = max(ans, dp[n][j]);
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>换成队列之后，每列做三件事：右端进一个、左端出一个、取队首。</p>
+    <pre class="code"><span class="cm">// dp[i][j] : 走到 i 行 j 列时，能收集到的最大能量</span>
+    <span class="cm">// 队列里存上一行的列号，dp 值从队首到队尾递减</span>
+    <span class="kw">int</span> <span class="fn">collect2</span>(<span class="kw">int</span> n, <span class="kw">int</span> m, <span class="kw">int</span> t, vector&lt;vector&lt;<span class="kw">int</span>&gt;&gt;&amp; dp) {
+        vector&lt;<span class="kw">int</span>&gt; <span class="fn">q</span>(m + 2);
+        <span class="kw">int</span> l = 0, r = 0;
+        auto push = [&amp;](<span class="kw">int</span> row, <span class="kw">int</span> col) {
+            <span class="kw">if</span> (col &gt; m) <span class="kw">return</span>;
+            <span class="kw">while</span> (l &lt; r &amp;&amp; dp[row][q[r - 1]] &lt;= dp[row][col]) r--;
+            q[r++] = col;
+        };
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            l = r = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= t; j++) push(i - 1, j);        <span class="cm">// j = 1 时窗口是 [1, t+1]</span>
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= m; j++) {
+                push(i - 1, j + t);                             <span class="cm">// 右端进来一格</span>
+                <span class="kw">if</span> (l &lt; r &amp;&amp; q[l] == j - t - 1) l++;            <span class="cm">// 左端出去一格</span>
+                dp[i][j] += dp[i - 1][q[l]];
+            }
+        }
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= m; j++) ans = max(ans, dp[n][j]);
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>初始化那段循环把 <code>[1, t]</code> 先塞进去，是因为 j = 1 时窗口是 <code>[1 − t, 1 + t]</code>，截到合法范围就是 <code>[1, 1 + t]</code>，长度 t + 1。之后每列右端加一个 <code>j + t</code>，正好接上。</p>
+      <p><code>push</code> 里 <code>col &gt; m</code> 直接返回这一句不能省：j 走到 m 附近时，<code>j + t</code> 早就超过 m 了，那些列不存在。</p>
+
+      <h2>四、演示：向右跳跃一格一格推进</h2>
+      <p>橙色是当前正在算的 i，蓝色条是这一轮的候选区间 <code>[i − b, i − a]</code>，下面那行是队列里剩下的落点。点「下一步」看区间怎么滑动、队列怎么吐掉队尾。</p>
+      <div class="viz" id="vizJump">
+        <p class="viz-title">向右跳跃：窗口与队列</p>
+        <div id="jumpBody"></div>
+        <p class="viz-note" id="jumpNote"></p>
+        <p class="viz-answer" id="jumpAns"></p>
+        <div class="viz-controls">
+          <button id="jumpNext">下一步</button>
+          <button id="jumpAuto">自动播放</button>
+          <button id="jumpReset">重置</button>
+          <label>数据 <select id="jumpCase">
+            <option value="0">示例 a=2, b=3</option>
+            <option value="1">a=1, b=3</option>
+            <option value="2">a=3, b=5</option>
+          </select></label>
+        </div>
+      </div>
+
+      <h2>五、演示：向下收集逐格填表</h2>
+      <p>上面那行是上一行的 dp，蓝色是这一列的候选窗口 <code>[j − t, j + t]</code>，队首那一列用深色边框标出来。绿点是能量点，没有能量的格子显示 0。网格规模小，只看得清结构，真实数据到 4000 × 4000。</p>
+      <div class="viz" id="vizCol">
+        <p class="viz-title">向下收集：一行一列地填</p>
+        <div id="colBody"></div>
+        <p class="viz-note" id="colNote"></p>
+        <p class="viz-answer" id="colAns"></p>
+        <div class="viz-controls">
+          <button id="colNext">下一步</button>
+          <button id="colAuto">自动播放</button>
+          <button id="colReset">重置</button>
+          <label>随机种子 <select id="colSeed">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select></label>
+        </div>
+      </div>
+
+      <h2>六、复杂度分析</h2>
+      <table class="complexity">
+        <tr><th>题目</th><th>朴素写法</th><th>队列写法</th><th>空间</th><th>说明</th></tr>
+        <tr><td>向右跳跃</td><td>O(n × (b − a + 1))</td><td>O(n)</td><td>O(n)</td><td>每个下标进队一次出队一次</td></tr>
+        <tr><td>向下收集</td><td>O(n × m × t)</td><td>O(n × m)</td><td>O(m) 或 O(n × m)</td><td>每行队列重建，滚动数组可压到 O(m)</td></tr>
+      </table>
+      <p>空间按题目上限算：向右跳跃 n ≤ 2 × 10⁵，dp 与队列各一个 int 数组，约 1.6 MB；向下收集 n、m ≤ 4000，整表 1600 万个 int 约 64 MB，滚成两行就降到 O(m)。</p>
+      <p>队列写法的时间是摊还的：看起来有 while 循环，但每个下标一生只进一次、出一次，n 个下标总操作数是 O(n)。</p>
+
+      <h2>七、总结</h2>
+      <p>认这个结构的办法是看转移式：<code>dp[i]</code> 依赖 <code>dp[j]</code> 的最大值，j 的合法范围写成 <code>[L(i), R(i)]</code> 之后，L 和 R 都随 i 单调不减，那就可以上单调队列。两道题的 L、R 分别是 <code>[i − b, i − a]</code> 和 <code>[j − t, j + t]</code>，都是这个形状。</p>
+      <p>写的时候三件事别漏：到不了的位置不进队；过期只在队首判断一次；答案是「还能再跳一次」的位置集合，不是最后一格。</p>
+      <p>下一类题会麻烦一点：转移式里 j 和 i 缠在一起，得先做一次代数变形，把它们拆成「只含 j 的部分」加「只含 i 的部分」，才能套上同样的队列。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>向右跳跃获得最大得分</td><td><a href="https://www.luogu.com.cn/problem/P1725" target="_blank">P1725 琪露诺</a></td></tr>
+        <tr><td>洛谷</td><td>向下收集获得最大能量</td><td><a href="https://www.luogu.com.cn/problem/P3800" target="_blank">P3800 Power 收集</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解130【扩展】动态规划优化专题4-单调队列和单调栈优化</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', blueBg: '#dbeafe', orange: '#ea580c', orangeBg: '#ffedd5',
+            gray: '#9aa0a6', bg: '#f6f7f9', border: '#e6e8eb', text: '#1f2328', dim: '#6b7280', green: '#16a34a' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function T(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '" font-size="' + (o.size || 12) + '" fill="' + (o.fill || C.text) +
+      '" text-anchor="' + (o.anchor || 'middle') + '"' + (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function R(x, y, w, h, fill, stroke, rx) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx == null ? 4 : rx) +
+      '" fill="' + fill + '" stroke="' + (stroke || 'none') + '"/>';
+  }
+  function LN(x1, y1, x2, y2, stroke, w, dash) {
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke +
+      '" stroke-width="' + (w || 1) + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
+  }
+  function mount(id, inner) { var el = document.getElementById(id); if (el) el.innerHTML = inner; }
+  function wrap(hh, body) { return '<svg viewBox="0 0 680 ' + hh + '" role="img">' + body + '</svg>'; }
+  function bind(id, ev, fn) { var el = document.getElementById(id); if (el) el.addEventListener(ev, fn); return el; }
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // ---------- 图 1：候选区间随 i 滑动 ----------
+  (function () {
+    var arr = [1, 3, -2, 5, -1, 4, 2, -3];
+    var n = 7, a = 2, b = 3;
+    var g = '';
+    var cw = 66, ch = 38, x0 = 46, y0 = 74;
+    g += T(24, 32, 'n = 7, a = 2, b = 3：i 加 1，候选落点的区间整体右移一格', { size: 12, fill: C.text, weight: '600', anchor: 'start' });
+    for (var i = 0; i <= n; i++) {
+      var x = x0 + i * (cw + 4);
+      g += R(x, y0, cw, ch, C.bg, C.border);
+      g += T(x + cw / 2, y0 + 17, String(arr[i]), { size: 12 });
+      g += T(x + cw / 2, y0 + 33, String(i), { size: 10, fill: C.dim });
+    }
+    g += T(20, y0 + 24, 'arr', { size: 11, fill: C.dim, anchor: 'end' });
+    // 两个窗口
+    var rows = [{ i: 3, y: y0 + ch + 26 }, { i: 4, y: y0 + ch + 66 }];
+    for (var k = 0; k < rows.length; k++) {
+      var rw = rows[k];
+      var lo = Math.max(0, rw.i - b), hi = rw.i - a;
+      var bx = x0 + lo * (cw + 4) - 3;
+      var bw = (hi - lo + 1) * (cw + 4) - 4 + 6;
+      g += R(bx, rw.y, bw, 16, C.blueBg, C.blue);
+      g += T(bx + bw + 10, rw.y + 12, 'i = ' + rw.i + '，候选区间 [' + lo + ', ' + hi + ']', { size: 11, fill: C.blue, anchor: 'start' });
+      // 指向当前 i 的箭头
+      var ix = x0 + rw.i * (cw + 4) + cw / 2;
+      g += LN(ix, rw.y + 16, ix, rw.y + 24, C.orange, 1.4, '3 3');
+      g += R(x0 + rw.i * (cw + 4), y0 - 8, cw, ch + 8, 'none', C.orange);
+    }
+    g += T(24, y0 + ch + 124, '区间里的元素大部分没变，变的只有右端进来的那个和左端出去的那个', { size: 12, fill: C.dim, anchor: 'start' });
+    mount('figWindow', wrap(y0 + ch + 142, g));
+  })();
+
+  // ---------- 图 2：向下收集的窗口 ----------
+  (function () {
+    var m = 7, t = 2, j = 3;
+    var g = '';
+    var cw = 66, ch = 38, x0 = 70, y0 = 76;
+    g += T(24, 32, 'j = 3, t = 2：dp[i][3] 只看上一行第 1 到 5 列里最大的', { size: 12, fill: C.text, weight: '600', anchor: 'start' });
+    var lo = Math.max(1, j - t), hi = Math.min(m, j + t);
+    for (var p = 1; p <= m; p++) {
+      var x = x0 + (p - 1) * (cw + 4);
+      var inw = (p >= lo && p <= hi);
+      g += R(x, y0, cw, ch, inw ? C.blueBg : C.bg, inw ? C.blue : C.border);
+      g += T(x + cw / 2, y0 + 24, 'p = ' + p, { size: 11, fill: inw ? C.blue : C.dim });
+      g += T(x + cw / 2, y0 - 8, String(p), { size: 10, fill: C.dim });
+    }
+    g += T(14, y0 + 24, '上一行', { size: 11, fill: C.dim, anchor: 'start' });
+    // 窗口条
+    var bx = x0 + (lo - 1) * (cw + 4) - 3;
+    var bw = (hi - lo + 1) * (cw + 4) - 4 + 6;
+    g += R(bx, y0 + ch + 8, bw, 5, C.blue, C.blue);
+    g += T(bx + bw / 2, y0 + ch + 26, '窗口 [p−t, p+t]', { size: 11, fill: C.blue });
+    // 下一行
+    var y1 = y0 + ch + 76;
+    for (var p2 = 1; p2 <= m; p2++) {
+      var x2 = x0 + (p2 - 1) * (cw + 4);
+      var cur = (p2 === j);
+      g += R(x2, y1, cw, ch, cur ? C.orangeBg : C.bg, cur ? C.orange : C.border);
+      g += T(x2 + cw / 2, y1 + 24, cur ? 'dp[i][' + j + ']' : '', { size: 11, fill: C.orange });
+    }
+    g += T(14, y1 + 24, '这一行', { size: 11, fill: C.dim, anchor: 'start' });
+    var jx = x0 + (j - 1) * (cw + 4) + cw / 2;
+    g += LN(bx + bw / 2, y0 + ch + 13, jx, y1 - 4, C.gray, 1.4, '4 3');
+    g += T(24, y1 + ch + 30, 'j 每加 1，窗口两端同时加 1，队列里只动两头', { size: 12, fill: C.dim, anchor: 'start' });
+    mount('figRow', wrap(y1 + ch + 48, g));
+  })();
+
+  // ---------- 演示 1：向右跳跃 ----------
+  (function () {
+    var cases = [
+      { n: 7, a: 2, b: 3, arr: [1, 3, -2, 5, -1, 4, 2, -3] },
+      { n: 8, a: 1, b: 3, arr: [2, -1, 4, 3, -2, 5, 1, 6, -3] },
+      { n: 9, a: 3, b: 5, arr: [1, 2, -3, 4, 5, -1, 3, 2, 6, -2] }
+    ];
+    var NA = -1000000000;
+    var body = document.getElementById('jumpBody');
+    var note = document.getElementById('jumpNote');
+    var ansEl = document.getElementById('jumpAns');
+    var nxt = document.getElementById('jumpNext');
+    var auto = document.getElementById('jumpAuto');
+    var rst = document.getElementById('jumpReset');
+    var sel = document.getElementById('jumpCase');
+    var st = null, timer = null;
+
+    function frames() {
+      var cse = cases[+sel.value];
+      var nn = cse.n, aa = cse.a, bb = cse.b, arr = cse.arr;
+      var dp = [], q = [];
+      for (var i = 0; i <= nn; i++) dp.push(NA);
+      dp[0] = arr[0];
+      var l = 0, r = 0;
+      var out = [];
+      out.push({ i: -1, dp: dp.slice(), q: [], l: 0, r: 0, lo: 0, hi: -1, msg: '起点在 0，先拿 arr[0] = ' + arr[0] + '。' });
+      for (var i2 = 1; i2 <= nn; i2++) {
+        var come = i2 - aa, od = i2 - bb - 1;
+        if (come >= 0 && dp[come] !== NA) {
+          while (l < r && dp[q[r - 1]] <= dp[come]) { r--; q.pop(); }
+          q.push(come); r++;
+        }
+        if (l < r && q[l] === od) l++;
+        var got = (l < r) ? dp[q[l]] + arr[i2] : NA;
+        dp[i2] = got;
+        out.push({
+          i: i2, dp: dp.slice(), q: q.slice(), l: l, r: r,
+          lo: Math.max(0, i2 - bb), hi: i2 - aa, come: come, od: od, got: got,
+          msg: (got === NA) ? ('i = ' + i2 + '：候选区间 [' + Math.max(0, i2 - bb) + ', ' + (i2 - aa) + '] 里没有能站的位置，保持到不了。')
+            : ('i = ' + i2 + '：队首是 ' + q[l] + '（dp = ' + dp[q[l]] + '），dp[' + i2 + '] = ' + dp[q[l]] + ' + ' + arr[i2] + ' = ' + got + '。')
+        });
+      }
+      var ans = NA, arg = -1;
+      for (var i3 = nn + 1 - bb; i3 <= nn; i3++) if (dp[i3] > ans) { ans = dp[i3]; arg = i3; }
+      out.push({ i: -2, dp: dp.slice(), q: q.slice(), l: l, r: r, lo: nn + 1 - bb, hi: nn, ans: ans, arg: arg,
+        msg: '收尾：i 从 ' + (nn + 1 - bb) + ' 到 ' + nn + ' 都能再跳一次出界，最大的是 dp[' + arg + '] = ' + ans + '。' });
+      return { cse: cse, fr: out };
+    }
+
+    function draw() {
+      var cse = st.cse, fr = st.fr[st.step], nn = cse.n, arr = cse.arr;
+      var cw = Math.min(56, Math.floor(600 / (nn + 2))), ch = 34;
+      var x0 = 40, y0 = 56;
+      var g = '';
+      g += T(24, 28, 'arr（每格是落到这里能拿的分）', { size: 11, fill: C.dim, anchor: 'start' });
+      for (var i = 0; i <= nn; i++) {
+        var x = x0 + i * (cw + 4);
+        var cur = (i === fr.i);
+        g += R(x, y0, cw, ch, cur ? C.orangeBg : C.bg, cur ? C.orange : C.border);
+        g += T(x + cw / 2, y0 + 22, String(arr[i]), { size: 12 });
+        g += T(x + cw / 2, y0 - 6, String(i), { size: 10, fill: C.dim });
+      }
+      // 候选窗口条
+      if (fr.hi >= fr.lo && fr.i >= 0) {
+        var bx = x0 + fr.lo * (cw + 4) - 3;
+        var bw = (fr.hi - fr.lo + 1) * (cw + 4) - 4 + 6;
+        g += R(bx, y0 + ch + 6, bw, 6, C.blue, C.blue);
+      }
+      // dp 行
+      var y1 = y0 + ch + 44;
+      g += T(24, y1 - 12, 'dp（— 表示到不了）', { size: 11, fill: C.dim, anchor: 'start' });
+      for (var i2 = 0; i2 <= nn; i2++) {
+        var x2 = x0 + i2 * (cw + 4);
+        var v = fr.dp[i2];
+        var cur2 = (i2 === fr.i);
+        g += R(x2, y1, cw, ch, cur2 ? C.orangeBg : C.bg, cur2 ? C.orange : C.border);
+        g += T(x2 + cw / 2, y1 + 22, v === NA ? '—' : String(v), { size: 12, fill: v === NA ? C.gray : C.text });
+      }
+      // 队列
+      var y2 = y1 + ch + 36;
+      g += T(24, y2, '队列（左是队首）', { size: 11, fill: C.dim, anchor: 'start' });
+      var qx = 140;
+      if (fr.q.length === 0) {
+        g += T(qx, y2, '（空）', { size: 11, fill: C.gray, anchor: 'start' });
+      } else {
+        for (var k = fr.l; k < fr.r; k++) {
+          var idx = fr.q[k];
+          var x3 = qx + (k - fr.l) * 62;
+          if (x3 + 58 > 660) break;
+          var head = (k === fr.l);
+          g += R(x3, y2 - 16, 56, 26, head ? C.orangeBg : C.bg, head ? C.orange : C.border);
+          g += T(x3 + 28, y2 + 2, idx + ' : ' + (fr.dp[idx] === NA ? '—' : fr.dp[idx]), { size: 11, fill: head ? C.orange : C.text });
+        }
+      }
+      body.innerHTML = wrap(y2 + 30, g);
+      note.innerHTML = fr.msg;
+      ansEl.textContent = (fr.i === -2) ? ('答案 = ' + fr.ans) : '';
+      nxt.disabled = (st.step >= st.fr.length - 1);
+      if (nxt.disabled && timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+    }
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      st = frames(); st.step = 0; draw();
+    }
+    bind('jumpNext', 'click', function () { if (st.step < st.fr.length - 1) { st.step++; draw(); } });
+    bind('jumpAuto', 'click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step < st.fr.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 700);
+    });
+    bind('jumpReset', 'click', reset);
+    bind('jumpCase', 'change', reset);
+    reset();
+  })();
+
+  // ---------- 演示 2：向下收集 ----------
+  (function () {
+    var NN = 4, MM = 7, TT = 2;
+    var body = document.getElementById('colBody');
+    var note = document.getElementById('colNote');
+    var ansEl = document.getElementById('colAns');
+    var nxt = document.getElementById('colNext');
+    var auto = document.getElementById('colAuto');
+    var rst = document.getElementById('colReset');
+    var sel = document.getElementById('colSeed');
+    var st = null, timer = null;
+
+    function frames() {
+      var rnd = mulberry32(+sel.value * 7919 + 13);
+      var dp = [];
+      for (var i = 0; i <= NN; i++) { dp.push([]); for (var j = 0; j <= MM; j++) dp[i].push(0); }
+      var pts = [];
+      for (var r = 1; r <= NN; r++) {
+        for (var c = 1; c <= MM; c++) {
+          if (rnd() < 0.28) { var v = 1 + Math.floor(rnd() * 9); dp[r][c] = v; pts.push([r, c]); }
+        }
+      }
+      var out = [];
+      out.push({ i: 1, j: 0, dp: dp.map(function (row) { return row.slice(); }), q: [], l: 0, r: 0,
+        msg: '第 1 行是初始能量，可以站任意位置。从第 2 行开始逐行、逐列填表。' });
+      var q = [], l = 0, r = 0;
+      var push = function (row, col) {
+        if (col > MM) return;
+        while (l < r && dp[row][q[r - 1]] <= dp[row][col]) { r--; q.pop(); }
+        q.push(col); r++;
+      };
+      for (var i2 = 2; i2 <= NN; i2++) {
+        q = []; l = 0; r = 0;
+        for (var j0 = 1; j0 <= TT; j0++) push(i2 - 1, j0);
+        for (var j = 1; j <= MM; j++) {
+          push(i2 - 1, j + TT);
+          if (l < r && q[l] === j - TT - 1) l++;
+          var best = dp[i2 - 1][q[l]];
+          dp[i2][j] += best;
+          out.push({
+            i: i2, j: j, dp: dp.map(function (row) { return row.slice(); }),
+            q: q.slice(), l: l, r: r, lo: j - TT, hi: j + TT, best: best,
+            msg: 'dp[' + i2 + '][' + j + '] = ' + (dp[i2][j] - best) + ' + ' + best + ' = ' + dp[i2][j] +
+              '，队首是第 ' + q[l] + ' 列。'
+          });
+        }
+      }
+      var ans = 0, arg = 1;
+      for (var j2 = 1; j2 <= MM; j2++) if (dp[NN][j2] > ans) { ans = dp[NN][j2]; arg = j2; }
+      out.push({ i: NN, j: -1, dp: dp.map(function (row) { return row.slice(); }), q: [], l: 0, r: 0, ans: ans, arg: arg,
+        msg: '最后一行最大的是第 ' + arg + ' 列，答案 ' + ans + '。' });
+      return { fr: out, pts: pts };
+    }
+
+    function draw() {
+      var fr = st.fr[st.step];
+      var cw = 60, ch = 34, x0 = 96, y0 = 52;
+      var g = '';
+      for (var i = 1; i <= NN; i++) {
+        for (var j = 1; j <= MM; j++) {
+          var x = x0 + (j - 1) * (cw + 4), y = y0 + (i - 1) * (ch + 6);
+          var cur = (fr.i === i && fr.j === j);
+          var inw = (fr.i === i + 1 && fr.j >= 1 && j >= Math.max(1, fr.lo) && j <= Math.min(MM, fr.hi));
+          var head = (fr.i === i + 1 && fr.j >= 1 && fr.l < fr.r && fr.q[fr.l] === j);
+          var fill = C.bg, stroke = C.border;
+          if (head) { fill = C.blueBg; stroke = C.blue; }
+          else if (inw) { fill = '#f2f6fd'; stroke = C.blue; }
+          if (cur) { fill = C.orangeBg; stroke = C.orange; }
+          g += R(x, y, cw, ch, fill, stroke);
+          g += T(x + cw / 2, y + 22, String(fr.dp[i][j]), { size: 12, fill: cur ? C.orange : C.text });
+          if (j === 1) g += T(x0 - 12, y + 22, '第 ' + i + ' 行', { size: 11, fill: C.dim, anchor: 'end' });
+          if (i === 1) g += T(x + cw / 2, y0 - 10, String(j), { size: 10, fill: C.dim });
+        }
+      }
+      var yy = y0 + NN * (ch + 6) + 24;
+      if (fr.j >= 1) {
+        g += T(24, yy, '窗口 [j−t, j+t] = [' + Math.max(1, fr.lo) + ', ' + Math.min(MM, fr.hi) + ']', { size: 11, fill: C.blue, anchor: 'start' });
+      }
+      body.innerHTML = wrap(yy + 20, g);
+      note.innerHTML = fr.msg;
+      ansEl.textContent = (fr.j === -1) ? ('答案 = ' + fr.ans) : '';
+      nxt.disabled = (st.step >= st.fr.length - 1);
+      if (nxt.disabled && timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+    }
+    function reset() {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      st = frames(); st.step = 0; draw();
+    }
+    bind('colNext', 'click', function () { if (st.step < st.fr.length - 1) { st.step++; draw(); } });
+    bind('colAuto', 'click', function () {
+      if (timer) { clearInterval(timer); timer = null; auto.textContent = '自动播放'; return; }
+      auto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (st.step < st.fr.length - 1) { st.step++; draw(); }
+        else { clearInterval(timer); timer = null; auto.textContent = '自动播放'; }
+      }, 420);
+    });
+    bind('colReset', 'click', reset);
+    bind('colSeed', 'change', reset);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>
