@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>达标子数组的个数：归并分治与树状数组 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.rs-sel,.rs-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.rs-sel:focus{outline:none;border-color:var(--accent);}
+.rs-btn{cursor:pointer;}
+.rs-btn:hover{border-color:var(--accent);color:var(--accent);}
+.rs-btn:disabled{opacity:.4;cursor:default;}
+.rs-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.rs-ctl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>达标子数组的个数：归并分治与树状数组</h1>
+      <p class="intro">子数组的累加和落在 <code class="inline">[lower, upper]</code> 里就算达标。前缀和把它改写成「两个前缀和之差落在一个区间」，问题立刻变成数点对。n 到 10 的 5 次方，两两枚举是 5 × 10 的 9 次方次比较，得换办法。两种做法都能做到 O(n log n)：归并分治常数更小，树状数组配离散化更好懂。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>前缀和是处理子数组统计的常备工具。令 <code class="inline">s[i]</code> 为前 i 个数的和，那么子数组 <code class="inline">(l..r)</code> 的和就是 <code class="inline">s[r] - s[l-1]</code>。这一句把「一段连续区间」压成「两个点」，后面所有推导都在这两个点上做。</p>
+      <p>麻烦在于前缀和本身没有范围。<code class="inline">nums[i]</code> 可以是任意整数，n 是 10 的 5 次方，<code class="inline">s[i]</code> 能跑到正负 10 的 14 次方量级，既不能当下标，也不能指望它单调。所以两种做法都要先解决「值域无界」这件事：一个用排序把它变有序，一个用离散化把它压成名次。</p>
+
+      <h2 id="problem">一、问题</h2>
+      <p>给定长度 n 的数组 <code class="inline">nums</code> 和两个整数 <code class="inline">lower</code>、<code class="inline">upper</code>。子数组达标的条件是累加和在 <code class="inline">[lower, upper]</code> 范围上，返回达标子数组的个数。</p>
+      <p>数据范围：<code class="inline">1 &lt;= n &lt;= 10^5</code>，<code class="inline">nums[i]</code> 可能是任意整数，<code class="inline">-10^5 &lt;= lower &lt;= upper &lt;= +10^5</code>。注意 <code class="inline">lower</code> 可以是负数，<code class="inline">nums[i]</code> 也可以是负数，答案最大是 <code class="inline">n*(n+1)/2</code>，会超过 int，统计变量要用 long long。</p>
+
+      <h2 id="prefix">二、前缀和改写成数点对</h2>
+      <p>记 <code class="inline">s[i] = nums[0] + ... + nums[i]</code>，另外补一个 <code class="inline">s[-1] = 0</code>。子数组 <code class="inline">(l..r)</code> 达标就是：</p>
+      <figure class="fig" id="figPrefix"></figure>
+            <p>把不等式挪一挪，条件是 <code class="inline">s[r] - upper &lt;= s[l-1] &lt;= s[r] - lower</code>。也就是说，扫到位置 r 时，只要知道前面已经出现过的前缀和里有多少个落在 <code class="inline">[s[r]-upper, s[r]-lower]</code> 这一段值域上，就把这个数加到答案里。</p>
+      <p>「前面出现过的值里，有多少个落在某段值域上」这句话，正是树状数组的模板问题。剩下的问题是值域太大，以及值可能是负数。</p>
+
+      <h2 id="merge">三、归并分治</h2>
+      <p>先看不依赖离散化的做法。把前缀和数组 <code class="inline">s[0..n-1]</code> 拿去分治，<code class="inline">f(l, r)</code> 返回「下标对 (a, b) 都落在 <code class="inline">[l, r]</code> 里、a &lt; b、且 <code class="inline">s[b] - s[a]</code> 达标」的个数。</p>
+      <p>左右两半各自的答案递归算。跨中点的那些对，左端点在左半、右端点在右半，下标大小关系天然满足，于是只剩值域条件。左半和右半在归并之后都是有序的，对每个右半的元素 <code class="inline">s[i]</code>，左半里满足条件的是一段连续区间，用两个指针框出来就行。</p>
+      <figure class="fig" id="figMerge"></figure>
+            <p>这里有个细节值得盯一下：窗口 <code class="inline">[wl, wr)</code> 是左闭右开，<code class="inline">wr</code> 用的是 <code class="inline">&lt;=</code> 而 <code class="inline">wl</code> 用的是 <code class="inline">&lt;</code>，正好对应值域区间的两个端点一个是闭的一个也是闭的。写成两个 <code class="inline">&lt;</code> 或者两个 <code class="inline">&lt;=</code>，边界上的样例就会差一个。</p>
+
+    <pre class="code"><span class="kw">int</span> <span class="fn">countRangeSum</span>(<span class="kw">int</span> n, <span class="kw">int</span> lower, <span class="kw">int</span> upper) {
+        sumv[0] = nums[0];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; n; i++) {
+            sumv[i] = sumv[i - 1] + nums[i];
+        }
+        lowv = lower;
+        upv = upper;
+        <span class="kw">return</span> f(0, n - 1);
+    }</pre>
+
+    <pre class="code"><span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">long</span> <span class="kw">long</span> sumv[MAXN], helpv[MAXN];
+    <span class="kw">int</span> lowv, upv;
+
+    <span class="kw">int</span> <span class="fn">mergeCnt</span>(<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">int</span> wl = l, wr = l;
+        <span class="kw">long</span> <span class="kw">long</span> mx, mn;
+        <span class="kw">for</span> (<span class="kw">int</span> i = m + 1; i &lt;= r; i++) {
+            mx = sumv[i] - lowv;
+            mn = sumv[i] - upv;
+            <span class="kw">while</span> (wr &lt;= m &amp;&amp; sumv[wr] &lt;= mx) wr++;
+            <span class="kw">while</span> (wl &lt;= m &amp;&amp; sumv[wl] &lt; mn) wl++;
+            ans += wr - wl;
+        }
+        <span class="kw">int</span> p1 = l, p2 = m + 1, i = l;
+        <span class="kw">while</span> (p1 &lt;= m &amp;&amp; p2 &lt;= r) {
+            helpv[i++] = sumv[p1] &lt;= sumv[p2] ? sumv[p1++] : sumv[p2++];
+        }
+        <span class="kw">while</span> (p1 &lt;= m) helpv[i++] = sumv[p1++];
+        <span class="kw">while</span> (p2 &lt;= r) helpv[i++] = sumv[p2++];
+        <span class="kw">for</span> (i = l; i &lt;= r; i++) sumv[i] = helpv[i];
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">f</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span> lowv &lt;= sumv[l] &amp;&amp; sumv[l] &lt;= upv ? 1 : 0;
+        }
+        <span class="kw">int</span> m = (l + r) / 2;
+        <span class="kw">return</span> f(l, m) + f(m + 1, r) + mergeCnt(l, m, r);
+    }</pre>
+
+      <p>递归深度是 log n，每层合并是 O(n)，总时间 O(n log n)。额外空间只有一个 <code class="inline">help</code> 数组，O(n)。</p>
+
+      <h2 id="bit">四、树状数组加离散化</h2>
+      <p>换个角度：值域大这件事，其实只用到「相对大小」。我们从来不问「前缀和等于多少」，只问「有多少个前缀和不超过某个值」。那么把所有会出现的前缀和排个序、去重，用名次代替原值就够了。</p>
+      <figure class="fig" id="figRank"></figure>
+            <p><code class="inline">rank(v)</code> 的定义是「<code class="inline">sorted</code> 里小于等于 v 的最大名次」，找不到就返回 0。有了它，「不超过 v 的个数」就是树状数组的前缀和 <code class="inline">presum(rank(v))</code>。</p>
+
+    <pre class="code"><span class="kw">int</span> <span class="fn">rankv</span>(<span class="kw">long</span> <span class="kw">long</span> v) {
+        <span class="kw">int</span> left = 1, right = m, mid;
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">while</span> (left &lt;= right) {
+            mid = (left + right) / 2;
+            <span class="kw">if</span> (sorted[mid] &lt;= v) {
+                ans = mid;
+                left = mid + 1;
+            } <span class="kw">else</span> {
+                right = mid - 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+    <pre class="code"><span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">int</span> c) {
+        <span class="kw">while</span> (i &lt;= m) {
+            tree[i] += c;
+            i += i &amp; -i;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">presum</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">while</span> (i &gt; 0) {
+            ans += tree[i];
+            i -= i &amp; -i;
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <p>主流程：扫每个位置，先算出当前前缀和 s，用它去查「已经出现过的前缀和里有多少个落在 <code class="inline">[s-upper, s-lower]</code>」，再把 s 自己插进树状数组。</p>
+
+    <pre class="code"><span class="kw">int</span> <span class="fn">countRangeSum</span>(vector&lt;<span class="kw">long</span> <span class="kw">long</span>&gt;&amp; nums, <span class="kw">int</span> lower, <span class="kw">int</span> upper) {
+        build(nums);
+        <span class="kw">long</span> <span class="kw">long</span> s = 0;
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            s += nums[i];
+            ans += presum(rankv(s - lower)) - presum(rankv(s - upper - 1));
+            <span class="kw">if</span> (lower &lt;= s &amp;&amp; s &lt;= upper) {
+                ans++;
+            }
+            add(rankv(s), 1);
+        }
+        <span class="kw">return</span> ans;
+    }</pre>
+
+      <p>这里有个细节：离散化的集合是 <code class="inline">s[0..n-1]</code> 这 n 个前缀和，<code class="inline">s[-1] = 0</code> 那个空前缀并不在里面。所以「子数组从 0 开始」这种情况查不到，得单独补一句判断累加。漏掉这一句，全是正数的样例会少算一截。</p>
+      <p>还有一处容易写错：查询用的是 <code class="inline">rank(s - upper - 1)</code> 而不是 <code class="inline">rank(s - upper)</code> 再减一。因为 <code class="inline">s - upper - 1</code> 这个值本身不在集合里，<code class="inline">rank</code> 会把它向下取到最接近的那一档，减一的操作交给二分自己完成，比手算稳妥。</p>
+
+      <h2 id="demo">五、演示：树状数组逐步统计</h2>
+      <p>下面这个演示把树状数组解法逐步展开。左边是原始数组与当前扫到的位置，中间是离散化后的前缀和名次轴（已经插入过的会描粗），右边是树状数组内部的计数值。每一步高亮当前查询的那段值域。</p>
+      <div class="viz" id="vizBit">
+        <p class="viz-title">树状数组 + 离散化：逐步统计达标子数组</p>
+        <div id="vizBitBody"></div>
+        <div class="viz-controls">
+          <div class="rs-ctl"><label for="bitPreset">例子</label>
+            <select class="rs-sel" id="bitPreset">
+              <option value="0">nums = [-2, 5, -1, 3]，lower = -2，upper = 2</option>
+              <option value="1">nums = [1, 1, 1]，lower = 1，upper = 2</option>
+              <option value="2">nums = [3, -1, -2, 4]，lower = 0，upper = 3</option>
+              <option value="3">nums = [-5, 2, 2, -6, 3]，lower = -3，upper = 0</option>
+            </select>
+          </div>
+          <button class="rs-btn" id="bitPrev" type="button">上一步</button>
+          <button class="rs-btn" id="bitNext" type="button">下一步</button>
+          <button class="rs-btn" id="bitAuto" type="button">自动播放</button>
+          <button class="rs-btn" id="bitReset" type="button">重置</button>
+        </div>
+        <div class="legend">
+          <span><i class="dot full"></i>本步刚插入的前缀和</span>
+          <span><i class="dot partial"></i>查询命中的值域段</span>
+          <span><i class="dot skip"></i>还没插入 / 未命中</span>
+        </div>
+      </div>
+
+      <h2 id="complexity">复杂度分析</h2>
+      <p>两种做法的规模都是 n。</p>
+      <table class="complexity">
+        <tr><th>做法</th><th>时间</th><th>额外空间</th></tr>
+        <tr><td>枚举两端点</td><td>O(n²)</td><td>O(n)</td></tr>
+        <tr><td>归并分治</td><td>O(n log n)</td><td>O(n)</td></tr>
+        <tr><td>树状数组 + 离散化</td><td>O(n log n)</td><td>O(n)</td></tr>
+      </table>
+      <p>归并分治：递归式 <code class="inline">T(n) = 2T(n/2) + O(n)</code>，展开得 O(n log n)。额外空间只有 <code class="inline">help</code> 数组与 <code class="inline">sum</code> 数组，都是 n 个 long long，按题目上限 n = 10 的 5 次方算，合计约 1.6 MB。</p>
+      <p>树状数组：离散化排序 O(n log n)，之后每个位置做两次 <code class="inline">rank</code>（各 O(log n)）、两次 <code class="inline">presum</code>、一次 <code class="inline">add</code>，合计 O(n log n)。空间是排序数组 n 个 long long 加树状数组 n 个 int，约 1.2 MB。</p>
+      <p>常数上归并分治更好：它的内层是指针移动，没有二分和位运算。树状数组的理解成本低一些，代码里那些模板函数可以直接搬。</p>
+
+      <h2 id="summary">总结</h2>
+      <p>这道题的关键一步是前缀和改写：子数组的统计问题变成值域上的计数问题，前缀和的值域无界由离散化解决，有序性由归并过程自带。两种做法其实是同一件事的两种落地：归并分治在排序的过程中顺手统计，树状数组先排序再用名次统计。</p>
+      <p>几个容易写错的地方：<code class="inline">s[-1] = 0</code> 要单独判断、值域区间的两个端点一个用 <code class="inline">&lt;</code> 一个用 <code class="inline">&lt;=</code>、统计变量开 long long。这些在 n 很小的样例上不一定暴露，交上去才会挂。往后的「按值域统计」类题目，思路都是这个路子：先问清楚要查什么量，再看这个量能不能用树状数组或者线段树维护。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>区间和的个数</td><td><a href="https://leetcode.cn/problems/count-of-range-sum/" target="_blank">leetcode.cn/problems/count-of-range-sum/</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解131【扩展】动态规划优化专题5-树状数组和线段树优化</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+</section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = {
+    blue: '#2563eb', blueBg: '#dbeafe', blueSoft: '#eef4ff',
+    orange: '#ea580c', orangeBg: '#ffedd5',
+    gray: '#9aa0a6', grayBg: '#f6f7f9', border: '#e6e8eb',
+    text: '#333', dim: '#6b7280'
+  };
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/ /g, '\u00a0');
+  }
+  function mksvg(inner, w, h) {
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" ' +
+      'style="width:100%;height:auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif">' +
+      '<style>text{font-size:12px;fill:' + C.text + '}</style>' + inner + '</svg>';
+  }
+  function mktxt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '"' +
+      (o.anchor ? ' text-anchor="' + o.anchor + '"' : '') +
+      (o.size ? ' font-size="' + o.size + '"' : '') +
+      (o.fill ? ' fill="' + o.fill + '"' : '') +
+      (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function mkbox(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" ' +
+      'fill="' + (o.fill || C.grayBg) + '" stroke="' + (o.stroke || C.border) + '" ' +
+      'stroke-width="' + (o.sw || 1) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function mkline(x1, y1, x2, y2, o) {
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" ' +
+      'stroke="' + (o.stroke || C.gray) + '" stroke-width="' + (o.sw || 1) + '"' +
+      (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function cell(x, y, w, h, label, o) {
+    o = o || {};
+    var g = mkbox(x, y, w, h, o);
+    g += mktxt(x + w / 2, y + h / 2 + 4, label, {
+      anchor: 'middle', size: o.size || 12, fill: o.tfill || C.text, weight: o.weight
+    });
+    return g;
+  }
+  function mount(id, inner, w, h, cap) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = mksvg(inner, w, h) + '<figcaption>' + cap + '</figcaption>';
+  }
+
+  /* ---------- 图一：前缀和改写 ---------- */
+  (function () {
+    var VW = 660, topY = 26;
+    var nums = ['3', '-1', '2', '4', '-2'];
+    var pre = [0, 3, 2, 4, 8, 6];
+    var cw = 46, gap = 8, x0 = 96;
+    var g = '';
+    g += mktxt(30, topY + 4, 'nums', { anchor: 'start', size: 12, fill: C.dim, weight: '600' });
+    for (var i = 0; i < nums.length; i++) {
+      var cx = x0 + i * (cw + gap);
+      g += cell(cx, topY - 12, cw, 26, nums[i], { fill: C.blueSoft, stroke: C.blue });
+      g += mktxt(cx + cw / 2, topY + 26, String(i), { anchor: 'middle', size: 11, fill: C.dim });
+    }
+    var py = topY + 58;
+    g += mktxt(30, py + 4, '前缀和 s', { anchor: 'start', size: 12, fill: C.dim, weight: '600' });
+    for (var j = 0; j < pre.length; j++) {
+      var sx = x0 - (cw + gap) / 2 + j * (cw + gap);
+      var isEnd = (j === 2 || j === 5);
+      g += cell(sx, py - 12, cw, 26, String(pre[j]), {
+        fill: isEnd ? C.orangeBg : C.grayBg,
+        stroke: isEnd ? C.orange : C.border
+      });
+      g += mktxt(sx + cw / 2, py + 26, 's[' + (j - 1) + ']', { anchor: 'middle', size: 11, fill: C.dim });
+    }
+    var lx = x0 - (cw + gap) / 2 + 2 * (cw + gap) + cw / 2;
+    var rx = x0 - (cw + gap) / 2 + 5 * (cw + gap) + cw / 2;
+    var ay = py + 44;
+    g += mkline(lx, ay, rx, ay, { stroke: C.orange, sw: 1.8 });
+    g += mkline(lx, ay - 6, lx, ay + 6, { stroke: C.orange, sw: 1.8 });
+    g += mkline(rx, ay - 6, rx, ay + 6, { stroke: C.orange, sw: 1.8 });
+    g += mktxt((lx + rx) / 2, ay - 8, '子数组 (2..4) 的和 = s[4] - s[1] = 8 - 3 = 5',
+      { anchor: 'middle', size: 12, fill: C.orange, weight: '600' });
+    var by = ay + 34;
+    g += mktxt(30, by, '达标条件 lower <= s[r] - s[l-1] <= upper', { anchor: 'start', size: 13, fill: C.text, weight: '600' });
+    g += mktxt(30, by + 22, '等价于 s[l-1] 落在 [ s[r] - upper , s[r] - lower ] 这一段值域上',
+      { anchor: 'start', size: 12, fill: C.dim });
+    mount('figPrefix', g, VW, by + 44, '子数组和 = 两个前缀和之差，条件等价于左端点落在一段由右端点决定的区间里');
+  })();
+
+  /* ---------- 图二：归并分治的窗口 ---------- */
+  (function () {
+    var VW = 660, y = 30;
+    var leftv = ['-4', '-1', '2', '5'];
+    var rightv = ['1', '3', '7', '9'];
+    var cw = 52, gap = 10, lx0 = 40, rx0 = 350;
+    var g = mktxt(30, y - 8, '归并之后：左半有序、右半有序', { anchor: 'start', size: 12, fill: C.dim });
+    for (var i = 0; i < leftv.length; i++) {
+      g += cell(lx0 + i * (cw + gap), y, cw, 26, leftv[i], { fill: C.blueSoft, stroke: C.blue });
+    }
+    for (var j = 0; j < rightv.length; j++) {
+      g += cell(rx0 + j * (cw + gap), y, cw, 26, rightv[j], { fill: C.grayBg, stroke: C.border });
+    }
+    var wy = y + 52;
+    var lower = 2, upper = 6, s = 3;
+    var lo = s - upper, hi = s - lower;
+    g += mktxt(30, wy - 10, '当前 s[i] = ' + s + '，lower = ' + lower + '，upper = ' + upper +
+      '，要找左半里落在 [' + lo + ', ' + hi + '] 的个数', { anchor: 'start', size: 12, fill: C.text });
+    for (var i2 = 0; i2 < leftv.length; i2++) {
+      var v = parseInt(leftv[i2], 10);
+      var hit = (v >= lo && v <= hi);
+      g += cell(lx0 + i2 * (cw + gap), wy, cw, 26, leftv[i2], {
+        fill: hit ? C.orangeBg : C.grayBg, stroke: hit ? C.orange : C.border
+      });
+    }
+    var wx0 = lx0 + (cw + gap), wx1 = lx0 + 3 * (cw + gap);
+    var by = wy + 36;
+    g += mkline(wx0 - 5, by, wx1 - 5, by, { stroke: C.orange, sw: 2 });
+    g += mktxt((wx0 + wx1) / 2 - 5, by - 8, 'wr - wl = 2，本步贡献 2 个',
+      { anchor: 'middle', size: 12, fill: C.orange, weight: '600' });
+    var ny = by + 30;
+    g += mktxt(30, ny, 's[i] 变大时窗口整体右移，两个指针都不回退，一轮合并 O(长度)',
+      { anchor: 'start', size: 12, fill: C.dim });
+    mount('figMerge', g, VW, ny + 24, '右半每往右走一步，左半的达标窗口整体右移，两个指针都只增不减');
+  })();
+
+  /* ---------- 图三：离散化 ---------- */
+  (function () {
+    var VW = 660, y = 34;
+    var raw = ['-1.4e13', '7', '3.2e12', '-8.9e12', '15'];
+    var sorted = ['-8.9e12', '-1.4e13', '7', '15', '3.2e12'];
+    var g = mktxt(30, y - 10, '原始前缀和（示意的值，跨度到 10^13）', { anchor: 'start', size: 12, fill: C.dim });
+    var cw = 72, gap = 8, x0 = 226;
+    for (var i = 0; i < raw.length; i++) {
+      g += cell(x0 + i * (cw + gap), y, cw, 26, raw[i], { fill: C.grayBg, stroke: C.border });
+    }
+    var my = y + 58;
+    g += mkline(x0 + 20, y + 30, x0 + 20, my - 6, { stroke: C.blue, sw: 1.6, dash: '4 3' });
+    g += mkline(x0 + 4 * (cw + gap) + 36, y + 30, x0 + 4 * (cw + gap) + 36, my - 6, { stroke: C.blue, sw: 1.6, dash: '4 3' });
+    g += mktxt(30, my - 10, '排序 + 去重之后，用名次代替原值', { anchor: 'start', size: 12, fill: C.dim });
+    var rankv = [2, 1, 5, 3, 4];
+    for (var j = 0; j < rankv.length; j++) {
+      g += cell(x0 + j * (cw + gap), my, cw, 26, '名次 ' + rankv[j], { fill: C.blueSoft, stroke: C.blue });
+    }
+    var ty = my + 50;
+    g += mktxt(30, ty, '之后所有比较都在名次上做，树状数组下标范围 1 ~ m，m <= n',
+      { anchor: 'start', size: 12, fill: C.dim });
+    g += mktxt(30, ty + 22, 'rank(v) = sorted 里 <= v 的最大名次，查不到返回 0',
+      { anchor: 'start', size: 12, fill: C.dim });
+    mount('figRank', g, VW, ty + 44, '原始前缀和跨度到 10 的 13 次方，压成名次之后下标只剩 1 到 m，m 不超过 n');
+  })();
+
+  /* ---------- 演示：树状数组逐步统计 ---------- */
+  (function () {
+    var PRESETS = [
+      { nums: [-2, 5, -1, 3], lower: -2, upper: 2 },
+      { nums: [1, 1, 1], lower: 1, upper: 2 },
+      { nums: [3, -1, -2, 4], lower: 0, upper: 3 },
+      { nums: [-5, 2, 2, -6, 3], lower: -3, upper: 0 }
+    ];
+    var body = document.getElementById('vizBitBody');
+    var bPrev = document.getElementById('bitPrev');
+    var bNext = document.getElementById('bitNext');
+    var bAuto = document.getElementById('bitAuto');
+    var bReset = document.getElementById('bitReset');
+    var selP = document.getElementById('bitPreset');
+    var cur = 0, steps = [], timer = null;
+
+    function lowerBound(arr, v) {
+      var lo = 0, hi = arr.length - 1, ans = 0;
+      while (lo <= hi) {
+        var mid = (lo + hi) >> 1;
+        if (arr[mid] <= v) { ans = mid + 1; lo = mid + 1; } else { hi = mid - 1; }
+      }
+      return ans;
+    }
+    function build() {
+      var P = PRESETS[+selP.value];
+      var n = P.nums.length;
+      var all = [], s = 0;
+      for (var i = 0; i < n; i++) { s += P.nums[i]; all.push(s); }
+      var sorted = all.slice().sort(function (a, b) { return a - b; });
+      var uniq = [];
+      for (var k = 0; k < sorted.length; k++) {
+        if (k === 0 || sorted[k] !== sorted[k - 1]) uniq.push(sorted[k]);
+      }
+      var m = uniq.length;
+      var tree = new Array(m + 1);
+      for (var z = 0; z <= m; z++) tree[z] = 0;
+      function add(i, c) { while (i <= m) { tree[i] += c; i += i & -i; } }
+      function presum(i) { var a = 0; while (i > 0) { a += tree[i]; i -= i & -i; } return a; }
+      steps = [];
+      var acc = 0;
+      steps.push({ i: -1, s: 0, hitLo: 0, hitHi: 0, got: 0, acc: 0, tree: tree.slice(), msg: '开始：树状数组全 0，还没插入任何前缀和' });
+      s = 0;
+      for (var i2 = 0; i2 < n; i2++) {
+        s += P.nums[i2];
+        var rHi = lowerBound(uniq, s - P.lower);
+        var rLo = lowerBound(uniq, s - P.upper - 1);
+        var got = presum(rHi) - presum(rLo);
+        var extra = (P.lower <= s && s <= P.upper) ? 1 : 0;
+        acc += got + extra;
+        add(lowerBound(uniq, s), 1);
+        var m2 = '第 ' + (i2 + 1) + ' 个数：s = ' + s + '，查 [' + (s - P.upper) + ', ' + (s - P.lower) +
+          '] → ' + got + ' 个' + (extra ? '，再从 0 开始的这一段 +1' : '') + '，累计 ' + acc;
+        steps.push({ i: i2, s: s, hitLo: rLo + 1, hitHi: rHi, got: got, extra: extra, acc: acc, tree: tree.slice(), msg: m2 });
+      }
+    }
+    function render() {
+      var P = PRESETS[+selP.value];
+      var st = steps[cur];
+      var n = P.nums.length;
+      var VW = 660, x = 30, y = 30;
+      var g = '';
+      g += mktxt(x, y, 'nums（第 1 个数下标为 0）', { anchor: 'start', size: 12, fill: C.dim });
+      var cw = 40, gap = 6;
+      for (var i = 0; i < n; i++) {
+        var cx = x + 150 + i * (cw + gap);
+        var cur_i = (st.i === i);
+        g += cell(cx, y - 16, cw, 26, String(P.nums[i]), {
+          fill: cur_i ? C.orangeBg : (i < st.i ? C.blueSoft : C.grayBg),
+          stroke: cur_i ? C.orange : (i < st.i ? C.blue : C.border)
+        });
+      }
+      var all = [], s = 0;
+      for (var t = 0; t < n; t++) { s += P.nums[t]; all.push(s); }
+      var uniq = [];
+      var srt = all.slice().sort(function (a, b) { return a - b; });
+      for (var k = 0; k < srt.length; k++) {
+        if (k === 0 || srt[k] !== srt[k - 1]) uniq.push(srt[k]);
+      }
+      var m = uniq.length;
+      var y2 = y + 56;
+      g += mktxt(x, y2, '离散化名次轴（1 ~ ' + m + '）', { anchor: 'start', size: 12, fill: C.dim });
+      var cw2 = Math.min(56, Math.floor((VW - x - 180) / m) - 4);
+      var x0 = x + 170;
+      for (var j = 1; j <= m; j++) {
+        var cx2 = x0 + (j - 1) * (cw2 + 4);
+        var inRange = (st.hitHi > 0 && j > st.hitLo - 1 && j <= st.hitHi);
+        g += cell(cx2, y2 - 16, cw2, 26, String(uniq[j - 1]), {
+          fill: inRange ? C.orangeBg : C.grayBg,
+          stroke: inRange ? C.orange : C.border,
+          size: 11
+        });
+        g += mktxt(cx2 + cw2 / 2, y2 + 24, String(j), { anchor: 'middle', size: 10, fill: C.dim });
+      }
+      var y3 = y2 + 62;
+      g += mktxt(x, y3, '树状数组 tree[]', { anchor: 'start', size: 12, fill: C.dim });
+      for (var q = 1; q <= m; q++) {
+        var cx3 = x0 + (q - 1) * (cw2 + 4);
+        g += cell(cx3, y3 - 16, cw2, 26, String(st.tree[q]), {
+          fill: st.tree[q] > 0 ? C.blueSoft : C.grayBg,
+          stroke: st.tree[q] > 0 ? C.blue : C.border
+        });
+      }
+      var y4 = y3 + 50;
+      g += mktxt(x, y4, 'ans += presum(' + st.hitHi + ') - presum(' + (st.hitLo - 1) + ') = ' + st.got +
+        (st.extra ? '，空前缀这一段 +1' : '') + '　累计 = ' + st.acc,
+        { anchor: 'start', size: 13, fill: C.blue, weight: '600' });
+      var y5 = y4 + 24;
+      g += mktxt(x, y5, st.msg, { anchor: 'start', size: 12, fill: C.dim });
+      var extra = '<div class="breakdown">' +
+        '<div class="row">第 <span class="num">' + cur + '</span> / ' + (steps.length - 1) + ' 步　' +
+        '当前前缀和 <span class="num">' + st.s + '</span>　' +
+        '本步新增 <span class="num">' + (st.got + (st.extra || 0)) + '</span>　' +
+        '答案 <span class="num">' + st.acc + '</span></div></div>';
+      body.innerHTML = mksvg(g, VW, y5 + 22) + extra;
+      bPrev.disabled = (cur === 0);
+      bNext.disabled = (cur === steps.length - 1);
+    }
+    function stopAuto() { if (timer) { clearInterval(timer); timer = null; bAuto.textContent = '自动播放'; } }
+    bNext.addEventListener('click', function () { if (cur < steps.length - 1) { cur++; render(); } });
+    bPrev.addEventListener('click', function () { if (cur > 0) { cur--; render(); } });
+    bReset.addEventListener('click', function () { stopAuto(); cur = 0; render(); });
+    selP.addEventListener('change', function () { stopAuto(); build(); cur = 0; render(); });
+    bAuto.addEventListener('click', function () {
+      if (timer) { stopAuto(); return; }
+      bAuto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (cur < steps.length - 1) { cur++; render(); } else stopAuto();
+      }, 900);
+    });
+    build();
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

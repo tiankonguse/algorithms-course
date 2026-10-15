@@ -17,3 +17,13 @@
 - 自检全过：verify_pages 三页 PASS（pager 链双向正确）、verify_viz_steps、verify_home（444 / 9 / 84 / 273）；自写 `/tmp/js125/overlap.js` 全预设全帧 ALL CLEAN，`/tmp/js125/probe.js` 12 项断言与 node 侧独立实现（空间压缩迭代版）逐项一致。
 - 收口动作：nav 父层与组 json 落盘 + 重新生成 json + 入口页兜底数字同步（438→444 / 83→84 / 268→273）+ prompt.md 进度推到 126 + 两笔 git 提交 + 清掉本次起的 headless Chrome。
 - 下一课是 **126**。开工第一步先抢 `/tmp/algo-course-lock-126/owner`，抢不到就退出。
+
+## 2026-10-16 03:00 — 130 课（单调队列与单调栈优化）
+
+- 进度指针读自 `prompt.md`（当时「下一课：130」），抢 `/tmp/algo-course-lock-130/owner` 得 `LOCK_OK auto-1792090900-79226`，收口已删 owner（126~129 由别的会话完成，本轮只做 130）。
+- 产出 **4 页，新开「单调队列与单调栈优化」组**（`nav/dp/dp-monoq/`，插在 `dp-optimize` 之后、`dp-restore` 之前）：`dp-monoq-basic`（P1725 + P3800）、`dp-monoq-formula`（P2627 + POJ1821 + LC2463）、`dp-monoq-stack`（LC2281 + 变序和）、`dp-monoq-boxes`（LC1687），难度 3/4/4/4。教学序就是组内序。
+- 材料：`ppt/算法讲解130【扩展】动态规划优化专题4-单调队列和单调栈优化.pptx`（9 页）+ `src/class130/` 8 份 Java，**全无「C++ 塞注释」版**，页面代码全部自改 C++。
+- 8 题全部编译（`g++ -O2 -std=c++17` + 自建 bits shim 到 `/tmp/cpp130/inc/bits/`）+ 独立暴力随机对拍 `bad=0`；错法比例与例子数字全部自己量（`exp.cpp` / `exp2.cpp` / `exp3.cpp`）。详细记录按课号写入 `progress/130.md`。
+- 自检全过：verify_pages 四页 PASS（pager 链双向正确）、verify_viz_steps 逐帧无空帧、verify_home（**463 / 9 / 87 / 289**）；自写 `/tmp/js130/probe.js` 20 项末帧答案与页面内独立暴力实现逐项一致、`/tmp/js130/overlap.js` 15 项逐图逐帧文字 bbox ALL CLEAN。
+- 收口动作：nav 父层与组 json 落盘 + 重新生成 json（459→463 页、86→87 组）+ 入口页兜底数字同步（444→463 / 84→87 / 273→289）+ prompt.md 进度推到 **131** + 两笔 git 提交 + 清掉本次起的 headless Chrome。
+- 下一课是 **131**（树状数组和线段树优化）。开工第一步先抢 `/tmp/algo-course-lock-131/owner`，抢不到就退出。
