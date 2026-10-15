@@ -12,12 +12,13 @@ agent_created: true
 
 - 站点根：`~/project/github/AIProject/algorithms-course`；课件根：`~/project/github/AIProject/algorithm-journey`
 - **开工前必读**：`algorithms-course/prompt.md`（进度/下一课/约定权威）与 `algorithms-course/.workbuddy/memory/MEMORY.md`（站点约定权威），缺一不可，别凭印象写。本文件是流程，prompt.md 是状态，互相关联。
+- **prompt.md 已瘦身（2026-10-16）**：每课详细记录（题目拆页、对拍数字、踩坑、自检）按课号拆到 `algorithms-course/progress/NNN.md`（如 `progress/128.md`），prompt.md 只留头部、进度指针、跳过与已完成列表。要参考某课先例按课号读对应文件，不要全量加载历史。
 - **本文件是唯一自动加载的那份**（2026-10-14 瘦身后 27KB），细节全在 `references/`，**按需读**：读哪份看文末「按需读索引」表，不要一次把 `references/` 全读进来。
 - **本技能自包含（2026-10-14）**：脚本、参考资料（写作范本四篇、`humanize.md` 去 AI 味规则、分节坑录 `pitfalls-*.md`）全在本目录下，跑流程**不依赖项目外的任何技能**——不再调用 `ui-verify-cdp`（截图与越界用本目录 `scripts/shot_*.js` / `verify_pages.js`）、不再调用 `去AI味` / `humanizer`（规则已内联在 `references/humanize.md`）。脚本也只用 node 内置模块 + 同目录 `cdp_page.js`，不读 `node_modules`。
 
 ## 〇、进度与触发
 
-- **任何「转换下一课 / 把第 NNN 课做成页面 / 批量转换 N 课」任务，第一步完整读 prompt.md**（下一课/已完成/跳过都在那里），再按本文件执行；收口时回写。
+- **任何「转换下一课 / 把第 NNN 课做成页面 / 批量转换 N 课」任务，第一步完整读 prompt.md**（下一课/已完成/跳过都在那里），再按本文件执行；收口时回写。某课的详细记录在 `progress/NNN.md`，需要参考先例（同主题、相邻课）时按课号读，别整批加载。
 - **2026-10-03 用户定调：从小到大转（001 → 207）**。已完成 159~207 共 49 课（历史倒序产物，不回炉重排），下一课以 prompt.md 为准。
 - 推进时的三种情况：
   - **导学课不产页**（001/002 等）：PPT 无可讲的方法/算法/数据结构，或 `src/classNNN/` 无代码 → 记进 prompt.md「跳过」并注明原因。
@@ -216,7 +217,7 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 
 ## 九、收尾
 
-- 更新 `algorithms-course/prompt.md` 进度：完成课挪进「已完成」，「下一课」+1（从小到大推进）；导学课挪进「跳过」并写一句原因。
+- 更新 `algorithms-course/prompt.md` 进度：完成课挪进「已完成」，「下一课」+1（从小到大推进）；导学课挪进「跳过」并写一句原因。**详细记录写进 `algorithms-course/progress/NNN.md`（每课一个文件，文件头一行 `* NNN 课产出 X 页…`，正文格式照旧）**，prompt.md 不放正文。
 - **python 替换锚点截断会把旧句残留成重复**（029 实测）：锚点只写到「* 下一课：**029**。」就整行换掉，行尾原有「003~028 已产页…」留在原地变一句两半。替换后 `grep -n '下一课：' prompt.md` 整行看一遍。
 - 往 `algorithms-course/.workbuddy/memory/YYYY-MM-DD.md` 追加一条：本次建了哪几页、源自第几课、页码/组的位置。共享层有改动（shared.css/js）时写进 `memory/MEMORY.md`。
 
@@ -235,7 +236,7 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 
 > **2026-10-02 用户定调：转换一节课不开子智能体，太浪费 token。** 现在改为**主循环直接做**。
 
-**单课**：按一~九节完整跑一遍，跑完就收口（更新 nav、重新生成 json、更新 prompt.md、补 memory 日志）。**连转 N 课**：串行，一课做完收口干净再开下一课；上下文太满提示用户 `/compact`，不要自己开子智能体「腾地方」。
+**单课**：按一~九节完整跑一遍，跑完就收口（更新 nav、重新生成 json、更新 prompt.md、写 `progress/NNN.md`、补 memory 日志）。**连转 N 课**：串行，一课做完收口干净再开下一课；上下文太满提示用户 `/compact`，不要自己开子智能体「腾地方」。
 
 **控制上下文的小技巧**：PPT 文本别整篇 cat 进上下文（抽到 /tmp/pptNNN.txt 再 grep/sed 按段取）；源码同理（编译跑对拍、不整份读）；页面用「先 Write 带占位符 + 脚本替换」避免手写转义；收口核验只用 grep -c / ls -lT / find -newermt 这类不进上下文的检查。
 
