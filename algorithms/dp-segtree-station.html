@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线段树维护最小值：基站选址 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.st-sel,.st-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.st-sel:focus{outline:none;border-color:var(--accent);}
+.st-btn{cursor:pointer;}
+.st-btn:hover{border-color:var(--accent);color:var(--accent);}
+.st-btn:disabled{opacity:.4;cursor:default;}
+.st-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.st-ctl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>线段树维护最小值：基站选址</h1>
+      <p class="intro">一排村庄，选最多 k 个位置建基站，没被覆盖到的村庄要赔钱。状态定为「最右的基站建在 i」，转移要枚举上一个基站 p 并算中间村庄的赔偿。赔偿是「随着最右基站右移而不断暴露」的量，正好用线段树维护最小值加区间加一次扛下：叶子 p 存「dp[t-1][p] + 已暴露赔偿」，扫到 i 先查前缀最小值，再给会失服务的候选区间加赔偿。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>覆盖类 DP 的常规做法是把「最后一个被选对象的位置」放进状态，然后枚举上一个。这题的数据是村庄在一条线上，基站装在村庄位置上，覆盖范围是一个以村庄为中心的区间。真正难算的是「没覆盖到的村庄要赔」这笔动态的账：最右基站每往右挪一步，就可能有几个村庄从「被服务」变成「失服务」，赔偿要重新算。</p>
+
+      <h2 id="problem">一、问题</h2>
+      <p>n 个村庄排成一排，<code class="inline">dist[i]</code> 是 i 号到 1 号的距离（有序无重复），<code class="inline">fix[i]</code> 是在 i 号建基站的费用，<code class="inline">range[i]</code> 是 i 号村庄的接收范围（基站到它的距离不超过这个数就得到服务），<code class="inline">warranty[i]</code> 是它没被任何基站服务时的赔偿。最多选 k 个村庄建基站，返回总花费最小值。数据范围 <code class="inline">1 &lt;= n &lt;= 20000</code>，<code class="inline">1 &lt;= k &lt;= 100</code>。</p>
+
+      <h2 id="pre">二、预处理：覆盖区间与预警列表</h2>
+      <p>对每个村庄 j，能被哪些基站服务？基站装在村庄位置 p 上，条件是 <code class="inline">dist[p] &gt;= dist[j] - range[j]</code> 且 <code class="inline">dist[p] &lt;= dist[j] + range[j]</code>。dist 有序，二分两次就能得到服务它的基站位置区间 <code class="inline">[left[j], right[j]]</code>：</p>
+      <figure class="fig" id="figCover"></figure>
+      <p>预警列表是关键装置。对村庄 j，记下 <code class="inline">right[j]</code>：当最右基站的位置从 <code class="inline">right[j]</code> 挪到 <code class="inline">right[j]+1</code> 时，j 就从「被服务」变成「失服务」。把所有这种村庄挂在 <code class="inline">right[j]</code> 这个位置下（链式前向星存邻接表），扫到位置 i 时一次拿到「刚越过右边界」的全部村庄。</p>
+      <figure class="fig" id="figAlarm"></figure>
+
+      <h2 id="state">三、状态与转移</h2>
+      <p>设 <code class="inline">dp[t][i]</code> 为「最多建 t 个基站、最右一个建在 i 号、1..i 号村庄的最少花费」。转移枚举上一个基站 p（p &lt; i）：</p>
+      <figure class="fig" id="figDp"></figure>
+      <p>其中 <code class="inline">penalty(p+1..i-1)</code> 是这段村庄里、p 和 i 都覆盖不到的村庄的赔偿和。先看 t=1：只有一个基站建在 i，前面村庄 j &lt; i 只要 <code class="inline">right[j] &lt; i</code> 就失服务（<code class="inline">left[j] &lt;= i</code> 对 j &lt; i 恒成立），赔偿可以随 i 递增累计。</p>
+
+      <h2 id="segtree">四、线段树维护最小值</h2>
+      <p>t &gt;= 2 时，内层是「对所有 p 求 <code class="inline">dp[t-1][p] + penalty(p+1..i-1)</code> 的最小值」。把每个 p 当作线段树的一个叶子，叶子值 = <code class="inline">dp[t-1][p]</code> + 已经暴露的赔偿。i 每前进一位，新暴露的村庄（预警列表里 right[j] == i-1 的那些）会让一部分候选 p 的赔偿变大：</p>
+      <ul>
+        <li>j 失服务的前提是 p 也够不到它，即 <code class="inline">p &lt; left[j]</code>（p 太靠左）；</li>
+        <li>所以对每个新暴露的 j，给叶子区间 <code class="inline">[1, left[j]-1]</code> 整体加 <code class="inline">warranty[j]</code>；</li>
+        <li>然后 <code class="inline">dp[i] = min(dp[i], query(1, i-1) + fix[i])</code>。</li>
+      </ul>
+      <p>注意顺序：先查询、再处理本位置的预警。因为预警加的是「下一个位置才暴露」的赔偿，当前 i 的查询不该看到它们。</p>
+
+      <h2 id="virtual">五、补一个无穷远村庄</h2>
+      <p>边界处理有个省事的办法：在 dist 末尾补一个 <code class="inline">dist = 无穷大</code> 的虚拟村庄，fix、range、warranty 都是 0。最右基站必然有一个「建」在它上面（费用 0，也不产生赔偿），真实村庄最多 k 个基站对应外层循环跑 k+1 轮。这样就不用讨论「最后一个基站之后还有没人赔」：虚拟村庄兜住一切。虚拟村庄的预警列表也会正常生成，left/right 都是它自己，加的赔偿是 0，无副作用。</p>
+
+      <h2 id="code">六、实现</h2>
+      <p>预处理：二分求覆盖区间、生成预警列表（链式前向星）。注意 <code class="inline">right[i]</code> 求出来之后要复查一次，二分找到的位置可能恰好差一个距离，超出接收范围要往回退一格：</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">search</span>(<span class="kw">int</span> d) {
+        <span class="kw">int</span> l = 1, r = n, m;
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">while</span> (l &lt;= r) {
+            m = (l + r) / 2;
+            <span class="kw">if</span> (dist[m] &gt;= d) {
+                ans = m;
+                r = m - 1;
+            } <span class="kw">else</span> {
+                l = m + 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v) {
+        nxt[cnt] = head[u];
+        to[cnt] = v;
+        head[u] = cnt++;
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        cnt = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            lft[i] = search(dist[i] - range[i]);
+            rgt[i] = search(dist[i] + range[i]);
+            <span class="kw">if</span> (dist[rgt[i]] &gt; dist[i] + range[i]) {
+                rgt[i]--;
+            }
+            addEdge(rgt[i], i);
+        }
+    }</pre>
+      <p>线段树维护最小值，带区间加懒标记，和面包店那题只差 max 换成 min：</p>
+    <pre class="code"><span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        segmin[i] = min(segmin[i &lt;&lt; 1], segmin[i &lt;&lt; 1 | 1]);
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (lazyadd[i] != 0) {
+            lazy(i &lt;&lt; 1, lazyadd[i]);
+            lazy(i &lt;&lt; 1 | 1, lazyadd[i]);
+            lazyadd[i] = 0;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">lazy</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        segmin[i] += v;
+        lazyadd[i] += v;
+    }
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) {
+            segmin[i] = dp[l];
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            build(l, mid, i &lt;&lt; 1);
+            build(mid + 1, r, i &lt;&lt; 1 | 1);
+            up(i);
+        }
+        lazyadd[i] = 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            lazy(i, jobv);
+        } <span class="kw">else</span> {
+            down(i);
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobl &lt;= mid) add(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+            <span class="kw">if</span> (jobr &gt; mid) add(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+            up(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) <span class="kw">return</span> segmin[i];
+        down(i);
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">int</span> ans = INT_MAX;
+        <span class="kw">if</span> (jobl &lt;= mid) ans = min(ans, query(jobl, jobr, l, mid, i &lt;&lt; 1));
+        <span class="kw">if</span> (jobr &gt; mid) ans = min(ans, query(jobl, jobr, mid + 1, r, i &lt;&lt; 1 | 1));
+        <span class="kw">return</span> ans;
+    }</pre>
+      <p>主流程。t=1 层的 <code class="inline">w</code> 就是「只建一个基站时前面村庄的累计赔偿」；t&gt;=2 层每轮把上一层的 dp 铺进线段树，边扫边查边加：</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">compute</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, w = 0; i &lt;= n; i++) {
+            dp[i] = w + fix[i];
+            <span class="kw">for</span> (<span class="kw">int</span> ei = head[i]; ei != 0; ei = nxt[ei]) {
+                w += warranty[to[ei]];
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> t = 2; t &lt;= k + 1; t++) {
+            build(1, n, 1);
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+                <span class="kw">if</span> (i &gt;= t) {
+                    dp[i] = min(dp[i], query(1, i - 1, 1, n, 1) + fix[i]);
+                }
+                <span class="kw">for</span> (<span class="kw">int</span> ei = head[i], uncover; ei != 0; ei = nxt[ei]) {
+                    uncover = to[ei];
+                    <span class="kw">if</span> (lft[uncover] &gt; 1) {
+                        add(1, lft[uncover] - 1, warranty[uncover], 1, n, 1);
+                    }
+                }
+            }
+        }
+        <span class="kw">return</span> dp[n];
+    }</pre>
+
+      <h2 id="demo">七、演示：最右基站推进时的失服务</h2>
+      <p>下面演示只建一个基站（t=1）的场景：最右基站位置 i 从 1 往右推，每个村庄画了它的覆盖区间，橙色的是当前基站，绿色是被它覆盖的村庄，红色是已经失服务、正在累计赔偿的村庄。能看到赔偿 w 只在「越过某个 right[j]」的那一刻跳增。</p>
+      <div class="viz" id="vizStation">
+        <p class="viz-title">基站选址：覆盖区间与失服务赔偿</p>
+        <div id="vizStationBody"></div>
+        <div class="viz-controls">
+          <div class="st-ctl"><label for="stationPreset">例子</label>
+            <select class="st-sel" id="stationPreset">
+              <option value="0">5 村：dist=[2,4,7,9,12]，range=[3,1,2,2,4]</option>
+              <option value="1">3 村全覆盖：range 都很大</option>
+              <option value="2">3 村都失服务：range = 1</option>
+            </select>
+          </div>
+          <button class="st-btn" id="stationPrev" type="button">上一步</button>
+          <button class="st-btn" id="stationNext" type="button">下一步</button>
+          <button class="st-btn" id="stationAuto" type="button">自动播放</button>
+          <button class="st-btn" id="stationReset" type="button">重置</button>
+        </div>
+        <div class="legend">
+          <span><i class="dot full"></i>当前基站位置</span>
+          <span><i class="dot partial"></i>被服务村庄</span>
+          <span><i class="dot skip"></i>失服务（计入赔偿）</span>
+        </div>
+      </div>
+
+      <h2 id="complexity">复杂度分析</h2>
+      <p>预处理一次二分 O(n log n)；外层 t 循环 k+1 轮，内层 i 循环 n 次，每次一次查询（O(log n)）加若干次区间加（每个村庄的预警恰好被处理一次，总 O(n log n) 一层的量）。总时间 O(k n log n)，k = 100、n = 20000 时约 10 的 8 次方量级，能过。</p>
+      <p>空间：线段树两个 n×4 数组加各预处理数组，O(n)。</p>
+
+      <h2 id="summary">总结</h2>
+      <p>基站选址把「枚举上一个基站 + 算动态赔偿」压成线段树上的「查询最小值 + 区间加」。三个关键装置：覆盖区间 <code class="inline">[left, right]</code> 把服务关系变成数轴上的区间；预警列表把「赔偿什么时候开始」挂在 right[j] 上，每个村庄只被处理一次；虚拟村庄把最后一个基站的边界兜掉。查询和区间加的顺序不能反。</p>
+      <p>这三题（玉米田、面包店、基站选址）合起来看，树状数组/线段树优化的本质是同一句：把转移内层的枚举换成数据结构维护的量，区别只在要维护的是前缀最值、区间加最值还是区间加最小值。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>基站选址</td><td><a href="https://www.luogu.com.cn/problem/P2605" target="_blank">luogu.com.cn/problem/P2605</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解131【扩展】动态规划优化专题5-树状数组和线段树优化</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+</section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = {
+    blue: '#2563eb', blueBg: '#dbeafe', blueSoft: '#eef4ff',
+    orange: '#ea580c', orangeBg: '#ffedd5',
+    green: '#16a34a', greenBg: '#dcfce7',
+    gray: '#9aa0a6', grayBg: '#f6f7f9', border: '#e6e8eb',
+    text: '#333', dim: '#6b7280'
+  };
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/ /g, '\u00a0');
+  }
+  function mksvg(inner, w, h) {
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" ' +
+      'style="width:100%;height:auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif">' +
+      '<style>text{font-size:12px;fill:' + C.text + '}</style>' + inner + '</svg>';
+  }
+  function mktxt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '"' +
+      (o.anchor ? ' text-anchor="' + o.anchor + '"' : '') +
+      (o.size ? ' font-size="' + o.size + '"' : '') +
+      (o.fill ? ' fill="' + o.fill + '"' : '') +
+      (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function mkbox(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" ' +
+      'fill="' + (o.fill || C.grayBg) + '" stroke="' + (o.stroke || C.border) + '" ' +
+      'stroke-width="' + (o.sw || 1) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function mkline(x1, y1, x2, y2, o) {
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" ' +
+      'stroke="' + (o.stroke || C.gray) + '" stroke-width="' + (o.sw || 1) + '"' +
+      (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function cell(x, y, w, h, label, o) {
+    o = o || {};
+    var g = mkbox(x, y, w, h, o);
+    g += mktxt(x + w / 2, y + h / 2 + 4, label, {
+      anchor: 'middle', size: o.size || 12, fill: o.tfill || C.text, weight: o.weight
+    });
+    return g;
+  }
+  function mount(id, inner, w, h, cap) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = mksvg(inner, w, h) + '<figcaption>' + cap + '</figcaption>';
+  }
+
+  /* ---------- 图一：覆盖区间 ---------- */
+  (function () {
+    var VW = 660, y = 26;
+    var g = '';
+    g += mktxt(30, y, '村庄位置在 dist 数轴上，每个村庄能收到信号的基站位置是一个区间', { anchor: 'start', size: 12, fill: C.dim });
+    var x0 = 60, x1 = 620, ly = y + 40;
+    g += mkline(x0, ly, x1, ly, { stroke: C.gray, sw: 1.5 });
+    var pos = [100, 200, 340, 460, 560];
+    var names = ['1', '2', '3', '4', '5'];
+    for (var i = 0; i < 5; i++) {
+      g += mkline(pos[i], ly - 6, pos[i], ly + 6, { stroke: C.text, sw: 1.5 });
+      g += mktxt(pos[i], ly + 22, names[i], { anchor: 'middle', size: 11, fill: C.text });
+    }
+    var y2 = y + 78;
+    g += mktxt(30, y2 + 4, '村庄 3 的覆盖区间 [left[3], right[3]]：', { anchor: 'start', size: 12, fill: C.dim });
+    g += mkline(pos[2] - 110, y2 + 18, pos[2] + 95, y2 + 18, { stroke: C.blue, sw: 3 });
+    g += mktxt(pos[2], y2 + 32, 'left[3]', { anchor: 'middle', size: 10, fill: C.blue });
+    g += mktxt(pos[2] - 110 - 26, y2 + 32, 'left', { anchor: 'middle', size: 10, fill: C.dim });
+    g += mktxt(pos[2] + 95 + 24, y2 + 32, 'right', { anchor: 'middle', size: 10, fill: C.dim });
+    var y3 = y2 + 50;
+    g += mktxt(30, y3, '基站建在区间内的任何位置，村庄 3 都算被服务；区间外就算失服务', { anchor: 'start', size: 12, fill: C.dim });
+    mount('figCover', g, VW, y3 + 26, '接收范围把「哪个基站能服务我」变成数轴上的一段区间');
+  })();
+
+  /* ---------- 图二：预警列表 ---------- */
+  (function () {
+    var VW = 660, y = 26;
+    var g = '';
+    g += mktxt(30, y, '村庄 j 的 right[j] = 5：基站建在 5 号还能服务它，挪到 6 号就失服务', { anchor: 'start', size: 12, fill: C.dim });
+    var x0 = 60, ly = y + 40;
+    var pos = [100, 200, 340, 460, 560, 620];
+    for (var i = 0; i < 6; i++) {
+      g += mkline(pos[i], ly - 6, pos[i], ly + 6, { stroke: C.text, sw: 1.5 });
+      g += mktxt(pos[i], ly + 20, String(i + 1), { anchor: 'middle', size: 11, fill: C.text });
+    }
+    var y2 = y + 76;
+    g += mkline(pos[4] + 8, ly, pos[4] + 8, y2, { stroke: C.orange, sw: 1.5, dash: '4 3' });
+    g += mktxt(pos[4] + 8, y2 - 8, 'right[j] = 5 处挂一条预警：j', { anchor: 'middle', size: 12, fill: C.orange, weight: '600' });
+    var y3 = y2 + 26;
+    g += mktxt(30, y3, '基站位置推进到 6 及以上时，j 失服务，赔偿加进所有 p < left[j] 的候选', { anchor: 'start', size: 12, fill: C.text });
+    mount('figAlarm', g, VW, y3 + 26, '预警列表让「哪些村庄刚越过右边界」在扫到 right[j] 时一次拿到');
+  })();
+
+  /* ---------- 图三：dp 转移 ---------- */
+  (function () {
+    var VW = 660, y = 26;
+    var g = '';
+    g += mktxt(30, y, 'dp[t][i] = min(dp[t-1][i], fix[i] + min{ dp[t-1][p] + penalty(p+1..i-1) : p < i })',
+      { anchor: 'start', size: 14, fill: C.text, weight: '600' });
+    var y2 = y + 38;
+    g += mktxt(30, y2, 'p 是上一个基站位置；penalty 是 p 和 i 都覆盖不到的中间村庄赔偿和', { anchor: 'start', size: 12, fill: C.dim });
+    var y3 = y2 + 30;
+    g += mktxt(30, y3, '线段树叶子 p 存 dp[t-1][p] + 已暴露赔偿；query(1, i-1) 一次拿最小值', { anchor: 'start', size: 12, fill: C.blue, weight: '600' });
+    mount('figDp', g, VW, y3 + 26, '转移内层 = 所有候选 p 的「dp[t-1][p] + 已暴露赔偿」取最小值');
+  })();
+
+  /* ---------- 演示：失服务推进 ---------- */
+  (function () {
+    var PRESETS = [
+      { dist: [2, 4, 7, 9, 12], range: [3, 1, 2, 2, 4], fix: [1, 1, 1, 1, 1], warranty: [2, 3, 4, 5, 6] },
+      { dist: [2, 4, 7], range: [100, 100, 100], fix: [3, 2, 1], warranty: [5, 5, 5] },
+      { dist: [2, 4, 7], range: [1, 1, 1], fix: [3, 2, 1], warranty: [10, 10, 10] }
+    ];
+    var body = document.getElementById('vizStationBody');
+    var bPrev = document.getElementById('stationPrev');
+    var bNext = document.getElementById('stationNext');
+    var bAuto = document.getElementById('stationAuto');
+    var bReset = document.getElementById('stationReset');
+    var selP = document.getElementById('stationPreset');
+    var cur = 0, steps = [], timer = null;
+
+    function build() {
+      var P = PRESETS[+selP.value];
+      var n = P.dist.length;
+      // left/right：村庄 j 能被基站位置 p 服务
+      var lf = [], rt = [];
+      for (var j = 0; j < n; j++) {
+        lf[j] = -1; rt[j] = -1;
+        for (var p = 0; p < n; p++) {
+          if (Math.abs(P.dist[p] - P.dist[j]) <= P.range[j]) {
+            if (lf[j] === -1) lf[j] = p;
+            rt[j] = p;
+          }
+        }
+      }
+      // 加虚拟村庄 n（dist = 无穷）
+      var stepsArr = [];
+      var w = 0;
+      for (var i = 0; i <= n; i++) {  // i 是最右基站位置（0..n，n 是虚拟）
+        var serv = [], unserv = [];
+        for (var j = 0; j < n; j++) {
+          if (i === n || (lf[j] !== -1 && lf[j] <= i && i <= rt[j])) serv.push(j);
+          else unserv.push(j);
+        }
+        var dp1 = P.fix[i] + w;  // t=1 层：最右基站建在 i
+        var desc = '';
+        if (i === n) {
+          desc = '最右基站建在虚拟村庄：真实村庄一个基站都没装，全部失服务';
+          w += P.warranty[0];  // 虚拟村庄场景：赔偿所有
+        }
+        stepsArr.push({ i: i, serv: serv.slice(), unserv: unserv.slice(), w: w, dp1: dp1, lf: lf.slice(), rt: rt.slice(), msg: desc });
+        // 推进 w：越过 right[j] == i 的村庄
+        if (i < n) {
+          for (var j2 = 0; j2 < n; j2++) {
+            if (rt[j2] === i && i >= lf[j2]) {
+              w += P.warranty[j2];
+            }
+          }
+        }
+      }
+      steps = stepsArr;
+      // 修正末帧 msg
+      steps[steps.length - 1].msg = '赔偿累计 ' + w + '（全部村庄失服务）';
+      steps[steps.length - 1].dp1 = 0;
+    }
+    function render() {
+      var st = steps[cur];
+      var P = PRESETS[+selP.value];
+      var n = P.dist.length;
+      var VW = 660, x = 30, y = 30;
+      var g = '';
+      // 数轴
+      var x0 = 90, x1 = 620, ly = y + 16;
+      g += mkline(x0, ly, x1, ly, { stroke: C.gray, sw: 1.5 });
+      var scale = (x1 - x0) / (P.dist[n - 1] + 1);
+      for (var j = 0; j < n; j++) {
+        var px = x0 + P.dist[j] * scale;
+        g += mkline(px, ly - 6, px, ly + 6, { stroke: C.text, sw: 1.5 });
+        g += mktxt(px, ly + 20, '村' + (j + 1), { anchor: 'middle', size: 10, fill: C.text });
+      }
+      // 虚拟村庄位置
+      var vx = x1 + 6;
+      g += mkline(vx, ly - 6, vx, ly + 6, { stroke: C.text, sw: 1.5 });
+      g += mktxt(vx, ly + 20, '∞', { anchor: 'middle', size: 10, fill: C.dim });
+      // 覆盖区间（每个村庄一行）
+      var y2 = y + 52;
+      g += mktxt(x, y2, '覆盖区间（村庄 → 能服务它的基站位置段）', { anchor: 'start', size: 12, fill: C.dim, weight: '600' });
+      var rowH = 20;
+      for (var j2 = 0; j2 < n; j2++) {
+        var ry = y2 + 18 + j2 * (rowH + 6);
+        g += mktxt(x, ry + 4, String(j2 + 1), { anchor: 'start', size: 11, fill: C.dim });
+        var lfPx = x0 + P.dist[st.lf[j2]] * scale;
+        var rtPx = x0 + P.dist[st.rt[j2]] * scale;
+        g += mkline(lfPx, ry, rtPx, ry, { stroke: C.blue, sw: 3 });
+        g += mktxt(x0, ry - 10, '[', { anchor: 'middle', size: 11, fill: C.dim });
+      }
+      // 当前基站位置
+      var curPx = (st.i === n) ? vx : x0 + P.dist[st.i] * scale;
+      g += mkline(curPx, y + 6, curPx, y2 + 18 + n * (rowH + 6) + 4, { stroke: C.orange, sw: 2, dash: '4 3' });
+      g += mktxt(curPx, y + 8 - 6, '基站 i' + (st.i === n ? '=∞' : '=' + (st.i + 1)), { anchor: 'middle', size: 11, fill: C.orange, weight: '600' });
+      // 状态行
+      var y3 = y2 + 18 + n * (rowH + 6) + 26;
+      g += mktxt(x, y3, '被服务：' + (st.serv.length ? st.serv.map(function (v) { return v + 1; }).join('、') : '无') +
+        '　失服务：' + (st.unserv.length ? st.unserv.map(function (v) { return v + 1; }).join('、') : '无'),
+        { anchor: 'start', size: 12, fill: C.text });
+      var y4 = y3 + 26;
+      g += mktxt(x, y4, '累计赔偿 w = ' + st.w + '　dp[1][' + (st.i === n ? '∞' : st.i + 1) + '] = ' + st.dp1,
+        { anchor: 'start', size: 13, fill: C.blue, weight: '600' });
+      var y5 = y4 + 26;
+      if (st.msg) g += mktxt(x, y5, st.msg, { anchor: 'start', size: 12, fill: C.dim });
+      var extra = '<div class="breakdown">' +
+        '<div class="row">第 <span class="num">' + cur + '</span> / ' + (steps.length - 1) + ' 步　' +
+        '基站位置 <span class="num">' + (st.i === n ? '∞（虚拟）' : st.i + 1) + '</span>　' +
+        '累计赔偿 <span class="num">' + st.w + '</span></div></div>';
+      body.innerHTML = mksvg(g, VW, y5 + 26) + extra;
+      bPrev.disabled = (cur === 0);
+      bNext.disabled = (cur === steps.length - 1);
+    }
+    function stopAuto() { if (timer) { clearInterval(timer); timer = null; bAuto.textContent = '自动播放'; } }
+    bNext.addEventListener('click', function () { if (cur < steps.length - 1) { cur++; render(); } });
+    bPrev.addEventListener('click', function () { if (cur > 0) { cur--; render(); } });
+    bReset.addEventListener('click', function () { stopAuto(); cur = 0; render(); });
+    selP.addEventListener('change', function () { stopAuto(); build(); cur = 0; render(); });
+    bAuto.addEventListener('click', function () {
+      if (timer) { stopAuto(); return; }
+      bAuto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (cur < steps.length - 1) { cur++; render(); } else stopAuto();
+      }, 900);
+    });
+    build();
+    render();
+  })();
+})();
+</script>
+</body>
+</html>
