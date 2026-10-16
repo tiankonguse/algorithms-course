@@ -1,0 +1,336 @@
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>幸运数字：树上倍增与线性基</h1>
+      <p class="intro">树上一条路径，路径上的点权随便选，异或和最大是多少。线性基本来只和集合有关，但路径是「深度 ≥ LCA 的点」这个集合，得给每个基记上它来自哪层，才能把树砍成两段。</p>
+
+      <h2>零、问题</h2>
+      <p>n 个点连成一棵树，每个点有数字，q 次查询：a 到 b 路径上的点，随意选择数字，求最大异或和。n ≤ 2 × 10<sup>4</sup>、q ≤ 2 × 10<sup>5</sup>、点权 ≤ 2<sup>60</sup>。</p>
+      <p>路径是 x 到 LCA 再到 y 的一串点。直接想法：把路径上所有点的数字倒进一个线性基，求最大异或。但路径长 O(n)，q 次查询 O(nq) 不行。要预处理每个点「到根的线性基」，查询时把 x 段和 y 段拼起来。</p>
+
+      <h2>一、带深度的线性基</h2>
+      <p>每个点 u 维护 bases[u]：从根到 u 这条路径上所有点权组成空间的线性基。只存基还不够，查询时 x 段的基里可能有「深度比 LCA 浅」的点（不在路径上），要能用深度过滤。</p>
+      <p>于是每个基多记一个 level：它最早来自哪个深度的点。插入时如果新数更深，就把它和已有基交换：更深的数优先占位。这样 level[i] 永远是「能代表这个基位的最深来源」。</p>
+
+      <figure class="fig" id="fig-depth"></figure>
+
+      <p>bases[u] 从父亲继承一份，再把 u 自己的数字插进去。对每个 u 这样做，全树一遍 DFS 就能建完，查询时 x、y 两段的基都现成。</p>
+
+      <h2>二、查询：深度过滤 + 合并</h2>
+      <p>lca = LCA(x, y)。x 侧基里 level ≥ deep[lca] 的基直接放进全局基（每个位一个，不冲突）；y 侧基里同样过滤后逐个插入（可能和 x 侧的基线性相关，要重新消）。合出来的全局基就是路径上点权的线性基，从高到低贪心取最大异或和。</p>
+
+      <figure class="fig" id="fig-path"></figure>
+
+          <pre class="code"><span class="cm">// 带深度的线性基插入：更深的数优先占基位</span>
+    <span class="kw">bool</span> <span class="fn">insertReplace</span>(<span class="kw">ll</span> curv, <span class="kw">int</span> curl, <span class="kw">ll</span>* basis, <span class="kw">int</span>* level) {
+      <span class="kw">for</span> (<span class="kw">int</span> i = BIT; i &gt;= 0; i--) {
+        <span class="kw">if</span> (curv &gt;&gt; i == 1) {
+          <span class="kw">if</span> (basis[i] == 0) {
+            basis[i] = curv;
+            level[i] = curl;
+            <span class="kw">return</span> <span class="kw">true</span>;
+          }
+          <span class="kw">if</span> (curl &gt; level[i]) {
+            swap(curv, basis[i]);
+            swap(curl, level[i]);
+          }
+          curv ^= basis[i];
+        }
+      }
+      <span class="kw">return</span> <span class="kw">false</span>;
+    }</pre>
+
+          <pre class="code"><span class="cm">// 树上倍增：bases[u] 是根到 u 路径上点的线性基（每个基记深度）</span>
+    <span class="kw">void</span> <span class="fn">dfs</span>(<span class="kw">int</span> root) {
+      stackSize = 0;
+      push(root, 0, -1);
+      <span class="kw">while</span> (stackSize &gt; 0) {
+        pop();
+        <span class="kw">if</span> (e == -1) {
+          deep[u] = deep[f] + 1;
+          stjump[u][0] = f;
+          <span class="kw">for</span> (<span class="kw">int</span> p = 1; p &lt;= power; p++) {
+            stjump[u][p] = stjump[stjump[u][p - 1]][p - 1];
+          }
+          <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt;= BIT; i++) {
+            bases[u][i] = bases[f][i];
+            levels[u][i] = levels[f][i];
+          }
+          insertReplace(arr[u], deep[u], bases[u], levels[u]);
+          e = head[u];
+        } <span class="kw">else</span> {
+          e = next[e];
+        }
+        <span class="kw">if</span> (e != 0) {
+          push(u, f, e);
+          <span class="kw">if</span> (to[e] != f) push(to[e], u, -1);
+        }
+      }
+    }</pre>
+
+          <pre class="code"><span class="cm">// 查询：深度不小于 LCA 的基才有效，x 侧直接放、y 侧逐个插入</span>
+    <span class="kw">ll</span> <span class="fn">query</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) {
+      <span class="kw">int</span> lc = lca(x, y);
+      memset(basis, 0, <span class="kw">sizeof</span>(basis));
+      <span class="kw">for</span> (<span class="kw">int</span> i = BIT; i &gt;= 0; i--) {
+        <span class="kw">ll</span> num = bases[x][i];
+        <span class="kw">if</span> (levels[x][i] &gt;= deep[lc] &amp;&amp; num != 0) basis[i] = num;
+      }
+      <span class="kw">for</span> (<span class="kw">int</span> i = BIT; i &gt;= 0; i--) {
+        <span class="kw">ll</span> num = bases[y][i];
+        <span class="kw">if</span> (levels[y][i] &gt;= deep[lc] &amp;&amp; num != 0) {
+          <span class="kw">for</span> (<span class="kw">int</span> j = i; j &gt;= 0; j--) {
+            <span class="kw">if</span> (num &gt;&gt; j == 1) {
+              <span class="kw">if</span> (basis[j] == 0) { basis[j] = num; <span class="kw">break</span>; }
+              num ^= basis[j];
+            }
+          }
+        }
+      }
+      <span class="kw">ll</span> ans = 0;
+      <span class="kw">for</span> (<span class="kw">int</span> i = BIT; i &gt;= 0; i--) ans = max(ans, ans ^ basis[i]);
+      <span class="kw">return</span> ans;
+    }</pre>
+
+      <p>预处理 O(n × 60²)（每个点复制 + 插入 60 位），查询 O(60²)（LCA O(60) + 合并 60 位）。树的 DFS 用迭代栈写，递归在 C++ 上会爆栈。</p>
+
+      <h2>三、演示：路径点权合并</h2>
+      <p>一棵 5 点树，三条查询路径，看点权怎么按深度过滤进全局基，最大异或和是多少。</p>
+
+      <div class="viz" id="viz-lucky">
+        <div class="viz-title">演示：树上线性基，按深度过滤合并</div>
+        <div id="lucky-svg"></div>
+        <div class="viz-controls">
+          <select id="lucky-sel">
+            <option value="ex1">查询 4 → 5（路径 4,2,5）</option>
+            <option value="ex2">查询 3 → 5（路径 3,1,2,5）</option>
+            <option value="ex3">查询 1 → 5（路径 1,2,5）</option>
+          </select>
+          <button type="button" id="lucky-prev">上一步</button>
+          <button type="button" id="lucky-next">下一步</button>
+          <button type="button" id="lucky-play">自动播放</button>
+          <button type="button" id="lucky-reset">重置</button>
+        </div>
+      </div>
+
+      <h2>四、总结</h2>
+      <p>幸运数字把线性基和树上倍增接起来：每个点存「到根的带深度线性基」，插入时深的数优先占位，查询按 LCA 深度过滤后合并两段。O(n × 60²) 预处理换 O(q × 60²) 查询，2 × 10<sup>5</sup> 次查询直接跑。这个「带深度的基」是树上线性基题的标准零件，路径端点、子树、换根变体都在这上面改。</p>
+
+      <h2>五、相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>P3292 [SCOI2016] 幸运数字</td><td><a href="https://www.luogu.com.cn/problem/P3292" target="_blank">P3292</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>六、参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解137【扩展】线性基-下</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', red: '#dc2626', green: '#16a34a', dim: '#64748b', border: '#cbd5e1', bg: '#f1f5f9' };
+  function T(x, y, s, opt) {
+    opt = opt || {};
+    var a = opt.anchor || 'start', f = opt.fill || '#0f172a', w = opt.weight || '400', z = opt.size || 13;
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x); t.setAttribute('y', y); t.setAttribute('font-size', z);
+    t.setAttribute('fill', f); t.setAttribute('font-weight', w); t.setAttribute('text-anchor', a);
+    t.textContent = s;
+    return t;
+  }
+  function R(x, y, w, h, opt) {
+    opt = opt || {};
+    var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    r.setAttribute('x', x); r.setAttribute('y', y); r.setAttribute('width', w); r.setAttribute('height', h);
+    r.setAttribute('fill', opt.fill || '#fff'); r.setAttribute('stroke', opt.stroke || C.border); r.setAttribute('stroke-width', 1.2);
+    if (opt.rx) r.setAttribute('rx', opt.rx);
+    return r;
+  }
+  function LN(x1, y1, x2, y2, opt) {
+    opt = opt || {};
+    var l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    l.setAttribute('stroke', opt.stroke || C.dim); l.setAttribute('stroke-width', opt.w || 1.2);
+    return l;
+  }
+  function mount(id, svg) { document.getElementById(id).appendChild(svg); }
+  function svgEl(w, h) {
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    s.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    s.setAttribute('style', 'width:100%;height:auto');
+    return s;
+  }
+
+  // ---------- 图1：带深度替换 ----------
+  (function () {
+    var s = svgEl(640, 220);
+    s.appendChild(T(30, 26, '同一基位竞争：新数更深，优先占基位', { weight: '600' }));
+    var rows = [
+      ['basis[2] 存 5', '来自深度 3', '5'],
+      ['插入 7（深度 5）', '7 更深，替换 5 占位', '7'],
+      ['5 被顶出来继续往下消', 'level[2] = 5', '5 ^ 7 = 2']
+    ];
+    for (var i = 0; i < 3; i++) {
+      var yy = 50 + i * 40;
+      s.appendChild(R(30, yy - 18, 180, 32, { fill: '#f8fafc' }));
+      s.appendChild(T(120, yy + 4, rows[i][0], { anchor: 'middle', size: 12 }));
+      s.appendChild(R(218, yy - 18, 240, 32, { fill: i === 1 ? '#eff6ff' : '#f8fafc', stroke: i === 1 ? C.blue : C.border }));
+      s.appendChild(T(338, yy + 4, rows[i][1], { anchor: 'middle', size: 12, fill: i === 1 ? C.blue : C.dim }));
+      s.appendChild(R(466, yy - 18, 130, 32, { fill: i === 2 ? '#fef2f2' : '#f8fafc', stroke: i === 2 ? C.red : C.border }));
+      s.appendChild(T(531, yy + 4, rows[i][2], { anchor: 'middle', size: 12, fill: i === 2 ? C.red : C.dim }));
+    }
+    s.appendChild(T(30, 186, '这样每个基位都指向「最深」的来源点：过滤深度时最不容易误伤', { fill: C.dim, size: 12 }));
+    s.appendChild(T(30, 210, 'level 记录的是插入时那个点的深度，不是数字大小', { fill: C.dim, size: 12 }));
+    mount('fig-depth', s);
+  })();
+
+  // ---------- 图2：路径合并 ----------
+  (function () {
+    var s = svgEl(640, 240);
+    s.appendChild(T(30, 26, '查询 4 → 5，LCA = 2：路径点 = 4, 2, 5', { weight: '600' }));
+    s.appendChild(R(280, 50, 46, 30, { fill: '#eff6ff', stroke: C.blue }));
+    s.appendChild(T(303, 69, '1', { anchor: 'middle' }));
+    s.appendChild(R(190, 130, 46, 30, { fill: '#eff6ff', stroke: C.blue }));
+    s.appendChild(T(213, 149, '2', { anchor: 'middle' }));
+    s.appendChild(R(380, 130, 46, 30, { fill: '#f8fafc' }));
+    s.appendChild(T(403, 149, '3', { anchor: 'middle' }));
+    s.appendChild(R(110, 195, 46, 26, { fill: '#fef2f2', stroke: C.red }));
+    s.appendChild(T(133, 212, '4', { anchor: 'middle', fill: C.red }));
+    s.appendChild(R(280, 195, 46, 26, { fill: '#fef2f2', stroke: C.red }));
+    s.appendChild(T(303, 212, '5', { anchor: 'middle', fill: C.red }));
+    LN(303, 80, 213, 130, { stroke: C.blue });
+    LN(303, 80, 403, 130);
+    LN(213, 160, 133, 195, { stroke: C.red });
+    LN(213, 160, 303, 195, { stroke: C.red });
+    s.appendChild(T(480, 60, 'x 侧基（深度 ≥ 2）', { fill: C.dim, size: 12 }));
+    s.appendChild(T(480, 82, 'bases[4] 过滤后：6', { fill: C.blue, size: 12 }));
+    s.appendChild(T(480, 104, 'y 侧基（深度 ≥ 2）', { fill: C.dim, size: 12 }));
+    s.appendChild(T(480, 126, 'bases[5] 过滤后：7、5', { fill: C.blue, size: 12 }));
+    s.appendChild(T(480, 156, '合并全局基 {6, 7, 5}', { fill: C.dim, size: 12 }));
+    s.appendChild(T(480, 184, '最大异或和', { weight: '600', fill: C.green, size: 13 }));
+    s.appendChild(T(480, 208, '6 ^ 7 = 1、7 最大 → 7', { fill: C.green, size: 12 }));
+    mount('fig-path', s);
+  })();
+
+  // ---------- 演示 ----------
+  var NODE = {
+    1: { x: 303, y: 70, w: 2, deep: 1, fa: 0 },
+    2: { x: 213, y: 150, w: 5, deep: 2, fa: 1 },
+    3: { x: 403, y: 150, w: 11, deep: 2, fa: 1 },
+    4: { x: 133, y: 205, w: 6, deep: 3, fa: 2 },
+    5: { x: 303, y: 205, w: 7, deep: 3, fa: 2 }
+  };
+  var EDGES = [[1, 2], [1, 3], [2, 4], [2, 5]];
+  var DATA = {
+    ex1: { x: 4, y: 5, head: '查询 4 → 5', concl: '路径点 {6, 5, 7} → 最大异或和 = 7' },
+    ex2: { x: 3, y: 5, head: '查询 3 → 5', concl: '路径点 {11, 2, 5, 7} → 最大异或和 = 14' },
+    ex3: { x: 1, y: 5, head: '查询 1 → 5', concl: '路径点 {2, 5, 7} → 最大异或和 = 7' }
+  };
+  var BIT = 60;
+  function insertInto(basis, num) {
+    for (var i = BIT; i >= 0; i--) {
+      if ((num >> i) === 1) {
+        if (basis[i] === 0) { basis[i] = num; return true; }
+        num ^= basis[i];
+      }
+    }
+    return false;
+  }
+  function maxXor(basis) {
+    var ans = 0;
+    for (var i = BIT; i >= 0; i--) ans = Math.max(ans, ans ^ basis[i]);
+    return ans;
+  }
+  function father(u) { return NODE[u].fa; }
+  function pathNodes(x, y) {
+    var a = x, b = y;
+    var pa = [], pb = [];
+    while (NODE[a].deep > NODE[b].deep) { pa.push(a); a = father(a); }
+    while (NODE[b].deep > NODE[a].deep) { pb.push(b); b = father(b); }
+    while (a !== b) { pa.push(a); pb.push(b); a = father(a); b = father(b); }
+    pa.push(a);
+    return pa.concat(pb.reverse());
+  }
+  function buildSteps(p) {
+    var steps = [];
+    var nodes = pathNodes(p.x, p.y);
+    var lcaDeep = Math.min(NODE[p.x].deep, NODE[p.y].deep);
+    steps.push({ note: '路径 ' + p.x + ' → ' + p.y + '：' + nodes.join('、') + '，LCA 深度 ' + lcaDeep, nodes: [], head: p.head });
+    var basis = [];
+    for (var k = 0; k < nodes.length; k++) {
+      var u = nodes[k];
+      insertInto(basis, NODE[u].w);
+      steps.push({ note: '加入点 ' + u + '（权 ' + NODE[u].w + '），当前最大异或 ' + maxXor(basis), nodes: nodes.slice(0, k + 1), head: p.head });
+    }
+    var ans = maxXor(basis);
+    steps.push({ note: p.concl + '（基最大异或 = ' + ans + '）', nodes: nodes.slice(), last: true, head: p.head });
+    return steps;
+  }
+
+  var cur = 0, steps = [], sel = document.getElementById('lucky-sel');
+  var DATA_CUR = DATA[sel.value];
+  function draw() {
+    var box = document.getElementById('lucky-svg');
+    box.innerHTML = '';
+    var st = steps[cur];
+    var p = DATA_CUR;
+    var s = svgEl(640, 260);
+    s.appendChild(T(30, 24, p.head + (st.last ? ' → 结论' : ''), { weight: '700', fill: C.blue }));
+    var onPath = {};
+    if (st.nodes) for (var t = 0; t < st.nodes.length; t++) onPath[st.nodes[t]] = true;
+    for (var e = 0; e < EDGES.length; e++) {
+      var u = EDGES[e][0], v = EDGES[e][1];
+      s.appendChild(LN(NODE[u].x, NODE[u].y + 8, NODE[v].x, NODE[v].y - 8, { stroke: onPath[u] && onPath[v] ? C.red : C.dim, w: onPath[u] && onPath[v] ? 2.5 : 1.2 }));
+    }
+    for (var id in NODE) {
+      var nd = NODE[id];
+      var isP = onPath[id];
+      s.appendChild(R(nd.x - 22, nd.y - 14, 44, 28, { fill: isP ? '#fef2f2' : '#f8fafc', stroke: isP ? C.red : C.border }));
+      s.appendChild(T(nd.x, nd.y + 4, id, { anchor: 'middle', size: 12, fill: isP ? C.red : '#0f172a', weight: '600' }));
+      s.appendChild(T(nd.x, nd.y + 14, 'w=' + nd.w, { anchor: 'middle', size: 10, fill: isP ? C.red : C.dim }));
+    }
+    s.appendChild(T(30, 242, st.note, { size: 13 }));
+    box.appendChild(s);
+    var elPrev = document.getElementById('lucky-prev');
+    var elNext = document.getElementById('lucky-next');
+    elPrev.disabled = cur <= 0;
+    elNext.disabled = cur >= steps.length - 1;
+  }
+  sel.addEventListener('change', function () {
+    DATA_CUR = DATA[sel.value];
+    steps = buildSteps(DATA_CUR);
+    cur = 0;
+    draw();
+  });
+  document.getElementById('lucky-prev').addEventListener('click', function () { if (cur > 0) { cur--; draw(); } });
+  document.getElementById('lucky-next').addEventListener('click', function () { if (cur < steps.length - 1) { cur++; draw(); } });
+  var timer = null;
+  document.getElementById('lucky-play').addEventListener('click', function () {
+    if (timer) { clearInterval(timer); timer = null; return; }
+    timer = setInterval(function () {
+      if (cur >= steps.length - 1) { clearInterval(timer); timer = null; return; }
+      cur++; draw();
+    }, 1000);
+  });
+  document.getElementById('lucky-reset').addEventListener('click', function () {
+    if (timer) { clearInterval(timer); timer = null; }
+    steps = buildSteps(DATA_CUR);
+    cur = 0;
+    draw();
+  });
+  steps = buildSteps(DATA_CUR);
+  draw();
+})();
+</script>
