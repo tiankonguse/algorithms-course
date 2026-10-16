@@ -1,0 +1,327 @@
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>01分数规划：背包与生成树</h1>
+      <p class="intro">上一页的 check 是取 top-k 结余，因为选择没有约束。给选择加上重量下限、连通性这些约束，check 内部就要换工具：01背包和最小生成树。</p>
+
+      <h2>零、问题</h2>
+      <p>牛群才艺：n ≤ 250 头牛，每头有重量和才艺，选若干只让总重量不少于 w，最大化 才艺和 / 重量和，乘 1000 取整。w ≤ 1000，重量 ≤ 10^6。</p>
+      <p>最优比率生成树：n ≤ 1000 个村庄，坐标 (x, y) 决定两两之间的欧式距离，海拔 z 决定修路花费（海拔差绝对值）。连通所有村庄至少 n−1 条路，希望 总花费 / 总距离 尽量小，保留 3 位小数。修路条数少本身就是 n−1 条，于是问题精确化成「选一棵生成树，最小化 树上总花费 / 树上总距离」。</p>
+      <p>两题的 check 内部工具完全不同，一个 01背包、一个最小生成树，但「结余表达式 + 二分」的框架原样不动。</p>
+
+      <h2>一、重量约束：01背包判定</h2>
+      <p>固定 x，每头牛的结余 value_i = talent_i − x·weight_i。要在总重 ≥ w 的集合里最大化结余和，这是带重量下限的 01背包：dp[p] 记重量恰好 p 的最大结余和，重量一超过 w 就并进 dp[w]，相当于「≥ w」共用一个槽。</p>
+
+      <figure class="fig" id="fig-knapsack"></figure>
+
+      <p>逆序滚动保证每头牛只用一次，p 从 w 往下扫，新重量 j = p + weight_i 超过 w 时直接更新 dp[w]：</p>
+
+    <pre class="code"><span class="kw">bool</span> <span class="fn">check</span>(<span class="kw">double</span> x) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            value[i] = (<span class="kw">double</span>)talent[i] - x * weight[i];
+        }
+        dp[0] = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= w; j++) dp[j] = NA;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> p = w; p &gt;= 0; p--) {
+                <span class="kw">int</span> j = p + weight[i];
+                <span class="kw">if</span> (j &gt;= w) {
+                    dp[w] = max(dp[w], dp[p] + value[i]);
+                } <span class="kw">else</span> {
+                    dp[j] = max(dp[j], dp[p] + value[i]);
+                }
+            }
+        }
+        <span class="kw">return</span> dp[w] &gt;= 0;
+    }</pre>
+
+      <p>无效解用 NA = −1e9 兜底（重量 0 之外的槽一开始全无效），dp[0] = 0 表示一头不选。dp[w] ≥ 0 就说明存在重量达标的选择让比值 ≥ x。二分上界取才艺和，输出直接截断：</p>
+
+    <pre class="code"><span class="kw">int</span> <span class="fn">main</span>() {
+        scanf("%d%d", &amp;n, &amp;w);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) scanf("%d%d", &amp;weight[i], &amp;talent[i]);
+        <span class="kw">double</span> l = 0, r = 0, ans = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) r += talent[i];
+        <span class="kw">while</span> (l &lt; r &amp;&amp; r - l &gt;= sml) {
+            <span class="kw">double</span> x = (l + r) / 2;
+            <span class="kw">if</span> (check(x)) {
+                ans = x;
+                l = x + sml;
+            } <span class="kw">else</span> {
+                r = x - sml;
+            }
+        }
+        printf("%d\n", (<span class="kw">int</span>)(ans * 1000));
+    }</pre>
+
+      <h2>二、连通性约束：生成树判定</h2>
+      <p>固定 x，把每条边的权改成 cost − x·dist。最小生成树权值和 ≤ 0 等价于存在一棵生成树让 (总花费) − x·(总距离) ≤ 0，即 总花费/总距离 ≤ x。这里的选择工具是 prim：每次解锁离已选点集「结余最近」的点，累加 n−1 条边。</p>
+
+      <figure class="fig" id="fig-prim"></figure>
+
+    <pre class="code"><span class="kw">double</span> <span class="fn">prim</span>(<span class="kw">double</span> x) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            vis[i] = <span class="kw">false</span>;
+            value[i] = cost[1][i] - x * dist[1][i];
+        }
+        vis[1] = <span class="kw">true</span>;
+        <span class="kw">double</span> sum = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n - 1; i++) {
+            <span class="kw">double</span> minDist = 1e100;
+            <span class="kw">int</span> next = 0;
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= n; j++) {
+                <span class="kw">if</span> (!vis[j] &amp;&amp; value[j] &lt; minDist) {
+                    minDist = value[j];
+                    next = j;
+                }
+            }
+            sum += minDist;
+            vis[next] = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= n; j++) {
+                <span class="kw">if</span> (!vis[j] &amp;&amp; value[j] &gt; cost[next][j] - x * dist[next][j]) {
+                    value[j] = cost[next][j] - x * dist[next][j];
+                }
+            }
+        }
+        <span class="kw">return</span> sum;
+    }</pre>
+
+      <p>注意二分方向反了：题目求最小比值，check 通过（MST 权值和 ≤ 0）说明当前 x 还能更小，往左二分；只有 check 失败才往右。上界取 100（海拔差上限），比任意真实比值都大：</p>
+
+    <pre class="code"><span class="kw">int</span> <span class="fn">main</span>() {
+        <span class="kw">while</span> (scanf("%d", &amp;n) == 1 &amp;&amp; n != 0) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) scanf("%d%d%d", &amp;X[i], &amp;Y[i], &amp;Z[i]);
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+                <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= n; j++) {
+                    <span class="kw">if</span> (i != j) {
+                        dist[i][j] = sqrt((<span class="kw">double</span>)(X[i] - X[j]) * (X[i] - X[j]) +
+                                          (<span class="kw">double</span>)(Y[i] - Y[j]) * (Y[i] - Y[j]));
+                        cost[i][j] = abs(Z[i] - Z[j]);
+                    }
+                }
+            }
+            <span class="kw">double</span> l = 0, r = 100, ans = 0;
+            <span class="kw">while</span> (l &lt; r &amp;&amp; r - l &gt;= sml) {
+                <span class="kw">double</span> x = (l + r) / 2;
+                <span class="kw">if</span> (prim(x) &lt;= 0) {
+                    ans = x;
+                    r = x - sml;
+                } <span class="kw">else</span> {
+                    l = x + sml;
+                }
+            }
+            printf("%.3f\n", ans);
+        }
+    }</pre>
+
+      <div class="viz" id="viz-knap">
+        <div class="viz-title">演示：逐牛推进背包结余 dp</div>
+        <div id="knap-svg"></div>
+        <div class="viz-controls">
+          <select id="knap-sel">
+            <option value="ex1">牛：(2,8)(3,6)(1,2)，w=3</option>
+            <option value="ex2">牛：(1,4)(1,5)(2,9)，w=2</option>
+            <option value="ex3">随机：(6,11)(7,12)(9,11)(1,11)，w=5</option>
+          </select>
+          <button type="button" id="knap-prev">上一步</button>
+          <button type="button" id="knap-next">下一步</button>
+          <button type="button" id="knap-play">自动播放</button>
+          <button type="button" id="knap-reset">重置</button>
+        </div>
+      </div>
+
+      <h2>三、总结</h2>
+      <p>背包题把「重量 ≥ w」压进 dp[w] 一个槽，生成树题用 prim 直接产出 n−1 条边的结余和，两题都只改 check 内部。还有一个要记牢的差异：求最大比值时 check 通过就往右，求最小比值时往左，方向写反答案会差一个量级。</p>
+
+      <h2>四、相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>P4377 [USACO] Talent Show 牛群的才艺展示</td><td><a href="https://www.luogu.com.cn/problem/P4377" target="_blank">P4377</a></td></tr>
+          <tr><td>POJ</td><td>2728 Desert King 最优比率生成树</td><td><a href="http://poj.org/problem?id=2728" target="_blank">POJ 2728</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>五、参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解138【扩展】01分数规划</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', red: '#dc2626', green: '#16a34a', dim: '#64748b', border: '#cbd5e1', bg: '#f1f5f9' };
+  function T(x, y, s, opt) {
+    opt = opt || {};
+    var a = opt.anchor || 'start', f = opt.fill || '#0f172a', w = opt.weight || '400', z = opt.size || 13;
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x); t.setAttribute('y', y); t.setAttribute('font-size', z);
+    t.setAttribute('fill', f); t.setAttribute('font-weight', w); t.setAttribute('text-anchor', a);
+    t.textContent = s;
+    return t;
+  }
+  function R(x, y, w, h, opt) {
+    opt = opt || {};
+    var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    r.setAttribute('x', x); r.setAttribute('y', y); r.setAttribute('width', w); r.setAttribute('height', h);
+    r.setAttribute('fill', opt.fill || '#fff'); r.setAttribute('stroke', opt.stroke || C.border); r.setAttribute('stroke-width', 1.2);
+    if (opt.rx) r.setAttribute('rx', opt.rx);
+    return r;
+  }
+  function LN(x1, y1, x2, y2, opt) {
+    opt = opt || {};
+    var l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    l.setAttribute('stroke', opt.stroke || C.dim); l.setAttribute('stroke-width', opt.w || 1.2);
+    return l;
+  }
+  function mount(id, svg) { document.getElementById(id).appendChild(svg); }
+  function svgEl(w, h) {
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    s.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    s.setAttribute('style', 'width:100%;height:auto');
+    return s;
+  }
+
+  // ---------- 图1：dp 封顶 ----------
+  (function () {
+    var s = svgEl(740, 260);
+    var X0 = 40, Y0 = 34, HH = 120;
+    var cells = 6, CW = 78, GAP = 12;
+    var zline = Y0 + HH;
+    for (var i = 0; i <= cells; i++) {
+      var x = X0 + i * (CW + GAP);
+      var isCap = i === cells;
+      s.appendChild(R(x, zline - 60, CW, 60, { fill: isCap ? '#fef3c7' : C.bg, stroke: isCap ? '#d97706' : C.border }));
+      s.appendChild(T(x + CW / 2, zline - 26, isCap ? '≥' + cells : String(i), { anchor: 'middle', size: 12, weight: isCap ? '600' : '400', fill: isCap ? '#92400e' : '#0f172a' }));
+      s.appendChild(T(x + CW / 2, zline - 8, isCap ? '(封顶)' : '', { anchor: 'middle', size: 10, fill: '#92400e' }));
+    }
+    s.appendChild(LN(X0 - 10, zline, X0 + cells * (CW + GAP) + CW + 10, zline, { stroke: C.dim }));
+    s.appendChild(T(X0, zline + 18, 'dp[p]：重量恰好 p 的最大结余和；dp[w] 收纳所有重量 ≥ w 的选择', { size: 12, fill: C.dim }));
+    var ax = X0 + 2 * (CW + GAP) + CW / 2;
+    s.appendChild(LN(ax, zline - 66, ax, zline - 74, { stroke: C.blue, w: 1.6 }));
+    s.appendChild(T(ax, zline - 78, '新重量 p + w_i ≥ w 时直接并入', { anchor: 'middle', size: 11, fill: C.blue }));
+    mount('fig-knapsack', s);
+  })();
+
+  // ---------- 图2：prim 解锁 ----------
+  (function () {
+    var s = svgEl(640, 250);
+    var X0 = 60, Y0 = 30, HH = 150;
+    var pts = [[100, 70], [250, 40], [420, 80], [560, 60], [330, 180]];
+    var un = [1, 2, 3, 4, 5];
+    var unlocked = [0];
+    var order = [1, 3, 2, 4];  // 解锁顺序：1 → 3 → 2 → 4
+    for (var i = 0; i < order.length + 1; i++) {
+      var y = Y0 + i * 40;
+      s.appendChild(T(X0 - 30, y + 4, i === 0 ? '第 0 轮' : '第 ' + i + ' 轮', { size: 11, fill: C.dim }));
+      var cur = i === 0 ? [0] : unlocked.slice(0, i + 1);
+      for (var j = 0; j < pts.length; j++) {
+        var inCur = cur.indexOf(j) >= 0;
+        var c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        c.setAttribute('cx', X0 + pts[j][0] / 6); c.setAttribute('cy', y + pts[j][1] / 8);
+        c.setAttribute('r', 7); c.setAttribute('fill', inCur ? C.blue : '#fff');
+        c.setAttribute('stroke', inCur ? C.blue : C.border); c.setAttribute('stroke-width', 1.4);
+        s.appendChild(c);
+        s.appendChild(T(X0 + pts[j][0] / 6, y + pts[j][1] / 8 - 12, '点' + (j + 1), { anchor: 'middle', size: 10, fill: inCur ? C.blue : C.dim }));
+      }
+      if (i > 0) {
+        var last = cur[cur.length - 1];
+        s.appendChild(T(X0 + 340, y - 6, '解锁点 ' + (last + 1) + '，边权 = cost − x·dist', { size: 11, fill: C.green }));
+      }
+    }
+    s.appendChild(T(X0, Y0 + 5 * 40 + 6, '每轮从「未解锁点」里选结余 value 最小的解锁，n−1 轮后 sum 就是最小生成树的结余和', { size: 12, fill: C.dim }));
+    mount('fig-prim', s);
+  })();
+
+  // ---------- 演示：背包推进 ----------
+  (function () {
+    var PRESETS = {
+      ex1: { w: 3, x: 3.3, cows: [[2, 8], [3, 6], [1, 2]] },
+      ex2: { w: 2, x: 4.6, cows: [[1, 4], [1, 5], [2, 9]] },
+      ex3: { w: 5, x: 3.0, cows: [[6, 11], [7, 12], [9, 11], [1, 11]] }
+    };
+    var sel = document.getElementById('knap-sel');
+    var steps = [], at = 0;
+    function gen(p) {
+      var w = p.w, n = p.cows.length, xVal = p.x;
+      var dp = [0], i;
+      for (i = 1; i <= w; i++) dp[i] = -1e9;
+      var out = [];
+      out.push({ cow: -1, dp: dp.slice(), note: '初始：dp[0] = 0，其余无效' });
+      for (var ci = 0; ci < n; ci++) {
+        var wt = p.cows[ci][0], tl = p.cows[ci][1];
+        var val = tl - xVal * wt;
+        var upd = [];
+        for (var pp = w; pp >= 0; pp--) {
+          var j = pp + wt;
+          var cand = dp[pp] + val;
+          var target = j >= w ? w : j;
+          if (cand > dp[target]) { dp[target] = cand; upd.push([target, pp, cand]); }
+        }
+        out.push({ cow: ci, val: val, upd: upd.slice(), dp: dp.slice(), note: '第 ' + (ci + 1) + ' 头牛：结余 = ' + val.toFixed(2) });
+      }
+      out.push({ cow: -2, dp: dp.slice(), note: '结束：dp[w] = ' + dp[w].toFixed(4) + (dp[w] >= 0 ? ' ≥ 0，check(x) 为 true' : ' < 0，check(x) 为 false') });
+      return out;
+    }
+    function render() {
+      var p = PRESETS[sel.value];
+      var st = steps[at];
+      var w = p.w;
+      var s = svgEl(700, 250);
+      var X0 = 40, Y0 = 30;
+      var CW = 82, GAP = 10;
+      var zline = Y0 + 90;
+      for (var i = 0; i <= w; i++) {
+        var x = X0 + i * (CW + GAP);
+        var isCap = i === w;
+        var v = st.dp[i];
+        var good = v >= -1e8;
+        var valTxt = good ? (v >= 0 ? v.toFixed(2) : v.toFixed(1)) : '无效';
+        var hl = false;
+        if (st.upd) for (var u = 0; u < st.upd.length; u++) if (st.upd[u][0] === i) hl = true;
+        s.appendChild(R(x, zline - 56, CW, 56, { fill: hl ? '#dbeafe' : (isCap ? '#fef3c7' : C.bg), stroke: hl ? C.blue : (isCap ? '#d97706' : C.border) }));
+        s.appendChild(T(x + CW / 2, zline - 18, isCap ? '≥' + w : String(i), { anchor: 'middle', size: 11, fill: isCap ? '#92400e' : C.dim }));
+        s.appendChild(T(x + CW / 2, zline - 34, valTxt, { anchor: 'middle', size: 12, weight: hl ? '600' : '400', fill: hl ? C.blue : (good ? '#0f172a' : '#94a3b8') }));
+      }
+      if (st.cow >= 0) {
+        s.appendChild(T(X0, zline + 20, '当前牛 (w=' + p.cows[st.cow][0] + ', t=' + p.cows[st.cow][1] + ') 结余 value = ' + st.val.toFixed(2) + '，高亮的是本轮被更新的槽', { size: 12 }));
+      }
+      var note;
+      if (st.cow === -2) {
+        note = st.dp[w] >= 0
+          ? 'check(' + p.x.toFixed(1) + ') 通过：存在重量 ≥ w 的选择，结余和 ≥ 0，最优比值 ≥ ' + p.x.toFixed(1)
+          : 'check(' + p.x.toFixed(1) + ') 不通过：所有重量达标的选择结余和都 < 0，最优比值 < ' + p.x.toFixed(1);
+      } else {
+        note = st.note;
+      }
+      s.appendChild(T(X0, zline + 44, note, { size: 12, weight: '600', fill: (st.cow === -2 && st.dp[w] < 0) ? C.red : C.green }));
+      document.getElementById('knap-svg').innerHTML = '';
+      document.getElementById('knap-svg').appendChild(s);
+      document.getElementById('knap-prev').disabled = at === 0;
+      document.getElementById('knap-next').disabled = st.cow === -2;
+    }
+    sel.addEventListener('change', function () { steps = gen(PRESETS[sel.value]); at = 0; render(); });
+    document.getElementById('knap-prev').addEventListener('click', function () { if (at > 0) { at--; render(); } });
+    document.getElementById('knap-next').addEventListener('click', function () { if (steps[at].cow !== -2) { at++; render(); } });
+    document.getElementById('knap-reset').addEventListener('click', function () { at = 0; render(); });
+    document.getElementById('knap-play').addEventListener('click', function () {
+      if (steps[at].cow === -2) { at = 0; }
+      var iv = setInterval(function () {
+        if (steps[at].cow === -2) { clearInterval(iv); return; }
+        at++; render();
+      }, 500);
+    });
+    steps = gen(PRESETS[sel.value]); render();
+  })();
+
+})();
+</script>

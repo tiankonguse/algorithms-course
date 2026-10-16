@@ -1,0 +1,313 @@
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>01分数规划：负环与树型dp</h1>
+      <p class="intro">选择结构变成「图上找环」和「树上选闭包」时，check 内部换成判负环和树型dp，结余表达式与二分框架还是老样子。</p>
+
+      <h2>零、问题</h2>
+      <p>最小圈：n ≤ 3000、m ≤ 10000 的有向带权图，边权可负。环平均 = 环内边权和 / 边数，返回所有环里最小的平均值，保留 8 位小数。</p>
+      <p>最佳团体：k ≤ n ≤ 2500 的树，0 号是根且免费，每个非根节点有招募花费和战斗值。招一个节点必须连它所有祖先一起招，除根外恰好招 k 个，最大化 战斗和 / 花费和，保留 3 位小数。</p>
+      <p>「环」和「树上闭包」这两类选择，top-k 表达不了，check 内部换了判定工具，但读法一样：固定 x，结余和 ≥ 0 才通过。</p>
+
+      <h2>一、环平均：减 x 判负环</h2>
+      <p>固定 x，把每条边权减去 x。某个环的原平均 < x，等价于减 x 后这个环的权和 < 0。所以 check(x) 就是问：这张图有没有负环。最小圈的平均就是二分能到达的最小 x。</p>
+      <p>判负环用递归版 spfa：value[u] 记超级源点到 u 的最小累积边权，path[u] 记 u 是否在当前的递归路径上。边权能变小时才更新，更新完发现目标是递归路径上的点（回边成环），或者递归下去发现负环，就报告 true。</p>
+
+      <figure class="fig" id="fig-cycle"></figure>
+
+    <pre class="code"><span class="kw">bool</span> <span class="fn">dfs</span>(<span class="kw">int</span> u, <span class="kw">double</span> x) {
+        <span class="kw">if</span> (u == 0) {
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+                <span class="kw">if</span> (dfs(i, x)) <span class="kw">return</span> <span class="kw">true</span>;
+            }
+        } <span class="kw">else</span> {
+            path[u] = <span class="kw">true</span>;
+            <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e != 0; e = nxt[e]) {
+                <span class="kw">int</span> v = to[e];
+                <span class="kw">double</span> w = wgt[e] - x;
+                <span class="kw">if</span> (value[v] &gt; value[u] + w) {
+                    value[v] = value[u] + w;
+                    <span class="kw">if</span> (path[v] || dfs(v, x)) <span class="kw">return</span> <span class="kw">true</span>;
+                }
+            }
+            path[u] = <span class="kw">false</span>;
+        }
+        <span class="kw">return</span> <span class="kw">false</span>;
+    }</pre>
+
+      <p>0 号点当超级源点，有通往所有点的边，从它开始逐个试。二分范围取 [−1e7, 1e7]，sml 1e-9：边权可负，左端不能从 0 开始。有负环说明最小平均还能更小，往左；没有负环才把 ans 更新成 x 往右。</p>
+
+      <h2>二、树上闭包：dfn 序 + 树型dp</h2>
+      <p>固定 x，节点结余 = 战斗值 − x·招募花费。要在树上选恰好 k 个点且闭包（选 v 必选父），最大化结余和。直接按树做 dp 要处理父子耦合，换成 dfn 序之后，树变成一段线性排列，子树是连续区间，背包直接在线上跑。</p>
+      <p>dfs 给每个节点编 dfn 号，同时记下子树大小 sz[i]：dfn 序里 i 的子树正好占 [i, i + sz[i] − 1]。</p>
+
+      <figure class="fig" id="fig-dfn"></figure>
+
+    <pre class="code"><span class="kw">int</span> <span class="fn">dfs</span>(<span class="kw">int</span> u) {
+        <span class="kw">int</span> i = ++dfnCnt;
+        dfn[u] = i;
+        sz[i] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> e = head[u]; e != 0; e = nxt[e]) {
+            <span class="kw">int</span> v = to[e];
+            sz[i] += dfs(v);
+        }
+        <span class="kw">return</span> sz[i];
+    }</pre>
+
+      <p>dp[i][j]：dfn 序 i 到 n 之间选 j 个点的最大结余。不选 i，整棵子树跳过，从 i + sz[i] 继续；选 i，结余 value[i] 加上从 i + 1 继续选 j − 1 个（i 的子树里其它点可再选，闭包已满足）：</p>
+
+    <pre class="code"><span class="kw">bool</span> <span class="fn">check</span>(<span class="kw">double</span> x) {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt;= n; i++) {
+            value[dfn[i]] = (<span class="kw">double</span>)strength[i] - x * cost[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= k; j++) dp[dfnCnt + 1][j] = NA;
+        <span class="kw">for</span> (<span class="kw">int</span> i = dfnCnt; i &gt;= 2; i--) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= k; j++) {
+                dp[i][j] = max(dp[i + sz[i]][j], value[i] + dp[i + 1][j - 1]);
+            }
+        }
+        <span class="kw">return</span> dp[2][k] &gt;= 0;
+    }</pre>
+
+      <p>0 号节点 dfn 编号是 1，所以答案看 dp[2][k]。二分上界取 10000（战斗值上限），输出保留三位小数。</p>
+
+      <div class="viz" id="viz-circle">
+        <div class="viz-title">演示：DFS 递归判负环</div>
+        <div id="circle-svg"></div>
+        <div class="viz-controls">
+          <select id="circle-sel">
+            <option value="ex1">环 1→2→3→1：边权 2, -5, 1</option>
+            <option value="ex2">双向边 1↔2(1)、1↔3(4/-1)：无负环</option>
+            <option value="ex3">自环 1→1(-3) + 1↔2(-1/0)</option>
+          </select>
+          <button type="button" id="circle-prev">上一步</button>
+          <button type="button" id="circle-next">下一步</button>
+          <button type="button" id="circle-play">自动播放</button>
+          <button type="button" id="circle-reset">重置</button>
+        </div>
+      </div>
+
+      <h2>三、总结</h2>
+      <p>负环判定接住「环平均」：减 x 之后有负环，说明平均还能压低，二分往左。树型dp 接住「树上闭包」：dfn 序把子树压成连续区间，不选就跳整棵子树。两题共享的骨架仍然是结余 + 二分，到这里 01分数规划的五种选择结构（top-k、背包、生成树、环、闭包）已经齐了。</p>
+
+      <h2>四、相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>P3199 [HNOI2009] 最小圈</td><td><a href="https://www.luogu.com.cn/problem/P3199" target="_blank">P3199</a></td></tr>
+          <tr><td>洛谷</td><td>P4322 [JSOI2016] 最佳团体</td><td><a href="https://www.luogu.com.cn/problem/P4322" target="_blank">P4322</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>五、参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解138【扩展】01分数规划</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', red: '#dc2626', green: '#16a34a', dim: '#64748b', border: '#cbd5e1', bg: '#f1f5f9' };
+  function T(x, y, s, opt) {
+    opt = opt || {};
+    var a = opt.anchor || 'start', f = opt.fill || '#0f172a', w = opt.weight || '400', z = opt.size || 13;
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x); t.setAttribute('y', y); t.setAttribute('font-size', z);
+    t.setAttribute('fill', f); t.setAttribute('font-weight', w); t.setAttribute('text-anchor', a);
+    t.textContent = s;
+    return t;
+  }
+  function R(x, y, w, h, opt) {
+    opt = opt || {};
+    var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    r.setAttribute('x', x); r.setAttribute('y', y); r.setAttribute('width', w); r.setAttribute('height', h);
+    r.setAttribute('fill', opt.fill || '#fff'); r.setAttribute('stroke', opt.stroke || C.border); r.setAttribute('stroke-width', 1.2);
+    if (opt.rx) r.setAttribute('rx', opt.rx);
+    return r;
+  }
+  function LN(x1, y1, x2, y2, opt) {
+    opt = opt || {};
+    var l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    l.setAttribute('stroke', opt.stroke || C.dim); l.setAttribute('stroke-width', opt.w || 1.2);
+    return l;
+  }
+  function mount(id, svg) { document.getElementById(id).appendChild(svg); }
+  function svgEl(w, h) {
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    s.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    s.setAttribute('style', 'width:100%;height:auto');
+    return s;
+  }
+
+  // ---------- 图1：减 x 判负环 ----------
+  (function () {
+    var s = svgEl(640, 240);
+    var p = { p1: [180, 90], p2: [400, 50], p3: [400, 150] };
+    var edges = [[1, 2, 2], [2, 3, -5], [3, 1, 1]];
+    var visited = [[1, 2, true], [2, 3, true], [3, 1, false]];
+    for (var i = 0; i < edges.length; i++) {
+      var e = edges[i], v = visited[i];
+      var a = p['p' + e[0]], b = p['p' + e[1]];
+      var midx = (a[0] + b[0]) / 2, midy = (a[1] + b[1]) / 2;
+      s.appendChild(LN(a[0], a[1], b[0], b[1], { stroke: v[2] ? C.blue : C.red, w: 1.8 }));
+      s.appendChild(T(midx, midy - 6, (v[2] ? '' : '回边 ') + e[2], { anchor: 'middle', size: 11, fill: v[2] ? C.blue : C.red }));
+      if (!v[2]) {
+        s.appendChild(T(midx, midy + 10, 'value[1] 变小且 path[1] 在栈中 → 负环', { anchor: 'middle', size: 10, fill: C.red }));
+      }
+    }
+    for (var j = 1; j <= 3; j++) {
+      var c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', p['p' + j][0]); c.setAttribute('cy', p['p' + j][1]); c.setAttribute('r', 16);
+      c.setAttribute('fill', j === 3 ? '#fee2e2' : C.bg); c.setAttribute('stroke', j === 3 ? C.red : C.blue); c.setAttribute('stroke-width', 1.6);
+      s.appendChild(c);
+      s.appendChild(T(p['p' + j][0], p['p' + j][1] + 4, String(j), { anchor: 'middle', size: 13, weight: '600' }));
+      s.appendChild(T(p['p' + j][0], p['p' + j][1] + 30, 'value=' + [0, 2, -3][j - 1], { anchor: 'middle', size: 11, fill: C.dim }));
+    }
+    s.appendChild(T(20, 220, 'x = 0 时每条边减 0，DFS 沿 1→2→3 前进，回到 1 时 value[1] 从 0 降到 −2，而 1 还在递归路径上：负环成立', { size: 12 }));
+    mount('fig-cycle', s);
+  })();
+
+  // ---------- 图2：dfn 序与子树区间 ----------
+  (function () {
+    var s = svgEl(700, 260);
+    var X0 = 30, Y0 = 30;
+    var tree = { 0: [1, 2], 1: [3], 2: [4, 5], 3: [], 4: [], 5: [] };
+    var px = { 0: 80, 1: 40, 2: 130, 3: 40, 4: 105, 5: 170 };
+    var py = { 0: 60, 1: 120, 2: 120, 3: 180, 4: 180, 5: 180 };
+    for (var u in tree) {
+      u = Number(u);
+      for (var k = 0; k < tree[u].length; k++) {
+        var v = tree[u][k];
+        s.appendChild(LN(px[u], py[u], px[v], py[v], { stroke: C.dim }));
+      }
+    }
+    var dfnPos = { 0: 1, 1: 2, 3: 3, 2: 4, 4: 5, 5: 6 };
+    for (var i = 0; i <= 5; i++) {
+      var c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', px[i]); c.setAttribute('cy', py[i]); c.setAttribute('r', 14);
+      c.setAttribute('fill', i === 0 ? '#fef3c7' : C.bg); c.setAttribute('stroke', i === 0 ? '#d97706' : C.blue);
+      s.appendChild(c);
+      s.appendChild(T(px[i], py[i] + 4, String(i), { anchor: 'middle', size: 12 }));
+      s.appendChild(T(px[i] + 18, py[i] - 4, 'dfn=' + dfnPos[i], { anchor: 'start', size: 10, fill: C.dim }));
+    }
+    var X2 = 300;
+    s.appendChild(T(X2, Y0 + 10, 'dfn 序：', { size: 12 }));
+    var names = ['0', '1', '3', '2', '4', '5'];
+    var CW = 44, GAP = 4;
+    var sizes = { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1 };
+    sizes[1] = 2; sizes[3] = 1; sizes[2] = 3; sizes[4] = 1; sizes[5] = 1;
+    for (var j = 0; j < names.length; j++) {
+      var x = X2 + j * (CW + GAP);
+      var isSub = names[j] !== '0';
+      s.appendChild(R(x, Y0 + 26, CW, 34, { fill: isSub ? '#dbeafe' : '#fef3c7', stroke: isSub ? C.blue : '#d97706' }));
+      s.appendChild(T(x + CW / 2, Y0 + 47, names[j], { anchor: 'middle', size: 12 }));
+      s.appendChild(T(x + CW / 2, Y0 + 60, 'sz=' + sizes[j], { anchor: 'middle', size: 9, fill: C.dim }));
+    }
+    var r3x = X2 + 1 * (CW + GAP), r3w = 2 * (CW + GAP) - GAP;
+    s.appendChild(R(r3x - 3, Y0 + 22, r3w + 6, 42, { fill: 'none', stroke: C.green, strokeWidth: 1.6, strokeDasharray: '4 3' }));
+    s.appendChild(T(r3x + 3, Y0 + 74, '节点 1 的子树 = [1, 1+sz[1]) = dfn 2..3', { size: 11, fill: C.green }));
+    s.appendChild(T(X2, Y0 + 96, 'dp[i][j]：不选 i 跳整棵子树 i+sz[i]，选 i 从 i+1 继续，闭包自动满足', { size: 12, fill: C.dim }));
+    mount('fig-dfn', s);
+  })();
+
+  // ---------- 演示：DFS 判负环 ----------
+  (function () {
+    var PRESETS = {
+      ex1: {
+        nodes: 3,
+        pos: { 1: [150, 80], 2: [330, 50], 3: [330, 140] },
+        edges: [[1, 2, 2], [2, 3, -5], [3, 1, 1]],
+        steps: [
+          { note: '从 0 号超级源点开始，试 dfs(1)', path: [1], value: { 1: 0 }, upd: [], cyc: -1 },
+          { note: '边 1→2（权 2）：value[2] 0 → 2，递归 2', path: [1, 2], value: { 1: 0, 2: 2 }, upd: [2], cyc: -1 },
+          { note: '边 2→3（权 -5）：value[3] 0 → -3，递归 3', path: [1, 2, 3], value: { 1: 0, 2: 2, 3: -3 }, upd: [3], cyc: -1 },
+          { note: '边 3→1（权 1）：value[1] 0 → -2，且 1 还在递归路径上 → 负环！', path: [1, 2, 3], value: { 1: -2, 2: 2, 3: -3 }, upd: [1], cyc: 1, done: true, ans: -0.66666667 }
+        ]
+      },
+      ex2: {
+        nodes: 3,
+        pos: { 1: [150, 80], 2: [330, 50], 3: [330, 140] },
+        edges: [[1, 2, 1], [2, 1, 1], [1, 3, 4], [3, 1, -1]],
+        steps: [
+          { note: '从超级源点试 dfs(1)', path: [1], value: { 1: 0 }, upd: [], cyc: -1 },
+          { note: '边 1→2（1）：value[2] 0 → 1，递归 2', path: [1, 2], value: { 1: 0, 2: 1 }, upd: [2], cyc: -1 },
+          { note: '边 2→1（1）：0 > 1+1=2 不成立，不更新，返回', path: [1], value: { 1: 0, 2: 1 }, upd: [], cyc: -1 },
+          { note: '边 1→3（4）：value[3] 0 → 4，递归 3', path: [1, 3], value: { 1: 0, 2: 1, 3: 4 }, upd: [3], cyc: -1 },
+          { note: '边 3→1（-1）：0 > 4-1=3 不成立，不更新，返回', path: [1], value: { 1: 0, 2: 1, 3: 4 }, upd: [], cyc: -1 },
+          { note: '全部边扫完没有回边成环 → 无负环', path: [], value: { 1: 0, 2: 1, 3: 4 }, upd: [], cyc: -1, done: true, ans: 1.0 }
+        ]
+      },
+      ex3: {
+        nodes: 2,
+        pos: { 1: [200, 90], 2: [400, 90] },
+        edges: [[1, 1, -3], [1, 2, -1], [2, 1, 0]],
+        steps: [
+          { note: '从超级源点试 dfs(1)', path: [1], value: { 1: 0 }, upd: [], cyc: -1 },
+          { note: '自环 1→1（权 -3）：value[1] 0 → -3，且 1 在递归路径上 → 负环！', path: [1], value: { 1: -3 }, upd: [1], cyc: 1, done: true, ans: -3.0 }
+        ]
+      }
+    };
+    var sel = document.getElementById('circle-sel');
+    var at = 0;
+    function render() {
+      var p = PRESETS[sel.value];
+      var st = p.steps[at];
+      var s = svgEl(640, 230);
+      var X0 = 20, Y0 = 20;
+      for (var i = 0; i < p.edges.length; i++) {
+        var e = p.edges[i];
+        var a = p.pos[e[0]], b = p.pos[e[1]];
+        s.appendChild(LN(a[0], a[1], b[0], b[1], { stroke: C.border, w: 1.3 }));
+        var mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+        s.appendChild(T(mx, my - 5, String(e[2]), { anchor: 'middle', size: 11, fill: C.dim }));
+      }
+      var inPath = {};
+      for (var q = 0; q < st.path.length; q++) inPath[st.path[q]] = true;
+      for (var j = 1; j <= p.nodes; j++) {
+        var pos = p.pos[j];
+        var val = st.value[j] !== undefined ? st.value[j] : '-';
+        var isCyc = st.cyc === j;
+        var c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        c.setAttribute('cx', pos[0]); c.setAttribute('cy', pos[1]); c.setAttribute('r', 18);
+        c.setAttribute('fill', isCyc ? '#fee2e2' : (inPath[j] ? '#dbeafe' : C.bg));
+        c.setAttribute('stroke', isCyc ? C.red : (inPath[j] ? C.blue : C.border));
+        c.setAttribute('stroke-width', isCyc ? 2.2 : 1.5);
+        s.appendChild(c);
+        s.appendChild(T(pos[0], pos[1] + 4, String(j), { anchor: 'middle', size: 13, weight: '600' }));
+        s.appendChild(T(pos[0], pos[1] + 34, 'value=' + (typeof val === 'number' ? val.toFixed(1) : val), { anchor: 'middle', size: 10, fill: C.dim }));
+        if (isCyc) s.appendChild(T(pos[0], pos[1] - 26, '回边命中', { anchor: 'middle', size: 10, fill: C.red, weight: '600' }));
+      }
+      s.appendChild(T(X0, 210, st.note, { size: 12, weight: '600', fill: st.done ? (st.cyc >= 0 ? C.red : C.green) : '#0f172a' }));
+      if (st.done) {
+        s.appendChild(T(X0, 226, '二分结论：最小圈平均 = ' + st.ans.toFixed(3), { size: 11, fill: C.dim }));
+      }
+      document.getElementById('circle-svg').innerHTML = '';
+      document.getElementById('circle-svg').appendChild(s);
+      document.getElementById('circle-prev').disabled = at === 0;
+      document.getElementById('circle-next').disabled = st.done;
+    }
+    sel.addEventListener('change', function () { at = 0; render(); });
+    document.getElementById('circle-prev').addEventListener('click', function () { if (at > 0) { at--; render(); } });
+    document.getElementById('circle-next').addEventListener('click', function () { if (!PRESETS[sel.value].steps[at].done) { at++; render(); } });
+    document.getElementById('circle-reset').addEventListener('click', function () { at = 0; render(); });
+    document.getElementById('circle-play').addEventListener('click', function () {
+      if (PRESETS[sel.value].steps[at].done) { at = 0; }
+      var iv = setInterval(function () {
+        if (PRESETS[sel.value].steps[at].done) { clearInterval(iv); return; }
+        at++; render();
+      }, 550);
+    });
+    render();
+  })();
+
+})();
+</script>
