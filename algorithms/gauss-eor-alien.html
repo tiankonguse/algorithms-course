@@ -1,0 +1,313 @@
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>外星千足虫：位图高斯消元与最早确定时刻</h1>
+      <p class="intro">外星虫的腿数是奇数，地球虫是偶数。现在有 n 种虫子、m 条测量记录，每条记录写「哪些虫参与了这次测量」和一个奇偶结果。记录可能有冗余，问：用到第几条记录就能确定每只虫的属性？如果全用上还确定不了，打印 Cannot Determine。n 到 1000，上一节的模板直接搬过来会慢在「一行有 1000 个系数」，这一节把行压进位图，顺便把「最早第几条」这个答案在消元过程中顺手记下来。</p>
+
+      <h2>零、一条记录转一行方程</h2>
+      <p>变量 x<sub>j</sub>：虫 j 是外星（1）还是地球（0）。一条测量记录「011 1」的意思是：1 号虫没参与、2 号和 3 号虫参与了，总腿数是奇数。它写成一个方程：</p>
+      <p>x<sub>2</sub> ^ x<sub>3</sub> = 1</p>
+      <p>参与了的虫，属性和（异或）必须等于总腿数的奇偶。每条记录一行：参与的位置是 1，没参与是 0，最后一格是常数。行号就是记录编号，这题的「第几条」答案直接挂在行号上。</p>
+
+      <figure class="fig" id="fig-row"></figure>
+
+      <h2>一、一行 1000 位：位图</h2>
+      <p>n 最大 1000，一行 1000 个系数。用 int 数组存，异或消元要逐格来，常数时间差一个数量级。位图把一行压进 long：一个 long 存 64 位，1000 位要 16 个 long。消元时整组 long 异或，一次处理 64 个系数。</p>
+      <p>位图里第 0 位永远不用，列 1..n 对应位 1..n，常数放在第 s+1 位（s = max(n, m)，比所有列都靠右）。辅助函数就这么几个：</p>
+
+          <pre class="code"><span class="cm">// 位图辅助：一行状态用若干个 long 表示，每个 long 存 64 位</span>
+    <span class="cm">// 第 0 位永远不用，列 1..n 对应位 1..n，常数列对应更高位</span>
+    <span class="kw">void</span> <span class="fn">set</span>(<span class="kw">int</span> row, <span class="kw">int</span> col, <span class="kw">int</span> v) {
+      <span class="kw">if</span> (v == 0) {
+        mat[row][col / 64] &amp;= ~(1LL &lt;&lt; (col % 64));
+      } <span class="kw">else</span> {
+        mat[row][col / 64] |= 1LL &lt;&lt; (col % 64);
+      }
+    }
+
+    <span class="kw">int</span> <span class="fn">get</span>(<span class="kw">int</span> row, <span class="kw">int</span> col) {
+      <span class="kw">return</span> ((mat[row][col / 64] &gt;&gt; (col % 64)) &amp; 1) == 1 ? 1 : 0;
+    }
+
+    <span class="cm">// row2 ^= row1，bits 表示需要异或的位数，按 64 位一组整组异或</span>
+    <span class="kw">void</span> <span class="fn">eor</span>(<span class="kw">int</span> row1, <span class="kw">int</span> row2, <span class="kw">int</span> bits) {
+      <span class="kw">for</span> (<span class="kw">int</span> k = 0; k &lt;= bits / 64; k++) {
+        mat[row2][k] ^= mat[row1][k];
+      }
+    }</pre>
+
+      <h2>二、need：消元过程里顺手记</h2>
+      <p>第 i 列找主元，从第 i 行往后扫到第 n 行，第一个系数是 1 的行换上来当主元行。这一行来自第 j 条记录，把它记进 need，need 取所有主元来源行号的最大值。消元跑完，need 就是「确定所有 n 个变量，至少要用到前 need 条记录」。</p>
+      <p>这里有个细节：主元只在记录 1..n 里找，第 n+1 条往后的记录不参与消元。所以确定解的 need 最多是 n；如果前 n 条记录凑不满 n 个主元，再多记录也救不回来，直接判 Cannot Determine。</p>
+      <p>第 i 列扫完没有主元：直接 return。前面 i-1 列已经定了，这一列没有 1 说明变量 i 无法确定，除非这列本来就是多余列（i &gt; n）。</p>
+
+          <pre class="code"><span class="cm">// 位图版高斯消元：need 记下「用到的最晚那条测量记录」</span>
+    <span class="kw">void</span> <span class="fn">gauss</span>(<span class="kw">int</span> n) {
+      need = 0;
+      <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        <span class="kw">for</span> (<span class="kw">int</span> j = i; j &lt;= n; j++) {
+          <span class="kw">if</span> (get(j, i) == 1) {
+            swap(i, j);
+            need = max(need, j);
+            <span class="kw">break</span>;
+          }
+        }
+        <span class="cm">// 第 i 列没有主元：方程组不能唯一确定，直接结束</span>
+        <span class="kw">if</span> (get(i, i) == 0) {
+          <span class="kw">return</span>;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= n; j++) {
+          <span class="kw">if</span> (i != j &amp;&amp; get(j, i) == 1) {
+            eor(i, j, n + 2);
+          }
+        }
+      }
+    }</pre>
+
+      <figure class="fig" id="fig-need"></figure>
+
+      <h2>三、判定与输出</h2>
+      <p>消元结束后看前 n 行：对角线全 1，说明每个变量都有主元、方程组唯一解，输出 need，再把每行的常数列读出来：1 是外星虫，0 是地球虫。有一行对角线是 0，说明还有自由元，用所有记录也确定不了，打印 Cannot Determine。</p>
+      <p>外星虫的输出串是 ?y7M#，题面约定，不是乱码，直接照打。</p>
+
+          <pre class="code"><span class="cm">// 读入 m 条测量记录，常数放在第 s + 1 列</span>
+    s = max(n, m);
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+      <span class="kw">string</span> line;
+      cin &gt;&gt; line;
+      <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= n; j++) {
+        set(i, j, line[j - 1] - '0');
+      }
+      cin &gt;&gt; b;
+      set(i, s + 1, b);
+    }
+    gauss(s);
+
+    <span class="cm">// 前 n 行对角线全 1 才能确定每只虫的属性</span>
+    <span class="kw">int</span> sign = 1;
+    <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+      <span class="kw">if</span> (get(i, i) == 0) {
+        sign = 0;
+        <span class="kw">break</span>;
+      }
+    }
+    <span class="kw">if</span> (sign == 0) {
+      cout &lt;&lt; "Cannot Determine" &lt;&lt; endl;
+    } <span class="kw">else</span> {
+      cout &lt;&lt; need &lt;&lt; endl;
+      <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        <span class="kw">if</span> (get(i, s + 1) == 1) {
+          cout &lt;&lt; "?y7M#" &lt;&lt; endl;  <span class="cm">// 外星虫</span>
+        } <span class="kw">else</span> {
+          cout &lt;&lt; "Earth" &lt;&lt; endl;  <span class="cm">// 地球虫</span>
+        }
+      }
+    }</pre>
+
+      <h2>四、复杂度</h2>
+      <p>消元扫 s = max(n, m) 行、每列找主元扫 s 行、消元对 s 行做整组 long 异或（每组 (n+2)/64 个 long）。总操作 O(s² · n / 64)。s ≤ 2000 时约 10<sup>8</sup> 次位运算，一秒内跑完。这是位图换来的常数优势。</p>
+
+      <div class="viz" id="viz-alien">
+        <div class="viz-title">演示：位图行逐列消元，need 随主元来源更新</div>
+        <div id="alien-svg"></div>
+        <div class="viz-controls">
+          <select id="alien-sel">
+            <option value="p1">3 条记录 3 种虫：恰好确定（need=3）</option>
+            <option value="p2">4 条记录 3 种虫：3 条就够，第 4 条冗余（need=3）</option>
+            <option value="p3">3 条记录 4 种虫：不足，Cannot Determine</option>
+          </select>
+          <button type="button" id="alien-prev">上一步</button>
+          <button type="button" id="alien-next">下一步</button>
+          <button type="button" id="alien-play">自动播放</button>
+          <button type="button" id="alien-reset">重置</button>
+        </div>
+      </div>
+
+      <h2>五、总结</h2>
+      <p>位图把「一行 n 个系数」压成 n/64 个 long，消元从逐格异或变成整组异或；need 在选主元时顺手取主元来源行号的最大值，消元结束它就是答案。判定逻辑和前面完全一样：前 n 行对角线全 1 才有唯一解。至此高斯消元专题的三种方程都见过了：加法、异或、同余，模板一样，区别只在「归一化」这一步怎么定义。</p>
+
+      <h2>六、相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>P2447 SDOI2010 外星千足虫（位图 + 最早确定时刻）</td><td><a href="https://www.luogu.com.cn/problem/P2447" target="_blank">P2447</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>七、参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解134【扩展】高斯消元专题2-解决异或方程组</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = { blue: '#2563eb', red: '#dc2626', green: '#16a34a', dim: '#64748b', border: '#cbd5e1', bg: '#f1f5f9' };
+  function T(x, y, s, opt) {
+    opt = opt || {};
+    var a = opt.anchor || 'start', f = opt.fill || '#0f172a', w = opt.weight || '400', z = opt.size || 13;
+    return '<text x="' + x + '" y="' + y + '" text-anchor="' + a + '" fill="' + f + '" font-weight="' + w + '" font-size="' + z + '">' + s + '</text>';
+  }
+  function R(x, y, w, h, opt) {
+    opt = opt || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" fill="' + (opt.fill || C.bg) + '" stroke="' + (opt.stroke || C.border) + '" stroke-width="' + (opt.sw || 1) + '" rx="3"/>';
+  }
+  function mount(id, svg, w, h) {
+    document.getElementById(id).innerHTML = '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">' + svg + '</svg>';
+  }
+  var VW = 760;
+  // 预设：n 虫数，s=max(n,m)，rows = 记录（位串含常数，第 s+1 位是常数）
+  var DATA = {
+    p1: { n: 3, s: 3, rows: ['0101', '1001', '0011'] },
+    p2: { n: 3, s: 4, rows: ['10001', '01001', '00101', '11101'] },
+    p3: { n: 4, s: 4, rows: ['10001', '01001', '00101'] }
+  };
+  var steps = [], cur = 0, timer = null;
+  var elSvg = document.getElementById('alien-svg');
+  var elSel = document.getElementById('alien-sel');
+  var elPrev = document.getElementById('alien-prev');
+  var elNext = document.getElementById('alien-next');
+  var elPlay = document.getElementById('alien-play');
+  var elReset = document.getElementById('alien-reset');
+
+  function build(sel) {
+    var d = DATA[sel], n = d.n, s = d.s;
+    // 记录：rows[i] 第 0..s 位（0=占位），位 1..n 系数，位 s+1 常数
+    var mat = [[0]];
+    for (var i = 0; i < d.rows.length; i++) {
+      var r = [0];
+      for (var b = 1; b <= s + 1; b++) r.push(parseInt(d.rows[i][b - 1], 10));
+      mat.push(r);
+    }
+    steps = [];
+    var needV = 0;
+    function push(phase, msg, hi, needShow) {
+      steps.push({ phase: phase, msg: msg, mat: mat.map(function (r) { return r.slice(); }), hi: hi || {}, need: needShow === undefined ? needV : needShow });
+    }
+    push('init', '初始：每条记录一行位串，最后一位是常数', {});
+    for (var i = 1; i <= s; i++) {
+      var p = -1;
+      // 课程实现：主元只在记录 1..n 里找
+      for (var j = i; j <= n; j++) {
+        if (j < mat.length && mat[j][i] === 1) { p = j; break; }
+        if (j >= mat.length) break;
+      }
+      if (p === -1) {
+        if (i <= n) push('free', '第 ' + i + ' 列没有主元：变量 x' + i + ' 无法确定，直接 return', { col: i });
+        else push('free', '第 ' + i + ' 列是多余列（i > n），主元查找范围为空', { col: i });
+        continue;
+      }
+      var tmpR = mat[i]; mat[i] = mat[p]; mat[p] = tmpR;
+      needV = Math.max(needV, p);
+      push('swap', '第 ' + i + ' 列主元来自第 ' + p + ' 条记录，need = ' + needV, { row: i, col: i }, needV);
+      for (var j = 1; j <= n; j++) {
+        if (j !== i && j < mat.length && mat[j][i] === 1) {
+          for (var k = i; k <= s + 1; k++) mat[j][k] ^= mat[i][k];
+          push('elim', '第 ' + j + ' 行异或主元行（整组 long 异或），第 ' + i + ' 位消成 0', { row: j, col: i }, needV);
+        }
+      }
+    }
+    var ok = 1;
+    for (var i = 1; i <= n; i++) if (i >= mat.length || mat[i][i] !== 1) { ok = 0; break; }
+    if (ok) {
+      var parts = [];
+      for (var i = 1; i <= n; i++) parts.push('x' + i + '=' + mat[i][s + 1]);
+      push('ans', '能确定：need=' + needV + '，解 ' + parts.join(' '), {});
+    } else {
+      push('ans', 'Cannot Determine：前 n 行有对角线为 0', {});
+    }
+    cur = 0;
+  }
+
+  function render() {
+    var st = steps[cur];
+    var d = DATA[elSel.value], n = d.n, s = d.s;
+    var rows = st.mat.length - 1;
+    var cw = 34, ch = 34, gap = 3;
+    var x0 = 24, y0 = 30;
+    var nbits = s + 1;
+    var HH = y0 + rows * (ch + gap) + 40 + 26 + 26 + 34;
+    var g = '';
+    // 位标签：位 1..n 是变量，位 s+1 是常数
+    for (var b = 1; b <= n; b++) g += T(x0 + (b - 1) * (cw + gap) + cw / 2, y0 - 8, 'x' + b, { anchor: 'middle', size: 11, fill: C.dim });
+    if (s > n) g += T(x0 + n * (cw + gap) + cw / 2, y0 - 8, '· · ·', { anchor: 'middle', size: 11, fill: C.dim });
+    g += T(x0 + s * (cw + gap) + cw / 2, y0 - 8, '常数', { anchor: 'middle', size: 11, fill: C.dim });
+    for (var r = 1; r <= rows; r++) {
+      var ry = y0 + (r - 1) * (ch + gap);
+      g += T(x0 - 12, ry + ch / 2 + 5, 'r' + r, { anchor: 'end', size: 12, fill: C.dim });
+      for (var b = 1; b <= nbits; b++) {
+        var hi = null;
+        if (st.hi.row === r && b === st.hi.col) hi = 'pivot';
+        else if (st.hi.row === r) hi = 'row';
+        else if (st.hi.col === b) hi = 'col';
+        var fill = C.bg, stroke = C.border, sw = 1;
+        if (hi === 'pivot') { fill = '#dbeafe'; stroke = C.blue; sw = 2; }
+        else if (hi === 'row') { stroke = C.blue; sw = 2; }
+        else if (hi === 'col') { stroke = C.red; sw = 2; }
+        g += R(x0 + (b - 1) * (cw + gap), ry, cw, ch, { fill: fill, stroke: stroke, sw: sw }) +
+          T(x0 + (b - 1) * (cw + gap) + cw / 2, ry + ch / 2 + 5, String(st.mat[r][b]), { anchor: 'middle', size: 13 });
+      }
+    }
+    var y3 = y0 + rows * (ch + gap) + 20;
+    g += T(x0, y3, '第 ' + (cur + 1) + ' / ' + steps.length + ' 步　' + st.msg, { size: 12, fill: C.dim });
+    g += T(x0, y3 + 24, 'need = ' + st.need, { size: 12, fill: C.blue, weight: '600' });
+    mount('alien-svg', g, VW, y3 + 50);
+    elPrev.disabled = cur <= 0;
+    elNext.disabled = cur >= steps.length - 1;
+  }
+
+  function play() {
+    if (timer) { clearInterval(timer); timer = null; elPlay.textContent = '自动播放'; return; }
+    elPlay.textContent = '暂停';
+    timer = setInterval(function () {
+      if (cur >= steps.length - 1) { clearInterval(timer); timer = null; elPlay.textContent = '自动播放'; return; }
+      cur++; render();
+    }, 900);
+  }
+
+  elSel.addEventListener('change', function () { build(elSel.value); render(); });
+  elPrev.addEventListener('click', function () { if (cur > 0) { cur--; render(); } });
+  elNext.addEventListener('click', function () { if (cur < steps.length - 1) { cur++; render(); } });
+  elPlay.addEventListener('click', play);
+  elReset.addEventListener('click', function () { if (timer) { clearInterval(timer); timer = null; elPlay.textContent = '自动播放'; } build(elSel.value); render(); });
+
+  // 静态图 1：一条记录转一行
+  var g1 = '';
+  g1 += T(8, 14, '测量记录「011 1」转成一行', { size: 13, weight: '600' });
+  for (var b = 1; b <= 4; b++) {
+    var v = b <= 3 ? (b === 1 ? 0 : 1) : 1;
+    g1 += R(40 + (b - 1) * 56, 34, 48, 30, { fill: b === 4 ? '#dbeafe' : C.bg, stroke: b === 4 ? C.blue : C.border, sw: b === 4 ? 2 : 1 });
+    g1 += T(64 + (b - 1) * 56, 53, String(v), { anchor: 'middle', size: 13 });
+  }
+  g1 += T(40, 52, 'x1', { size: 11, fill: C.dim });
+  g1 += T(96, 52, 'x2', { size: 11, fill: C.dim });
+  g1 += T(152, 52, 'x3', { size: 11, fill: C.dim });
+  g1 += T(228, 52, '常数', { size: 11, fill: C.dim });
+  g1 += T(10, 92, 'x2 ^ x3 = 1：参与测量的虫，属性和等于总腿数奇偶', { size: 12 });
+  g1 += T(10, 116, '行号就是记录编号，「第几条记录」直接挂在行号上', { size: 12, fill: C.green });
+  mount('fig-row', g1, 400, 136);
+
+  // 静态图 2：need 的含义
+  var g2 = '';
+  g2 += T(8, 14, 'need = 所有主元来源行号的最大值', { size: 13, weight: '600' });
+  g2 += R(20, 34, 260, 30, { fill: C.bg, stroke: C.border });
+  g2 += T(150, 53, '第 1 列主元来自第 1 行 → need=1', { anchor: 'middle', size: 11 });
+  g2 += R(20, 70, 260, 30, { fill: C.bg, stroke: C.border });
+  g2 += T(150, 89, '第 2 列主元来自第 2 行 → need=2', { anchor: 'middle', size: 11 });
+  g2 += R(20, 106, 260, 30, { fill: '#dbeafe', stroke: C.blue, sw: 2 });
+  g2 += T(150, 125, '第 3 列主元来自第 3 行 → need=3', { anchor: 'middle', size: 11 });
+  g2 += T(150, 158, '主元只在记录 1..n 里找，所以确定解的 need 不超过 n', { anchor: 'middle', size: 12, fill: C.blue, weight: '600' });
+  g2 += T(150, 182, '第 4..m 条冗余记录不参与消元', { anchor: 'middle', size: 12, fill: C.dim });
+  mount('fig-need', g2, 300, 200);
+
+  build(elSel.value);
+  render();
+})();
+</script>
