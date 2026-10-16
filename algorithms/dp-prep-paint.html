@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>前缀/后缀最值加速：粉刷房子III · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.pt-sel,.pt-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.pt-sel:focus{outline:none;border-color:var(--accent);}
+.pt-btn{cursor:pointer;}
+.pt-btn:hover{border-color:var(--accent);color:var(--accent);}
+.pt-btn:disabled{opacity:.4;cursor:default;}
+.pt-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.pt-ctl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>前缀/后缀最值加速：粉刷房子III</h1>
+      <p class="intro">相邻同色的房子组成一个街区，要把一条街恰好涂成 t 个街区。dp 枚举当前房子的颜色时，要从「所有比它小的颜色」和「所有比它大的颜色」里取最小值，这又是两段区间最值。预处理好前缀最小值和后缀最小值，枚举颜色的 O(c) 段压成 O(1) 查表。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>还原数组那题是区间求和用前缀和；这一题是区间取 min 用前缀/后缀最值。两类预处理数组形态不同，同一个思路：转移里反复枚举的连续段，预先算成一个数组元素。</p>
+
+      <h2 id="problem">一、问题</h2>
+      <p>n 栋房子排成一排，每栋要涂 1..c 中的一种颜色。相邻两栋同色算同一个街区，街区编号按位置从左到右。有些房子已经涂好了（house[i] 非 0），没涂的每栋涂颜色 v 要花 cost[i][v]。返回把整条街涂成恰好 t 个街区的最小花费，做不到返回 -1。n ≤ 100，c ≤ 20，t ≤ n。</p>
+      <figure class="fig" id="figStreet"></figure>
+
+      <h2 id="state">二、状态设计</h2>
+      <p>从左往右涂。决定第 i 栋房子时，街区数是否 +1 取决于第 i-1 栋的颜色，所以状态要带「前一栋的颜色」。用 dp[j][v] 表示「1..i 栋房子凑出 j 个街区，且第 i+1 栋的颜色是 v」的最小花费。v 是右侧邻居的颜色而不是自己，这样第 i 栋涂色时，街区数 j 里还没算上「第 i 栋和第 i+1 栋是否同色」这一刀。</p>
+      <p>v = 0 是「右侧虚拟房」：第 i+1 栋不存在时用它占位。最后答案是 dp[t][0]：右侧没有真实邻居，虚拟房和它不同色，自动多算一个街区，所以主循环前 t 先加 1。</p>
+      <figure class="fig" id="figVirt"></figure>
+
+      <h2 id="naive">三、朴素转移</h2>
+      <p>第 i 栋房子涂色 v：</p>
+      <ul>
+        <li>如果 house[i] 已定且等于 v，继承 memo[j][v]（和右侧同色，街区数不变）或 memo[j-1][v]（不同色，开新区）里的较小值。</li>
+        <li>如果没定，颜色 v 的花费来自三段：所有比 v 小的颜色（开新区）、所有比 v 大的颜色（开新区）、以及自身颜色 v（和右侧同色，街区数不变）。前两段是区间 min。</li>
+      </ul>
+      <figure class="fig" id="figColor"></figure>
+      <p>对每个 (j, v) 枚举颜色，单格 O(c)，总 O(n·t·c)。c ≤ 20 其实也能过，但预处理后总复杂度降到 O(n·t·c)，数据范围放大后同样成立。</p>
+
+      <h2 id="opt">四、前缀/后缀最值预处理</h2>
+      <p>注意 cost 只对未涂色的房子累加，已涂色房子没有花费。每层每格重建两张表：</p>
+    <pre class="code"><span class="cm">// 预处理：pre[s] 是 dp[i-1][j-1][1..s] + cost[i][1..s] 的最小值</span>
+    <span class="cm">//         suf[s] 是 dp[i-1][j-1][s..c] + cost[i][s..c] 的最小值</span>
+    <span class="cm">// 枚举颜色 color 的 O(c) 段被这两张表拆成 O(1) 查询</span>
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> i, <span class="kw">int</span> j) {
+        pre[0] = suf[c + 1] = NA;
+        <span class="kw">for</span> (<span class="kw">int</span> v = 1; v &lt;= c; v++) {
+            pre[v] = pre[v - 1];
+            <span class="kw">if</span> (memo[j - 1][v] != NA) {
+                pre[v] = min(pre[v], memo[j - 1][v] + cost[i][v]);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> v = c; v &gt;= 1; v--) {
+            suf[v] = suf[v + 1];
+            <span class="kw">if</span> (memo[j - 1][v] != NA) {
+                suf[v] = min(suf[v], memo[j - 1][v] + cost[i][v]);
+            }
+        }
+    }</pre>
+      <p>主流程（n 栋房子 + 虚拟房，j 的上限 t 已经加过 1）：</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">compute</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> v = 0; v &lt;= c; v++) memo[0][v] = dp[0][v] = NA;
+        <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= t; j++)
+            <span class="kw">for</span> (<span class="kw">int</span> v = 0; v &lt;= c; v++)
+                memo[j][v] = (j == 1 ? 0 : NA);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= t; j++) {
+                build(i, j);                        <span class="cm">// 每一层重建前缀/后缀最值</span>
+                <span class="kw">for</span> (<span class="kw">int</span> v = 0; v &lt;= c; v++) {      <span class="cm">// v 是 i+1 号房的颜色</span>
+                    <span class="kw">int</span> ans = NA;
+                    <span class="kw">if</span> (house[i] != 0) {
+                        <span class="kw">if</span> (house[i] == v) ans = memo[j][house[i]];
+                        <span class="kw">else</span> ans = memo[j - 1][house[i]];
+                    } <span class="kw">else</span> {
+                        <span class="kw">if</span> (v == 0) ans = suf[1];   <span class="cm">// 右侧虚拟房，必开新区</span>
+                        <span class="kw">else</span> {
+                            ans = min(pre[v - 1], suf[v + 1]);
+                            <span class="kw">if</span> (memo[j][v] != NA) ans = min(ans, memo[j][v] + cost[i][v]);
+                        }
+                    }
+                    dp[j][v] = ans;
+                }
+            }
+            swap(memo, dp);
+        }
+        <span class="kw">return</span> memo[t][0];
+    }</pre>
+
+      <h2 id="demo">五、演示：逐格填表与最值查询</h2>
+      <p>小例演示。显示 dp[j][v] 的每格计算，未涂色时高亮它从 pre/suf 查到的两个来源。</p>
+      <div class="viz" id="vizPaint">
+        <p class="viz-title">粉刷房子III：三段 min 合并成前缀/后缀最值</p>
+        <div id="vizPaintBody"></div>
+        <div class="viz-controls">
+          <div class="pt-ctl"><label for="paintPreset">例子</label>
+            <select class="pt-sel" id="paintPreset">
+              <option value="0">4 房 3 色，街区数 2</option>
+              <option value="1">4 房 3 色，街区数 3</option>
+              <option value="2">4 房 3 色，街区数 1</option>
+            </select>
+          </div>
+          <button class="pt-btn" id="paintPrev" type="button">上一步</button>
+          <button class="pt-btn" id="paintNext" type="button">下一步</button>
+          <button class="pt-btn" id="paintAuto" type="button">自动播放</button>
+          <button class="pt-btn" id="paintReset" type="button">重置</button>
+        </div>
+        <div class="legend">
+          <span><i class="dot full"></i>当前格 dp[j][v]</span>
+          <span><i class="dot partial"></i>pre/suf 覆盖的颜色段</span>
+          <span><i class="dot skip"></i>已涂色或无关格</span>
+        </div>
+      </div>
+
+      <h2 id="complexity">复杂度分析</h2>
+      <p>朴素 O(n·t·c²)，优化后每层对每个 j 建两张长度 c 的表（O(c)），再对每个 v 查表（O(c)），总 O(n·t·c)。空间 memo/dp 各 (t+1)×(c+1)，O(t·c)。</p>
+
+      <h2 id="summary">总结</h2>
+      <p>这一题的状态比直觉多一个维度：dp[j][v] 记的是「第 i+1 栋的颜色 v」，让第 i 栋的街区数变化当场可判；v = 0 的虚拟房统一了「最右边没有邻居」的情况，代价是 t 预先 +1。加速部分和还原数组对称：那次区间求和，这次区间取 min，都是 pre/suf 数组。</p>
+      <p>最后一题挖砖块换了个更隐蔽的预处理：转移枚举的是「上一列挖几块」，预处理列的后缀最大值把这段枚举也压掉，还顺带压缩了空间。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>粉刷房子III</td><td><a href="https://leetcode.cn/problems/paint-house-iii/" target="_blank">leetcode.cn/problems/paint-house-iii</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解132【扩展】动态规划优化专题6-预处理数组优化</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+</section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = {
+    blue: '#2563eb', blueBg: '#dbeafe', blueSoft: '#eef4ff',
+    orange: '#ea580c', orangeBg: '#ffedd5',
+    gray: '#9aa0a6', grayBg: '#f6f7f9', border: '#e6e8eb',
+    text: '#333', dim: '#6b7280'
+  };
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/ /g, '\u00a0');
+  }
+  function mksvg(inner, w, h) {
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" ' +
+      'style="width:100%;height:auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif">' +
+      '<style>text{font-size:12px;fill:' + C.text + '}</style>' + inner + '</svg>';
+  }
+  function mktxt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '"' +
+      (o.anchor ? ' text-anchor="' + o.anchor + '"' : '') +
+      (o.size ? ' font-size="' + o.size + '"' : '') +
+      (o.fill ? ' fill="' + o.fill + '"' : '') +
+      (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function mkbox(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" ' +
+      'fill="' + (o.fill || C.grayBg) + '" stroke="' + (o.stroke || C.border) + '" ' +
+      'stroke-width="' + (o.sw || 1) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function mkline(x1, y1, x2, y2, o) {
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" ' +
+      'stroke="' + (o.stroke || C.gray) + '" stroke-width="' + (o.sw || 1) + '"' +
+      (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function cell(x, y, w, h, label, o) {
+    o = o || {};
+    var g = mkbox(x, y, w, h, o);
+    g += mktxt(x + w / 2, y + h / 2 + 4, label, {
+      anchor: 'middle', size: o.size || 12, fill: o.tfill || C.text, weight: o.weight
+    });
+    return g;
+  }
+  function mount(id, inner, w, h, cap) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = mksvg(inner, w, h) + '<figcaption>' + cap + '</figcaption>';
+  }
+
+  /* ---------- 图一：街区 ---------- */
+  (function () {
+    var VW = 660, y = 26;
+    var g = '';
+    g += mktxt(30, y, '相邻同色组成一个街区', { anchor: 'start', size: 12, fill: C.dim });
+    var cols = ['#2563eb', '#2563eb', '#ea580c', '#16a34a', '#16a34a', '#16a34a'];
+    var x0 = 100, y0 = y + 26, cw = 46, gap = 4;
+    for (var i = 0; i < 6; i++) {
+      g += cell(x0 + i * (cw + gap), y0, cw, 28, String(i + 1), { fill: cols[i] + '33', stroke: cols[i], tfill: C.text });
+      g += mktxt(x0 + i * (cw + gap) + cw / 2, y0 + 42, String(i + 1), { anchor: 'middle', size: 10, fill: C.dim });
+    }
+    g += mkline(x0 - 6, y0 - 10, x0 + 2 * (cw + gap) - 4, y0 - 10, { stroke: C.blue, sw: 2 });
+    g += mktxt(x0 + cw - 4, y0 - 18, '街区1', { anchor: 'middle', size: 11, fill: C.blue });
+    g += mkline(x0 + 2 * (cw + gap), y0 - 10, x0 + 3 * (cw + gap) - 2, y0 - 10, { stroke: C.orange, sw: 2 });
+    g += mktxt(x0 + 2.5 * (cw + gap), y0 - 18, '街区2', { anchor: 'middle', size: 11, fill: C.orange });
+    g += mkline(x0 + 3 * (cw + gap), y0 - 10, x0 + 6 * (cw + gap) - 6, y0 - 10, { stroke: C.green, sw: 2 });
+    g += mktxt(x0 + 4.5 * (cw + gap), y0 - 18, '街区3', { anchor: 'middle', size: 11, fill: C.green });
+    mount('figStreet', g, VW, y0 + 62, '6 栋房子 3 个街区：1-2 同色、4-6 同色');
+  })();
+
+  /* ---------- 图二：虚拟房 ---------- */
+  (function () {
+    var VW = 660, y = 26;
+    var g = '';
+    g += mktxt(30, y, 'dp[j][v]：1..i 房凑 j 街区，第 i+1 房颜色 v（v=0 是右侧虚拟房）', { anchor: 'start', size: 12, fill: C.dim });
+    var x0 = 100, y0 = y + 30, cw = 54, gap = 6;
+    var cols = ['#2563eb', '#ea580c', '#16a34a'];
+    for (var i = 0; i < 3; i++) {
+      g += cell(x0 + i * (cw + gap), y0, cw, 30, i === 2 ? 'i+1=v' : '房' + (i + 1), {
+        fill: cols[i] + '33', stroke: cols[i]
+      });
+    }
+    g += cell(x0 + 3 * (cw + gap), y0, cw, 30, 'v=0', { fill: C.grayBg, stroke: C.orange, dash: '4 3' });
+    g += mktxt(x0 + 3 * (cw + gap) + cw / 2, y0 + 46, '虚拟房', { anchor: 'middle', size: 10, fill: C.dim });
+    var y2 = y0 + 66;
+    g += mktxt(30, y2, '第 i 栋涂 v：和右侧 v 同色街区数不变，不同色则 +1。最右边没有邻居 → 虚拟房永远不同色 → t 预先 +1',
+      { anchor: 'start', size: 12, fill: C.text });
+    mount('figVirt', g, VW, y2 + 26, '右侧虚拟房统一了边界');
+  })();
+
+  /* ---------- 图三：三段最值 ---------- */
+  (function () {
+    var VW = 660, y = 26;
+    var g = '';
+    g += mktxt(30, y, '第 i 栋涂颜色 v（v=2，c=6）的三种来源：', { anchor: 'start', size: 12, fill: C.dim });
+    var x0 = 90, y0 = y + 32, cw = 40, gap = 6;
+    for (var v = 1; v <= 6; v++) {
+      var fill = v < 2 ? '#fef3c7' : (v === 2 ? C.blueBg : '#dcfce7');
+      var stroke = v < 2 ? C.orange : (v === 2 ? C.blue : C.green);
+      g += cell(x0 + (v - 1) * (cw + gap), y0, cw, 28, '色' + v, { fill: fill, stroke: stroke, size: 10 });
+    }
+    var y2 = y0 + 42;
+    g += mktxt(30, y2, '色 < v：memo[j-1][s] + cost[i][s] 的最小值 → pre[v-1]', { anchor: 'start', size: 12, fill: C.orange, weight: '600' });
+    var y3 = y2 + 24;
+    g += mktxt(30, y3, '色 = v：memo[j][v] + cost[i][v]（同色，街区数不变）', { anchor: 'start', size: 12, fill: C.blue, weight: '600' });
+    var y4 = y3 + 24;
+    g += mktxt(30, y4, '色 > v：memo[j-1][s] + cost[i][s] 的最小值 → suf[v+1]', { anchor: 'start', size: 12, fill: C.green, weight: '600' });
+    mount('figColor', g, VW, y4 + 26, '两段区间 min 换成前缀/后缀最值');
+  })();
+
+  /* ---------- 演示 ---------- */
+  (function () {
+    var PRESETS = [
+      { n: 4, c: 3, t: 2, house: [0, 0, 0, 0], cost: [[1, 5, 9], [2, 6, 10], [3, 7, 11], [4, 8, 12]] },
+      { n: 4, c: 3, t: 3, house: [0, 0, 0, 0], cost: [[1, 5, 9], [2, 6, 10], [3, 7, 11], [4, 8, 12]] },
+      { n: 4, c: 3, t: 1, house: [0, 0, 0, 0], cost: [[1, 5, 9], [2, 6, 10], [3, 7, 11], [4, 8, 12]] }
+    ];
+    var NA = 1e9;
+    var body = document.getElementById('vizPaintBody');
+    var bPrev = document.getElementById('paintPrev');
+    var bNext = document.getElementById('paintNext');
+    var bAuto = document.getElementById('paintAuto');
+    var bReset = document.getElementById('paintReset');
+    var selP = document.getElementById('paintPreset');
+    var cur = 0, steps = [], timer = null;
+
+    function build() {
+      var P = PRESETS[+selP.value];
+      var n = P.n, c = P.c, t = P.t;
+      var memo = [], dp = [];
+      for (var j = 0; j <= t + 1; j++) {
+        memo[j] = []; dp[j] = [];
+        for (var v = 0; v <= c; v++) { memo[j][v] = NA; dp[j][v] = NA; }
+      }
+      for (var v = 0; v <= c; v++) { memo[0][v] = NA; dp[0][v] = NA; }
+      for (var j2 = 1; j2 <= t + 1; j2++) memo[j2][0] = (j2 === 1 ? 0 : NA);
+      steps = [];
+      steps.push({ phase: 0, memo: snap(memo), msg: '初始化：memo[1][0] = 0（虚拟房 v=0 且街区数 1），其余 NA' });
+      var memoCur = memo, dpCur = dp;
+      for (var i = 1; i <= n; i++) {
+        for (var j = 1; j <= t + 1; j++) {
+          // pre / suf
+          var pre = [], suf = [];
+          pre[0] = NA; suf[c + 1] = NA;
+          for (var v = 1; v <= c; v++) {
+            pre[v] = pre[v - 1];
+            if (memoCur[j - 1][v] !== NA) pre[v] = Math.min(pre[v], memoCur[j - 1][v] + P.cost[i - 1][v - 1]);
+          }
+          for (var v = c; v >= 1; v--) {
+            suf[v] = suf[v + 1];
+            if (memoCur[j - 1][v] !== NA) suf[v] = Math.min(suf[v], memoCur[j - 1][v] + P.cost[i - 1][v - 1]);
+          }
+          steps.push({ phase: 1, i: i, j: j, memo: snap(memoCur), pre: pre.slice(), suf: suf.slice(), msg: '房 ' + i + ' j=' + j + '：pre=[' + pre.slice(1).map(fmt).join(',') + '] suf=[' + suf.slice(1).map(fmt).join(',') + ']' });
+          for (var v = 0; v <= c; v++) {
+            var ans = NA, src = '';
+            if (P.house[i - 1] !== 0) {
+              if (P.house[i - 1] === v) {
+                ans = memoCur[j][P.house[i - 1]];
+                src = '已定色 ' + P.house[i - 1] + ' 与 v 相同 → memo[j][v]';
+              } else {
+                ans = memoCur[j - 1][P.house[i - 1]];
+                src = '已定色 ' + P.house[i - 1] + ' ≠ v → memo[j-1][v]';
+              }
+            } else {
+              if (v === 0) {
+                ans = suf[1];
+                src = '虚拟房 → 必开新区 suf[1] = ' + ans;
+              } else {
+                ans = Math.min(pre[v - 1], suf[v + 1]);
+                src = 'min(pre[' + (v - 1) + ']=' + pre[v - 1] + ', suf[' + (v + 1) + ']=' + suf[v + 1] + ')';
+                if (memoCur[j][v] !== NA) {
+                  var same = memoCur[j][v] + P.cost[i - 1][v - 1];
+                  if (same < ans) { ans = same; src += '，同色 memo[j][v]+cost=' + same; }
+                }
+              }
+            }
+            dpCur[j][v] = ans;
+            steps.push({ phase: 2, i: i, j: j, v: v, memo: snap(memoCur), dp: snap(dpCur), src: src, msg: 'dp[' + j + '][' + v + '] = ' + (ans >= NA ? 'NA' : ans) + '　(' + src + ')' });
+          }
+        }
+        var tt = memoCur; memoCur = dpCur; dpCur = tt;
+        steps.push({ phase: 3, i: i, memo: snap(memoCur), msg: '房 ' + i + ' 处理完，memo = dp 互换' });
+      }
+      var ans = memoCur[t + 1][0];
+      steps.push({ phase: 4, memo: snap(memoCur), msg: '答案 memo[' + (t + 1) + '][0] = ' + (ans >= NA ? '-1（做不到）' : ans) });
+    }
+    function snap(m) {
+      var r = [];
+      for (var i = 0; i < m.length; i++) r[i] = m[i].slice();
+      return r;
+    }
+    function fmt(x) { return x >= NA ? 'NA' : String(x); }
+    function render() {
+      var st = steps[cur];
+      var P = PRESETS[+selP.value];
+      var c = P.c, t = P.t;
+      var VW = 720, x = 30, y = 24;
+      var g = '';
+      g += mktxt(x, y, 'house', { anchor: 'start', size: 12, fill: C.dim, weight: '600' });
+      var cw = 44, gap = 6, x0 = 110;
+      for (var i = 0; i < P.n; i++) {
+        g += cell(x0 + i * (cw + gap), y - 12, cw, 26, String(P.house[i]), {
+          fill: (st.i === i + 1 ? C.orangeBg : C.grayBg),
+          stroke: (st.i === i + 1 ? C.orange : C.border)
+        });
+        g += mktxt(x0 + i * (cw + gap) + cw / 2, y + 26, String(i + 1), { anchor: 'middle', size: 10, fill: C.dim });
+      }
+      // dp 表
+      var y2 = y + 60;
+      g += mktxt(x, y2, 'dp[j][v]（当前层）', { anchor: 'start', size: 12, fill: C.dim, weight: '600' });
+      var cw2 = 44, gap2 = 4, x1 = 100;
+      g += cell(x1 - cw2, y2 + 10, cw2, 22, 'j\\v', { fill: C.grayBg, stroke: C.border, size: 10 });
+      for (var v = 0; v <= c; v++) g += cell(x1 + v * (cw2 + gap2), y2 + 10, cw2, 22, String(v), { fill: C.grayBg, stroke: C.border, size: 10 });
+      for (var j = 0; j <= t + 1; j++) {
+        var yy = y2 + 10 + (j + 1) * 20;
+        g += cell(x1 - cw2, yy, cw2, 18, String(j), { fill: C.grayBg, stroke: C.border, size: 10 });
+        for (var v = 0; v <= c; v++) {
+          var isCur = (st.j === j && st.v === v && st.phase === 2);
+          var val = st.dp && st.dp[j] ? fmt(st.dp[j][v]) : fmt(st.memo[j][v]);
+          g += cell(x1 + v * (cw2 + gap2), yy, cw2, 18, val, {
+            fill: isCur ? C.orangeBg : C.blueSoft,
+            stroke: isCur ? C.orange : C.blue,
+            size: 10
+          });
+        }
+      }
+      var y3 = y2 + 10 + (t + 2) * 20 + 22;
+      if (st.phase === 2) {
+        g += mktxt(x, y3, 'dp[' + st.j + '][' + st.v + '] 来源：' + st.src, { anchor: 'start', size: 12, fill: C.blue, weight: '600' });
+      }
+      var y4 = y3 + 24;
+      g += mktxt(x, y4, st.msg, { anchor: 'start', size: 12, fill: C.dim });
+      var extra = '<div class="breakdown">' +
+        '<div class="row">第 <span class="num">' + cur + '</span> / ' + (steps.length - 1) + ' 步　房 <span class="num">' + (st.i || 0) + '</span></div></div>';
+      body.innerHTML = mksvg(g, VW, y4 + 26) + extra;
+      bPrev.disabled = (cur === 0);
+      bNext.disabled = (cur === steps.length - 1);
+    }
+    function stopAuto() { if (timer) { clearInterval(timer); timer = null; bAuto.textContent = '自动播放'; } }
+    bNext.addEventListener('click', function () { if (cur < steps.length - 1) { cur++; render(); } });
+    bPrev.addEventListener('click', function () { if (cur > 0) { cur--; render(); } });
+    bReset.addEventListener('click', function () { stopAuto(); cur = 0; render(); });
+    selP.addEventListener('change', function () { stopAuto(); build(); cur = 0; render(); });
+    bAuto.addEventListener('click', function () {
+      if (timer) { stopAuto(); return; }
+      bAuto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (cur < steps.length - 1) { cur++; render(); } else stopAuto();
+      }, 500);
+    });
+    build();
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

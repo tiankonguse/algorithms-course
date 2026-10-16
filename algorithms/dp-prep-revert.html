@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>前缀和加速枚举：还原数组的方法数 · 算法教程</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.rv-sel,.rv-btn{
+  border:1px solid var(--border);background:var(--bg);border-radius:6px;
+  padding:5px 11px;font-size:14px;color:var(--text);font-family:inherit;
+}
+.rv-sel:focus{outline:none;border-color:var(--accent);}
+.rv-btn{cursor:pointer;}
+.rv-btn:hover{border-color:var(--accent);color:var(--accent);}
+.rv-btn:disabled{opacity:.4;cursor:default;}
+.rv-btn:disabled:hover{border-color:var(--border);color:var(--text);}
+.rv-ctl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>前缀和加速枚举：还原数组的方法数</h1>
+      <p class="intro">丢失了部分数字的数组要还原，每个位置的值都不超过左右邻居的较大者。从右往左填，状态里要记住「刚填的数字」和「它和更前一个的大小关系」。填一个位置的合法取值是三段连续的区间，朴素做法一段一段枚举，预处理数组把三段区间分别改成后缀和与前缀和，枚举从 O(m) 变 O(1)。</p>
+
+      <h2 id="bg">零、背景</h2>
+      <p>「加速枚举」和上一题的「减少枚举」不同：这里枚举的数字段没有少，只是把重复求的区间和提前算好。值域只有 ≤ 200，m 很小，但 n 有 10 的 4 次方，每层少一个 O(m) 的枚举，总共省掉 O(n·m) 到 O(n·m²) 的差距。</p>
+
+      <h2 id="problem">一、问题</h2>
+      <p>原本长度 n 的数组，下标从 1 开始，每个位置是不超过 200 的正数，且满足 <code class="inline">arr[i] &lt;= max(arr[i-1], arr[i+1])</code>，边界 <code class="inline">arr[1] &lt;= arr[2]</code>、<code class="inline">arr[n] &lt;= arr[n-1]</code>。部分数字丢失（记 0），问还原成不违规数组有多少种方法，答案对 998244353 取模。n 到 10 的 4 次方。</p>
+      <figure class="fig" id="figCond"></figure>
+
+      <h2 id="state">二、从右往左的状态设计</h2>
+      <p>决定位置 i 的值时，右边邻居 arr[i+1] 已经确定，但 arr[i-1] 还没定，约束 <code class="inline">arr[i] &lt;= max(arr[i-1], arr[i+1])</code> 没法当场判定。换个角度：决定位置 i 时能判定的是「位置 i+1 的约束」，它右边的 arr[i+2] 也定了。所以状态要带上右侧两个值的信息：</p>
+      <figure class="fig" id="figState"></figure>
+      <p>memo[v][s]：上一个位置（i+1）填的是 v；s 表示它和更前一个位置（i+2）的关系：s = 0 表示 v 严格大于它，s = 1 表示 v 小于等于它。决定位置 i 填 cur 时，检查「位置 i+1 的约束」：<code class="inline">v &lt;= max(cur, arr[i+2])</code>。</p>
+      <ul>
+        <li>cur &gt; v：位置 i+1 约束自动满足（max 至少是 cur &gt; v）。新关系 s' = 0（cur 严格大于 v）。</li>
+        <li>cur = v：约束满足（max ≥ v）。新关系 s' = 1。</li>
+        <li>cur &lt; v：只有 s = 1（v ≤ arr[i+2]）时才满足，因为 max = arr[i+2] ≥ v。新关系 s' = 1。</li>
+      </ul>
+
+      <h2 id="naive">三、朴素枚举</h2>
+      <p>位置 i 未定时，对每个 (v, s) 枚举 cur 分三段累加：</p>
+      <figure class="fig" id="figSeg"></figure>
+      <p><code class="inline">dp[v][s] = sum(cur=v+1..m 的 memo[cur][0]) + memo[v][1] + (s==1 时 sum(cur=1..v-1 的 memo[cur][1]))</code>。注意 cur = v 那一段独立出来，因为它的新关系是 s' = 1。</p>
+
+      <h2 id="opt">四、前缀/后缀和预处理</h2>
+      <p>三段里两段是连续区间的求和：<code class="inline">memo[cur][0]</code> 的后缀和、<code class="inline">memo[cur][1]</code> 的前缀和。每层开始前 O(m) 重建，转移里 O(1) 查表：</p>
+    <pre class="code"><span class="cm">// 预处理：suf0 是 memo[*][0] 的后缀和，pre1 是 memo[*][1] 的前缀和</span>
+    <span class="cm">// memo[v][s]：上一个数字是 v；s=0 表示它严格大于更前一个，s=1 表示小于等于</span>
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        suf0[m] = memo[m][0];
+        <span class="kw">for</span> (<span class="kw">int</span> v = m - 1; v &gt;= 0; v--) {
+            suf0[v] = (suf0[v + 1] + memo[v][0]) % MOD;
+        }
+        pre1[1] = memo[1][1];
+        <span class="kw">for</span> (<span class="kw">int</span> v = 2; v &lt;= m; v++) {
+            pre1[v] = (pre1[v - 1] + memo[v][1]) % MOD;
+        }
+    }</pre>
+      <p>主流程（滚动数组 memo/dp，每层互换）：</p>
+    <pre class="code"><span class="kw">int</span> <span class="fn">compute</span>() {
+        <span class="kw">for</span> (<span class="kw">int</span> v = 0; v &lt;= m; v++) {   <span class="cm">// 第 0 个数字的边界</span>
+            memo[v][0] = 0;
+            memo[v][1] = 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            prepare();                   <span class="cm">// 每一层重建一次前缀/后缀和</span>
+            <span class="kw">for</span> (<span class="kw">int</span> v = 0; v &lt;= m; v++) {
+                <span class="kw">for</span> (<span class="kw">int</span> s = 0; s &lt;= 1; s++) {
+                    <span class="kw">int</span> ans = 0;
+                    <span class="kw">if</span> (arr[i] != 0) {   <span class="cm">// 位置 i 的数字已经确定</span>
+                        <span class="kw">if</span> (arr[i] &gt;= v || s == 1) {
+                            ans = memo[arr[i]][arr[i] &gt; v ? 0 : 1];
+                        }
+                    } <span class="kw">else</span> {             <span class="cm">// 位置 i 需要填，三段枚举合并成查表</span>
+                        <span class="kw">if</span> (v + 1 &lt;= m) ans = (ans + suf0[v + 1]) % MOD;
+                        <span class="kw">if</span> (v != 0)      ans = (ans + memo[v][1]) % MOD;
+                        <span class="kw">if</span> (s == 1)      ans = (ans + pre1[v - 1]) % MOD;
+                    }
+                    dp[v][s] = ans;
+                }
+            }
+            swap(memo, dp);
+        }
+        <span class="kw">return</span> memo[0][1];
+    }</pre>
+
+      <h2 id="demo">五、演示：一层内的三段与查表</h2>
+      <p>小值域演示。左侧是上一层的 memo 表，右侧逐步显示当前层某个 (v, s) 的三段累加如何变成两次查表。</p>
+      <div class="viz" id="vizRevert">
+        <p class="viz-title">还原数组：三层枚举合并成前缀/后缀和</p>
+        <div id="vizRevertBody"></div>
+        <div class="viz-controls">
+          <div class="rv-ctl"><label for="revertPreset">例子</label>
+            <select class="rv-sel" id="revertPreset">
+              <option value="0">arr = [0, 0, 0]，m = 4</option>
+              <option value="1">arr = [2, 0, 0]，m = 4</option>
+              <option value="2">arr = [1, 0, 1]，m = 4</option>
+            </select>
+          </div>
+          <button class="rv-btn" id="revertPrev" type="button">上一步</button>
+          <button class="rv-btn" id="revertNext" type="button">下一步</button>
+          <button class="rv-btn" id="revertAuto" type="button">自动播放</button>
+          <button class="rv-btn" id="revertReset" type="button">重置</button>
+        </div>
+        <div class="legend">
+          <span><i class="dot full"></i>当前 (v, s) 的三段来源</span>
+          <span><i class="dot partial"></i>前缀/后缀和覆盖段</span>
+          <span><i class="dot skip"></i>与本段无关</span>
+        </div>
+      </div>
+
+      <h2 id="complexity">复杂度分析</h2>
+      <p>朴素是每层对每个 (v, s) 枚举 cur，O(n·m²)；优化后每层 O(m) 建前缀/后缀和，再加 O(m) 填表，总 O(n·m)。n = 10 的 4 次方、m = 200 时，n·m = 2×10 的 6 次方，n·m² = 4×10 的 8 次方，差两个数量级。</p>
+      <p>空间：memo/dp 都是 (m+1)×2，加 suf0/pre1 各 m+1，O(m)。</p>
+
+      <h2 id="summary">总结</h2>
+      <p>这一题最绕的是状态语义：从右往左填，s 表示「刚填的值 v 和更前一个的关系」，它决定了 cur &lt; v 那段能不能走。三个枚举段里两段是区间和，预处理后缀和与前缀和后 O(1) 查表。和炮兵阵地对照：那题预筛状态集合，这题预存区间和，都是「转移里反复算的东西先算好」。</p>
+      <p>下一题粉刷房子把同样思路用到最小值上：枚举颜色的三段，改成前缀最小值和后缀最小值。</p>
+
+      <h2 id="prob-links">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>牛客</td><td>还原数组的方法数</td><td><a href="https://www.nowcoder.com/practice/49c5284278974cbda474ec13d8bd86a9" target="_blank">nowcoder.com/practice/49c5284278974cbda474ec13d8bd86a9</a></td></tr>
+      </table>
+
+      <h2 id="refs">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解132【扩展】动态规划优化专题6-预处理数组优化</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+</section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var C = {
+    blue: '#2563eb', blueBg: '#dbeafe', blueSoft: '#eef4ff',
+    orange: '#ea580c', orangeBg: '#ffedd5',
+    gray: '#9aa0a6', grayBg: '#f6f7f9', border: '#e6e8eb',
+    text: '#333', dim: '#6b7280'
+  };
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/ /g, '\u00a0');
+  }
+  function mksvg(inner, w, h) {
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" ' +
+      'style="width:100%;height:auto;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif">' +
+      '<style>text{font-size:12px;fill:' + C.text + '}</style>' + inner + '</svg>';
+  }
+  function mktxt(x, y, s, o) {
+    o = o || {};
+    return '<text x="' + x + '" y="' + y + '"' +
+      (o.anchor ? ' text-anchor="' + o.anchor + '"' : '') +
+      (o.size ? ' font-size="' + o.size + '"' : '') +
+      (o.fill ? ' fill="' + o.fill + '"' : '') +
+      (o.weight ? ' font-weight="' + o.weight + '"' : '') +
+      '>' + esc(s) + '</text>';
+  }
+  function mkbox(x, y, w, h, o) {
+    o = o || {};
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" ' +
+      'fill="' + (o.fill || C.grayBg) + '" stroke="' + (o.stroke || C.border) + '" ' +
+      'stroke-width="' + (o.sw || 1) + '"' + (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function mkline(x1, y1, x2, y2, o) {
+    o = o || {};
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" ' +
+      'stroke="' + (o.stroke || C.gray) + '" stroke-width="' + (o.sw || 1) + '"' +
+      (o.dash ? ' stroke-dasharray="' + o.dash + '"' : '') + '/>';
+  }
+  function cell(x, y, w, h, label, o) {
+    o = o || {};
+    var g = mkbox(x, y, w, h, o);
+    g += mktxt(x + w / 2, y + h / 2 + 4, label, {
+      anchor: 'middle', size: o.size || 12, fill: o.tfill || C.text, weight: o.weight
+    });
+    return g;
+  }
+  function mount(id, inner, w, h, cap) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = mksvg(inner, w, h) + '<figcaption>' + cap + '</figcaption>';
+  }
+
+  /* ---------- 图一：约束 ---------- */
+  (function () {
+    var VW = 660, y = 26;
+    var g = '';
+    g += mktxt(30, y, '每个位置不超过左右邻居的较大者：arr[i] ≤ max(arr[i-1], arr[i+1])', { anchor: 'start', size: 12, fill: C.dim });
+    var arr = ['4', '1', '3'];
+    var x0 = 110, y0 = y + 30, cw = 52, gap = 10;
+    for (var i = 0; i < 3; i++) {
+      g += cell(x0 + i * (cw + gap), y0, cw, 28, arr[i], {
+        fill: (i === 1 ? C.orangeBg : C.blueSoft),
+        stroke: (i === 1 ? C.orange : C.blue)
+      });
+      g += mktxt(x0 + i * (cw + gap) + cw / 2, y0 + 42, String(i), { anchor: 'middle', size: 10, fill: C.dim });
+    }
+    var y2 = y0 + 62;
+    g += mktxt(30, y2, '位置 2 填 1：max(4, 3) = 4 ≥ 1 ✓。若填 5：max(4, 3) = 4 < 5 ✗', { anchor: 'start', size: 12, fill: C.text });
+    mount('figCond', g, VW, y2 + 26, '约束只比较大小，值域 ≤ 200 是后续枚举加速的前提');
+  })();
+
+  /* ---------- 图二：状态 ---------- */
+  (function () {
+    var VW = 660, y = 26;
+    var g = '';
+    g += mktxt(30, y, '从右往左决定：填位置 i 时，位置 i+1 的值 v 与 i+2 的关系 s 已知', { anchor: 'start', size: 12, fill: C.dim });
+    var x0 = 90, y0 = y + 30, cw = 90, ch = 32, gap = 20;
+    var rows = ['i+2（更前）', 'i+1 = v', 'i = cur（待填）'];
+    for (var r = 0; r < 3; r++) {
+      var yy = y0 + r * (ch + 12);
+      g += cell(x0, yy, cw, ch, rows[r], {
+        fill: (r === 2 ? C.orangeBg : (r === 1 ? C.blueBg : C.grayBg)),
+        stroke: (r === 2 ? C.orange : (r === 1 ? C.blue : C.border))
+      });
+    }
+    g += mktxt(x0 + cw + 20, y0 + 16, 's = 0：v > i+2 的值', { anchor: 'start', size: 11, fill: C.dim });
+    g += mktxt(x0 + cw + 20, y0 + 38, 's = 1：v ≤ i+2 的值', { anchor: 'start', size: 11, fill: C.dim });
+    g += mktxt(x0 + cw + 20, y0 + 72, '填 cur 时检查位置 i+1 的约束：', { anchor: 'start', size: 11, fill: C.blue, weight: '600' });
+    g += mktxt(x0 + cw + 20, y0 + 94, 'v ≤ max(cur, i+2 的值)', { anchor: 'start', size: 11, fill: C.blue });
+    var y3 = y0 + 3 * (ch + 12) + 6;
+    g += mktxt(30, y3, '新关系 s\'：cur > v 则 0，cur ≤ v 则 1，随 memo[cur][s\'] 往下传',
+      { anchor: 'start', size: 12, fill: C.text });
+    mount('figState', g, VW, y3 + 26, '状态携带右侧两个值的关系，让约束能当场判定');
+  })();
+
+  /* ---------- 图三：三段枚举 ---------- */
+  (function () {
+    var VW = 660, y = 26;
+    var g = '';
+    g += mktxt(30, y, '枚举 cur 分三段（v = 3，m = 6）：', { anchor: 'start', size: 12, fill: C.dim });
+    var x0 = 90, y0 = y + 32, cw = 40, gap = 6;
+    var seg = [];
+    for (var v = 1; v <= 6; v++) {
+      if (v > 3) seg.push('s\'=0');
+      else if (v === 3) seg.push('s\'=1');
+      else seg.push('仅 s=1');
+    }
+    for (var i = 0; i < 6; i++) {
+      var fill = i > 2 ? '#fef3c7' : (i === 2 ? C.blueBg : C.grayBg);
+      var stroke = i > 2 ? C.orange : (i === 2 ? C.blue : C.border);
+      g += cell(x0 + i * (cw + gap), y0, cw, 28, seg[i], { fill: fill, stroke: stroke, size: 10 });
+      g += mktxt(x0 + i * (cw + gap) + cw / 2, y0 + 42, String(v), { anchor: 'middle', size: 10, fill: C.dim });
+    }
+    var y2 = y0 + 64;
+    g += mktxt(30, y2, '段1（cur > v）：memo[cur][0] 的后缀和 suf0[v+1]', { anchor: 'start', size: 12, fill: C.orange, weight: '600' });
+    var y3 = y2 + 24;
+    g += mktxt(30, y3, '段2（cur = v）：单点 memo[v][1]', { anchor: 'start', size: 12, fill: C.blue, weight: '600' });
+    var y4 = y3 + 24;
+    g += mktxt(30, y4, '段3（cur < v，仅 s=1）：memo[cur][1] 的前缀和 pre1[v-1]', { anchor: 'start', size: 12, fill: C.text });
+    mount('figSeg', g, VW, y4 + 26, '两段区间求和换成后缀和与前缀和，枚举消失');
+  })();
+
+  /* ---------- 演示 ---------- */
+  (function () {
+    var PRESETS = [
+      { arr: [0, 0, 0], m: 4 },
+      { arr: [2, 0, 0], m: 4 },
+      { arr: [1, 0, 1], m: 4 }
+    ];
+    var MOD = 998244353;
+    var body = document.getElementById('vizRevertBody');
+    var bPrev = document.getElementById('revertPrev');
+    var bNext = document.getElementById('revertNext');
+    var bAuto = document.getElementById('revertAuto');
+    var bReset = document.getElementById('revertReset');
+    var selP = document.getElementById('revertPreset');
+    var cur = 0, steps = [], timer = null;
+
+    function build() {
+      var P = PRESETS[+selP.value];
+      var n = P.arr.length, m = P.m;
+      var memo = [], dp = [];
+      for (var v = 0; v <= m; v++) { memo[v] = [0, 1]; dp[v] = [0, 0]; }
+      steps = [];
+      steps.push({ phase: 0, memo: snap(memo), msg: '边界：memo[v][0] = 0，memo[v][1] = 1（第 0 个位置之前没有约束）' });
+      for (var i = 1; i <= n; i++) {
+        // 建 suf0 / pre1
+        var suf0 = [], pre1 = [];
+        suf0[m] = memo[m][0];
+        for (var v = m - 1; v >= 0; v--) suf0[v] = (suf0[v + 1] + memo[v][0]) % MOD;
+        pre1[1] = memo[1][1];
+        for (var v = 2; v <= m; v++) pre1[v] = (pre1[v - 1] + memo[v][1]) % MOD;
+        steps.push({ phase: 1, i: i, memo: snap(memo), suf0: suf0.slice(), pre1: pre1.slice(), msg: '层 ' + i + '：建 suf0（memo[*][0] 后缀和）与 pre1（memo[*][1] 前缀和）' });
+        for (var v = 0; v <= m; v++) {
+          for (var s = 0; s <= 1; s++) {
+            var ans = 0;
+            var parts = [];
+            if (P.arr[i - 1] !== 0) {
+              if (P.arr[i - 1] >= v || s === 1) {
+                ans = memo[P.arr[i - 1]][P.arr[i - 1] > v ? 0 : 1];
+                parts.push('固定值 ' + P.arr[i - 1] + '，直接查 memo[' + P.arr[i - 1] + '][' + (P.arr[i - 1] > v ? 0 : 1) + '] = ' + ans);
+              }
+            } else {
+              if (v + 1 <= m) { parts.push('suf0[' + (v + 1) + '] = ' + suf0[v + 1]); ans = (ans + suf0[v + 1]) % MOD; }
+              if (v !== 0) { parts.push('memo[' + v + '][1] = ' + memo[v][1]); ans = (ans + memo[v][1]) % MOD; }
+              if (s === 1 && v - 1 >= 0) { parts.push('pre1[' + (v - 1) + '] = ' + pre1[v - 1]); ans = (ans + pre1[v - 1]) % MOD; }
+            }
+            dp[v][s] = ans;
+            steps.push({ phase: 2, i: i, v: v, s: s, memo: snap(memo), dp: snap(dp), parts: parts.slice(), msg: 'dp[' + v + '][' + s + '] = ' + ans });
+          }
+        }
+        var t = memo; memo = dp; dp = t;
+        steps.push({ phase: 3, i: i, memo: snap(memo), msg: '层 ' + i + ' 结束，memo = dp 互换' });
+      }
+      steps.push({ phase: 4, memo: snap(memo), msg: '答案 memo[0][1] = ' + memo[0][1] });
+    }
+    function snap(m) {
+      var r = [];
+      for (var i = 0; i < m.length; i++) r[i] = m[i].slice();
+      return r;
+    }
+    function render() {
+      var st = steps[cur];
+      var P = PRESETS[+selP.value];
+      var m = P.m;
+      var VW = 660, x = 30, y = 24;
+      var g = '';
+      // arr 显示
+      g += mktxt(x, y, 'arr', { anchor: 'start', size: 12, fill: C.dim, weight: '600' });
+      var cw = 44, gap = 6, x0 = 100;
+      for (var i = 0; i < P.arr.length; i++) {
+        g += cell(x0 + i * (cw + gap), y - 12, cw, 26, String(P.arr[i]), {
+          fill: (st.i === i + 1 ? C.orangeBg : C.grayBg),
+          stroke: (st.i === i + 1 ? C.orange : C.border)
+        });
+        g += mktxt(x0 + i * (cw + gap) + cw / 2, y + 26, String(i + 1), { anchor: 'middle', size: 10, fill: C.dim });
+      }
+      // memo 表
+      var y2 = y + 60;
+      g += mktxt(x, y2, 'memo[v][s]（当前层）', { anchor: 'start', size: 12, fill: C.dim, weight: '600' });
+      var cw2 = 42, gap2 = 6, x1 = 100;
+      g += cell(x1 - cw2, y2 + 10, cw2, 22, 'v\\s', { fill: C.grayBg, stroke: C.border, size: 10 });
+      g += cell(x1, y2 + 10, cw2, 22, 's=0', { fill: C.grayBg, stroke: C.border, size: 10 });
+      g += cell(x1 + cw2 + gap2, y2 + 10, cw2, 22, 's=1', { fill: C.grayBg, stroke: C.border, size: 10 });
+      for (var v = 0; v <= m; v++) {
+        var yy = y2 + 10 + (v + 1) * 22;
+        g += cell(x1 - cw2, yy, cw2, 20, String(v), { fill: C.grayBg, stroke: C.border, size: 10 });
+        for (var s = 0; s <= 1; s++) {
+          var isCur = (st.v === v && st.s === s && st.phase === 2);
+          var ccx = x1 + s * (cw2 + gap2);
+          g += cell(ccx, yy, cw2, 20, String(st.memo[v][s]), {
+            fill: isCur ? C.orangeBg : C.blueSoft,
+            stroke: isCur ? C.orange : C.blue,
+            size: 10
+          });
+        }
+      }
+      // 信息
+      var y3 = y2 + 10 + (m + 1) * 22 + 22;
+      var info = '';
+      if (st.phase === 1) info = 'suf0 = [' + st.suf0.slice(1).join(', ') + ']　pre1 = [' + st.pre1.slice(1).join(', ') + ']';
+      else if (st.phase === 2) info = 'dp[' + st.v + '][' + st.s + '] = ' + st.parts.join(' + ');
+      else if (st.phase === 4) info = '答案 = ' + st.msg.split('= ')[1];
+      if (info) g += mktxt(x, y3, info, { anchor: 'start', size: 12, fill: C.blue, weight: '600' });
+      var y4 = y3 + 24;
+      g += mktxt(x, y4, st.msg, { anchor: 'start', size: 12, fill: C.dim });
+      var extra = '<div class="breakdown">' +
+        '<div class="row">第 <span class="num">' + cur + '</span> / ' + (steps.length - 1) + ' 步　层 ' +
+        '<span class="num">' + (st.i || 0) + '</span></div></div>';
+      body.innerHTML = mksvg(g, VW, y4 + 26) + extra;
+      bPrev.disabled = (cur === 0);
+      bNext.disabled = (cur === steps.length - 1);
+    }
+    function stopAuto() { if (timer) { clearInterval(timer); timer = null; bAuto.textContent = '自动播放'; } }
+    bNext.addEventListener('click', function () { if (cur < steps.length - 1) { cur++; render(); } });
+    bPrev.addEventListener('click', function () { if (cur > 0) { cur--; render(); } });
+    bReset.addEventListener('click', function () { stopAuto(); cur = 0; render(); });
+    selP.addEventListener('change', function () { stopAuto(); build(); cur = 0; render(); });
+    bAuto.addEventListener('click', function () {
+      if (timer) { stopAuto(); return; }
+      bAuto.textContent = '暂停';
+      timer = setInterval(function () {
+        if (cur < steps.length - 1) { cur++; render(); } else stopAuto();
+      }, 600);
+    });
+    build();
+    render();
+  })();
+})();
+</script>
+</body>
+</html>
