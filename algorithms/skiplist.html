@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>跳表：静态数组实现有序表</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>跳表：静态数组实现有序表</h1>
+      <p class="intro">AVL 树靠旋转保证平衡，跳表换一条路：让骰子决定每个节点占几层，期望层数 O(log n)，查询从顶层开始一层层往下跳。随机化把「数据顺序决定结构」这层耦合拆掉了。就算输入是严格升序，跳表结构也不退化。</p>
+
+      <h2>零、背景</h2>
+      <p>有序表要支持六种操作，单次 O(log n)：增加 x（重复加入算词频）、删除 x（多个只删一个）、查询 x 的排名（比 x 小的个数 + 1）、查询排名第 k 的数、前驱、后继。</p>
+      <p>上一讲的 AVL 树用左右子树高度差 ≤ 1 把树压平，查询从根往下走。跳表不用树：它是一摞有序链表，底层装着全部元素，上面每层按概率稀疏化。查找一个数，从最上层开始，能跳就跳，跳不过去就降一层，到底层时已经离目标很近了。</p>
+      <p>为什么值得这么做？二叉搜索树最怕一种输入：按有序顺序插入，树直接退化成链表，O(log n) 变 O(n)。跳表把「结构长什么样」的决定权从数据手里拿过来，交给随机层数。数据再刁钻，结构分布依然稳定。代价是期望意义上的 O(log n)，不是最坏保证。</p>
+
+      <h2>一、跳表长什么样</h2>
+      <p>每个节点除了值，还有一个随机层数。层数 1 的节点只在最底层出现；层数 L 的节点在下面 L 层都出现。最底层是一条完整的有序链表，越往上节点越少。</p>
+      <figure class="fig">
+        <svg viewBox="0 0 900 300" id="figLevel" role="img" aria-label="跳表多层结构"></svg>
+      </figure>
+      <p>上图是插入 2, 5, 8, 11, 14, 17 后的一个可能形态：17 层数 4（每层都在），2 层数 1（只占底层）。层数怎么来？抛硬币，小于 0.5 就加一层，直到抛到大的或撞上限 MAXL：</p>
+<pre class="code"><span class="kw">int</span> randomLevel() {
+    <span class="kw">int</span> ans = 1;
+    <span class="kw">while</span> ((rand() / <span class="kw">double</span>(RAND_MAX)) &lt; 0.5) {
+        ans++;
+    }
+    <span class="kw">return</span> min(ans, MAXL);
+}</pre>
+      <p>期望层数是 2（P(层 ≥ k) = 0.5^(k-1)），第 k 层期望放 n / 2^(k-1) 个节点。这就是复杂度分析的起点。</p>
+
+      <h2>二、静态数组怎么装</h2>
+      <p>竞赛里不用指针结构，跳表照旧开静态数组。节点从 1 号开始用，0 表示空指针（没有节点）：</p>
+<pre class="code">const <span class="kw">int</span> MAXL = 20;      <span class="cm">// 层数上限</span>
+const <span class="kw">int</span> MAXN = 100001;  <span class="cm">// 最大操作数，节点数不会超过它</span>
+
+<span class="kw">int</span> cnt;                 <span class="cm">// 已用的节点个数</span>
+<span class="kw">int</span> key[MAXN];           <span class="cm">// 节点的值</span>
+<span class="kw">int</span> key_count[MAXN];    <span class="cm">// 词频：这个值出现过几次</span>
+<span class="kw">int</span> level[MAXN];        <span class="cm">// 每个节点的层数</span>
+<span class="kw">int</span> next_node[MAXN][MAXL + 1];  <span class="cm">// next_node[i][h]：i 在第 h 层的后继节点编号</span>
+<span class="kw">int</span> len[MAXN][MAXL + 1];         <span class="cm">// len[i][h]：i 到 next_node[i][h] 这条边跨过多少个元素</span></pre>
+      <p>1 号节点是哨兵：值 INT_MIN、层数 MAXL，所有查询和修改从它出发。build() 建好哨兵，clear() 把用过的空间清零再把 cnt 归 0。跑多组数据时跳表支持反复重建。</p>
+      <p>next_node[i][h] 是二维数组，[MAXN][MAXL+1] 最坏 10 万 × 21 个 int，约 8 MB，完全装得下。跳表的「指针」就是数组下标，找后继是查表，不是解引用。</p>
+
+      <h2>三、len 数组：一条边跨过几个元素</h2>
+      <p>排名和按排名取值都要知道「跳过去多少元素」，所以每条边额外记一个长度。语义要分两层看：</p>
+      <figure class="fig">
+        <svg viewBox="0 0 900 250" id="figLen" role="img" aria-label="len 数组语义"></svg>
+      </figure>
+      <ul>
+        <li>最底层：len[i][1] 是 next_node[i][1] 那个节点的词频。底层的边通向一个具体元素，跨过个数就是它的词频。</li>
+        <li>更高层：len[i][h] 是这一跳覆盖的区间里，底层元素的总个数（词频都算）。上图的第二层链，哨兵到 2 跨过底层两个「2」，len = 2；2 到 7 跨过 [5, 7, 7] 三个元素，len = 3。</li>
+      </ul>
+      <p>查询 x 排名时把沿途的 len 累加，得到比 x 小的元素个数，加 1 就是排名。这就是 getRank 的原料。</p>
+
+      <h2>四、查询：从顶层往下跳</h2>
+      <p>find(i, h, num) 在 i 的第 h 层找 num：当前层的后继值小于 num 就一直往右走，走不动就降一层继续，到底层时精确匹配。核心循环只有一句：</p>
+<pre class="code"><span class="kw">int</span> find(<span class="kw">int</span> i, <span class="kw">int</span> h, <span class="kw">int</span> num) {
+    <span class="kw">while</span> (next_node[i][h] != 0 &amp;&amp; key[next_node[i][h]] &lt; num) {
+        i = next_node[i][h];
+    }
+    <span class="kw">if</span> (h == 1) {
+        <span class="kw">if</span> (next_node[i][h] != 0 &amp;&amp; key[next_node[i][h]] == num) {
+            <span class="kw">return</span> next_node[i][h];
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> 0;
+        }
+    }
+    <span class="kw">return</span> find(i, h - 1, num);
+}</pre>
+      <figure class="fig">
+        <svg viewBox="0 0 900 280" id="figFind" role="img" aria-label="find 查询下降路径"></svg>
+      </figure>
+      <p>查 11：第 3 层（这层只有 5 和 11）从哨兵跳到 5，5 的下一个就是 11，走不动；降第 2 层从 5 出发，5 先跳到 8（8 < 11），8 的下一跳是 11，又走不动；降到底层，底层 8 的后继正好是 11，命中。每层只做常数次比较，从第 20 层降到第 1 层总共 O(log n) 步。</p>
+      <p>其他三个查询同套路：</p>
+      <ul>
+        <li>small(i, h, num)：和 find 一样往右走，但沿途把 len 累进 rightCnt，返回比 num 小的个数。getRank(num) = small(1, MAXL, num) + 1。</li>
+        <li>index(x)：查排名第 x 的数。维护已累计个数 c，当 c + len[i][h] < x 就跳这条边（把整个区间都算进 c），否则降层，底层返回所在节点的 key。</li>
+        <li>pre(num)：前驱。到底层时停下的位置如果就是哨兵（i == 1），说明没有前驱，返回 INT_MIN；否则 key[i] 就是比 num 小的最大数。</li>
+        <li>post(num)：后继。底层停在的位置如果后继为空返回 INT_MAX；有个细节：如果 key[next_node[i][1]] == num（num 自己就在下一格），要再往后走一步才是真正比 num 大的数。课程代码专门处理了这一格。</li>
+      </ul>
+
+      <h2>五、增加与删除</h2>
+      <p>增加分两路：</p>
+      <ul>
+        <li>find 找到 num 已存在：addCount 从顶层到底层逐层把路径上的 len 加 1，并给底层那个节点的 key_count 加 1。词频 +1，结构不动。</li>
+        <li>找不到：新开节点 cnt + 1，randomLevel 定层数，addNode 逐层把它链进每层链表，同时维护 len。这里有个关键账：addNode(i, h, j) 返回 rightCnt（第 h 层跳过的元素数），递归往下一层插入后拿回 downCnt，于是新边 j 的 len[j][h] 和旧边被拆成两段的 len[i][h] 都能算出来，不需要重扫底层。完整代码在文末。</li>
+      </ul>
+      <p>删除对称：词频大于 1 时 removeCount 沿路径把 len 减 1、底层词频减 1；词频只剩 1 时 removeNode 逐层把 j 从链表摘掉（h > level[j] 的层本来就该没有 j，只减 len），底层拼接两段，len 用 len[i][h] += len[j][h] - 1 合回来。</p>
+      <p>跳表的删除比 AVL 省心一大截：AVL 删节点可能要旋转好几处恢复平衡，跳表删除就是纯链表摘除，没有「删完重新平衡」这一步。这是随机结构的一大红利。</p>
+
+      <h2>六、复杂度</h2>
+      <p>每层期望节点数减半：第 1 层 n 个、第 2 层 n/2、第 3 层 n/4……层数超过 log2 n 的概率极小。一次查询从顶层下降，每层往右走常数步，期望步数 O(log n)。</p>
+      <div class="viz" id="viz1">
+        <div class="viz-title">演示·随机层数：抛硬币决定每个节点占几层</div>
+        <div class="viz-controls">
+          <select id="viz1n">
+            <option value="6">n = 6</option>
+            <option value="8">n = 8</option>
+            <option value="10">n = 10</option>
+          </select>
+          <button>下一步</button>
+          <button>重置</button>
+        </div>
+        <div class="stepnote"></div>
+      </div>
+      <p>上图把「随机化」摊开看：每个节点层数由一轮抛硬币决定（小于 0.5 就加一层）。全部插完后，第 1 层有全部节点，第 2 层只有约一半，第 3 层约四分之一。增删改查都在这摞链上走，期望 O(log n)。最坏情况（连续抛出一堆大）概率指数级小，实际不用管。</p>
+      <p>大厂笔试、算法竞赛要用有序表时，跳表、AVL、替罪羊、Treap、FHQ Treap、Splay 会一种就够用；跳表实现最直白，静态数组版总共 200 多行。</p>
+
+      <h2>题1 完整实现</h2>
+      <p>下面是洛谷 P3369「普通平衡树」的完整解法。测试时把类名改成 Main。静态数组跳表，含增加、删除、排名、按排名取数、前驱、后继六种操作。</p>
+    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXL = 20;
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+
+    <span class="kw">int</span> cnt;
+    <span class="kw">int</span> key[MAXN];
+    <span class="kw">int</span> key_count[MAXN];
+    <span class="kw">int</span> level[MAXN];
+    <span class="kw">int</span> next_node[MAXN][MAXL + 1];
+    <span class="kw">int</span> len[MAXN][MAXL + 1];
+
+    <span class="kw">void</span> <span class="fn">build</span>() {
+        cnt = 1;
+        key[cnt] = INT_MIN;
+        level[cnt] = MAXL;
+    }
+
+    <span class="kw">void</span> <span class="fn">clear</span>() {
+        memset(key + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(key_count + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(level + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= cnt; i++) {
+            memset(next_node[i], 0, (MAXL + 1) * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+            memset(len[i], 0, (MAXL + 1) * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        }
+        cnt = 0;
+    }
+
+    <span class="kw">int</span> <span class="fn">randomLevel</span>() {
+        <span class="kw">int</span> ans = 1;
+        <span class="kw">while</span> ((rand() / <span class="kw">double</span>(RAND_MAX)) &lt; 0.5) {
+            ans++;
+        }
+        <span class="kw">return</span> min(ans, MAXL);
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i, <span class="kw">int</span> h, <span class="kw">int</span> num) {
+        <span class="kw">while</span> (next_node[i][h] != 0 &amp;&amp; key[next_node[i][h]] &lt; num) {
+            i = next_node[i][h];
+        }
+        <span class="kw">if</span> (h == 1) {
+            <span class="kw">if</span> (next_node[i][h] != 0 &amp;&amp; key[next_node[i][h]] == num) {
+                <span class="kw">return</span> next_node[i][h];
+            } <span class="kw">else</span> {
+                <span class="kw">return</span> 0;
+            }
+        }
+        <span class="kw">return</span> find(i, h - 1, num);
+    }
+
+    <span class="kw">void</span> <span class="fn">addCount</span>(<span class="kw">int</span> i, <span class="kw">int</span> h, <span class="kw">int</span> num) {
+        <span class="kw">while</span> (next_node[i][h] != 0 &amp;&amp; key[next_node[i][h]] &lt; num) {
+            i = next_node[i][h];
+        }
+        <span class="kw">if</span> (h == 1) {
+            key_count[next_node[i][h]]++;
+        } <span class="kw">else</span> {
+            addCount(i, h - 1, num);
+        }
+        len[i][h]++;
+    }
+
+    <span class="kw">int</span> <span class="fn">addNode</span>(<span class="kw">int</span> i, <span class="kw">int</span> h, <span class="kw">int</span> j) {
+        <span class="kw">int</span> rightCnt = 0;
+        <span class="kw">while</span> (next_node[i][h] != 0 &amp;&amp; key[next_node[i][h]] &lt; key[j]) {
+            rightCnt += len[i][h];
+            i = next_node[i][h];
+        }
+        <span class="kw">if</span> (h == 1) {
+            next_node[j][h] = next_node[i][h];
+            next_node[i][h] = j;
+            len[j][h] = key_count[next_node[j][h]];
+            len[i][h] = key_count[next_node[i][h]];
+            <span class="kw">return</span> rightCnt;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> downCnt = addNode(i, h - 1, j);
+            <span class="kw">if</span> (h &gt; level[j]) {
+                len[i][h]++;
+            } <span class="kw">else</span> {
+                next_node[j][h] = next_node[i][h];
+                next_node[i][h] = j;
+                len[j][h] = len[i][h] + 1 - downCnt - key_count[j];
+                len[i][h] = downCnt + key_count[j];
+            }
+            <span class="kw">return</span> rightCnt + downCnt;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        <span class="kw">if</span> (find(1, MAXL, num) != 0) {
+            addCount(1, MAXL, num);
+        } <span class="kw">else</span> {
+            key[++cnt] = num;
+            key_count[cnt] = 1;
+            level[cnt] = randomLevel();
+            addNode(1, MAXL, cnt);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">removeCount</span>(<span class="kw">int</span> i, <span class="kw">int</span> h, <span class="kw">int</span> num) {
+        <span class="kw">while</span> (next_node[i][h] != 0 &amp;&amp; key[next_node[i][h]] &lt; num) {
+            i = next_node[i][h];
+        }
+        <span class="kw">if</span> (h == 1) {
+            key_count[next_node[i][h]]--;
+        } <span class="kw">else</span> {
+            removeCount(i, h - 1, num);
+        }
+        len[i][h]--;
+    }
+
+    <span class="kw">void</span> <span class="fn">removeNode</span>(<span class="kw">int</span> i, <span class="kw">int</span> h, <span class="kw">int</span> j) {
+        <span class="kw">if</span> (h &lt; 1) {
+            <span class="kw">return</span>;
+        }
+        <span class="kw">while</span> (next_node[i][h] != 0 &amp;&amp; key[next_node[i][h]] &lt; key[j]) {
+            i = next_node[i][h];
+        }
+        <span class="kw">if</span> (h &gt; level[j]) {
+            len[i][h]--;
+        } <span class="kw">else</span> {
+            next_node[i][h] = next_node[j][h];
+            len[i][h] += len[j][h] - 1;
+        }
+        removeNode(i, h - 1, j);
+    }
+
+    <span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> j = find(1, MAXL, num);
+        <span class="kw">if</span> (j != 0) {
+            <span class="kw">if</span> (key_count[j] &gt; 1) {
+                removeCount(1, MAXL, num);
+            } <span class="kw">else</span> {
+                removeNode(1, MAXL, j);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">small</span>(<span class="kw">int</span> i, <span class="kw">int</span> h, <span class="kw">int</span> num) {
+        <span class="kw">int</span> rightCnt = 0;
+        <span class="kw">while</span> (next_node[i][h] != 0 &amp;&amp; key[next_node[i][h]] &lt; num) {
+            rightCnt += len[i][h];
+            i = next_node[i][h];
+        }
+        <span class="kw">if</span> (h == 1) {
+            <span class="kw">return</span> rightCnt;
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> rightCnt + small(i, h - 1, num);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getRank</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> small(1, MAXL, num) + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> i, <span class="kw">int</span> h, <span class="kw">int</span> x) {
+        <span class="kw">int</span> c = 0;
+        <span class="kw">while</span> (next_node[i][h] != 0 &amp;&amp; c + len[i][h] &lt; x) {
+            c += len[i][h];
+            i = next_node[i][h];
+        }
+        <span class="kw">if</span> (h == 1) {
+            <span class="kw">return</span> key[next_node[i][h]];
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> index(i, h - 1, x - c);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> index(1, MAXL, x);
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> i, <span class="kw">int</span> h, <span class="kw">int</span> num) {
+        <span class="kw">while</span> (next_node[i][h] != 0 &amp;&amp; key[next_node[i][h]] &lt; num) {
+            i = next_node[i][h];
+        }
+        <span class="kw">if</span> (h == 1) {
+            <span class="kw">return</span> i == 1 ? INT_MIN : key[i];
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> pre(i, h - 1, num);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> pre(1, MAXL, num);
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> i, <span class="kw">int</span> h, <span class="kw">int</span> num) {
+        <span class="kw">while</span> (next_node[i][h] != 0 &amp;&amp; key[next_node[i][h]] &lt; num) {
+            i = next_node[i][h];
+        }
+        <span class="kw">if</span> (h == 1) {
+            <span class="kw">if</span> (next_node[i][h] == 0) {
+                <span class="kw">return</span> INT_MAX;
+            }
+            <span class="kw">if</span> (key[next_node[i][h]] &gt; num) {
+                <span class="kw">return</span> key[next_node[i][h]];
+            }
+            i = next_node[i][h];
+            <span class="kw">if</span> (next_node[i][h] == 0) {
+                <span class="kw">return</span> INT_MAX;
+            } <span class="kw">else</span> {
+                <span class="kw">return</span> key[next_node[i][h]];
+            }
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> post(i, h - 1, num);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> post(1, MAXL, num);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        srand(time(0));
+        build();
+        <span class="kw">int</span> n;
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x; i &lt;= n; i++) {
+            cin &gt;&gt; op &gt;&gt; x;
+            <span class="kw">if</span> (op == 1) {
+                add(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 2) {
+                remove(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 3) {
+                cout &lt;&lt; getRank(x) &lt;&lt; endl;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 4) {
+                cout &lt;&lt; index(x) &lt;&lt; endl;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 5) {
+                cout &lt;&lt; pre(x) &lt;&lt; endl;
+            } <span class="kw">else</span> {
+                cout &lt;&lt; post(x) &lt;&lt; endl;
+            }
+        }
+        clear();
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2>总结</h2>
+      <p>1）跳表 = 多层有序链表，底层全量、上层稀疏，节点层数由抛硬币决定；2）next_node[i][h] 存第 h 层后继，len[i][h] 存这条边跨过的元素个数（底层是词频）；3）find / small / index / pre / post 都是「上层大步走、走不动降层」一个套路；4）增加删除都是链表操作，词频单独记，删除没有平衡修复这一步；5）期望 O(log n)：第 k 层期望 n / 2^(k-1) 个节点，随机化把最坏输入挡在门外。下一讲替罪羊树是「不旋转、整棵重建」的另一种平衡思路。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>普通平衡树</td><td><a href="https://www.luogu.com.cn/problem/P3369" target="_blank">P3369</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解149【扩展】有序表专题2-跳表</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var P = 'http://www.w3.org/2000/svg';
+  function T(x, y, s, size, color){
+    var t = document.createElementNS(P, 'text');
+    t.setAttribute('x', x); t.setAttribute('y', y);
+    t.setAttribute('font-size', size || 12);
+    if (color) t.setAttribute('fill', color);
+    t.textContent = s;
+    return t;
+  }
+  function R(x, y, w, h, fill, rx){
+    var r = document.createElementNS(P, 'rect');
+    r.setAttribute('x', x); r.setAttribute('y', y);
+    r.setAttribute('width', w); r.setAttribute('height', h);
+    r.setAttribute('fill', fill || 'none');
+    if (rx) r.setAttribute('rx', rx);
+    return r;
+  }
+  function CIRC(cx, cy, r, label, hlabel, fill){
+    var g = document.createElementNS(P, 'g');
+    var c = document.createElementNS(P, 'circle');
+    c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', r);
+    c.setAttribute('fill', fill || '#fff');
+    c.setAttribute('stroke', '#2c6e9e'); c.setAttribute('stroke-width', 1.5);
+    g.appendChild(c);
+    var t = T(cx, cy + 4, label, 13);
+    t.setAttribute('text-anchor', 'middle');
+    g.appendChild(t);
+    if (hlabel) { var h = T(cx, cy + 17, hlabel, 8.5); h.setAttribute('fill', '#b0703a'); h.setAttribute('text-anchor', 'middle'); g.appendChild(h); }
+    return g;
+  }
+  function LN(x1, y1, x2, y2, color, w){
+    var l = document.createElementNS(P, 'line');
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1);
+    l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    l.setAttribute('stroke', color || '#888');
+    l.setAttribute('stroke-width', w || 1.5);
+    return l;
+  }
+  function ARR(x1, y1, x2, y2, color, w){
+    var g = document.createElementNS(P, 'g');
+    g.appendChild(LN(x1, y1, x2, y2, color, w));
+    // 箭头小三角（方向水平偏右）
+    var dx = x2 - x1, dy = y2 - y1, d = Math.sqrt(dx*dx + dy*dy) || 1;
+    var ux = dx/d, uy = dy/d;
+    var p = document.createElementNS(P, 'polygon');
+    p.setAttribute('points', (x2) + ',' + (y2) + ' ' + (x2 - ux*8 - uy*4) + ',' + (y2 - uy*8 + ux*4) + ' ' + (x2 - ux*8 + uy*4) + ',' + (y2 - uy*8 - ux*4));
+    p.setAttribute('fill', color || '#888');
+    g.appendChild(p);
+    return g;
+  }
+  function mount(id, svg){ document.getElementById(id).appendChild(svg); }
+
+  // ===== 图1：跳表多层结构 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 900 300');
+    var vals = [2,5,8,11,14,17];
+    var lv = {2:1, 5:3, 8:2, 11:4, 14:1, 17:2};   // 每个节点的层数
+    var y = {1:250, 2:190, 3:130, 4:70};
+    // 每层一条水平基线
+    for (var h = 1; h <= 4; h++) {
+      svg.appendChild(T(30, y[h] - 10, '第 ' + h + ' 层', 11, '#777'));
+    }
+    var xs = {};
+    for (var i = 0; i < vals.length; i++) xs[vals[i]] = 110 + i * 115;
+    // 每层哨兵
+    for (var h = 1; h <= 4; h++) svg.appendChild(CIRC(45, y[h], 16, '-∞', 10, '#eee'));
+    // 画每层：只画层数 >= h 的节点，按值序连水平箭头
+    for (var h = 1; h <= 4; h++) {
+      var prev = 45;   // 从哨兵出发
+      for (var i = 0; i < vals.length; i++) {
+        var v = vals[i];
+        if (lv[v] < h) continue;
+        if (prev !== null) {
+          svg.appendChild(ARR(prev + 16, y[h], xs[v] - 20, y[h], h === 1 ? '#2c6e9e' : '#94b8d0', h === 1 ? 2 : 1.5));
+        }
+        prev = xs[v];
+      }
+    }
+    // 节点圆（画在最高层出现的位置上方叠层？简化：每层各画一个圆）
+    for (var h = 1; h <= 4; h++) {
+      for (var i = 0; i < vals.length; i++) {
+        var v = vals[i];
+        if (lv[v] >= h) svg.appendChild(CIRC(xs[v], y[h], 18, String(v), h === 1 ? '' : 'h' + lv[v], h === 1 ? '#dbe7f6' : '#fff'));
+      }
+    }
+    svg.appendChild(T(30, 288, '节点上的数字是值，右边角标是该节点层数；层数高的节点在更多层出现', 11, '#555'));
+    mount('figLevel', svg);
+  })();
+
+  // ===== 图2：len 语义 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 900 250');
+    // 底层：2,2,5,7,7,9,15,31（词频摊开）
+    var bot = [2,2,5,7,7,9,15,31];
+    var top = [2,7,15,31];
+    var bx = 80, by = 180, step = 92;
+    var tx = 170, ty = 70;
+    // 顶层链
+    svg.appendChild(T(30, ty - 12, '第二层', 11, '#777'));
+    var tp = [];
+    for (var i = 0; i < top.length; i++) {
+      var c = CIRC(tx + i * 170, ty, 20, String(top[i]));
+      tp.push(c); svg.appendChild(c);
+    }
+    // 顶层边 len
+    for (var i = 0; i < top.length - 1; i++) {
+      var x1 = tx + i * 170 + 20, x2 = tx + (i+1) * 170 - 20;
+      svg.appendChild(ARR(x1, ty, x2, ty, '#94b8d0', 1.5));
+      // 区间：top[i] 到 top[i+1] 之间的底层元素
+      var lo = top[i];
+      var cnt = 0;
+      for (var j = 0; j < bot.length; j++) if (bot[j] > lo && bot[j] <= top[i+1]) cnt++;
+      svg.appendChild(T((x1 + x2) / 2 - 12, ty - 12, 'len=' + cnt, 12, '#b0703a'));
+    }
+    // 哨兵到第一个（第二层）
+    svg.appendChild(ARR(60, ty, tx - 20, ty, '#94b8d0', 1.5));
+    var cnt0 = 0;
+    for (var j = 0; j < bot.length; j++) if (bot[j] <= top[0]) cnt0++;
+    svg.appendChild(T(90, ty - 12, 'len=' + cnt0, 12, '#b0703a'));
+    svg.appendChild(CIRC(40, ty, 18, '-∞', 10, '#eee'));
+    // 底层链
+    svg.appendChild(T(30, by - 12, '最底层', 11, '#777'));
+    // 底层哨兵与首条边（词频 2）
+    svg.appendChild(ARR(40, by, bx - 20, by, '#2c6e9e', 2));
+    svg.appendChild(T(52, by - 12, 'len=2', 11, '#b0703a'));
+    svg.appendChild(CIRC(20, by, 18, '-∞', 10, '#eee'));
+    var bp = [];
+    for (var i = 0; i < bot.length; i++) {
+      var c = CIRC(bx + i * step, by, 20, String(bot[i]));
+      bp.push(c); svg.appendChild(c);
+    }
+    for (var i = 0; i < bot.length - 1; i++) {
+      svg.appendChild(ARR(bx + i * step + 20, by, bx + (i+1) * step - 20, by, '#2c6e9e', 2));
+      // 底层边 len = 下一个节点的词频（全数组统计）
+      var freq = {};
+      for (var j = 0; j < bot.length; j++) freq[bot[j]] = (freq[bot[j]] || 0) + 1;
+      var w = freq[bot[i+1]];
+      svg.appendChild(T(bx + i * step + 32, by - 12, 'len=' + w, 11, '#b0703a'));
+    }
+    // 顶层节点向底层区间画虚线
+    for (var i = 0; i < top.length; i++) {
+      var v = top[i];
+      var idx = bot.indexOf(v);
+      if (idx >= 0) {
+        var dl = document.createElementNS(P, 'line');
+        dl.setAttribute('x1', tx + i * 170); dl.setAttribute('y1', ty + 20);
+        dl.setAttribute('x2', bx + idx * step); dl.setAttribute('y2', by - 20);
+        dl.setAttribute('stroke', '#c96'); dl.setAttribute('stroke-dasharray', '4 4');
+        svg.appendChild(dl);
+      }
+    }
+    svg.appendChild(T(30, 238, '第二层一条边跨过的底层元素个数 = len；最底层 len 就是下一个节点的词频', 11, '#555'));
+    mount('figLen', svg);
+  })();
+
+  // ===== 图3：find 查询下降路径 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 900 280');
+    var vals = [2,5,8,11,14,17];
+    var lv = {2:1, 5:3, 8:2, 11:4, 14:1, 17:2};
+    var y = {1:230, 2:170, 3:110, 4:50};
+    var xs = {};
+    for (var i = 0; i < vals.length; i++) xs[vals[i]] = 150 + i * 105;
+    // 每层链（从哨兵出发）
+    for (var h = 1; h <= 4; h++) {
+      var prev = 60;
+      for (var i = 0; i < vals.length; i++) {
+        var v = vals[i];
+        if (lv[v] < h) continue;
+        if (prev !== null) svg.appendChild(ARR(prev + 20, y[h], xs[v] - 20, y[h], '#ccd', 1.2));
+        prev = xs[v];
+      }
+    }
+    // 哨兵每层都有（level MAXL）
+    for (var h = 1; h <= 4; h++) svg.appendChild(CIRC(60, y[h], 18, '-∞', 10, '#eee'));
+    // 查询 11 的下降路径（红）：h4 哨兵停；h3 哨兵→5；h2 5→8→11(停)；h1 8→11 命中
+    svg.appendChild(LN(60, y[4], 80, y[4], '#c0392b', 2.5));
+    svg.appendChild(ARR(60, y[3], xs[5] - 20, y[3], '#c0392b', 2.5));
+    svg.appendChild(ARR(xs[5] + 20, y[2], xs[8] - 20, y[2], '#c0392b', 2.5));
+    svg.appendChild(ARR(xs[8] + 20, y[2], xs[11] - 20, y[2], '#c0392b', 2.5));
+    svg.appendChild(ARR(xs[8] + 20, y[1], xs[11] - 20, y[1], '#c0392b', 2.5));
+    // 节点
+    for (var h = 1; h <= 4; h++) {
+      for (var i = 0; i < vals.length; i++) {
+        var v = vals[i];
+        if (lv[v] >= h) svg.appendChild(CIRC(xs[v], y[h], 18, String(v), '', h === 1 && v === 11 ? '#ffe1e1' : (h === 1 ? '#dbe7f6' : '#fff')));
+      }
+    }
+    svg.appendChild(T(30, 270, '查询 11：第 3 层（只有 5 和 11）跳到 5 停，降层后从 5 走 8，再降底层直达 11，命中', 11, '#555'));
+    mount('figFind', svg);
+  })();
+
+  // ===== 演示：随机层数 =====
+  (function(){
+    var viz = document.getElementById('viz1');
+    var sel = document.getElementById('viz1n');
+    var btns = viz.querySelectorAll('.viz-controls button');
+    var note = viz.querySelector('.stepnote');
+    var svgBox = document.createElement('div');
+    viz.appendChild(svgBox);
+    var at = 0, N = 6, vals = [], lvs = [], seed = 20261017;
+    function mulberry32(a){
+      return function(){
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        var t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    function reset(){
+      at = 0;
+      N = parseInt(sel.value, 10);
+      var rnd = mulberry32(seed);
+      vals = []; lvs = [];
+      for (var i = 0; i < N; i++) {
+        vals.push(Math.floor(rnd() * 90) + 5);
+        var L = 1;
+        while (rnd() < 0.5 && L < 6) L++;
+        lvs.push(L);
+      }
+      render();
+    }
+    function render(){
+      svgBox.innerHTML = '';
+      var HH = 250;
+      var svg = document.createElementNS(P, 'svg');
+      svg.setAttribute('viewBox', '0 0 900 ' + HH);
+      svg.setAttribute('width', '100%');
+      // 已插入的节点排序
+      var done = vals.slice(0, at);
+      var sorted = done.map(function(v, i){ return {v: v, L: lvs[i], id: i}; })
+        .sort(function(a, b){ return a.v - b.v || a.id - b.id; });
+      var cellW = Math.floor(840 / N);
+      var baseY = 190;
+      for (var i = 0; i < N; i++) {
+        var x = 30 + i * cellW;
+        // 底层格子
+        var rc = R(x, baseY, cellW - 6, 34, i < at ? '#dbe7f6' : '#f4f4f4');
+        svg.appendChild(rc);
+        if (i < at) {
+          var p = sorted[i];
+          svg.appendChild(T(x + (cellW - 6) / 2, baseY + 22, String(p.v), 14));
+          // 层数柱
+          var ph = 8 + p.L * 26;
+          var pc = R(x + (cellW - 6) / 2 - 8, baseY - ph, 16, ph, '#2c6e9e');
+          svg.appendChild(pc);
+          svg.appendChild(T(x + (cellW - 6) / 2 + 20, baseY - 10, 'L' + p.L, 11, '#2c6e9e'));
+        } else {
+          svg.appendChild(T(x + (cellW - 6) / 2, baseY + 22, '·', 14, '#bbb'));
+        }
+      }
+      // 层高辅助线
+      for (var h = 1; h <= 6; h++) {
+        var yy = baseY - (8 + h * 26);
+        if (yy > 20) {
+          var ln = document.createElementNS(P, 'line');
+          ln.setAttribute('x1', 25); ln.setAttribute('y1', yy);
+          ln.setAttribute('x2', 875); ln.setAttribute('y2', yy);
+          ln.setAttribute('stroke', '#eee'); ln.setAttribute('stroke-dasharray', '3 3');
+          svg.appendChild(ln);
+          svg.appendChild(T(24, yy + 4, '第 ' + h + ' 层', 10, '#bbb'));
+        }
+      }
+      var msg;
+      if (at === 0) {
+        msg = '尚未插入，等骰子定层数';
+      } else if (at < N) {
+        var last = vals[at - 1];
+        msg = '插入 ' + last + '：抛硬币得了 ' + lvs[at - 1] + ' 层，' + (at) + '/' + N + ' 个已就位';
+      } else {
+        var avg = 0;
+        for (var i = 0; i < N; i++) avg += lvs[i];
+        avg = (avg / N).toFixed(1);
+        msg = '全部插入：平均层数 ' + avg + '（期望 ≈ 2），第 k 层期望只有 n / 2^(k-1) 个节点';
+      }
+      note.textContent = msg;
+      svgBox.appendChild(svg);
+    }
+    btns[0].addEventListener('click', function(){
+      if (at < N) { at++; render(); }
+      btns[0].disabled = at >= N;
+    });
+    btns[1].addEventListener('click', function(){
+      btns[0].disabled = false;
+      reset();
+    });
+    sel.addEventListener('change', function(){ btns[0].disabled = false; reset(); });
+    reset();
+  })();
+})();</script>
+</body>
+</html>
