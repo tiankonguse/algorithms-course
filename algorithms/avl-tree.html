@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AVL 树：静态数组实现有序表</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>AVL 树：静态数组实现有序表</h1>
+      <p class="intro">有序表是一个抽象类：key 按序组织，支持增删改查和排名、第 k 小、前驱后继，全部 O(log n)。AVL 树是把它落地的第一站，也是理解后面跳表、替罪羊树、Treap 的起点。这一页把一个完整可用的 AVL 有序表拆开讲：静态数组怎么存、左旋右旋怎么转、四种违规怎么判、删除双子节点怎么替换。</p>
+
+      <h2 id="abstract">零、有序表</h2>
+      <p>「有序表」的抽象层只有一句话：key 按序组织，支持和序有关的查询。具体到操作：增加一个 key（重复加入算多个词频）、删除一个 key（只删一个）、查 key 的排名（比它小的个数 + 1）、查排名第几的 key、查前驱（小于 x 的最大数）、查后继（大于 x 的最小数）。不管底层是什么结构，这些操作都要 O(log n)。</p>
+      <p>竞赛里实现有序表，代码用静态数组写：数组下标当指针，节点编号是 1..cnt 的整数，0 表示空。为什么不用 new？笔试和算法竞赛环境里，动态结构的分配和回收不可控，可能超时；工程上为了防止内存泄漏才用动态结构。静态数组的代价是预先估好 MAXN，本题操作次数 1e5、值域 −1e7..1e7，MAXN 开到 1e5 + 1 够用。</p>
+
+      <h2 id="balance">一、平衡性</h2>
+      <p>AVL 的平衡定义：任意节点，左子树高度和右子树高度相差不超过 1。高度存在 height 数组里，空子树高度按 0 算。</p>
+      <p>除了 height，每个节点还要维护这些信息：key 本身、key_count（这个词频，重复加入累加）、siz（整个子树里所有词频之和，排名靠它）、ls 和 rs（左右孩子下标）。为什么多维护 siz 而不是只维护节点数？重复值算多个，排名是按词频算的。</p>
+      <p>树高被压住是 O(log n) 的来源。满足这个平衡条件的树，高度不超过 1.44 log2(n+2)，于是单次操作最多走这么多层。</p>
+
+      <h2 id="rotate">二、左旋与右旋</h2>
+      <p>旋转是 AVL 的原子操作。左旋 leftRotate(i)：i 的右孩子 r 升为根，r 的左子树改挂到 i 的右边，i 变成 r 的左孩子。右旋对称。</p>
+      <figure class="fig" id="figRotate"></figure>
+      <p>旋转后要 up(i)、up(r)，重新算这两个节点的 height 和 siz。这里有个值得停一下的观察：旋转不改变中序遍历的次序。BST 里节点本来就按 key 排序，旋转只改父子关系，不改变「谁在谁的左边」。正是这一点让排名、第 k 小、前驱后继在任意次旋转之后依然正确，有序表才能放心用旋转维持平衡。</p>
+
+      <h2 id="violate">三、四种违规</h2>
+      <p>新增或删除节点后，从被影响的位置往上，每个祖先都可能失衡。失衡只有四种形态，按「哪边高、哪个孙子高」分类：</p>
+      <figure class="fig" id="figViolate"></figure>
+      <p>LL：左子树高，且左子树的左子树也高，右旋一次。LR：左子树高，但高的是左子树的右子树，先左旋左子树再右旋。RR 和 RL 对称。maintain(i) 里判定 LL 还是 LR，靠一句 height[ls[ls[i]]] &gt;= height[rs[ls[i]]]：左孙更高或持平按 LL 处理，否则按 LR。这个「持平按 LL」的写法不是巧合，它同时兜住了删除后 LL 和 LR 一起出现的情况（详见删除那一节）。</p>
+
+      <h2 id="add">四、增加节点</h2>
+      <p>add(i, num) 递归走：节点为空就新开一个节点；key 相等就 key_count++；num 小走左、大走右。回溯时先 up(i) 再 maintain(i)，从底往上每一层都可能旋转。</p>
+      <p>每一层调整是 O(1)，总代价就是树高 O(log n)。真实发生的旋转次数极少，复杂度主要就是走过树高的路程，不是真的每次都转到。</p>
+
+      <h2 id="remove">五、删除节点</h2>
+      <p>remove(i, num) 递归定位。key_count 大于 1 直接减一，不动结构。减到 1 时按孩子情况处理：</p>
+      <figure class="fig" id="figDelete"></figure>
+      <p>没有孩子，返回 0，节点消失。只有左孩子或只有右孩子，孩子顶替。两个孩子都有，这是重点：找右子树的最左节点 mostLeft（中序后继），用 removeMostLeft 把它从右子树摘下来，再让 mostLeft 顶替被删节点，左右孩子接过来。替换之后整棵树还是 BST。</p>
+      <p>外层 remove(num) 先查 getRank(num) != getRank(num + 1) 确认 num 存在。getRank(num + 1) 统计的是小于 num+1 的个数，等于小于等于 num 的个数再加 1，两个排名不同就说明 num 在树里。</p>
+      <p>注意点：删除后可能 LL 和 LR 同时出现，maintain 里按 LL 调整；可能 RR 和 RL 同时出现，按 RR 调整。代码里写的就是这个顺序，不需要额外分支。</p>
+
+      <h2 id="ops">六、六种操作</h2>
+      <p>getRank(x)：比 x 小的个数 + 1。key[i] &gt;= x 走左子树，否则累加左子树大小加词频，继续走右子树。</p>
+      <p>index(x)：第 x 小的数。siz[左] &gt;= x 走左；siz[左] + key_count[i] &lt; x 走右并把 x 减掉前面；否则落在当前节点，返回 key[i]。</p>
+      <p>pre(x)：小于 x 的最大数，没有返回 INT_MIN。post(x)：大于 x 的最小数，没有返回 INT_MAX。两个都是递归里取 max/min 的写法。</p>
+
+      <h2 id="t1">七、题目1：完整实现</h2>
+      <p>洛谷 P3369。六种操作全实现，主函数按 op 分发，代码就是上面的拼装：</p>
+              <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+    <span class="kw">#include</span> &lt;algorithm&gt;
+    <span class="kw">#include</span> &lt;climits&gt;
+    <span class="kw">#include</span> &lt;cstring&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+
+    <span class="kw">int</span> cnt = 0;
+    <span class="kw">int</span> head = 0;
+    <span class="kw">int</span> key[MAXN];
+    <span class="kw">int</span> height[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> key_count[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        siz[i] = siz[ls[i]] + siz[rs[i]] + key_count[i];
+        height[i] = max(height[ls[i]], height[rs[i]]) + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">leftRotate</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> r = rs[i];
+        rs[i] = ls[r];
+        ls[r] = i;
+        up(i);
+        up(r);
+        <span class="kw">return</span> r;
+    }
+
+    <span class="kw">int</span> <span class="fn">rightRotate</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> l = ls[i];
+        ls[i] = rs[l];
+        rs[l] = i;
+        up(i);
+        up(l);
+        <span class="kw">return</span> l;
+    }
+
+    <span class="kw">int</span> <span class="fn">maintain</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> lh = height[ls[i]];
+        <span class="kw">int</span> rh = height[rs[i]];
+        <span class="kw">if</span> (lh - rh &gt; 1) {
+            <span class="kw">if</span> (height[ls[ls[i]]] &gt;= height[rs[ls[i]]]) {
+                i = rightRotate(i);
+            } <span class="kw">else</span> {
+                ls[i] = leftRotate(ls[i]);
+                i = rightRotate(i);
+            }
+        } <span class="kw">else</span> <span class="kw">if</span> (rh - lh &gt; 1) {
+            <span class="kw">if</span> (height[rs[rs[i]]] &gt;= height[ls[rs[i]]]) {
+                i = leftRotate(i);
+            } <span class="kw">else</span> {
+                rs[i] = rightRotate(rs[i]);
+                i = leftRotate(i);
+            }
+        }
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            key[++cnt] = num;
+            key_count[cnt] = siz[cnt] = height[cnt] = 1;
+            <span class="kw">return</span> cnt;
+        }
+        <span class="kw">if</span> (key[i] == num) {
+            key_count[i]++;
+        } <span class="kw">else</span> <span class="kw">if</span> (key[i] &gt; num) {
+            ls[i] = add(ls[i], num);
+        } <span class="kw">else</span> {
+            rs[i] = add(rs[i], num);
+        }
+        up(i);
+        <span class="kw">return</span> maintain(i);
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        head = add(head, num);
+    }
+
+    <span class="kw">int</span> <span class="fn">getRank</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (key[i] &gt;= num) {
+            <span class="kw">return</span> getRank(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> siz[ls[i]] + key_count[i] + getRank(rs[i], num);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getRank</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> getRank(head, num) + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">removeMostLeft</span>(<span class="kw">int</span> i, <span class="kw">int</span> mostLeft) {
+        <span class="kw">if</span> (i == mostLeft) {
+            <span class="kw">return</span> rs[i];
+        } <span class="kw">else</span> {
+            ls[i] = removeMostLeft(ls[i], mostLeft);
+            up(i);
+            <span class="kw">return</span> maintain(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">remove</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (key[i] &lt; num) {
+            rs[i] = remove(rs[i], num);
+        } <span class="kw">else</span> <span class="kw">if</span> (key[i] &gt; num) {
+            ls[i] = remove(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">if</span> (key_count[i] &gt; 1) {
+                key_count[i]--;
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (ls[i] == 0 &amp;&amp; rs[i] == 0) {
+                    <span class="kw">return</span> 0;
+                } <span class="kw">else</span> <span class="kw">if</span> (ls[i] != 0 &amp;&amp; rs[i] == 0) {
+                    i = ls[i];
+                } <span class="kw">else</span> <span class="kw">if</span> (ls[i] == 0 &amp;&amp; rs[i] != 0) {
+                    i = rs[i];
+                } <span class="kw">else</span> {
+                    <span class="kw">int</span> mostLeft = rs[i];
+                    <span class="kw">while</span> (ls[mostLeft] != 0) {
+                        mostLeft = ls[mostLeft];
+                    }
+                    rs[i] = removeMostLeft(rs[i], mostLeft);
+                    ls[mostLeft] = ls[i];
+                    rs[mostLeft] = rs[i];
+                    i = mostLeft;
+                }
+            }
+        }
+        up(i);
+        <span class="kw">return</span> maintain(i);
+    }
+
+    <span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> num) {
+        <span class="kw">if</span> (getRank(num) != getRank(num + 1)) {
+            head = remove(head, num);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> i, <span class="kw">int</span> x) {
+        <span class="kw">if</span> (siz[ls[i]] &gt;= x) {
+            <span class="kw">return</span> index(ls[i], x);
+        } <span class="kw">else</span> <span class="kw">if</span> (siz[ls[i]] + key_count[i] &lt; x) {
+            <span class="kw">return</span> index(rs[i], x - siz[ls[i]] - key_count[i]);
+        }
+        <span class="kw">return</span> key[i];
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> index(head, x);
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> INT_MIN;
+        }
+        <span class="kw">if</span> (key[i] &gt;= num) {
+            <span class="kw">return</span> pre(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> max(key[i], pre(rs[i], num));
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> pre(head, num);
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> INT_MAX;
+        }
+        <span class="kw">if</span> (key[i] &lt;= num) {
+            <span class="kw">return</span> post(rs[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> min(key[i], post(ls[i], num));
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> post(head, num);
+    }
+
+    <span class="kw">void</span> <span class="fn">clear</span>() {
+        memset(key + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(height + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(ls + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(rs + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(key_count + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(siz + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        cnt = 0;
+        head = 0;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        <span class="kw">int</span> n;
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x; i &lt;= n; i++) {
+            cin &gt;&gt; op &gt;&gt; x;
+            <span class="kw">if</span> (op == 1) {
+                add(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 2) {
+                remove(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 3) {
+                cout &lt;&lt; getRank(x) &lt;&lt; endl;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 4) {
+                cout &lt;&lt; index(x) &lt;&lt; endl;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 5) {
+                cout &lt;&lt; pre(x) &lt;&lt; endl;
+            } <span class="kw">else</span> {
+                cout &lt;&lt; post(x) &lt;&lt; endl;
+            }
+        }
+        clear();
+        <span class="kw">return</span> 0;
+    }</pre>
+      <p>洛谷 P6136 是同一套结构的数据加强版：操作还是这六种，只是输入变成强制在线，每次读到的 x 先异或上一次查询的答案，最后输出所有查询答案的异或。核心逻辑和本页代码完全一样，只是 main 里多两行异或。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示 · AVL 构建：随机序列逐个插入，画出树形并标注旋转</p>
+        <div class="viz-controls">
+          <select id="avlSel">
+            <option value="6" selected>n = 6</option>
+            <option value="8">n = 8</option>
+            <option value="10">n = 10</option>
+          </select>
+          <button id="avlNext">下一步</button>
+          <button id="avlReset">重置</button>
+        </div>
+        <div id="avlCanvas" style="min-height:340px;"></div>
+        <p class="stepnote" id="avlNote"></p>
+      </div>
+
+      <h2 id="sum">总结</h2>
+      <p>AVL 树是平衡搜索树的起点：静态数组存节点，height 管平衡，siz 管排名；左旋右旋是原子操作，不改变中序次序，所以排名类查询旋转后依然正确；失衡只有 LL、LR、RL、RR 四种，maintain 按一句高度比较选旋转；删除双子节点用右子树最左节点顶替，替换后仍是 BST。后面跳表、替罪羊树、Treap 都是同一套「有序表」抽象，换各自的平衡方式。</p>
+
+      <h2 id="prob">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>普通平衡树</td><td><a href="https://www.luogu.com.cn/problem/P3369" target="_blank">P3369</a></td></tr>
+        <tr><td>洛谷</td><td>普通平衡树（数据加强，强制在线）</td><td><a href="https://www.luogu.com.cn/problem/P6136" target="_blank">P6136</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解148【扩展】有序表专题1-AVL树</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var P = 'http://www.w3.org/2000/svg';
+  function T(x,y,s,fs){ var t=document.createElementNS(P,'text'); t.setAttribute('x',x); t.setAttribute('y',y); t.setAttribute('font-size',fs||13); t.textContent=s; return t; }
+  function R(x,y,w,h){ var r=document.createElementNS(P,'rect'); r.setAttribute('x',x); r.setAttribute('y',y); r.setAttribute('width',w); r.setAttribute('height',h); r.setAttribute('rx',6); r.setAttribute('fill','#f2f6fc'); r.setAttribute('stroke','#7aa2d0'); return r; }
+  function LN(x1,y1,x2,y2){ var l=document.createElementNS(P,'line'); l.setAttribute('x1',x1); l.setAttribute('y1',y1); l.setAttribute('x2',x2); l.setAttribute('y2',y2); l.setAttribute('stroke','#94a8c0'); l.setAttribute('stroke-width',1.2); return l; }
+  function mount(id, svg){ document.getElementById(id).appendChild(svg); }
+  function CIRC(cx,cy,r,label,hlabel,fill){
+    var g=document.createElementNS(P,'g');
+    var c=document.createElementNS(P,'circle'); c.setAttribute('cx',cx); c.setAttribute('cy',cy); c.setAttribute('r',r);
+    c.setAttribute('fill',fill||'#dbe7f6'); c.setAttribute('stroke','#4a6fa5'); c.setAttribute('stroke-width',1.4);
+    g.appendChild(c);
+    var t=T(cx,cy+4,label,13); t.setAttribute('text-anchor','middle'); g.appendChild(t);
+    if(hlabel){ var h=T(cx,cy+17,hlabel,8.5); h.setAttribute('fill','#b0703a'); h.setAttribute('text-anchor','middle'); g.appendChild(h); }
+    return g;
+  }
+
+  // ===== 图1：左旋 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 900 300');
+    var rc = R(12, 12, 400, 220); svg.appendChild(rc);
+    svg.appendChild(T(30, 34, '左旋前：i 的右孩子 r，r 的左子树 BL', 13));
+    svg.appendChild(CIRC(170, 120, 26, 'i', 'h=3'));
+    svg.appendChild(CIRC(290, 120, 26, 'r', 'h=2'));
+    svg.appendChild(T(350, 200, 'BL', 13));
+    svg.appendChild(R(300, 186, 88, 34));
+    svg.appendChild(LN(286, 120, 348, 186));
+    svg.appendChild(LN(190, 120, 268, 120));
+    svg.appendChild(T(60, 250, 'r 升为根，i 变 r 的左孩子', 11.5));
+    var rc2 = R(488, 12, 400, 220); svg.appendChild(rc2);
+    svg.appendChild(T(506, 34, '左旋后：BL 改挂到 i 的右边', 13));
+    svg.appendChild(CIRC(610, 120, 26, 'r', 'h=2'));
+    svg.appendChild(CIRC(720, 120, 26, 'i', 'h=1'));
+    svg.appendChild(T(800, 200, 'BL', 13));
+    svg.appendChild(R(750, 186, 88, 34));
+    svg.appendChild(LN(758, 186, 724, 136));
+    svg.appendChild(LN(634, 120, 696, 120));
+    svg.appendChild(T(496, 250, 'BL 原来在 r 的左边，转完还在 i 的右边，中序不变', 11.5));
+    var ar = T(432, 128, '→', 26); ar.setAttribute('text-anchor','middle'); svg.appendChild(ar);
+    mount('figRotate', svg);
+  })();
+
+  // ===== 图2：四种违规 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 900 320');
+    var cx = [112, 324, 536, 748];
+    var trees = [
+      {name:'LL', root:3, l:2, ll:1, lr:0, r:0, note:'左左高 → 右旋一次'},
+      {name:'LR', root:3, l:1, ll:0, lr:2, r:0, note:'左孙右高 → 先左旋左子，再右旋'},
+      {name:'RL', root:1, r:3, rl:2, rr:0, l:0, note:'右孙左高 → 先右旋右子，再左旋'},
+      {name:'RR', root:1, r:2, rl:0, rr:3, l:0, note:'右右高 → 左旋一次'}
+    ];
+    trees.forEach(function(t, ti){
+      var c = cx[ti];
+      svg.appendChild(T(c - 30, 26, t.name, 14));
+      svg.appendChild(CIRC(c, 70, 20, String(t.root), 'h=3'));
+      if (t.l){ svg.appendChild(LN(c, 78, c - 55, 148)); svg.appendChild(CIRC(c - 55, 158, 20, String(t.l), 'h=2')); }
+      if (t.ll){ svg.appendChild(LN(c - 55, 166, c - 92, 236)); svg.appendChild(CIRC(c - 92, 246, 20, String(t.ll), 'h=1')); }
+      if (t.lr){ svg.appendChild(LN(c - 55, 166, c - 22, 236)); svg.appendChild(CIRC(c - 22, 246, 20, String(t.lr), 'h=1')); }
+      if (t.r){ svg.appendChild(LN(c, 78, c + 55, 148)); svg.appendChild(CIRC(c + 55, 158, 20, String(t.r), 'h=2')); }
+      if (t.rl){ svg.appendChild(LN(c + 55, 166, c + 22, 236)); svg.appendChild(CIRC(c + 22, 246, 20, String(t.rl), 'h=1')); }
+      if (t.rr){ svg.appendChild(LN(c + 55, 166, c + 92, 236)); svg.appendChild(CIRC(c + 92, 246, 20, String(t.rr), 'h=1')); }
+      svg.appendChild(T(c - 100, 290, t.note, 10.5));
+    });
+    svg.appendChild(T(12, 312, '数字是 key，括号是高度。失衡形态由「哪边高、哪个孙子高」决定，maintain 一次判断挑旋转', 11));
+    mount('figViolate', svg);
+  })();
+
+  // ===== 图3：删除双子替换 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 900 270');
+    var rc = R(12, 12, 400, 220); svg.appendChild(rc);
+    svg.appendChild(T(30, 34, '删除前：删根 50，它有左右两个孩子', 13));
+    svg.appendChild(CIRC(150, 90, 24, '50'));
+    svg.appendChild(CIRC(70, 170, 22, '30'));
+    svg.appendChild(CIRC(230, 170, 22, '70'));
+    svg.appendChild(CIRC(188, 240, 22, '60', null, '#ffe1e1'));
+    svg.appendChild(LN(140, 100, 78, 162));
+    svg.appendChild(LN(162, 100, 222, 162));
+    svg.appendChild(LN(238, 178, 196, 232));
+    svg.appendChild(T(24, 252, '60 是右子树最左节点（中序后继）', 11));
+    var rc2 = R(488, 12, 400, 220); svg.appendChild(rc2);
+    svg.appendChild(T(506, 34, '删除后：60 顶替 50，左右孩子接过来', 13));
+    svg.appendChild(CIRC(610, 90, 24, '60', null, '#ffe1e1'));
+    svg.appendChild(CIRC(530, 170, 22, '30'));
+    svg.appendChild(CIRC(690, 170, 22, '70'));
+    svg.appendChild(LN(600, 100, 538, 162));
+    svg.appendChild(LN(622, 100, 682, 162));
+    svg.appendChild(T(496, 252, '70 的左子树空了，removeMostLeft 沿途也要 up + maintain', 11));
+    var ar = T(432, 118, '→', 26); ar.setAttribute('text-anchor','middle'); svg.appendChild(ar);
+    mount('figDelete', svg);
+  })();
+
+  // ===== 演示：AVL 构建 =====
+  (function(){
+    var sel = document.getElementById('avlSel');
+    var canvas = document.getElementById('avlCanvas');
+    var note = document.getElementById('avlNote');
+    var at = 0, seq = [], root = null;
+    function node(k){ return {k:k, h:1, s:1, l:null, r:null}; }
+    function hf(x){ return x ? x.h : 0; }
+    function upf(x){ x.h = Math.max(hf(x.l), hf(x.r)) + 1; x.s = (x.l ? x.l.s : 0) + (x.r ? x.r.s : 0) + 1; }
+    function ll(x){ var r = x.r; x.r = r.l; r.l = x; upf(x); upf(r); return r; }
+    function rr(x){ var l = x.l; x.l = l.r; l.r = x; upf(x); upf(l); return l; }
+    function mt(x, rot){
+      var lh = hf(x.l), rh = hf(x.r);
+      if (lh - rh > 1){
+        if (hf(x.l.l) >= hf(x.l.r)){ rot.push('LL 右旋'); return rr(x); }
+        rot.push('LR：先左旋左子树，再右旋'); x.l = ll(x.l); return rr(x);
+      }
+      if (rh - lh > 1){
+        if (hf(x.r.r) >= hf(x.r.l)){ rot.push('RR 左旋'); return ll(x); }
+        rot.push('RL：先右旋右子树，再左旋'); x.r = rr(x.r); return ll(x);
+      }
+      return x;
+    }
+    function ins(x, k, rot){
+      if (!x) return node(k);
+      if (k < x.k) x.l = ins(x.l, k, rot); else x.r = ins(x.r, k, rot);
+      upf(x); return mt(x, rot);
+    }
+    function gen(n){
+      var sd = 20261017;
+      function rnd(){ sd = (sd + 0x6D2B79F5) | 0; var t = Math.imul(sd ^ (sd >>> 15), sd | 1); sd = t + Math.imul(t ^ (t >>> 7), t | 61); return ((sd ^ (sd >>> 14)) >>> 0) / 4294967296; }
+      var out = [], used = {};
+      while (out.length < n){
+        var v = 1 + Math.floor(rnd() * 99);
+        if (!used[v]){ used[v] = 1; out.push(v); }
+      }
+      return out;
+    }
+    function render(){
+      while (canvas.firstChild) canvas.removeChild(canvas.firstChild);
+      var svg = document.createElementNS(P, 'svg');
+      var n = Number(sel.value);
+      var HH = 340;
+      svg.setAttribute('viewBox', '0 0 900 ' + HH);
+      svg.appendChild(T(20, 24, '插入序列：' + seq.join(', '), 13));
+      var inserted = seq.slice(0, at);
+      if (at === 0){
+        svg.appendChild(T(20, 80, '空树。点击「下一步」插入第一个数。', 13));
+        canvas.appendChild(svg);
+        note.textContent = '尚未插入';
+        document.getElementById('avlNext').disabled = (at >= n);
+        return;
+      }
+      // 中序收集节点
+      var mlist = [];
+      function collect(x, d){ if (!x) return; collect(x.l, d + 1); mlist.push({k:x.k, d:d}); collect(x.r, d + 1); }
+      collect(root, 0);
+      var m = mlist.length, sp = (m > 1) ? Math.floor(780 / (m - 1)) : 0;
+      var mx = {};
+      mlist.forEach(function(nd, i){ mx[nd.k] = 60 + i * sp; });
+      // 画连线 + 节点
+      function draw(x, dep){
+        if (!x) return;
+        var xp = mx[x.k], yp = 40 + dep * 44;
+        if (x.l){ var xl = mx[x.l.k], yl = 40 + (dep + 1) * 44; svg.appendChild(LN(xp, yp + 18, xl, yl - 18)); }
+        if (x.r){ var xr = mx[x.r.k], yr = 40 + (dep + 1) * 44; svg.appendChild(LN(xp, yp + 18, xr, yr - 18)); }
+        draw(x.l, dep + 1); draw(x.r, dep + 1);
+      }
+      function drawN(x, dep){
+        if (!x) return;
+        var xp = mx[x.k], yp = 40 + dep * 44;
+        svg.appendChild(CIRC(xp, yp, 18, String(x.k), 'h' + x.h));
+        drawN(x.l, dep + 1); drawN(x.r, dep + 1);
+      }
+      draw(root, 0); drawN(root, 0);
+      var rotTxt = '';
+      if (at > 0 && rotLog[at - 1] && rotLog[at - 1].length){
+        rotTxt = '，' + rotLog[at - 1].join('，');
+      }
+      svg.appendChild(T(20, HH - 56, '已插入 ' + at + ' / ' + n + ' 个' + rotTxt, 13));
+      if (at >= n){
+        // 末帧平衡检查
+        var ok = true;
+        function check(x){ if (!x) return; if (Math.abs(hf(x.l) - hf(x.r)) > 1) ok = false; check(x.l); check(x.r); }
+        check(root);
+        svg.appendChild(T(20, HH - 24, '全部插入完毕：树高 ' + root.h + '，所有节点 |左高 − 右高| ≤ 1：' + (ok ? '通过' : '不通过'), 13));
+      }
+      canvas.appendChild(svg);
+      note.textContent = (at >= n) ? '构建完成' : '已插入 ' + at + ' 个，点击「下一步」继续';
+      document.getElementById('avlNext').disabled = (at >= n);
+    }
+    var rotLog = [];
+    function rebuild(){
+      at = 0; seq = gen(Number(sel.value)); root = null; rotLog = [];
+    }
+    sel.addEventListener('change', function(){ rebuild(); render(); });
+    document.getElementById('avlNext').addEventListener('click', function(){
+      if (at < seq.length){
+        rotLog[at] = [];
+        root = ins(root, seq[at], rotLog[at]);
+        at++;
+        render();
+      }
+    });
+    document.getElementById('avlReset').addEventListener('click', function(){ rebuild(); render(); });
+    rebuild();
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重建队列：贪心 + 按序号插入的有序表</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>重建队列：贪心 + 按序号插入的有序表</h1>
+      <p class="intro">n 个人，每人两个数：身高 a，要求 b，代表站在自己左边的人里正好有 b 个人身高大于等于自己。把 n 个人排成一列满足所有要求。题解里绝大多数做法是 O(n²) 的数组插入，这一页用贪心把问题拆成「往第 b 个位置插一个人」，再靠 AVL 有序表把每次插入压到 O(log n)。</p>
+
+      <h2 id="prob">零、问题</h2>
+      <p>输入 n 个 (a, b)：a 是身高，b 是站在左边的人中身高大于等于 a 的人数。要输出一种从左到右的排列，让每个人的要求都满足。数据保证一定存在这样的排列。</p>
+      <p>O(n²) 的做法是：排好序之后用一个可插入的数组，插到第 b 个位置，数组整体后移。n 有 1e4 量级时这个平方复杂度就悬了。</p>
+
+      <h2 id="greedy">一、贪心：从高到低，插到第 b 个位置</h2>
+      <p>排序规则：身高从高到低，身高相同按 b 从小到大。处理到某个人时，序列里已经放好的人身高都大于等于他：更高的全放完了，同身高的、b 更小的也放完了。这时把他插到当前序列的第 b 个位置（下标从 0 开始），他左边恰好有 b 个人，而且这 b 个人全部大于等于他，他的要求当场满足。</p>
+      <figure class="fig" id="figGreedy"></figure>
+      <p>之后插入的人身高都小于等于他，不会破坏他的计数：更矮的人站在左边，不算「大于等于」。同身高的按 b 升序先小后大，先插的 b 小、位置靠前，后插的 b 大正好落在更右边，两边互不挤占。</p>
+      <p>如果有人问「为什么不能从矮到高处理」：那处理到高个子时，矮个子已经在队列里，高个子插进去会把矮个子左边的人数改变，要求就说不清了。从高到低是让「已经就位的人永远不会影响后插者左边的大于等于计数」。</p>
+
+      <h2 id="ordered">二、有序表：按序号插入的 AVL</h2>
+      <p>把「插到第 b 个位置」实现成有序表的操作。上一页的 AVL 按 key 大小比较左右，这里换成按左子树大小决定走向：siz[ls] &gt;= rank 走左，否则走右并减去左子树大小加一。中序遍历出来的顺序就是从左到右的队列顺序。</p>
+      <figure class="fig" id="figRank"></figure>
+      <p>为什么旋转在这里依然可行？上一页的观察：旋转不改变中序遍历的次序。按序号插入的 AVL 里，旋转同样只改结构不改中序，所以任意位置插入、任意次旋转之后，中序仍然是队列顺序。这正是不用普通数组、改用有序表的原因：插入一个元素是 O(log n)，整棵树的中序顺序却始终对。</p>
+      <p>实现上比上一页少两个数组：没有 key_count（每个人只出现一次，siz 就是子树人数），没有词频累加分支。height 和 siz 照常维护，maintain 完全一样。</p>
+
+      <h2 id="complex">三、复杂度</h2>
+      <p>排序 O(n log n)，n 次插入每次 O(log n)，总计 O(n log n)。这就是「最优时间复杂度」：题目给 1e4 人也跑得动。</p>
+
+      <h2 id="t2">四、题目2：完整实现</h2>
+      <p>LeetCode 406「根据身高重建队列」。上面分析的两步直接落地：</p>
+              <pre class="code"><span class="cm">// 重建队列：贪心 + 按中序序号插入的 AVL 有序表</span>
+    <span class="cm">// 一共 n 个人，每个人有 (a, b) 两个数据，a 表示身高</span>
+    <span class="cm">// b 表示站在自己左边的人中，正好有 b 个人的身高大于等于自己</span>
+    <span class="cm">// 返回任意一种满足全部要求的排列</span>
+    <span class="cm">// 测试链接 : https://leetcode.cn/problems/queue-reconstruction-by-height/</span>
+    <span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 2001;
+
+    <span class="kw">int</span> cnt = 0;
+    <span class="kw">int</span> head = 0;
+    <span class="kw">int</span> key[MAXN];
+    <span class="kw">int</span> height[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> value[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        siz[i] = siz[ls[i]] + siz[rs[i]] + 1;
+        height[i] = max(height[ls[i]], height[rs[i]]) + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">leftRotate</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> r = rs[i];
+        rs[i] = ls[r];
+        ls[r] = i;
+        up(i);
+        up(r);
+        <span class="kw">return</span> r;
+    }
+
+    <span class="kw">int</span> <span class="fn">rightRotate</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> l = ls[i];
+        ls[i] = rs[l];
+        rs[l] = i;
+        up(i);
+        up(l);
+        <span class="kw">return</span> l;
+    }
+
+    <span class="kw">int</span> <span class="fn">maintain</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> lh = height[ls[i]];
+        <span class="kw">int</span> rh = height[rs[i]];
+        <span class="kw">if</span> (lh - rh &gt; 1) {
+            <span class="kw">if</span> (height[ls[ls[i]]] &gt;= height[rs[ls[i]]]) {
+                i = rightRotate(i);
+            } <span class="kw">else</span> {
+                ls[i] = leftRotate(ls[i]);
+                i = rightRotate(i);
+            }
+        } <span class="kw">else</span> <span class="kw">if</span> (rh - lh &gt; 1) {
+            <span class="kw">if</span> (height[rs[rs[i]]] &gt;= height[ls[rs[i]]]) {
+                i = leftRotate(i);
+            } <span class="kw">else</span> {
+                rs[i] = rightRotate(rs[i]);
+                i = leftRotate(i);
+            }
+        }
+        <span class="kw">return</span> i;
+    }
+
+    <span class="cm">// 把 (num, idx) 插到中序遍历的第 rank 个位置（rank 从 0 开始）</span>
+    <span class="cm">// 这里不按 key 的大小比较左右，而是按左子树大小决定往哪边走</span>
+    <span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">int</span> rank, <span class="kw">int</span> num, <span class="kw">int</span> idx) {
+        <span class="kw">if</span> (i == 0) {
+            key[++cnt] = num;
+            value[cnt] = idx;
+            siz[cnt] = height[cnt] = 1;
+            <span class="kw">return</span> cnt;
+        }
+        <span class="kw">if</span> (siz[ls[i]] &gt;= rank) {
+            ls[i] = add(ls[i], rank, num, idx);
+        } <span class="kw">else</span> {
+            rs[i] = add(rs[i], rank - siz[ls[i]] - 1, num, idx);
+        }
+        up(i);
+        <span class="kw">return</span> maintain(i);
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num, <span class="kw">int</span> idx) {
+        head = add(head, idx, num, idx);
+    }
+
+    <span class="cm">// 中序遍历填答案：树的中序顺序就是最终的队列顺序</span>
+    <span class="kw">int</span> fi = 0;
+    <span class="kw">void</span> <span class="fn">inOrder</span>(<span class="kw">int</span> ans[][2], <span class="kw">int</span> i) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span>;
+        }
+        inOrder(ans, ls[i]);
+        ans[fi][0] = key[i];
+        ans[fi++][1] = value[i];
+        inOrder(ans, rs[i]);
+    }
+
+    <span class="kw">void</span> <span class="fn">clear</span>() {
+        memset(key + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(height + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(ls + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(rs + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(value + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(siz + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        cnt = 0;
+        head = 0;
+        fi = 0;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        <span class="kw">int</span> n;
+        cin &gt;&gt; n;
+        vector&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt; <span class="fn">people</span>(n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            cin &gt;&gt; people[i].first &gt;&gt; people[i].second;
+        }
+        <span class="cm">// 身高从高到低，同身高按 b 从小到大</span>
+        sort(people.begin(), people.end(), [](<span class="kw">const</span> pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&amp; a, <span class="kw">const</span> pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&amp; b) {
+            <span class="kw">return</span> a.first != b.first ? (a.first &gt; b.first) : (a.second &lt; b.second);
+        });
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            add(people[i].first, people[i].second);
+        }
+        <span class="kw">int</span> ans[MAXN][2];
+        inOrder(ans, head);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+            cout &lt;&lt; ans[i][0] &lt;&lt; " " &lt;&lt; ans[i][1] &lt;&lt; endl;
+        }
+        clear();
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <div class="viz">
+        <p class="viz-title">演示 · 贪心插入：逐个放到第 b 个位置，末帧验证每人要求</p>
+        <div class="viz-controls">
+          <select id="qSel">
+            <option value="4" selected>n = 4</option>
+            <option value="5">n = 5</option>
+            <option value="6">n = 6</option>
+          </select>
+          <button id="qNext">下一步</button>
+          <button id="qReset">重置</button>
+        </div>
+        <div id="qCanvas" style="min-height:300px;"></div>
+        <p class="stepnote" id="qNote"></p>
+      </div>
+
+      <h2 id="sum">总结</h2>
+      <p>重建队列把「排成一列满足 b 个大于等于」翻译成「按身高降序逐个插到第 b 个位置」，正确性靠一个事实：处理时队列里全是大于等于我的人，之后来的人都小于等于我。数组插入是 O(n²)，换成按序号插入的 AVL 有序表变成 O(n log n)，而旋转不改变中序次序这一点让有序表可以放心插在任意位置。这道题的意义不在题本身，在于展示了有序表能维护的不仅是 key 的大小序，还有中序这个位置序。</p>
+
+      <h2 id="prob2">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>根据身高重建队列</td><td><a href="https://leetcode.cn/problems/queue-reconstruction-by-height/" target="_blank">queue-reconstruction-by-height</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解148【扩展】有序表专题1-AVL树</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var P = 'http://www.w3.org/2000/svg';
+  function T(x,y,s,fs){ var t=document.createElementNS(P,'text'); t.setAttribute('x',x); t.setAttribute('y',y); t.setAttribute('font-size',fs||13); t.textContent=s; return t; }
+  function R(x,y,w,h){ var r=document.createElementNS(P,'rect'); r.setAttribute('x',x); r.setAttribute('y',y); r.setAttribute('width',w); r.setAttribute('height',h); r.setAttribute('rx',6); r.setAttribute('fill','#f2f6fc'); r.setAttribute('stroke','#7aa2d0'); return r; }
+  function LN(x1,y1,x2,y2){ var l=document.createElementNS(P,'line'); l.setAttribute('x1',x1); l.setAttribute('y1',y1); l.setAttribute('x2',x2); l.setAttribute('y2',y2); l.setAttribute('stroke','#94a8c0'); l.setAttribute('stroke-width',1.2); return l; }
+  function mount(id, svg){ document.getElementById(id).appendChild(svg); }
+
+  // ===== 图1：贪心插入过程 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 900 330');
+    var rows = [
+      {t:'排序后逐个插入，每次插到第 b 个位置', cells:[]},
+      {t:'插 (7,0) 到位置 0', cells:['7(0)']},
+      {t:'插 (7,1) 到位置 1', cells:['7(0)','7(1)']},
+      {t:'插 (6,1) 到位置 1', cells:['7(0)','6(1)','7(1)']},
+      {t:'插 (5,0) 到位置 0', cells:['5(0)','7(0)','6(1)','7(1)']},
+      {t:'插 (5,2) 到位置 2', cells:['5(0)','7(0)','5(2)','6(1)','7(1)']},
+      {t:'插 (4,4) 到位置 4，中序就是答案', cells:['5(0)','7(0)','5(2)','6(1)','4(4)','7(1)']}
+    ];
+    rows.forEach(function(r, ri){
+      var y = 34 + ri * 44;
+      svg.appendChild(T(20, y, r.t, 12));
+      r.cells.forEach(function(c, ci){
+        var x = 400 + ci * 80;
+        var rc = R(x, y - 16, 76, 28);
+        if (ci === r.cells.length - 1 && ri > 0){ rc.setAttribute('fill','#fff4d6'); rc.setAttribute('stroke','#c9a54a'); }
+        svg.appendChild(rc);
+        var t = T(x + 38, y + 2, c, 11.5); t.setAttribute('text-anchor','middle'); svg.appendChild(t);
+      });
+    });
+    svg.appendChild(T(20, 318, '每个 b 都是从 0 数的位置。等高者 b 小先插，b 大后插，互不挤占', 11));
+    mount('figGreedy', svg);
+  })();
+
+  // ===== 图2：按序号插入的 AVL =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 900 260');
+    var rc = R(12, 12, 876, 210); svg.appendChild(rc);
+    svg.appendChild(T(28, 36, 'AVL 不按 key 大小比较，按左子树大小决定走向，中序就是队列顺序', 13));
+    // 树：根 6(1)，左 7(0)，右 5(2)，右的左 4(4)？用经典例的插入结果
+    // 中序 [5(0), 7(0), 5(2), 6(1), 4(4), 7(1)]，树结构示意 6 节点
+    svg.appendChild(CIRC2(450, 90, 22, '6(1)'));
+    svg.appendChild(CIRC2(280, 160, 20, '7(0)'));
+    svg.appendChild(CIRC2(600, 160, 20, '5(2)'));
+    svg.appendChild(CIRC2(200, 230, 18, '5(0)'));
+    svg.appendChild(CIRC2(720, 230, 18, '7(1)'));
+    svg.appendChild(CIRC2(540, 230, 18, '4(4)'));
+    svg.appendChild(LN(440, 108, 288, 150));
+    svg.appendChild(LN(462, 108, 592, 150));
+    svg.appendChild(LN(272, 178, 208, 220));
+    svg.appendChild(LN(592, 178, 548, 220));
+    svg.appendChild(LN(610, 178, 712, 220));
+    svg.appendChild(T(28, 204, 'siz 存子树人数：往左还是往右，一次 siz[左] 比较决定', 11));
+    mount('figRank', svg);
+    function CIRC2(cx, cy, r, label){
+      var g = document.createElementNS(P,'g');
+      var c = document.createElementNS(P,'circle'); c.setAttribute('cx',cx); c.setAttribute('cy',cy); c.setAttribute('r',r);
+      c.setAttribute('fill','#dbe7f6'); c.setAttribute('stroke','#4a6fa5'); c.setAttribute('stroke-width',1.4);
+      g.appendChild(c);
+      var t = T(cx, cy + 4, label, 11.5); t.setAttribute('text-anchor','middle'); g.appendChild(t);
+      return g;
+    }
+  })();
+
+  // ===== 演示：贪心插入 =====
+  (function(){
+    var sel = document.getElementById('qSel');
+    var canvas = document.getElementById('qCanvas');
+    var note = document.getElementById('qNote');
+    var at = 0, order = [];
+    function gen(n){
+      var sd = 20261017;
+      function rnd(){ sd = (sd + 0x6D2B79F5) | 0; var t = Math.imul(sd ^ (sd >>> 15), sd | 1); sd = t + Math.imul(t ^ (t >>> 7), t | 61); return ((sd ^ (sd >>> 14)) >>> 0) / 4294967296; }
+      // 构造一个有解的随机队列：先随机身高，再算每个人的 b
+      var q = [];
+      for (var i = 0; i < n; i++) q.push({a: 1 + Math.floor(rnd() * 8), b: 0});
+      for (var i = 0; i < n; i++){
+        var b = 0;
+        for (var j = 0; j < i; j++) if (q[j].a >= q[i].a) b++;
+        q[i].b = b;
+      }
+      // 打乱
+      for (var i = n - 1; i > 0; i--){
+        var j = Math.floor(rnd() * (i + 1));
+        var t = q[i]; q[i] = q[j]; q[j] = t;
+      }
+      // 排序：身高降序，同身高 b 升序
+      q.sort(function(x, y){ return x.a !== y.a ? (y.a - x.a) : (x.b - y.b); });
+      return q;
+    }
+    function render(){
+      while (canvas.firstChild) canvas.removeChild(canvas.firstChild);
+      var n = Number(sel.value);
+      var HH = 300;
+      var svg = document.createElementNS(P,'svg');
+      svg.setAttribute('viewBox','0 0 900 ' + HH);
+      svg.appendChild(T(20, 26, '排序后（身高降序，同身高 b 升序）：' + order.map(function(p){ return p.a + '(' + p.b + ')'; }).join(', '), 12));
+      var cur = [];
+      for (var i = 0; i < at; i++) cur.splice(order[i].b, 0, order[i]);
+      // 画当前队列格子
+      var cellW = Math.floor(820 / n);
+      for (var i = 0; i < n; i++){
+        var x = 60 + i * cellW;
+        var rc = R(x, 60, cellW - 8, 46);
+        if (i < cur.length) rc.setAttribute('fill','#dbe7f6');
+        svg.appendChild(rc);
+        if (i < cur.length){
+          var t = T(x + (cellW - 8) / 2, 88, cur[i].a + '(' + cur[i].b + ')', 13);
+          t.setAttribute('text-anchor','middle'); svg.appendChild(t);
+        }
+      }
+      if (at > 0){
+        var last = order[at - 1];
+        svg.appendChild(T(20, 130, '这一步：把 ' + last.a + '(' + last.b + ') 插到位置 ' + last.b + '。插入时队列里全是大于等于 ' + last.a + ' 的人', 12.5));
+      } else {
+        svg.appendChild(T(20, 130, '空队列。点击「下一步」插入第一个人。', 12.5));
+      }
+      if (at >= n){
+        // 验证
+        var ok = true;
+        for (var i = 0; i < n; i++){
+          var cnt = 0;
+          for (var j = 0; j < i; j++) if (cur[j].a >= cur[i].a) cnt++;
+          if (cnt !== cur[i].b) ok = false;
+        }
+        svg.appendChild(T(20, HH - 50, '完整队列：' + cur.map(function(p){ return p.a + '(' + p.b + ')'; }).join('  '), 13));
+        svg.appendChild(T(20, HH - 20, '逐人核对「左边大于等于自己的人数 == b」：' + (ok ? '全部满足' : '有不满足'), 13));
+      } else {
+        svg.appendChild(T(20, HH - 20, '已插入 ' + at + ' / ' + n + ' 个', 12));
+      }
+      canvas.appendChild(svg);
+      note.textContent = (at >= n) ? '插入完毕并验证' : '已插入 ' + at + ' 个';
+      document.getElementById('qNext').disabled = (at >= n);
+    }
+    function rebuild(){ at = 0; order = gen(Number(sel.value)); }
+    sel.addEventListener('change', function(){ rebuild(); render(); });
+    document.getElementById('qNext').addEventListener('click', function(){ if (at < order.length){ at++; render(); } });
+    document.getElementById('qReset').addEventListener('click', function(){ rebuild(); render(); });
+    rebuild();
+    render();
+  })();
+})();
+</script>
+</body>
+</html>
