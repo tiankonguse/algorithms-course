@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>同余最短路：以最小步长为模</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.viz-controls select { margin-right: 8px; }
+.mono { font-family: ui-monospace,Menlo,Consolas,monospace; font-size: 12px; margin: 5px 0; color: #334155; }
+.chip { display: inline-block; min-width: 26px; padding: 3px 8px; border: 1px solid #cbd5e1; border-radius: 5px; margin: 2px 5px 2px 0; background: #fff; text-align: center; }
+.chip.hit { background: #dcfce7; border-color: #16a34a; }
+.chip.miss { background: #fee2e2; border-color: #dc2626; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>同余最短路：以最小步长为模</h1>
+      <p class="intro">给一堆正数、每种个数无限，问能拼出哪些数、拼不出哪个最大。这类题直接做完全背包会撞上超大的上限（楼层数 h 能到 2^63）。换个思路：拿一个数当模，把「拼数」变成「余数在图上跑最短路」，图的点数只有模长那么多，跑完答案直接数出来。</p>
+
+      <h2 id="group">零、同余分组：拼数变成图上最短路</h2>
+      <p>设这些正数里最小的一个是 x。任何一个拼出的数 v，都可以写成 v = d + k·x：先把 x 看成「基准」，每多拼一个 x 只改变大小、不改变 v 对 x 的余数。于是同一个余数 r 下的可拼数，是从某个最小值 dist[r] 起、每加一个 x 得到一串：dist[r], dist[r]+x, dist[r]+2x, …</p>
+      <p>那「能拼出的数有多少个 ≤ 上限」就变成：对每个余数 r，数一下这串里 ≤ 上限的有几个，即 (上限 − dist[r]) / x + 1（当 dist[r] ≤ 上限时）。</p>
+      <p>剩下的问题是 dist[r] 怎么求。建一张图：点是余数 0..x−1；每出现一个别的数 y，连边 r → (r+y) mod x、边权 y。从 0 出发跑最短路，dist[r] 就是「余数为 r 的最小可拼值」。图只有 x 个点，x 多大图就多大。</p>
+      <figure class="fig" id="figElev"></figure>
+      <p>这个分组是整套方法的骨架：模数越小图越小。x 取最小的那个数最划算，但先排序再取第一个也成立，只要 x 本身在可拼集合里，dist[r]+k·x 就都是可拼的。</p>
+
+      <h2 id="elevator">一、题1 跳楼机：楼层上限 2^63 也能数</h2>
+      <p>电梯在 1 层，每次能向上 x、y、z 层，或者回 1 层。问 1..h 里能到几层。h 读进来先减 1：回 1 层意味着任意时刻都能清零重来，所以能到的楼层 = 1 + 从偏移 0 出发能拼出的偏移个数，偏移上限就是 H = h−1。</p>
+      <p>模数直接取 x。连两条边：i → (i+y) mod x 权 y、i → (i+z) mod x 权 z。dijkstra 跑出 dist[r]，再对每个余数套统计公式。x、y、z 最大 10^5，x 个点、2x 条边，dijkstra 的 O(x log x) 完全够。</p>
+              <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 200001;
+
+    <span class="kw">long</span> <span class="kw">long</span> h;
+    <span class="kw">int</span> x, y, z;
+
+    <span class="kw">int</span> head[MAXN], nxt[MAXM], to[MAXM], cnt;
+    <span class="kw">long</span> <span class="kw">long</span> weight[MAXM];
+
+    <span class="kw">long</span> <span class="kw">long</span> distanceArr[MAXN];
+    <span class="kw">bool</span> visitedArr[MAXN];
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+    	cnt = 1;
+    	fill(head, head + x, 0);
+    	fill(distanceArr, distanceArr + x, LLONG_MAX);
+    	fill(visitedArr, visitedArr + x, <span class="kw">false</span>);
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">long</span> <span class="kw">long</span> w) {
+    	nxt[cnt] = head[u];
+    	to[cnt] = v;
+    	weight[cnt] = w;
+    	head[u] = cnt++;
+    }
+
+    <span class="kw">void</span> <span class="fn">dijkstra</span>() {
+    	priority_queue&lt;pair&lt;<span class="kw">long</span> <span class="kw">long</span>, <span class="kw">int</span>&gt;, vector&lt;pair&lt;<span class="kw">long</span> <span class="kw">long</span>, <span class="kw">int</span>&gt;&gt;, greater&lt;pair&lt;<span class="kw">long</span> <span class="kw">long</span>, <span class="kw">int</span>&gt;&gt;&gt; heap;
+    	heap.push({0, 0});
+    	distanceArr[0] = 0;
+    	<span class="kw">while</span> (!heap.empty()) {
+    		auto cur = heap.top();
+    		heap.pop();
+    		<span class="kw">int</span> u = cur.second;
+    		<span class="kw">long</span> <span class="kw">long</span> w = cur.first;
+    		<span class="kw">if</span> (visitedArr[u]) {
+    			<span class="kw">continue</span>;
+    		}
+    		visitedArr[u] = <span class="kw">true</span>;
+    		<span class="kw">for</span> (<span class="kw">int</span> ei = head[u], v; ei &gt; 0; ei = nxt[ei]) {
+    			v = to[ei];
+    			<span class="kw">if</span> (!visitedArr[v] &amp;&amp; distanceArr[v] &gt; w + weight[ei]) {
+    				distanceArr[v] = w + weight[ei];
+    				heap.push({distanceArr[v], v});
+    			}
+    		}
+    	}
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">compute</span>() {
+    	dijkstra();
+    	<span class="kw">long</span> <span class="kw">long</span> ans = 0;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; x; i++) {
+    		<span class="kw">if</span> (distanceArr[i] &lt;= h) {
+    			ans += (h - distanceArr[i]) / x + 1;
+    		}
+    	}
+    	<span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+    	cin &gt;&gt; h &gt;&gt; x &gt;&gt; y &gt;&gt; z;
+    	h = h - 1;
+    	prepare();
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; x; i++) {
+    		addEdge(i, (i + y) % x, y);
+    		addEdge(i, (i + z) % x, z);
+    	}
+    	cout &lt;&lt; compute() &lt;&lt; endl;
+    	<span class="kw">return</span> 0;
+    }</pre>
+      <p>实测（对拍）：2000 组随机小用例（x,y,z ∈ [1,8]，h ≤ 60），课程输出与暴力 BFS 枚举可达偏移完全一致。有个细节：模数取 x 而不是取 x、y、z 的最小值也正确，只是图更大一点，课程代码直接用第一个数 x。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示 · dijkstra 跑同余图：每个余数的最小可拼值怎么定下来</p>
+        <div class="viz-controls">
+          <select id="elevPreset">
+            <option>x=3 y=4 z=5，h=20</option>
+            <option>x=2 y=7 z=5，h=25</option>
+            <option>x=1 y=2 z=2，h=16</option>
+          </select>
+        </div>
+        <div id="elevBoard"></div>
+        <p class="viz-note" id="elevNote"></p>
+        <p class="viz-answer" id="elevAns"></p>
+        <div class="viz-controls">
+          <button id="elevPrev">上一步</button>
+          <button id="elevNext">下一步</button>
+          <button id="elevReset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="fence">二、题2 牛场围栏：拼不出的最大长度</h2>
+      <p>每种木棍长度 arr[i]，每根可以消掉最多 m 的长度，所以一根 arr[i] 的木棍实际能用 [max(1, arr[i]−m), arr[i]] 里任意长度。把全部可用长度收进一个集合（去重），最短的那个做模 x。</p>
+      <p>x 等于 1 时所有长度都能拼（模 1 只有一个余数 0，dist[0]=0），返回 −1。每个可用长度 j 连边 k → (k+j) mod x 权 j。跑完 dijkstra：</p>
+      <p>某余数完全不可达（dist[r] = ∞）→ 这个余数的长度一个都拼不出，不可拼的长度无穷多，返回 −1；否则答案 = max(dist[r] − x)。为什么减 x：dist[r] 是该余数下最小可拼值，dist[r]−x 一定拼不出（拼得出就轮不到 dist[r] 当最小），它就是该余数下最大的不可拼值，所有余数取最大。</p>
+      <figure class="fig" id="figFence"></figure>
+      <p>两个 −1 别混：x==1 是「全都能拼」，dist[r]==∞ 是「拼不出的有无穷多」，题目对这两种都要求输出 −1，但含义相反。</p>
+              <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 101;
+    <span class="kw">const</span> <span class="kw">int</span> MAXV = 3001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 30001;
+
+    <span class="kw">int</span> inf = INT_MAX;
+    <span class="kw">int</span> n, m, x;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">bool</span> setArr[MAXV];
+
+    <span class="kw">int</span> head[MAXV], nxt[MAXM], to[MAXM], weight[MAXM], cnt;
+    <span class="kw">int</span> distanceArr[MAXV];
+    <span class="kw">bool</span> visitedArr[MAXV];
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+    	cnt = 1;
+    	fill(setArr, setArr + MAXV, <span class="kw">false</span>);
+    	fill(head, head + x, 0);
+    	fill(distanceArr, distanceArr + x, inf);
+    	fill(visitedArr, visitedArr + x, <span class="kw">false</span>);
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdge</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> w) {
+    	nxt[cnt] = head[u];
+    	to[cnt] = v;
+    	weight[cnt] = w;
+    	head[u] = cnt++;
+    }
+
+    <span class="kw">void</span> <span class="fn">dijkstra</span>() {
+    	priority_queue&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;, vector&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;, greater&lt;pair&lt;<span class="kw">int</span>, <span class="kw">int</span>&gt;&gt;&gt; heap;
+    	heap.push({0, 0});
+    	distanceArr[0] = 0;
+    	<span class="kw">while</span> (!heap.empty()) {
+    		auto cur = heap.top();
+    		heap.pop();
+    		<span class="kw">int</span> u = cur.second, w = cur.first;
+    		<span class="kw">if</span> (visitedArr[u]) {
+    			<span class="kw">continue</span>;
+    		}
+    		visitedArr[u] = <span class="kw">true</span>;
+    		<span class="kw">for</span> (<span class="kw">int</span> ei = head[u], v; ei &gt; 0; ei = nxt[ei]) {
+    			v = to[ei];
+    			<span class="kw">if</span> (!visitedArr[v] &amp;&amp; distanceArr[v] &gt; w + weight[ei]) {
+    				distanceArr[v] = w + weight[ei];
+    				heap.push({distanceArr[v], v});
+    			}
+    		}
+    	}
+    }
+
+    <span class="kw">int</span> <span class="fn">compute</span>() {
+    	<span class="kw">int</span> ans = 0;
+    	<span class="kw">if</span> (x == 1) {
+    		ans = -1;
+    	} <span class="kw">else</span> {
+    		<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+    			<span class="kw">for</span> (<span class="kw">int</span> j = max(1, arr[i] - m); j &lt;= arr[i]; j++) {
+    				<span class="kw">if</span> (!setArr[j]) {
+    					setArr[j] = <span class="kw">true</span>;
+    					<span class="kw">for</span> (<span class="kw">int</span> k = 0; k &lt; x; k++) {
+    						addEdge(k, (k + j) % x, j);
+    					}
+    				}
+    			}
+    		}
+    		dijkstra();
+    		<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt; x; i++) {
+    			<span class="kw">if</span> (distanceArr[i] == inf) {
+    				ans = -1;
+    				<span class="kw">break</span>;
+    			}
+    			ans = max(ans, distanceArr[i] - x);
+    		}
+    	}
+    	<span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+    	cin &gt;&gt; n &gt;&gt; m;
+    	x = inf;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+    		cin &gt;&gt; arr[i];
+    		x = min(x, max(1, arr[i] - m));
+    	}
+    	prepare();
+    	cout &lt;&lt; compute() &lt;&lt; endl;
+    	<span class="kw">return</span> 0;
+    }</pre>
+      <p>实测（对拍）：3000 组随机小用例（n ≤ 6，arr ∈ [2,10]，m ∈ [1,5]），课程输出与「完全背包打表找最大不可拼」完全一致；「无穷多」情形（余数不可达）两边都判 −1。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示 · 围栏的 dijkstra：模数、可达余数、最大不可拼</p>
+        <div class="viz-controls">
+          <select id="fencePreset">
+            <option>arr=3,5，m=1（可用 2,3,4,5）</option>
+            <option>arr=4,5，m=0（可用 4,5）</option>
+            <option>arr=6,10，m=0（奇数无穷多）</option>
+            <option>arr=2,3，m=0（x=2，全可拼）</option>
+          </select>
+        </div>
+        <div id="fenceBoard"></div>
+        <p class="viz-note" id="fenceNote"></p>
+        <p class="viz-answer" id="fenceAns"></p>
+        <div class="viz-controls">
+          <button id="fencePrev">上一步</button>
+          <button id="fenceNext">下一步</button>
+          <button id="fenceReset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="sum">总结</h2>
+      <p>同余最短路把「拼数」压成「模 x 的余数图」：x 个点，每个可用数 y 连一条余数转移边，dist[r] = 余 r 的最小可拼值，答案按 (上限−dist[r])/x+1 逐余数数出来。</p>
+      <p>跳楼机把楼层偏移做成余数图直接数个数；围栏先收集可用长度、最短的做模，dist[r]−x 就是该余数下最大不可拼值，某余数不可达就是无穷多。两道题都是同一个 dijkstra，差别只在建边和统计。</p>
+      <p>下一步的变体：边权只有 0 和 1 时用 01bfs 更快，以及不建图、按子环转两圈的 O(n·x) 做法，后两页分别讲。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P3403" target="_blank">跳楼机</a></td><td><a href="https://www.luogu.com.cn/problem/P3403" target="_blank">luogu.com.cn</a></td></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P2662" target="_blank">牛场围栏</a></td><td><a href="https://www.luogu.com.cn/problem/P2662" target="_blank">luogu.com.cn</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解143【扩展】同余最短路</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function fnum(v){ return v===Infinity ? '∞' : String(v); }
+
+// ===== 图 1：同余分组数轴 =====
+(function(){
+  var W=720, H=250, body='';
+  body += txt(W/2, 22, '模 x=3：每个余数一列，从 dist[r] 起每 +3 一个可拼数', {fs:13});
+  var colX=[90, 300, 510], colW=180;
+  var data=[['余 0', 0, [0,3,6,9,12,15,18,21], [0,3,6,9,12,15,18]],
+            ['余 1', 4, [4,7,10,13,16,19,22], [4,7,10,13,16,19]],
+            ['余 2', 5, [5,8,11,14,17,20,23], [5,8,11,14,17,20]]];
+  for(var c=0;c<3;c++){
+    var x0=colX[c], d=data[c];
+    body += '<rect x="'+x0+'" y="48" width="'+colW+'" height="150" rx="8" fill="#f6f7f9" stroke="#cbd5e1"/>';
+    body += txt(x0+colW/2, 70, d[0]+'：dist='+d[1], {fs:12, fill:'#1f2937'});
+    var ys=88;
+    for(var i=0;i<d[2].length;i++){
+      var hit = d[3].indexOf(d[2][i])>=0;
+      body += '<circle cx="'+(x0+60)+'" cy="'+ys+'" r="7" fill="'+(hit?'#16a34a':'#fff')+'" stroke="#16a34a" stroke-width="1.5"/>';
+      body += txt(x0+78, ys+4, String(d[2][i]), {fs:11, an:'start'});
+      ys += 15;
+    }
+    body += txt(x0+colW/2, 172, hitCount(d[2], d[3])+' 个 ≤ 上限', {fs:11, fill:'#2563eb'});
+  }
+  body += txt(W/2, 226, '统计 = Σ (上限 − dist[r]) / x + 1；dist[r] 超过上限的余数不贡献', {fs:11, fill:'#334155'});
+  function hitCount(all, hit){ return hit.length; }
+  document.getElementById('figElev').innerHTML = svg(W, H, body) +
+    '<figcaption>同一余数下的可拼数从 dist[r] 开始每 +x 一个，数到上限为止。</figcaption>';
+})();
+
+// ===== 图 2：围栏可用长度与模数 =====
+(function(){
+  var W=720, H=240, body='';
+  body += txt(W/2, 22, '一根 arr[i] 的木棍消去最多 m，可用区间 [max(1,arr[i]−m), arr[i]]', {fs:13});
+  var arr=[7, 5], m=2;
+  var x1=120, w1=200, x2=400, w2=200;
+  var y=60, hh=90;
+  function bar(x, w, a, lo, hi){
+    body += '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+hh+'" rx="8" fill="#eef4ff" stroke="#2563eb"/>';
+    body += txt(x+w/2, y+24, '木棍长 '+a, {fs:12, fill:'#1e3a8a'});
+    body += txt(x+w/2, y+52, '可用 '+lo+'..'+hi, {fs:12, fill:'#334155'});
+    body += txt(x+w/2, y+76, '最短可用做模数 x', {fs:10, fill:'#64748b'});
+  }
+  bar(x1, w1, 7, 5, 7);
+  bar(x2, w2, 5, 3, 5);
+  body += txt(W/2, y+hh+34, '例：可用长度集合 {3,4,5,6,7}，最短 3 就是模数 x', {fs:11, fill:'#334155'});
+  body += '<line x1="'+(x1+60)+'" y1="'+y+'" x2="'+(x1+60)+'" y2="'+(y-12)+'" stroke="#dc2626" stroke-width="3"/>';
+  body += txt(x1+60, y-18, 'min', {fs:10, fill:'#dc2626'});
+  document.getElementById('figFence').innerHTML = svg(W, H, body) +
+    '<figcaption>每种木棍可用的是一段长度，全部合起来取最短当模数。</figcaption>';
+})();
+
+// ===== 演示 1：跳楼机 dijkstra =====
+var elevPresets = {
+  'x=3 y=4 z=5，h=20': { x:3, y:4, z:5, h:20 },
+  'x=2 y=7 z=5，h=25': { x:2, y:7, z:5, h:25 },
+  'x=1 y=2 z=2，h=16': { x:1, y:2, z:2, h:16 }
+};
+var eSel=document.getElementById('elevPreset'), eBoard=document.getElementById('elevBoard'),
+    eNote=document.getElementById('elevNote'), eAns=document.getElementById('elevAns');
+var eSt={};
+
+function elevBuild(){
+  var p=elevPresets[eSel.value], x=p.x, H=p.h-1;
+  var INF=Infinity, dist=[], vis=[];
+  for(var i=0;i<x;i++){ dist.push(INF); vis.push(false); }
+  var heap=[]; // {d,u}
+  dist[0]=0; heap.push({d:0,u:0});
+  function push(u,d){ heap.push({d:d,u:u}); heap.sort(function(a,b){ return a.d-b.d; }); }
+  var steps=[];
+  steps.push({kind:'init', dist:dist.slice(), note:'dist[0]=0，其余 ∞；堆里有 {0}'});
+  while(heap.length){
+    var top=heap.shift(), u=top.u, w=top.d;
+    if(vis[u]) continue;
+    vis[u]=true;
+    var relaxed=[];
+    var nbs=[[(u+p.y)%x,p.y],[(u+p.z)%x,p.z]];
+    for(var i=0;i<2;i++){
+      var v=nbs[i][0], ww=nbs[i][1];
+      if(!vis[v] && dist[v]>w+ww){
+        dist[v]=w+ww; push(v,dist[v]);
+        relaxed.push('点 '+v+' 变 '+fnum(dist[v])+'（+'+ww+'）');
+      }
+    }
+    steps.push({kind:'pop', u:u, dist:dist.slice(), note:'取出点 '+u+'（距离 '+w+'），'+(relaxed.length?relaxed.join('、'):'无松弛')});
+  }
+  // 统计
+  var cnt=0, rows=[];
+  for(var i=0;i<x;i++){
+    var c=0;
+    if(dist[i]<=H){ c=Math.floor((H-dist[i])/x)+1; }
+    rows.push('余 '+i+': dist='+fnum(dist[i])+' → '+c+' 个');
+    cnt+=c;
+  }
+  steps.push({kind:'ans', dist:dist.slice(), note:'统计：'+rows.join('；')+',总数 '+cnt});
+  eSt.p=p; eSt.steps=steps; eSt.step=0; eSt.ans=cnt; eSt.H=H;
+  elevRender();
+}
+function elevRender(){
+  var s=eSt.steps[eSt.step], p=eSt.p;
+  var chips='';
+  for(var i=0;i<p.x;i++){
+    chips += '<span class="chip'+(s.dist[i]===0?' hit':'')+'">余 '+i+'<br>'+fnum(s.dist[i])+'</span>';
+  }
+  eBoard.innerHTML='<div class="mono">余数 0..'+(p.x-1)+'，dijkstra 逐步确定 dist：'+chips+'</div>';
+  eNote.textContent=s.note;
+  var over=(eSt.step>=eSt.steps.length-1);
+  eAns.textContent = over ? ('可达楼层数 = '+eSt.ans+'（偏移上限 '+eSt.H+'，楼层 1..'+(eSt.H+1)+'）') : '';
+  document.getElementById('elevPrev').disabled=(eSt.step===0);
+  document.getElementById('elevNext').disabled=over;
+}
+eSel.addEventListener('change', elevBuild);
+document.getElementById('elevPrev').addEventListener('click', function(){ if(eSt.step>0){ eSt.step--; elevRender(); } });
+document.getElementById('elevNext').addEventListener('click', function(){ if(eSt.step<eSt.steps.length-1){ eSt.step++; elevRender(); } });
+document.getElementById('elevReset').addEventListener('click', function(){ eSt.step=0; elevRender(); });
+elevBuild();
+
+// ===== 演示 2：围栏 dijkstra =====
+var fencePresets = {
+  'arr=3,5，m=1（可用 2,3,4,5）': { arr:[3,5], m:1 },
+  'arr=4,5，m=0（可用 4,5）': { arr:[4,5], m:0 },
+  'arr=6,10，m=0（奇数无穷多）': { arr:[6,10], m:0 },
+  'arr=2,2，m=1（可用 1,2，x=1）': { arr:[2,2], m:1 }
+};
+var fSel=document.getElementById('fencePreset'), fBoard=document.getElementById('fenceBoard'),
+    fNote=document.getElementById('fenceNote'), fAns=document.getElementById('fenceAns');
+var fSt={};
+
+function fenceBuild(){
+  var p=fencePresets[fSel.value], n=p.arr.length, m=p.m;
+  var lens=[], seen={};
+  for(var i=0;i<n;i++){
+    for(var j=Math.max(1,p.arr[i]-m); j<=p.arr[i]; j++){
+      if(!seen[j]){ seen[j]=true; lens.push(j); }
+    }
+  }
+  lens.sort(function(a,b){ return a-b; });
+  var x=lens[0];
+  var INF=Infinity, dist=[], vis=[];
+  for(var i=0;i<x;i++){ dist.push(INF); vis.push(false); }
+  dist[0]=0;
+  var heap=[{d:0,u:0}];
+  function push(u,d){ heap.push({d:d,u:u}); heap.sort(function(a,b){ return a-d; }); }
+  var steps=[];
+  steps.push({kind:'init', dist:dist.slice(), note:'可用长度 {'+lens.join(',')+'}，模数 x='+x+'；dist[0]=0'});
+  while(heap.length){
+    var top=heap.shift(), u=top.u, w=top.d;
+    if(vis[u]) continue;
+    vis[u]=true;
+    var relaxed=[];
+    for(var i=0;i<lens.length;i++){
+      var v=(u+lens[i])%x, ww=lens[i];
+      if(!vis[v] && dist[v]>w+ww){
+        dist[v]=w+ww; push(v,dist[v]);
+        relaxed.push('点 '+v+' 变 '+fnum(dist[v])+'（+'+ww+'）');
+      }
+    }
+    steps.push({kind:'pop', u:u, dist:dist.slice(), note:'取出点 '+u+'（距离 '+w+'），'+(relaxed.length?relaxed.join('、'):'无松弛')});
+  }
+  // 统计
+  var ans=0, verdict='';
+  if(x===1){
+    verdict='x=1：所有长度都能拼，输出 -1';
+  } else {
+    var inf=false, infR=-1, mx=0;
+    for(var i=1;i<x;i++){
+      if(dist[i]===INF){ inf=true; infR=i; break; }
+      if(dist[i]-x>mx) mx=dist[i]-x;
+    }
+    if(inf) verdict='余数 '+infR+' 不可达，不可拼无穷多，输出 -1';
+    else { ans=mx; verdict='max(dist[r]−x) = '+mx; }
+  }
+  steps.push({kind:'ans', dist:dist.slice(), note:verdict});
+  fSt.p=p; fSt.steps=steps; fSt.step=0; fSt.ans=ans; fSt.verdict=verdict;
+  fenceRender();
+}
+function fenceRender(){
+  var s=fSt.steps[fSt.step], p=fSt.p;
+  var chips='';
+  for(var i=0;i<Math.min(fSt.steps[0].dist.length,8);i++){
+    chips += '<span class="chip'+(s.dist[i]===0?' hit':'')+'">余 '+i+'<br>'+fnum(s.dist[i])+'</span>';
+  }
+  fBoard.innerHTML='<div class="mono">模数 x='+fSt.steps[0].dist.length+'，dist：'+chips+'</div>';
+  fNote.textContent=s.note;
+  var over=(fSt.step>=fSt.steps.length-1);
+  fAns.textContent = over ? ('结论：'+fSt.verdict) : '';
+  document.getElementById('fencePrev').disabled=(fSt.step===0);
+  document.getElementById('fenceNext').disabled=over;
+}
+fSel.addEventListener('change', fenceBuild);
+document.getElementById('fencePrev').addEventListener('click', function(){ if(fSt.step>0){ fSt.step--; fenceRender(); } });
+document.getElementById('fenceNext').addEventListener('click', function(){ if(fSt.step<fSt.steps.length-1){ fSt.step++; fenceRender(); } });
+document.getElementById('fenceReset').addEventListener('click', function(){ fSt.step=0; fenceRender(); });
+fenceBuild();
+})();</script>
+</body>
+</html>

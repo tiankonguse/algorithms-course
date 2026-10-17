@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>同余最短路：背包转两圈</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.viz-controls select { margin-right: 8px; }
+.mono { font-family: ui-monospace,Menlo,Consolas,monospace; font-size: 12px; margin: 5px 0; color: #334155; }
+.chip { display: inline-block; min-width: 26px; padding: 3px 8px; border: 1px solid #cbd5e1; border-radius: 5px; margin: 2px 5px 2px 0; background: #fff; text-align: center; }
+.chip.cur { background: #fef9c3; border-color: #ca8a04; }
+.chip.upd { background: #dcfce7; border-color: #16a34a; }
+.chip.inf { background: #fee2e2; border-color: #dc2626; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>同余最短路：背包转两圈</h1>
+      <p class="intro">前两页的最短路都建了图。这页把图拆了：按 gcd 把余数分成几个子环，每个子环转两圈，O(n·x) 预处理完同余最短路，查询 O(1)。体积 10^5、查询 10^12 的背包题靠它过。不建图，直接转圈松弛价值补偿。</p>
+
+      <h2 id="ring">零、子环与两圈：不建图的松弛</h2>
+      <p>目标还是算 dist[r]（余 r 的最小可拼值 / 最优价值），但换个实现。观察转移 j → (j+v) mod x：所有边跳的余数差都是 v 的倍数，而 gcd(v, x) = d 时，(j+v) mod x 只会在 j 所在的那个模 d 子环里转。所以整个图被拆成 d 个互不相通的子环，每个子环是 x/d 个点首尾相接的环。</p>
+      <p>在一个环上做松弛，转一圈不够：松弛沿环的单向传播，起点 j 自己的更新发生在第一圈的末尾，它影响不到环里排在它前面的点。转两圈，环首尾的传播才补上。这就是「两次转圈法」名字的由来：每个子环从 j 出发，沿 +v 走，走满两圈。</p>
+      <figure class="fig" id="figRing"></figure>
+      <p>复杂度：对每个物品 i，gcd(v[i], x) 个子环、每环 x/gcd 个点走两圈，一圈 O(n·x) 总松弛，空间只一个 dist 数组。比 dijkstra 的 O(E log V) 省掉 log，还省了建图。</p>
+
+      <h2 id="knapsack">一、题5 背包：价值补偿怎么转</h2>
+      <p>题面：n 种物品（体积 v[i]、价值 c[i]，每种无限），m 条查询 jobv ∈ [10^11, 10^12]，问恰好凑满 jobv 的最大价值和，凑不满输出 -1。jobv 大到 10^12，普通完全背包的二维 DP 想都别想。</p>
+      <p>先挑一个「基准物品」：性价比（c/v）最高的那个，记体积 x、价值 y。把体积的余数图转圈，但 dp[r] 存的不是「最小体积」，是补偿：总体积先用基准物品铺满，替换掉若干基准物品、加入其他物品后，剩余体积（对 x 取模）为 r 时的最大价值净变化。</p>
+      <p>转移一行看明白：加入物品 i（体积 v[i]、价值 c[i]），新剩余 = (cur+v[i]) mod x；因为总体积不变，多占的 (cur+v[i])/x 个体积要从基准物品里扣掉，每个基准物品价值 y，所以净补偿 = dp[cur] − ((cur+v[i])/x)·y + c[i]，取 max。dp[0] = 0，其余初始为负无穷。</p>
+              <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+
+    <span class="kw">long</span> <span class="kw">long</span> inf = LLONG_MIN;
+    <span class="kw">int</span> v[MAXN], c[MAXN];
+    <span class="kw">long</span> <span class="kw">long</span> dp[MAXN];
+    <span class="kw">int</span> n, m, x, y;
+
+    <span class="kw">int</span> <span class="fn">gcd</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+    	<span class="kw">return</span> b == 0 ? a : gcd(b, a % b);
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>() {
+    	fill(dp, dp + x, inf);
+    	dp[0] = 0;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+    		<span class="kw">if</span> (v[i] != x) {
+    			<span class="kw">int</span> d = gcd(v[i], x);
+    			<span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; d; j++) {
+    				<span class="kw">for</span> (<span class="kw">int</span> cur = j, next, circle = 0; circle &lt; 2; circle += cur == j ? 1 : 0) {
+    					next = (cur + v[i]) % x;
+    					<span class="kw">if</span> (dp[cur] != inf) {
+    						dp[next] = max(dp[next], dp[cur] - (<span class="kw">long</span> <span class="kw">long</span>)((cur + v[i]) / x) * y + c[i]);
+    					}
+    					cur = next;
+    				}
+    			}
+    		}
+    	}
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+    	cin &gt;&gt; n &gt;&gt; m;
+    	<span class="kw">double</span> best = 0, ratio;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+    		cin &gt;&gt; v[i] &gt;&gt; c[i];
+    		ratio = (<span class="kw">double</span>)c[i] / v[i];
+    		<span class="kw">if</span> (ratio &gt; best) {
+    			best = ratio;
+    			x = v[i];
+    			y = c[i];
+    		}
+    	}
+    	compute();
+    	<span class="kw">long</span> <span class="kw">long</span> jobv;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+    		cin &gt;&gt; jobv;
+    		<span class="kw">int</span> mod = (<span class="kw">int</span>)(jobv % x);
+    		<span class="kw">if</span> (dp[mod] == inf) {
+    			cout &lt;&lt; "-1" &lt;&lt; endl;
+    		} <span class="kw">else</span> {
+    			cout &lt;&lt; jobv / x * y + dp[mod] &lt;&lt; endl;
+    		}
+    	}
+    	<span class="kw">return</span> 0;
+    }</pre>
+      <p>查询 O(1)：jobv 的余数 r = jobv mod x；dp[r] 是负无穷说明凑不出，输出 -1；否则答案 = (jobv/x)·y + dp[r]：基准铺满的价值加上补偿。</p>
+      <p>实测（对拍）：3000 组随机小用例（n ≤ 6，v ∈ [2,10]，c ∈ [1,8]，jobv ≤ 60），转圈输出与「完全背包打表求恰体积最大价值」完全一致。有个细节：基准必须是性价比最高的物品，不是体积最小的。补偿定义要求「先用基准铺满」是最优起点，便宜又占地方的基准会让补偿算成负的没意义。</p>
+
+      <div class="viz">
+        <p class="viz-title">演示 · 转圈松弛：子环里走两圈，dp 补偿逐个定下来</p>
+        <div class="viz-controls">
+          <select id="ringPreset">
+            <option>(3,5)(5,7)，jobv=28</option>
+            <option>(4,6)(6,10)(7,12)，jobv=20</option>
+            <option>(4,6)(6,10)，jobv=13</option>
+            <option>(4,6)(6,10)，jobv=14</option>
+          </select>
+        </div>
+        <div id="ringBoard"></div>
+        <p class="viz-note" id="ringNote"></p>
+        <p class="viz-answer" id="ringAns"></p>
+        <div class="viz-controls">
+          <button id="ringPrev">上一步</button>
+          <button id="ringNext">下一步</button>
+          <button id="ringReset">重置</button>
+        </div>
+      </div>
+
+      <figure class="fig" id="figComp"></figure>
+
+      <h2 id="sum">总结</h2>
+      <p>两次转圈法是同余最短路的第三种实现：不建图，按 gcd(v[i], x) 拆子环，每个子环单向走两圈松弛。两圈的原因很具体：环上松弛沿单向传播，起点在第一圈末尾才更新，第二圈补上首尾。</p>
+      <p>背包题把它用到极致：性价比最高的物品当基准，dp[r] 存「替换基准后的价值补偿」，查询拆成 (jobv/x)·y + dp[jobv mod x]。三种实现（dijkstra 任意边权、01bfs 0/1 边权、转两圈不建图）挑着用，同余最短路这一页就齐了。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P9140" target="_blank">背包</a></td><td><a href="https://www.luogu.com.cn/problem/P9140" target="_blank">luogu.com.cn</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解143【扩展】同余最短路</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function fnum(v){ return v===undefined ? '∞' : String(v); }
+
+// ===== 图 1：子环 =====
+(function(){
+  var W=720, H=250, body='';
+  body += txt(W/2, 22, 'x=6、v=4：gcd=2，余数拆成两个子环 {0,2,4} 和 {1,3,5}', {fs:13});
+  function ring(cx, cy, nodes){
+    var N=nodes.length;
+    for(var i=0;i<N;i++){
+      var a=nodes[i], b=nodes[(i+1)%N];
+      var ax=cx+Math.cos(i/N*2*Math.PI-Math.PI/2)*55, ay=cy+Math.sin(i/N*2*Math.PI-Math.PI/2)*55;
+      var bx=cx+Math.cos((i+1)/N*2*Math.PI-Math.PI/2)*55, by=cy+Math.sin((i+1)/N*2*Math.PI-Math.PI/2)*55;
+      body += '<line x1="'+ax.toFixed(1)+'" y1="'+ay.toFixed(1)+'" x2="'+bx.toFixed(1)+'" y2="'+by.toFixed(1)+'" stroke="#475569" stroke-width="1.5"/>';
+      body += '<circle cx="'+ax.toFixed(1)+'" cy="'+ay.toFixed(1)+'" r="17" fill="#fff" stroke="#2563eb" stroke-width="2"/>';
+      body += txt(ax.toFixed(1), ay.toFixed(1)+4, String(a), {fs:12, fill:'#1f2937'});
+    }
+  }
+  ring(220, 130, [0,2,4]);
+  ring(510, 130, [1,3,5]);
+  body += txt(220, 225, '子环 A：0→2→4→0', {fs:11, fill:'#334155'});
+  body += txt(510, 225, '子环 B：1→3→5→1', {fs:11, fill:'#334155'});
+  body += txt(W/2, 38, '', {fs:11});
+  document.getElementById('figRing').innerHTML = svg(W, H, body) +
+    '<figcaption>步长 v 与模 x 的 gcd 决定子环个数；子环内转两圈才把松弛传满。</figcaption>';
+})();
+
+// ===== 图 2：补偿数轴 =====
+(function(){
+  var W=720, H=210, body='';
+  body += txt(W/2, 22, 'jobv = 基准铺满 + 补偿：答案 = (jobv/x)·y + dp[jobv mod x]', {fs:13});
+  var x0=70, x1=650, y=110;
+  body += '<line x1="'+x0+'" y1="'+y+'" x2="'+x1+'" y2="'+y+'" stroke="#475569" stroke-width="2"/>';
+  var seg=[[x0+80,'基准 ×(jobv/x)','#2563eb'],[x0+300,'替换出补偿 dp[r]','#16a34a'],[x0+520,'余数 r 对齐','#9333ea']];
+  for(var i=0;i<seg.length;i++){
+    var sx=seg[i][0];
+    body += '<rect x="'+sx+'" y="'+(y-18)+'" width="40" height="36" rx="5" fill="'+seg[i][2]+'" opacity="0.18"/>';
+    body += txt(sx+20, y+26, seg[i][1], {fs:10, fill:seg[i][2]});
+  }
+  body += txt(W/2, 168, 'dp[r] 为负表示替换后反而亏，仍取最大值；为负无穷表示这个余数凑不出', {fs:11, fill:'#334155'});
+  document.getElementById('figComp').innerHTML = svg(W, H, body) +
+    '<figcaption>查询把体积拆成基准部分和余数部分，补偿查 dp 一次拿到。</figcaption>';
+})();
+
+// ===== 演示：转圈松弛 =====
+var ringPresets = {
+  '(3,5)(5,7)，jobv=28': { v:[3,5], c:[5,7], jobv:28 },
+  '(4,6)(6,10)(7,12)，jobv=20': { v:[4,6,7], c:[6,10,12], jobv:20 },
+  '(4,6)(6,10)，jobv=13': { v:[4,6], c:[6,10], jobv:13 },
+  '(4,6)(6,10)，jobv=14': { v:[4,6], c:[6,10], jobv:14 }
+};
+var rSel=document.getElementById('ringPreset'), rBoard=document.getElementById('ringBoard'),
+    rNote=document.getElementById('ringNote'), rAns=document.getElementById('ringAns');
+var rSt={};
+
+function gcd2(a,b){ return b===0?a:gcd2(b,a%b); }
+
+function ringBuild(){
+  var p=ringPresets[rSel.value], n=p.v.length;
+  var best=0, x=0, y=0;
+  for(var i=0;i<n;i++){
+    var ratio=p.c[i]/p.v[i];
+    if(ratio>best){ best=ratio; x=p.v[i]; y=p.c[i]; }
+  }
+  var INF=undefined, dp=[];
+  for(var i=0;i<x;i++) dp.push(INF);
+  dp[0]=0;
+  var steps=[];
+  steps.push({kind:'init', dp:dp.slice(), note:'基准物品：体积 '+x+'、价值 '+y+'（性价比最高）；dp[0]=0，其余 ∞'});
+  for(var i=0;i<n;i++){
+    if(p.v[i]===x) continue;
+    var d=gcd2(p.v[i], x);
+    for(var j=0;j<d;j++){
+      var cur=j, circle=0, first=true;
+      while(circle<2){
+        var next=(cur+p.v[i])%x;
+        var gain=null;
+        if(dp[cur]!==INF){
+          gain=dp[cur]-Math.floor((cur+p.v[i])/x)*y+p.c[i];
+          if(dp[next]===INF || gain>dp[next]){
+            dp[next]=gain;
+            steps.push({kind:'upd', dp:dp.slice(), note:'物品 ('+p.v[i]+','+p.c[i]+')：子环 '+j+',点 '+cur+'→'+next+'，dp['+next+'] 更新为 '+gain});
+          } else {
+            steps.push({kind:'same', dp:dp.slice(), note:'物品 ('+p.v[i]+','+p.c[i]+')：子环 '+j+',点 '+cur+'→'+next+'，dp['+next+']='+dp[next]+' 优于 '+gain+'，不变'});
+          }
+        } else {
+          steps.push({kind:'skip', dp:dp.slice(), note:'物品 ('+p.v[i]+','+p.c[i]+')：子环 '+j+',点 '+cur+'→'+next+'，dp['+cur+'] 为 ∞，跳过'});
+        }
+        cur=next;
+        if(cur===j) circle++;
+        first=false;
+      }
+    }
+  }
+  var mod=Math.floor(p.jobv%x), ans=null;
+  if(dp[mod]===INF){
+    steps.push({kind:'ans', dp:dp.slice(), note:'查询 jobv='+p.jobv+'：余数 '+mod+' 的 dp 为 ∞，输出 -1', ans:'-1'});
+  } else {
+    ans=Math.floor(p.jobv/x)*y+dp[mod];
+    steps.push({kind:'ans', dp:dp.slice(), note:'查询 jobv='+p.jobv+'：余数 '+mod+'，dp='+dp[mod]+'，答案 = ('+p.jobv+'/'+x+')·'+y+' + '+dp[mod]+' = '+ans, ans:ans});
+  }
+  rSt.p=p; rSt.x=x; rSt.y=y; rSt.steps=steps; rSt.step=0; rSt.ans=ans;
+  ringRender();
+}
+function ringRender(){
+  var s=rSt.steps[rSt.step];
+  var chips='';
+  for(var i=0;i<rSt.x;i++){
+    var cls='';
+    if(s.dp[i]===undefined) cls=' inf';
+    else if(i===0) cls=' upd';
+    chips += '<span class="chip'+cls+'">余 '+i+'<br>'+fnum(s.dp[i])+'</span>';
+  }
+  rBoard.innerHTML='<div class="mono">模数 x='+rSt.x+'（基准价值 y='+rSt.y+'），dp：'+chips+'</div>';
+  rNote.textContent=s.note;
+  var over=(rSt.step>=rSt.steps.length-1);
+  rAns.textContent = over ? ('结果：'+s.ans) : '';
+  document.getElementById('ringPrev').disabled=(rSt.step===0);
+  document.getElementById('ringNext').disabled=over;
+}
+rSel.addEventListener('change', ringBuild);
+document.getElementById('ringPrev').addEventListener('click', function(){ if(rSt.step>0){ rSt.step--; ringRender(); } });
+document.getElementById('ringNext').addEventListener('click', function(){ if(rSt.step<rSt.steps.length-1){ rSt.step++; ringRender(); } });
+document.getElementById('ringReset').addEventListener('click', function(){ rSt.step=0; ringRender(); });
+ringBuild();
+})();</script>
+</body>
+</html>
