@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>替罪羊树：失衡就推倒重建 · 算法仓库</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>替罪羊树：失衡就推倒重建</h1>
+      <p class="intro">AVL 树靠旋转救失衡，跳表靠随机层数拆耦合，替罪羊树换了个更暴力的思路：发现哪棵子树不平衡，就把这棵子树整个拆散，按中序排好，再二分重建成标准平衡树。每次重建的代价是整棵子树的规模，听着吓人，但均摊下来每次操作还是 O(log n)。</p>
+
+      <h2>零、背景</h2>
+      <p>要实现的有序表还是那六个操作：增加 x（重复算多个）、删除 x（只删一个）、查询 x 的排名（比 x 小的个数 + 1）、查询排名为 x 的数、查询 x 的前驱后继。操作次数 ≤ 1e5，值域 −1e7 到 1e7。</p>
+      <p>二叉搜索树最怕有序输入：按 1、2、3… 的顺序插入，树退化成一条向右的链，O(log n) 的操作全变成 O(n)。前面几课给出两种解法：AVL 旋转保持严格平衡，跳表用随机层数让结构不依赖数据顺序。替罪羊树是第三种：<strong>平时不管平衡，一旦发现失衡就把整棵子树推倒重建</strong>。</p>
+      <p>实现上它只有一个 rebuild 函数，没有左旋右旋那套转来转去的代码，常数时间也小。代价是扩展性弱，想在节点上挂区间和之类的衍生信息不好做。算法竞赛里它是「必带模板」的有序表结构之一，跟 Treap、FHQ Treap、Splay 并列。</p>
+
+      <h2>一、平衡因子与重构</h2>
+      <p>每棵子树记一个存活节点数 aliveSiz。以 i 为根的子树，只要出现</p>
+      <p style="text-align:center"><code>max(aliveSiz[左], aliveSiz[右]) &gt; ALPHA * aliveSiz[i]</code></p>
+      <p>就认为失衡。ALPHA 是平衡因子，取值范围 (0.5, 1.0)，取 0.5 以下或 1.0 以上没有意义：等于 0.5 时树必须完美均衡，重构频繁得吓人；等于 1.0 时任何形状都算「平衡」，重构永远不触发，树高随输入放飞。0.7 是实测最常用的值。</p>
+      <p>重构分三步：中序收集子树上所有存活节点，把节点序号收进数组；对这个数组二分建树，中间那个当根，左半边递归建左子树，右半边递归建右子树；把新树挂回原来的父节点，或者当整棵树都失衡时直接当新根。重建完就是一棵标准平衡树。</p>
+      <figure class="fig">
+        <div class="fig-title">图 1 有序插入 1..7 的退化链，中序收集后二分重建</div>
+        <div id="figRebuild"></div>
+      </figure>
+      <p>平衡因子直接决定树高和重建频率的取舍。实测：把 1 到 100000 按顺序插入，α 越大树越深，α 越小越接近满二叉树：</p>
+      <table class="complexity">
+        <tr><th>平衡因子 α</th><td>0.55</td><td>0.60</td><td>0.70</td><td>0.80</td><td>0.90</td><td>0.95</td></tr>
+        <tr><th>树高（顺序插入 10 万）</th><td>18</td><td>19</td><td>22</td><td>27</td><td>33</td><td>47</td></tr>
+      </table>
+      <p>α = 0.5 时树高接近理论最优，但插入过程中隔几步就整棵重建一次；α = 0.95 时几乎不重建，但树高涨到 47，查询多走一倍路。0.7 在两边都说得过去：顺序插入 10 万，树高才 22，比 log₂(100000) ≈ 17 高一点点。</p>
+
+      <h2>二、死亡节点与 aliveSiz</h2>
+      <p>先看这个实现怎么处理删除。删除 x 不真的从数组里抹掉节点，只是把 alive 标成 false：节点死了，但空间还占着。新插入的数字会优先复用死亡节点（add 时 aliveSiz == 0 的子树直接当空树，新建节点顶上去）。</p>
+      <figure class="fig">
+        <div class="fig-title">图 2 死亡节点与 aliveSiz：灰色 × 是删掉的节点，标注是子树存活数</div>
+        <div id="figAliveSiz"></div>
+      </figure>
+      <p>aliveSiz[i] = (alive[i] ? 1 : 0) + aliveSiz[左] + aliveSiz[右]，up 一步算完。新增节点走到的路径上 aliveSiz 一路 +1，删除节点走到的路径上一路 −1，都是就地可算。</p>
+      <p>这里有个关键剪枝：<strong>aliveSiz == 0 的子树直接无视</strong>。查询走进去等于走空树，插入时这棵子树直接被新节点替换。它保证死亡节点不会拖慢操作：整棵子树死光了，代码根本不碰它。</p>
+      <p>这个设计跟经典的替罪羊树不一样。经典版维护两个量：allSiz 是节点总数（含死亡），aliveSiz 是存活数；重构触发也有两个条件，除了左右失衡，还要求子树里存活比例低于阈值；重建后要上溯整条祖先链修正 allSiz。我这份实现只维护 aliveSiz，新增 +1 删除 −1，重建后不用回修任何祖先。经典版最麻烦的一步，这里直接省掉了。</p>
+
+      <h2>三、带词频的经典版本</h2>
+      <p>课上先讲了一个带词频压缩的版本，结构上是三个数组：key_count 是节点词频，siz 是子树里的数字总数（含词频），diff 是子树里不同 key 的个数。判断平衡用 diff：ALPHA * diff[i] >= max(diff[左], diff[右])；查询排名用 siz 累加：key 比 num 小的时候把 siz[左] + key_count[i] 全算进去。</p>
+      <p>词频压缩省节点：同一个 key 只占一个节点，重复插入只是 key_count++。但它有两个别扭的地方。第一，删除时 key_count--，减到 0 节点还留着，得等下次重建才清掉，死亡判定比 Better 版的 alive 布尔啰嗦。第二，平衡判定只数不同 key 数（diff），如果某个 key 重复了几十万次，它的词频不影响平衡判定，排名查询却要走 siz，量级容易脱节。</p>
+      <p>Better 版不做词频压缩：每个插入的数字单独建节点，重复 key 就是两个节点，词频就是两个节点的 aliveSiz 贡献。想统计「一共有多少个数」，直接看 aliveSiz[root]。实现更简单，代价只是重复 key 多时数组多用一点空间，MAXN 开够就行。</p>
+
+      <h2>四、查询与删除</h2>
+      <p>查询沿着 key 走，四种都是递归：</p>
+      <p>small(i, num) 数「比 num 小的数有多少个」：num 不大于 key[i] 走左子树；否则答案 = aliveSiz[左] + (alive[i] ? 1 : 0) + 右子树的 small。getRank(num) = small + 1。index(x) 找第 x 小的数：x 不大于左子树存活数走左；大于左子树 + 当前节点就算完，减去这个量走右。</p>
+      <p>前驱后继一个套路：pre(num) 先 getRank(num)，排名是 1 说明没有比它小的，返回 INT_MIN，否则 index(排名 − 1)。post(num) 走 getRank(num + 1)：这招把「大于 num 的最小数」变成「大于等于 num + 1 的最小数的排名」，排名等于存活总数 + 1 就返回 INT_MAX，否则 index(这个排名)。</p>
+      <p>删除有个绕弯的地方，注释里写得很明白。<strong>删除按排名删，不按值删</strong>。原因是：替罪羊树会重构，值相同的一批节点（重复插入的同一个 key），重建时选出的头 h 之后，这批节点可能分到 h 的左侧也可能分到右侧。再按 key 的大小关系找删除目标，方向没法确定走左还是走右。先求出这个数的排名，再按排名一路走下去，方向就是确定的。</p>
+      <p>remove(num) 还有个存在判定：getRank(num) != getRank(num + 1) 才删。两个排名相等说明 multiset 里根本没有 num，删了个寂寞。</p>
+
+      <h2>五、复杂度论证</h2>
+      <p>要回答三个问题：死亡节点会不会残留一堆拖慢重构？死亡节点会不会连成长链拖慢查询？均摊 O(log n) 怎么保证？</p>
+      <p>第一条：活着才有资格被收集。中序收集和查询都带剪枝，aliveSiz == 0 的子树整棵跳过，等于不存在。</p>
+      <p>第二条是核心：每次增删后所有子树都满足 ALPHA * aliveSiz[i] >= max(aliveSiz[左], aliveSiz[右])。设存活节点总数是 k，沿一条从上到下的路径，存活节点数就是 O(log k)。再看死亡节点：一个死亡节点必须有两个含存活节点的儿子，否则它所在子树必失衡、被重构清掉。所以死亡节点都是「连接件」，k 个存活节点最多需要 k − 1 个死亡节点来连接，而且它们的连接方式也近乎平衡：要是连成长链，同样会触发重构。于是整棵树节点总量 O(k)，路径上存活 O(log k)、死亡也 O(log k)。</p>
+      <figure class="fig">
+        <div class="fig-title">图 3 死亡节点为什么不会连成长链：无存活子树的子树被剪枝，死亡节点必须夹在存活节点之间</div>
+        <div id="figDead"></div>
+      </figure>
+      <p>实测验证一下：随机插入 10 万个数，再随机删掉能删的（值域 2e7 很稀疏，实际删掉 251 个），然后跑 5 万次查询，平均每条查询路径上遇到存活节点 4.28 个、死亡节点只有 0.01 个。死亡节点要么被重构清掉，要么整棵子树被剪枝无视，路径上基本见不到它们。</p>
+
+      <div class="viz">
+        <div class="viz-title">平衡因子 α 对树形的影响：按 1..12 顺序插入</div>
+        <div class="intro">α 越小树越矮、重构越频繁；α 越大越容易拖成高树。红色圆是本次插入后触发重建的子树根，死亡节点不会出现在这个演示里。</div>
+        <svg id="vizAlphaSvg" viewBox="0 0 640 600"></svg>
+        <div class="stepnote" id="vizAlphaNote"></div>
+        <div class="viz-controls">
+          <label>α <select id="vizAlphaSel">
+            <option value="0.55">0.55</option><option value="0.6">0.60</option>
+            <option value="0.7" selected>0.70</option><option value="0.8">0.80</option>
+            <option value="0.9">0.90</option><option value="0.95">0.95</option>
+          </select></label>
+          <button id="vizAlphaReset">重置</button>
+          <button id="vizAlphaNext" disabled>下一步</button>
+        </div>
+      </div>
+
+      <h2>六、题 1：普通平衡树</h2>
+      <p>洛谷 P3369 就是上面六操作，按课程实现写入口。结构函数一字不动，main 换成 P3369 的标准读法。</p>
+      <div class="code-wrap">    <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 2000001;
+
+    <span class="kw">int</span> cntn;
+    <span class="kw">int</span> root;
+    <span class="kw">int</span> key[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+
+     <span class="cm">// 节点是否存活，删掉就算死亡</span>
+    <span class="kw">bool</span> alive[MAXN];
+
+     <span class="cm">// 子树的存活节点数量</span>
+    <span class="kw">int</span> aliveSiz[MAXN];
+
+    <span class="kw">double</span> ALPHA = 0.7;
+    <span class="kw">int</span> top;
+    <span class="kw">int</span> father;
+    <span class="kw">int</span> side;
+    <span class="kw">int</span> collect[MAXN];
+    <span class="kw">int</span> collectSiz;
+
+    <span class="kw">int</span> <span class="fn">init</span>(<span class="kw">int</span> num) {
+        key[++cntn] = num;
+        ls[cntn] = rs[cntn] = 0;
+        alive[cntn] = <span class="kw">true</span>;
+        aliveSiz[cntn] = 1;
+        <span class="kw">return</span> cntn;
+    }
+
+     <span class="cm">// 汇总存活节点数量</span>
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        aliveSiz[i] = (alive[i] ? 1 : 0) + aliveSiz[ls[i]] + aliveSiz[rs[i]];
+    }
+
+    <span class="kw">void</span> <span class="fn">inorder</span>(<span class="kw">int</span> i) {
+        <span class="cm">// 增加剪枝：整棵树上没有存活节点也跳过</span>
+        <span class="kw">if</span> (i != 0 &amp;&amp; aliveSiz[i] != 0) {
+            inorder(ls[i]);
+            <span class="kw">if</span> (alive[i]) {
+                collect[++collectSiz] = i;
+            }
+            inorder(rs[i]);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l &gt; r) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">int</span> m = (l + r) / 2;
+        <span class="kw">int</span> h = collect[m];
+        ls[h] = build(l, m - 1);
+        rs[h] = build(m + 1, r);
+        up(h);
+        <span class="kw">return</span> h;
+    }
+
+    <span class="kw">void</span> <span class="fn">rebuild</span>() {
+        <span class="kw">if</span> (top != 0) {
+            collectSiz = 0;
+            inorder(top);
+            <span class="kw">int</span> newRoot = build(1, collectSiz);
+            <span class="kw">if</span> (father == 0) {
+                root = newRoot;
+            } <span class="kw">else</span> <span class="kw">if</span> (side == 1) {
+                ls[father] = newRoot;
+            } <span class="kw">else</span> {
+                rs[father] = newRoot;
+            }
+        }
+    }
+
+    <span class="kw">bool</span> <span class="fn">balance</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> ALPHA * aliveSiz[i] &gt;= max(aliveSiz[ls[i]], aliveSiz[rs[i]]);
+    }
+
+     <span class="cm">// 返回头节点编号</span>
+    <span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">int</span> f, <span class="kw">int</span> s, <span class="kw">int</span> num) {
+        <span class="cm">// 增加剪枝：整棵树上没有存活节点就算空树</span>
+        <span class="kw">if</span> (i == 0 || aliveSiz[i] == 0) {
+            <span class="kw">return</span> init(num);
+        }
+        <span class="kw">if</span> (num &lt;= key[i]) {
+            ls[i] = add(ls[i], i, 1, num);
+        } <span class="kw">else</span> {
+            rs[i] = add(rs[i], i, 2, num);
+        }
+        up(i);
+        <span class="kw">if</span> (!balance(i)) {
+            top = i;
+            father = f;
+            side = s;
+        }
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        top = father = side = 0;
+        root = add(root, 0, 0, num);
+        rebuild();
+    }
+
+    <span class="kw">int</span> <span class="fn">small</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="cm">// 增加剪枝：整棵树上没有存活节点，就算空树</span>
+        <span class="kw">if</span> (i == 0 || aliveSiz[i] == 0) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (num &lt;= key[i]) {
+            <span class="kw">return</span> small(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> aliveSiz[ls[i]] + (alive[i] ? 1 : 0) + small(rs[i], num);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getRank</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> small(root, num) + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> i, <span class="kw">int</span> x) {
+        <span class="kw">if</span> (x &lt;= aliveSiz[ls[i]]) {
+            <span class="kw">return</span> index(ls[i], x);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> less = aliveSiz[ls[i]] + (alive[i] ? 1 : 0);
+            <span class="kw">if</span> (less &lt; x) {
+                <span class="kw">return</span> index(rs[i], x - less);
+            }
+        }
+        <span class="kw">return</span> key[i];
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> index(root, x);
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> kth = getRank(num);
+        <span class="kw">if</span> (kth == 1) {
+            <span class="kw">return</span> INT_MIN;
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> index(kth - 1);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> kth = getRank(num + 1);
+        <span class="kw">if</span> (kth == aliveSiz[root] + 1) {
+            <span class="kw">return</span> INT_MAX;
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> index(kth);
+        }
+    }
+
+     <span class="cm">// 注意remove方法</span>
+     <span class="cm">// 因为替罪羊树会重构，所以值相同的一批节点，重构时假设选出的头为h</span>
+     <span class="cm">// 那么这批节点，有可能在h的左侧，也有可能在h的右侧</span>
+     <span class="cm">// 所以删除时，如果h已经被删，还要继续寻找其他key值相同的节点</span>
+     <span class="cm">// 此时只根据key值的大小关系，方向无法确定是左还是右</span>
+     <span class="cm">// 所以先求出目标的排名，再按排名删除，这样移动方向是确定的</span>
+    <span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> i, <span class="kw">int</span> f, <span class="kw">int</span> s, <span class="kw">int</span> rank) {
+        <span class="kw">int</span> lsiz = aliveSiz[ls[i]];
+        <span class="kw">if</span> (rank &lt;= lsiz) {
+            remove(ls[i], i, 1, rank);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> cur = alive[i] ? 1 : 0;
+            <span class="kw">if</span> (alive[i] &amp;&amp; rank == lsiz + cur) {
+                alive[i] = <span class="kw">false</span>;
+            } <span class="kw">else</span> {
+                remove(rs[i], i, 2, rank - lsiz - cur);
+            }
+        }
+        up(i);
+        <span class="kw">if</span> (!balance(i)) {
+            top = i;
+            father = f;
+            side = s;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> rank1 = getRank(num);
+        <span class="kw">int</span> rank2 = getRank(num + 1);
+        <span class="kw">if</span> (rank1 != rank2) {
+            top = father = side = 0;
+            remove(root, 0, 0, rank1);
+            rebuild();
+        }
+    }
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        <span class="kw">int</span> m;
+        cin &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x; i &lt;= m; i++) {
+            cin &gt;&gt; op &gt;&gt; x;
+            <span class="kw">if</span> (op == 1) {
+                add(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 2) {
+                remove(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 3) {
+                cout &lt;&lt; getRank(x) &lt;&lt; "\n";
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 4) {
+                cout &lt;&lt; index(x) &lt;&lt; "\n";
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 5) {
+                cout &lt;&lt; pre(x) &lt;&lt; "\n";
+            } <span class="kw">else</span> {
+                cout &lt;&lt; post(x) &lt;&lt; "\n";
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre></div>
+      <p>值得记的细节：add 里如果 i == 0 或 aliveSiz[i] == 0，直接 init(num) 返回新节点，这就是「整棵子树死光直接替换」的剪枝在插入里的体现；rebuild 只在整次操作结束后执行一次，取的是路径上最上方的失衡节点 top，所以一次插入最多重建一棵子树。</p>
+
+      <h2>七、总结</h2>
+      <p>替罪羊树拿「推倒重建」换掉了旋转：失衡判定就一个不等式，重建就一个中序收集加二分建树，增删改查全是递归沿路径走。理解难度低、代码好写、常数小，是实现普通有序表的稳妥选择。</p>
+      <p>三个数字记牢：平衡因子取 0.7；查询与重构均摊 O(log n)；死亡节点总数不超过存活节点数，路径上更见不到几个。可扩展性弱是它唯一的短板，需要区间信息时换 FHQ Treap 或 Splay。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>普通平衡树</td><td><a href="https://www.luogu.com.cn/problem/P3369" target="_blank">P3369</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解150【扩展】有序表专题3-替罪羊树</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>
+(function () {
+  var NS = 'http://www.w3.org/2000/svg';
+  function svg(w, h) {
+    var s = document.createElementNS(NS, 'svg');
+    s.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    s.setAttribute('width', '100%');
+    return s;
+  }
+  function T(x, y, txt, fs, fill) {
+    var t = document.createElementNS(NS, 'text');
+    t.setAttribute('x', x); t.setAttribute('y', y);
+    t.setAttribute('font-size', fs || 13); t.setAttribute('fill', fill || '#333');
+    t.textContent = txt; return t;
+  }
+  function CIRC(cx, cy, r, txt, fs, fill, stroke) {
+    var g = document.createElementNS(NS, 'g');
+    var c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', r);
+    c.setAttribute('fill', fill || '#dbe7f6');
+    if (stroke) c.setAttribute('stroke', stroke);
+    g.appendChild(c);
+    g.appendChild(T(cx, cy + fs * 0.35, txt, fs || 12, '#333'));
+    return g;
+  }
+  function LN(x1, y1, x2, y2, color, w) {
+    var l = document.createElementNS(NS, 'line');
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    l.setAttribute('stroke', color || '#94b8d0'); l.setAttribute('stroke-width', w || 1.5);
+    return l;
+  }
+  function ARR(x1, y1, x2, y2, color, w) {
+    var g = document.createElementNS(NS, 'g');
+    var l = document.createElementNS(NS, 'line');
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    l.setAttribute('stroke', color || '#94b8d0'); l.setAttribute('stroke-width', w || 1.5);
+    g.appendChild(l);
+    var ang = Math.atan2(y2 - y1, x2 - x1);
+    var hx = 7;
+    var a1 = document.createElementNS(NS, 'line');
+    a1.setAttribute('x1', x2); a1.setAttribute('y1', y2);
+    a1.setAttribute('x2', x2 - hx * Math.cos(ang - 0.4)); a1.setAttribute('y2', y2 - hx * Math.sin(ang - 0.4));
+    a1.setAttribute('stroke', color || '#94b8d0'); a1.setAttribute('stroke-width', w || 1.5);
+    var a2 = document.createElementNS(NS, 'line');
+    a2.setAttribute('x1', x2); a2.setAttribute('y1', y2);
+    a2.setAttribute('x2', x2 - hx * Math.cos(ang + 0.4)); a2.setAttribute('y2', y2 - hx * Math.sin(ang + 0.4));
+    a2.setAttribute('stroke', color || '#94b8d0'); a2.setAttribute('stroke-width', w || 1.5);
+    g.appendChild(a1); g.appendChild(a2);
+    return g;
+  }
+  function mount(id, s) { document.getElementById(id).appendChild(s); }
+
+  // ============ 图 1：失衡 → 中序 → 二分重建 ============
+  (function () {
+    var HH = 375, W = 680;
+    var s = svg(W, HH);
+    var x0 = 20;
+    // 阶段 1：退化链
+    s.appendChild(T(x0, 26, '有序插入 1..7 退化成链', 12, '#555'));
+    var cxs = [];
+    for (var i = 1; i <= 7; i++) { cxs.push(x0 + 16 + (i - 1) * 34); }
+    for (var i = 0; i < 7; i++) s.appendChild(CIRC(cxs[i], 56, 13, String(i + 1), 10));
+    for (var i = 0; i < 6; i++) s.appendChild(ARR(cxs[i] + 13, 56, cxs[i + 1] - 13, 56, '#c0504d', 1.8));
+    s.appendChild(T(x0, 88, '树高 7，查询要一路走到底', 10, '#555'));
+    s.appendChild(ARR(x0 + 90, 96, x0 + 90, 112, '#94b8d0', 1.5));
+    // 阶段 2：中序收集
+    s.appendChild(T(x0, 130, '中序收集存活节点', 12, '#555'));
+    for (var i = 1; i <= 7; i++) s.appendChild(CIRC(x0 + 16 + (i - 1) * 34, 158, 13, String(i), 10, '#e8f2e4'));
+    s.appendChild(T(x0, 190, '节点按中序排成一列，build 取中间为根', 10, '#555'));
+    s.appendChild(ARR(x0 + 120, 198, x0 + 120, 214, '#94b8d0', 1.5));
+    // 阶段 3：二分重建（中序坐标布局：x 按中序位置，y 按深度）
+    s.appendChild(T(x0, 232, '二分重建标准平衡树', 12, '#555'));
+    var xmid = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6};
+    var ydep = {1: 2, 2: 1, 3: 2, 4: 0, 5: 2, 6: 1, 7: 2};
+    var px0 = 120, py0 = 262, xgap = 40, ygap = 34;
+    function npos(v) { return [px0 + xmid[v] * xgap, py0 + ydep[v] * ygap]; }
+    s.appendChild(LN(npos(4)[0], npos(4)[1] + 13, npos(2)[0], npos(2)[1] - 13, '#2c6e9e', 1.6));
+    s.appendChild(LN(npos(4)[0], npos(4)[1] + 13, npos(6)[0], npos(6)[1] - 13, '#2c6e9e', 1.6));
+    s.appendChild(LN(npos(2)[0], npos(2)[1] + 13, npos(1)[0], npos(1)[1] - 13, '#2c6e9e', 1.6));
+    s.appendChild(LN(npos(2)[0], npos(2)[1] + 13, npos(3)[0], npos(3)[1] - 13, '#2c6e9e', 1.6));
+    s.appendChild(LN(npos(6)[0], npos(6)[1] + 13, npos(5)[0], npos(5)[1] - 13, '#2c6e9e', 1.6));
+    s.appendChild(LN(npos(6)[0], npos(6)[1] + 13, npos(7)[0], npos(7)[1] - 13, '#2c6e9e', 1.6));
+    for (var v = 1; v <= 7; v++) {
+      var p = npos(v);
+      s.appendChild(CIRC(p[0], p[1], 13, String(v), 10));
+    }
+    s.appendChild(T(px0 + 3 * xgap - 12, py0 + 2 * ygap + 26, '树高 3，查询 3 步', 10, '#555'));
+    mount('figRebuild', s);
+  })();
+
+  // ============ 图 2：aliveSiz 与剪枝 ============
+  (function () {
+    var HH = 320, W = 680;
+    var s = svg(W, HH);
+    // 树：8 存活(aliveSiz=5) / 4 死亡(2) / 12 存活(3) / 2 存活(1) / 6 存活(1) / 10 存活(1) / 14 死亡(0)
+    var pos = {
+      '8': {x: 340, y: 60}, '4': {x: 180, y: 130}, '12': {x: 500, y: 130},
+      '2': {x: 90, y: 200}, '6': {x: 270, y: 200}, '10': {x: 430, y: 200}, '14': {x: 590, y: 200},
+      '13': {x: 540, y: 270}, '20': {x: 640, y: 270}
+    };
+    var edges = [['8','4'],['8','12'],['4','2'],['4','6'],['12','10'],['12','14'],['14','13'],['14','20']];
+    for (var i = 0; i < edges.length; i++) {
+      var a = pos[edges[i][0]], b = pos[edges[i][1]];
+      s.appendChild(LN(a.x, a.y + 18, b.x, b.y - 18, '#94b8d0', 1.3));
+    }
+    function node(key, x, y, alive, dead, subsiz) {
+      var g = document.createElementNS(NS, 'g');
+      var c = document.createElementNS(NS, 'circle');
+      c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', 18);
+      if (dead) { c.setAttribute('fill', '#f0f0f0'); c.setAttribute('stroke', '#999'); }
+      else c.setAttribute('fill', alive ? '#dbe7f6' : '#f0f0f0');
+      if (dead) {
+        var l1 = document.createElementNS(NS, 'line');
+        l1.setAttribute('x1', x - 9); l1.setAttribute('y1', y - 9); l1.setAttribute('x2', x + 9); l1.setAttribute('y2', y + 9);
+        l1.setAttribute('stroke', '#999'); l1.setAttribute('stroke-width', 2);
+        var l2 = document.createElementNS(NS, 'line');
+        l2.setAttribute('x1', x + 9); l2.setAttribute('y1', y - 9); l2.setAttribute('x2', x - 9); l2.setAttribute('y2', y + 9);
+        l2.setAttribute('stroke', '#999'); l2.setAttribute('stroke-width', 2);
+        g.appendChild(l1); g.appendChild(l2);
+      }
+      g.appendChild(c);
+      g.appendChild(T(x, y + 4, key, 12, '#333'));
+      g.appendChild(T(x - 30, y + 32, 'aliveSiz=' + subsiz, 10, dead && subsiz === 0 ? '#c0504d' : '#777'));
+      return g;
+    }
+    s.appendChild(node('8', 340, 60, true, false, 5));
+    s.appendChild(node('4', 180, 130, false, true, 2));
+    s.appendChild(node('12', 500, 130, true, false, 3));
+    s.appendChild(node('2', 90, 200, true, false, 1));
+    s.appendChild(node('6', 270, 200, true, false, 1));
+    s.appendChild(node('10', 430, 200, true, false, 1));
+    s.appendChild(node('14', 590, 200, false, true, 0));
+    // 14 子树：整棵无存活，虚线框 + 红字
+    s.appendChild(node('13', 540, 270, false, true, 0));
+    s.appendChild(node('20', 640, 270, false, true, 0));
+    var r = document.createElementNS(NS, 'rect');
+    r.setAttribute('x', 505); r.setAttribute('y', 250); r.setAttribute('width', 160); r.setAttribute('height', 44);
+    r.setAttribute('fill', 'none'); r.setAttribute('stroke', '#c0504d'); r.setAttribute('stroke-dasharray', '5 3');
+    s.appendChild(r);
+    s.appendChild(T(548, 248, '整棵跳过', 11, '#c0504d'));
+    s.appendChild(T(30, 22, '灰色 × 是删掉的节点；每棵子树的 aliveSiz 标在圆下方', 11, '#555'));
+    mount('figAliveSiz', s);
+  })();
+
+  // ============ 图 3：死亡节点为什么不会连成长链 ============
+  (function () {
+    var HH = 220, W = 720;
+    var s = svg(W, HH);
+    s.appendChild(T(20, 24, '会失衡的形态：死亡节点连成一条长链', 12, '#555'));
+    // 左：长链 D-D-D-D-L，失衡
+    var lx = 90;
+    var liv = [[90, 50], [160, 80], [230, 110], [300, 140], [370, 170]];
+    for (var i = 0; i < 5; i++) {
+      var dead = i < 4;
+      var g = document.createElementNS(NS, 'g');
+      var c = document.createElementNS(NS, 'circle');
+      c.setAttribute('cx', liv[i][0]); c.setAttribute('cy', liv[i][1]); c.setAttribute('r', 16);
+      c.setAttribute('fill', dead ? '#f0f0f0' : '#dbe7f6');
+      if (dead) c.setAttribute('stroke', '#999');
+      g.appendChild(c);
+      if (dead) {
+        var l1 = document.createElementNS(NS, 'line');
+        l1.setAttribute('x1', liv[i][0] - 8); l1.setAttribute('y1', liv[i][1] - 8);
+        l1.setAttribute('x2', liv[i][0] + 8); l1.setAttribute('y2', liv[i][1] + 8);
+        l1.setAttribute('stroke', '#999'); l1.setAttribute('stroke-width', 2);
+        var l2 = document.createElementNS(NS, 'line');
+        l2.setAttribute('x1', liv[i][0] + 8); l2.setAttribute('y1', liv[i][1] - 8);
+        l2.setAttribute('x2', liv[i][0] - 8); l2.setAttribute('y2', liv[i][1] + 8);
+        l2.setAttribute('stroke', '#999'); l2.setAttribute('stroke-width', 2);
+        g.appendChild(l1); g.appendChild(l2);
+        g.appendChild(T(liv[i][0], liv[i][1] + 4, '死', 10, '#777'));
+      } else {
+        g.appendChild(T(liv[i][0], liv[i][1] + 4, '活', 10, '#2c6e9e'));
+      }
+      s.appendChild(g);
+      if (i > 0) s.appendChild(LN(liv[i - 1][0] + 16, liv[i - 1][1], liv[i][0] - 16, liv[i][1], '#c0504d', 1.6));
+    }
+    s.appendChild(T(60, 202, '失衡，触发重构', 11, '#c0504d'));
+    s.appendChild(ARR(420, 120, 470, 120, '#94b8d0', 1.5));
+    // 右：死亡节点夹在存活节点之间，近平衡
+    s.appendChild(T(500, 24, '近平衡的形态：死亡节点当连接件', 12, '#555'));
+    function dn(x, y, dead, txt) {
+      var g = document.createElementNS(NS, 'g');
+      var c = document.createElementNS(NS, 'circle');
+      c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', 15);
+      c.setAttribute('fill', dead ? '#f0f0f0' : '#dbe7f6');
+      if (dead) c.setAttribute('stroke', '#999');
+      g.appendChild(c);
+      g.appendChild(T(x, y + 4, txt, 10, dead ? '#777' : '#2c6e9e'));
+      return g;
+    }
+    s.appendChild(dn(560, 60, false, '活'));
+    s.appendChild(dn(650, 60, false, '活'));
+    s.appendChild(dn(605, 120, true, '死'));
+    s.appendChild(dn(560, 180, false, '活'));
+    s.appendChild(dn(650, 180, false, '活'));
+    s.appendChild(LN(560, 75, 596, 105, '#94b8d0', 1.3));
+    s.appendChild(LN(650, 75, 614, 105, '#94b8d0', 1.3));
+    s.appendChild(LN(605, 135, 570, 165, '#94b8d0', 1.3));
+    s.appendChild(LN(605, 135, 640, 165, '#94b8d0', 1.3));
+    s.appendChild(T(500, 205, '死亡节点两边都有存活子树，不会失衡', 11, '#555'));
+    mount('figDead', s);
+  })();
+
+  // ============ 演示：平衡因子 α 对树形的影响 ============
+  (function () {
+    var svgEl = document.getElementById('vizAlphaSvg');
+    var NS2 = 'http://www.w3.org/2000/svg';
+
+    // 课程算法的 JS 仿真：节点 {k, l, r, a, s}
+    var nodes = [], root = 0, alpha = 0.7;
+    var FR = [];   // 帧数组：每帧 {root, note, rebuild}
+    var seq = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+    function initNode(num) {
+      nodes.push({k: num, l: 0, r: 0, a: true, s: 1});
+      return nodes.length - 1;
+    }
+    function upN(i) { nodes[i].s = (nodes[i].a ? 1 : 0) + (nodes[i].l ? nodes[nodes[i].l].s : 0) + (nodes[i].r ? nodes[nodes[i].r].s : 0); }
+    function inord(i, out) {
+      if (i !== 0 && nodes[i].s !== 0) {
+        inord(nodes[i].l, out);
+        if (nodes[i].a) out.push(i);
+        inord(nodes[i].r, out);
+      }
+    }
+    function buildN(l, r, col) {
+      if (l > r) return 0;
+      var m = (l + r) >> 1;
+      var h = col[m];
+      nodes[h].l = buildN(l, m - 1, col);
+      nodes[h].r = buildN(m + 1, r, col);
+      upN(h);
+      return h;
+    }
+    function balanceN(i) { return alpha * nodes[i].s >= Math.max(nodes[i].l ? nodes[nodes[i].l].s : 0, nodes[i].r ? nodes[nodes[i].r].s : 0); }
+    var gTop = 0, gFather = 0, gSide = 0;
+    function addN(i, f, sd, num) {
+      if (i === 0 || nodes[i].s === 0) return initNode(num);
+      if (num <= nodes[i].k) nodes[i].l = addN(nodes[i].l, i, 1, num);
+      else nodes[i].r = addN(nodes[i].r, i, 2, num);
+      upN(i);
+      if (!balanceN(i)) { gTop = i; gFather = f; gSide = sd; }
+      return i;
+    }
+    function rebuildN() {
+      if (gTop !== 0) {
+        var col = [];
+        inord(gTop, col);
+        var newRoot = buildN(0, col.length - 1, col);
+        if (gFather === 0) root = newRoot;
+        else if (gSide === 1) nodes[gFather].l = newRoot;
+        else nodes[gFather].r = newRoot;
+      }
+    }
+    function snapshot() {
+      return {root: root, note: '', rebuild: gTop !== 0, rebuildKey: gTop !== 0 ? nodes[gTop].k : 0,
+              nodes: nodes.map(function (n) { return n ? {k: n.k, l: n.l, r: n.r, a: n.a, s: n.s} : null; })};
+    }
+
+    function computeFrames() {
+      nodes = [null]; root = 0; gTop = gFather = gSide = 0;
+      FR = [];
+      FR.push(snapshot());
+      for (var i = 0; i < seq.length; i++) {
+        gTop = gFather = gSide = 0;
+        root = addN(root, 0, 0, seq[i]);
+        var rebuilt = gTop !== 0;
+        var rk = gTop !== 0 ? nodes[gTop].k : 0;
+        rebuildN();
+        var snap = snapshot();
+        snap.note = '插入 ' + seq[i] + (rebuilt ? '：触发重建' : '');
+        snap.rebuild = rebuilt;
+        snap.rebuildKey = rk;
+        FR.push(snap);
+      }
+    }
+
+    // 树布局：中序给 x，深度给 y
+    var xpos = {}, ypos = {}, maxDepth = 0;
+    var xCounter = 0;
+    function layout2(i, d) {
+      if (i === 0 || nodes[i].s === 0) return;
+      layout2(nodes[i].l, d + 1);
+      xpos[i] = xCounter++;
+      ypos[i] = d;
+      if (d > maxDepth) maxDepth = d;
+      layout2(nodes[i].r, d + 1);
+    }
+
+    function drawFrame(f) {
+      while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+      nodes = f.nodes;   // 用该帧的树快照
+      xCounter = 0; maxDepth = 0; xpos = {}; ypos = {};
+      layout2(f.root, 0);
+      if (f.root === 0) {
+        var em = document.createElementNS(NS2, 'text');
+        em.setAttribute('x', 300); em.setAttribute('y', 80); em.setAttribute('font-size', 14);
+        em.setAttribute('text-anchor', 'middle'); em.setAttribute('fill', '#999');
+        em.textContent = '（空树）';
+        svgEl.appendChild(em);
+      } else {
+      var XGAP = 44, YGAP = 44, OX = 60, OY = 70;
+      // 边
+      function edge(parentId, childId, isL) {
+        if (childId === 0) return;
+        var px = OX + xpos[parentId] * XGAP, py = OY + ypos[parentId] * YGAP;
+        var cx = OX + xpos[childId] * XGAP, cy = OY + ypos[childId] * YGAP;
+        var l = document.createElementNS(NS2, 'line');
+        l.setAttribute('x1', px); l.setAttribute('y1', py + 16);
+        l.setAttribute('x2', cx); l.setAttribute('y2', cy - 16);
+        l.setAttribute('stroke', '#94b8d0'); l.setAttribute('stroke-width', 1.5);
+        svgEl.appendChild(l);
+      }
+      function edgesOf(i) {
+        if (i === 0 || nodes[i].s === 0) return;
+        edge(i, nodes[i].l, true);
+        edgesOf(nodes[i].l);
+        edge(i, nodes[i].r, false);
+        edgesOf(nodes[i].r);
+      }
+      edgesOf(f.root);
+      // 节点
+      var stack = [f.root];
+      while (stack.length) {
+        var i = stack.pop();
+        if (i === 0 || nodes[i].s === 0) continue;
+        var x = OX + xpos[i] * XGAP, y = OY + ypos[i] * YGAP;
+        var g = document.createElementNS(NS2, 'g');
+        var c = document.createElementNS(NS2, 'circle');
+        c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', 16);
+        if (nodes[i].a) {
+          if (f.rebuildKey && nodes[i].k === f.rebuildKey) { c.setAttribute('fill', '#f6d5d2'); c.setAttribute('stroke', '#c0504d'); c.setAttribute('stroke-width', 2); }
+          else c.setAttribute('fill', '#dbe7f6');
+        } else {
+          c.setAttribute('fill', '#f0f0f0'); c.setAttribute('stroke', '#999');
+        }
+        g.appendChild(c);
+        var t = document.createElementNS(NS2, 'text');
+        t.setAttribute('x', x); t.setAttribute('y', y + 4); t.setAttribute('font-size', 11);
+        t.setAttribute('text-anchor', 'middle'); t.setAttribute('fill', '#333');
+        t.textContent = nodes[i].k;
+        g.appendChild(t);
+        svgEl.appendChild(g);
+        stack.push(nodes[i].l);
+        stack.push(nodes[i].r);
+      }
+      var note = document.getElementById('vizAlphaNote');
+      var live = f.root ? nodes[f.root].s : 0;
+      var dp = f.root ? maxDepth + 1 : 0;
+      note.textContent = f.note + '　当前树深 ' + dp + '（存活 ' + live + ' 个）';
+      }   // else：非空树
+    }
+
+    var at = 0;
+    function resetAll() {
+      alpha = parseFloat(document.getElementById('vizAlphaSel').value);
+      computeFrames();
+      at = 0;
+      drawFrame(FR[0]);
+      document.getElementById('vizAlphaNote').textContent = '初始：空树。点「下一步」逐个插入 1..12。';
+      document.getElementById('vizAlphaNext').disabled = false;
+    }
+    function nextStep() {
+      if (at + 1 < FR.length) {
+        at++;
+        drawFrame(FR[at]);
+      }
+      if (at + 1 >= FR.length) document.getElementById('vizAlphaNext').disabled = true;
+    }
+    document.getElementById('vizAlphaSel').addEventListener('change', resetAll);
+    document.getElementById('vizAlphaReset').addEventListener('click', resetAll);
+    document.getElementById('vizAlphaNext').addEventListener('click', nextStep);
+    resetAll();
+  })();
+})();
+</script>
+</body>
+</html>
