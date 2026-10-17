@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>卡特兰数：因子计数法</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>卡特兰数：因子计数法</h1>
+      <p class="intro">前面几页遇到合数模数只能退 O(n²) 的公式4。n 到 10⁶ 时 O(n²) 直接爆炸，而 p 又可能是合数，逆元这条路也堵死。出路是把卡特兰数拆成质数幂再相乘，全程不碰除法。这就是本题的重点：公式2 + 质因子计数法。</p>
+
+      <h2 id="mod">零、取模的七种数据状况</h2>
+      <p>求第 n 项卡特兰数对 p 取模，按 n 的规模和 p 是否质数分七种情况，先定数据再挑公式：</p>
+      <table class="complexity">
+        <tr><th>情况</th><th>数据状况</th><th>用哪个</th></tr>
+        <tr><td>1</td><td>n ≤ 35，答案不溢出 long</td><td>公式4，直接返回真实值</td></tr>
+        <tr><td>2</td><td>n 是 10³ 规模，p 为质数</td><td>公式1、2、3、4 都行</td></tr>
+        <tr><td>3</td><td>n 是 10³ 规模，p 可能是合数</td><td>公式4</td></tr>
+        <tr><td>4</td><td>n 是 10⁶ 规模，p 为质数</td><td>公式1、2、3</td></tr>
+        <tr><td>5</td><td>n 是 10⁶ 规模，p 可能是合数</td><td>公式2 + 因子计数法</td></tr>
+        <tr><td>6</td><td>n 是 10³ 规模，要求打印完整真实答案</td><td>大数乘法（树屋阶梯那页）</td></tr>
+        <tr><td>7</td><td>n 是 10⁶ 规模，要求打印完整真实答案</td><td>不可能，不取模一定算不完</td></tr>
+      </table>
+      <p>情况 5 是这页的主角：n 到 10⁶，p 任意（可能不是质数）。公式4 O(n²) 算不动，公式2 里除法要逆元而 p 不给逆元，只能把 C(2n,n)/(n+1) 的质因子逐个数出来，再快速幂乘回去。</p>
+
+      <h2 id="t5">一、题目5：有趣的数列</h2>
+      <p>洛谷 P3200。求第 n 项卡特兰数对 p 取模，n ≤ 10⁶，p ≤ 10⁹，p 可能不为质数。核心是把 (2n)!/(n!(n+1)!) 拆成质数幂：</p>
+      <figure class="fig" id="figFactor"></figure>
+      <p>做法分四步。第一步用欧拉筛拿到 2..2n 每个数的最小质因子，minpf[x]=0 说明 x 是质数。第二步给每个数设计数：2..n 各 −1（分母 n!），n+2..2n 各 +1（分子 (2n)!/(n+1)!，因为 (n+1)! 恰好消掉 n+1 这一项）。第三步从大到小遍历，合数 i 把自己的计数搬给两个质因子：counts[minpf[i]] += counts[i]，counts[i/minpf[i]] += counts[i]，然后清空自己。第四步对每个计数非零的数做快速幂，全部乘起来就是答案。</p>
+      <p>为什么从大到小：合数 i 的质因子都比 i 小，从 2n 往下扫保证处理 i 时它已经是分解终态。counts[i] 可能为负（分母多于分子）或零，快速幂照常算，符号由幂次的正负决定。复杂度 = 欧拉筛 O(n) + 计数分解 O(n) + 质数个数个快速幂 O(n log p)，实测 n=10⁶ 单组 0.03 秒。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+    typedef <span class="kw">long</span> <span class="kw">long</span> <span class="kw">ll</span>;
+
+    <span class="cm">// 有趣的数列：求第 n 项卡特兰数对 p 取模</span>
+    <span class="cm">// 1 &lt;= n &lt;= 10^6，1 &lt;= p &lt;= 10^9，p 可能不为质数</span>
+    <span class="cm">// 公式2 + 质因子计数法：把 (2n)! / (n!(n+1)!) 分解成质数幂再相乘</span>
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 2000001;
+
+    <span class="cm">// minpf[i] == 0 代表 i 是质数；否则 i 是合数且最小质因子是 minpf[i]</span>
+    <span class="kw">int</span> minpf[MAXN];
+    <span class="kw">int</span> prime[MAXN];
+    <span class="kw">int</span> cnt;
+
+    <span class="cm">// 每个数的质因子计数：2..n 各 -1（分母），n+2..2n 各 +1（分子），n+1 抵消为 0</span>
+    <span class="kw">int</span> counts[MAXN];
+
+    <span class="cm">// 欧拉筛，时间复杂度 O(n)</span>
+    <span class="kw">void</span> <span class="fn">euler</span>(<span class="kw">int</span> n) {
+    	memset(minpf, 0, <span class="kw">sizeof</span>(minpf));
+    	cnt = 0;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+    		<span class="kw">if</span> (minpf[i] == 0) {
+    			prime[cnt++] = i;
+    		}
+    		<span class="kw">for</span> (<span class="kw">int</span> j = 0; j &lt; cnt; j++) {
+    			<span class="kw">if</span> ((<span class="kw">ll</span>)i * prime[j] &gt; n) {
+    				<span class="kw">break</span>;
+    			}
+    			minpf[i * prime[j]] = prime[j];
+    			<span class="kw">if</span> (i % prime[j] == 0) {
+    				<span class="kw">break</span>;
+    			}
+    		}
+    	}
+    }
+
+    <span class="kw">ll</span> <span class="fn">power</span>(<span class="kw">ll</span> x, <span class="kw">ll</span> p, <span class="kw">int</span> mod) {
+    	<span class="kw">ll</span> ans = 1;
+    	<span class="kw">while</span> (p &gt; 0) {
+    		<span class="kw">if</span> (p &amp; 1) {
+    			ans = ans * x % mod;
+    		}
+    		x = x * x % mod;
+    		p &gt;&gt;= 1;
+    	}
+    	<span class="kw">return</span> ans;
+    }
+
+    <span class="cm">// 公式2 + 质因子计数法</span>
+    <span class="kw">int</span> <span class="fn">compute</span>(<span class="kw">int</span> n, <span class="kw">int</span> mod) {
+    	euler(2 * n);
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+    		counts[i] = -1;
+    	}
+    	<span class="kw">for</span> (<span class="kw">int</span> i = n + 2; i &lt;= 2 * n; i++) {
+    		counts[i] = 1;
+    	}
+    	<span class="cm">// 从大到小统计计数：合数按最小质因子分解，质数计数确定后快速幂</span>
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 2 * n; i &gt;= 2; i--) {
+    		<span class="kw">if</span> (minpf[i] != 0) {
+    			counts[minpf[i]] += counts[i];
+    			counts[i / minpf[i]] += counts[i];
+    			counts[i] = 0;
+    		}
+    	}
+    	<span class="kw">ll</span> ans = 1;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= 2 * n; i++) {
+    		<span class="kw">if</span> (counts[i] != 0) {
+    			ans = ans * power(i, counts[i], mod) % mod;
+    		}
+    	}
+    	<span class="kw">return</span> (<span class="kw">int</span>)ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+    	<span class="kw">int</span> n, mod;
+    	cin &gt;&gt; n &gt;&gt; mod;
+    	cout &lt;&lt; compute(n, mod) &lt;&lt; endl;
+    	<span class="kw">return</span> 0;
+    }</pre>
+
+      <h2 id="t7">二、题目7：不含递增三元组的排列方法数</h2>
+      <p>洛谷 SP7897 / SPOJ SKYLINE。数字 1..n 的排列，要求任意从左往右的三个位置不能依次递增，问有多少种排列，答案对 10⁶ 取模。这个题设定不复杂，结论居然是卡特兰数：把 n 小的情况暴力枚举全排列，符合要求的数量打出来就是 1, 1, 2, 5, 14…。目前没有合理解释，记住卡特兰数前几项 1, 1, 2, 5, 14, 42 就能认出它。</p>
+      <figure class="fig" id="figSkyline"></figure>
+      <p>这也提醒一个通用招：入参简单的计数题，先用暴力跑出前几项，再拿去和已知序列对表。10⁶ 含很多因子，无法求逆元，n ≤ 1000 直接公式4 预建整张表，多组输入一次算完。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+    typedef <span class="kw">long</span> <span class="kw">long</span> <span class="kw">ll</span>;
+
+    <span class="cm">// 不含递增三元组的排列方法数</span>
+    <span class="cm">// 数字 1..n 的排列，任意从左往右的三个位置不能依次递增</span>
+    <span class="cm">// 暴力枚举小数据发现答案就是卡特兰数，答案对 1000000 取模</span>
+    <span class="cm">// 1000000 含很多因子无法求逆元，直接公式4 预建，n &lt;= 1000</span>
+    <span class="kw">const</span> <span class="kw">int</span> MOD = 1000000;
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 1001;
+
+    <span class="kw">ll</span> f[MAXN];
+
+    <span class="kw">void</span> <span class="fn">build</span>() {
+    	f[0] = f[1] = 1;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt; MAXN; i++) {
+    		<span class="kw">for</span> (<span class="kw">int</span> l = 0, r = i - 1; l &lt; i; l++, r--) {
+    			f[i] = (f[i] + f[l] * f[r] % MOD) % MOD;
+    		}
+    	}
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+    	build();
+    	<span class="kw">int</span> n;
+    	<span class="kw">while</span> (cin &gt;&gt; n) {
+    		<span class="kw">if</span> (n == 0) {
+    			<span class="kw">break</span>;
+    		}
+    		cout &lt;&lt; f[n] &lt;&lt; endl;
+    	}
+    	<span class="kw">return</span> 0;
+    }</pre>
+
+      <div class="viz">
+        <p class="viz-title">演示 · 因子计数法：从 counts 初始表到质数幂乘积</p>
+        <div class="viz-controls">
+          <select id="fcSel">
+            <option value="3" selected>n = 3</option>
+            <option value="5">n = 5</option>
+            <option value="7">n = 7</option>
+          </select>
+          <button id="fcNext">下一步</button>
+          <button id="fcReset">重置</button>
+        </div>
+        <div id="fcCanvas" style="min-height:330px;"></div>
+        <p class="stepnote" id="fcNote"></p>
+      </div>
+
+      <h2 id="sum">总结</h2>
+      <p>因子计数法专治「n 大 + p 合数」：欧拉筛出最小质因子表，给 2..2n 每个数一个 ±1 的计数，从大到小把合数的计数分解给质因子，最后对每个质数做快速幂乘起来。没有除法，p 是合数也无所谓，复杂度 O(n)。题 7 是另一类套路：小数据暴力枚举出前几项，认出卡特兰数后直接公式4。两题对拍全过，n=10⁶ 性能 0.03 秒。</p>
+
+      <h2 id="prob">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td>有趣的数列</td><td><a href="https://www.luogu.com.cn/problem/P3200" target="_blank">P3200</a></td></tr>
+        <tr><td>洛谷</td><td>不含递增三元组的排列方法数</td><td><a href="https://www.luogu.com.cn/problem/SP7897" target="_blank">SP7897</a></td></tr>
+        <tr><td>SPOJ</td><td>SKYLINE</td><td><a href="https://www.spoj.com/problems/SKYLINE" target="_blank">SKYLINE</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解147【扩展】卡特兰数题型详解和取模处理</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var P = 'http://www.w3.org/2000/svg';
+  function T(x,y,s,fs){ var t=document.createElementNS(P,'text'); t.setAttribute('x',x); t.setAttribute('y',y); t.setAttribute('font-size',fs||13); t.textContent=s; return t; }
+  function R(x,y,w,h){ var r=document.createElementNS(P,'rect'); r.setAttribute('x',x); r.setAttribute('y',y); r.setAttribute('width',w); r.setAttribute('height',h); r.setAttribute('rx',6); r.setAttribute('fill','#f2f6fc'); r.setAttribute('stroke','#7aa2d0'); return r; }
+  function LN(x1,y1,x2,y2){ var l=document.createElementNS(P,'line'); l.setAttribute('x1',x1); l.setAttribute('y1',y1); l.setAttribute('x2',x2); l.setAttribute('y2',y2); l.setAttribute('stroke','#94a8c0'); l.setAttribute('stroke-width',1.2); return l; }
+  function mount(id, svg){ document.getElementById(id).appendChild(svg); }
+
+  // ===== 图1：因子计数法 n=5 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 680 300');
+    var rc = R(12, 12, 656, 120); svg.appendChild(rc);
+    svg.appendChild(T(28, 40, 'n=5：C(5) = (10)! / (5!·6!) = 42', 13.5));
+    svg.appendChild(T(28, 70, 'counts 初始：分母 2..5 各 −1，分子 7..10 各 +1，6 抵消为 0', 13));
+    svg.appendChild(T(28, 100, '从大到小分解合数：10→2,5，9→3,3，8→2,4，6→2,3（计数为 0 无影响）', 12.5));
+    // 质数指数卡
+    var cards = [
+      {x:60,  y:160, v:'2¹'},
+      {x:160, y:160, v:'3¹'},
+      {x:260, y:160, v:'7¹'}
+    ];
+    cards.forEach(function(c){
+      var rc2 = R(c.x, c.y, 80, 44); svg.appendChild(rc2);
+      var t = T(c.x+40, c.y+28, c.v, 15); t.setAttribute('text-anchor','middle'); svg.appendChild(t);
+    });
+    var t2 = T(395, 186, '2·3·7 = 42 ✓', 15); t2.setAttribute('fill','#2f9e6e'); svg.appendChild(t2);
+    svg.appendChild(T(28, 250, '质数 2,3,5,7 的计数：counts[2]=1, counts[3]=1, counts[5]=0, counts[7]=1', 12));
+    svg.appendChild(T(28, 278, '每项快速幂：2¹·3¹·7¹ = 42，对 p 取模就是答案', 12.5));
+    mount('figFactor', svg);
+  })();
+
+  // ===== 图2：无递增三元组 n=3 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 680 230');
+    var rc = R(12, 12, 656, 206); svg.appendChild(rc);
+    svg.appendChild(T(28, 38, 'n=3 的全部 6 个排列，逐个检查有没有递增三元组', 13.5));
+    var arrs = ['123', '132', '213', '231', '312', '321'];
+    var oks = [false, true, true, true, true, true];
+    for (var i = 0; i < 6; i++){
+      var y = 60 + i * 26;
+      var rc2 = R(28, y-16, 130, 22); svg.appendChild(rc2);
+      svg.appendChild(T(40, y, arrs[i], 12.5));
+      var mark = T(180, y, oks[i] ? '✓ 无递增三元组' : '✗ 1&lt;2&lt;3 递增', 12);
+      mark.setAttribute('fill', oks[i] ? '#2f9e6e' : '#c0392b'); svg.appendChild(mark);
+    }
+    svg.appendChild(T(360, 40, '符合的 5 个 = C(3) = 5', 14));
+    svg.appendChild(T(360, 70, '暴力枚举 n 小的情况，前几项是 1, 1, 2, 5, 14, 42', 12));
+    svg.appendChild(T(360, 100, '这就是卡特兰数序列，直接认出来', 12));
+    svg.appendChild(T(360, 140, 'mod 10⁶ 含因子不能求逆元', 12));
+    svg.appendChild(T(360, 170, 'n ≤ 1000，公式4 预建整表 O(n²)', 12));
+    mount('figSkyline', svg);
+  })();
+
+  // ===== 演示：因子计数法 =====
+  (function(){
+    var sel = document.getElementById('fcSel');
+    var canvas = document.getElementById('fcCanvas');
+    var note = document.getElementById('fcNote');
+    var at = 0, FR = [], n = 0, minpf = [];
+
+    function euler(m){
+      var prime = [], pcnt = 0;
+      for (var i = 2; i <= m; i++) minpf[i] = 0;
+      for (var i = 2; i <= m; i++){
+        if (minpf[i] === 0) prime[pcnt++] = i;
+        for (var j = 0; j < pcnt; j++){
+          if (i * prime[j] > m) break;
+          minpf[i * prime[j]] = prime[j];
+          if (i % prime[j] === 0) break;
+        }
+      }
+    }
+    function buildFrames(nn){
+      var M = 2 * nn;
+      euler(M);
+      var counts = [];
+      for (var i = 2; i <= nn; i++) counts[i] = -1;
+      for (var i = nn + 2; i <= M; i++) counts[i] = 1;
+      counts[nn + 1] = 0;
+      var frames = [];
+      frames.push({phase:0, i:0, counts: counts.slice(), note:'counts 初始：分母 2..n 各 −1，分子 n+2..2n 各 +1'});
+      // 分解阶段：处理每个合数
+      for (var i = M; i >= 2; i--){
+        if (minpf[i] !== 0){
+          counts[minpf[i]] += counts[i];
+          counts[i / minpf[i]] += counts[i];
+          counts[i] = 0;
+          frames.push({phase:1, i:i, counts: counts.slice(), note:'分解合数 ' + i + '：计数搬给 ' + minpf[i] + ' 和 ' + (i/minpf[i])});
+        }
+      }
+      frames.push({phase:2, i:0, counts: counts.slice(), note:'分解完毕，只剩质数的计数（质数幂的指数）'});
+      // 乘法阶段：每个计数非零的数快速幂乘入
+      var ans = 1, shown = [];
+      for (var i = 2; i <= M; i++){
+        if (counts[i] !== 0){
+          var e = counts[i];
+          ans *= Math.pow(i, e);
+          shown.push(i + '^' + e);
+          frames.push({phase:3, i:i, counts: counts.slice(), ans: ans, note:'乘 ' + i + '^' + e + '，当前乘积 ' + ans});
+        }
+      }
+      return frames;
+    }
+    function render(){
+      while (canvas.firstChild) canvas.removeChild(canvas.firstChild);
+      var fr = FR[Math.min(at, FR.length - 1)];
+      var svg = document.createElementNS(P,'svg');
+      var M = 2 * n;
+      svg.setAttribute('viewBox','0 0 680 260');
+      svg.appendChild(T(20, 28, 'n = ' + n + '，范围 2..' + M + '，答案对任意 p 取模（本例 p=10⁹）', 13));
+      // 格子行
+      var u = Math.min(44, Math.floor(620 / (M - 1)));
+      var x0 = 20, y0 = 60;
+      var maxAbs = 0;
+      for (var i = 2; i <= M; i++){ var v = Math.abs(fr.counts[i]); if (v > maxAbs) maxAbs = v; }
+      for (var i = 2; i <= M; i++){
+        var x = x0 + (i - 2) * u;
+        var h = 22;
+        var rc = R(x, y0, u - 4, h);
+        var v = fr.counts[i] || 0;
+        if (fr.phase === 0) { rc.setAttribute('fill', v > 0 ? '#e8f5ec' : (v < 0 ? '#fdecea' : '#f5f5f5')); }
+        else if (fr.phase === 1 && i === fr.i) { rc.setAttribute('fill', '#fff3d6'); rc.setAttribute('stroke','#e0a63a'); }
+        else if (v !== 0 && minpf[i] === 0 && fr.phase >= 2) { rc.setAttribute('fill', '#e3ecf9'); }
+        svg.appendChild(rc);
+        var t = T(x + (u-4)/2, y0 + 15, '' + v, 11.5);
+        t.setAttribute('text-anchor','middle'); svg.appendChild(t);
+        var tl = T(x + (u-4)/2, y0 - 8, '' + i, 10);
+        tl.setAttribute('text-anchor','middle'); tl.setAttribute('fill','#5b6b7f'); svg.appendChild(tl);
+      }
+      svg.appendChild(T(20, y0 + 52, fr.note, 12.5));
+      if (fr.phase === 3){
+        var isLast = (at >= FR.length - 1);
+        var t2 = T(20, y0 + 80, isLast ? '乘积 = ' + fr.ans + ' = C(' + n + ')' : '乘积 = ' + fr.ans, 14);
+        t2.setAttribute('fill','#2f9e6e'); svg.appendChild(t2);
+      }
+      if (fr.phase === 2){
+        var powers = [];
+        for (var i = 2; i <= M; i++) if (fr.counts[i] !== 0) powers.push(i + '^' + fr.counts[i]);
+        svg.appendChild(T(20, y0 + 80, '质数幂：' + powers.join(' · '), 13));
+      }
+      canvas.appendChild(svg);
+      var last = FR[FR.length - 1];
+      note.textContent = (at >= FR.length - 1) ? '末帧：' + last.note + '，C(' + n + ') = ' + last.ans : fr.note;
+      document.getElementById('fcNext').disabled = (at >= FR.length - 1);
+    }
+    sel.addEventListener('change', function(){ n = Number(sel.value); FR = buildFrames(n); at = 0; render(); });
+    document.getElementById('fcNext').addEventListener('click', function(){ if (at < FR.length - 1) { at++; render(); } });
+    document.getElementById('fcReset').addEventListener('click', function(){ at = 0; render(); });
+    n = 3; FR = buildFrames(3);
+    render();
+  })();
+})();
+</script>
+</body>
+</html>
