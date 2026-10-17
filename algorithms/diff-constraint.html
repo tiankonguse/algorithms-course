@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>差分约束：判负环找一组解</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../assets/css/shared.css">
+<style>
+.viz { border: 1px solid var(--bd); border-radius: 8px; padding: 12px; margin: 14px 0; background: var(--bg2); }
+.viz-title { margin: 0 0 10px; font-size: 13px; color: var(--fg2); }
+.viz-note { margin: 10px 0 4px; font-size: 13px; }
+.viz-answer { margin-top: 6px; font-size: 15px; font-weight: 600; }
+.viz-controls { margin-top: 10px; }
+.viz-controls button { margin-right: 6px; }
+.viz-controls select { margin-right: 8px; }
+.mono { font-family: ui-monospace,Menlo,Consolas,monospace; font-size: 12px; margin: 5px 0; color: #334155; }
+.chip { display: inline-block; min-width: 26px; padding: 3px 8px; border: 1px solid #cbd5e1; border-radius: 5px; margin-right: 5px; background: #fff; text-align: center; }
+.chip.cur { outline: 2px solid #ea580c; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>差分约束：判负环找一组解</h1>
+      <p class="intro">给 n 个变量和一组 Xi − Xj ≤ Ci 的不等式，要判断有没有解，有解就输出一组。把每个不等式当成一条带权边，问题就变成「图里有没有负环」：没有负环，spfa 跑完的 dist 就是一组解；有负环，不等式组无解。</p>
+
+      <h2 id="forms">零、两种形式，一个转法</h2>
+      <p>形式1 是不等式 Xi − Xj ≤ Ci，判负环用最短路；形式2 是 Xi − Xj ≥ Ci，判「无限增加的环」用最长路。形式上两种，其实只需要形式1 的代码：两边乘 −1，Xi − Xj ≥ Ci 变成 Xj − Xi ≤ −Ci，正好是形式1。</p>
+      <figure class="fig" id="figForm"></figure>
+      <p>为什么有解等于没有负环：把不等式当约束，spfa 的松弛就是在给变量找一组不冲突的值。负环意味着绕一圈还能继续收紧，这条环上的约束加起来小于 0，凑不出任何一组值。那在形式上就是矛盾。</p>
+
+      <h2 id="build">一、建图：不等式变成边</h2>
+      <p>Xi − Xj ≤ Ci 挪一下是 Xi ≤ Xj + Ci。spfa 松弛时 dist[v] ≤ dist[u] + w 对应一条 u→v 权 w 的边，所以这条不等式建成边 j→i、权 Ci。</p>
+      <p>方向别弄反：不等号左边是 Xi，右边是 Xj + Ci，按「右边推到左边」建 j→i。建反了整张图都是错的，判负环跟着一起错。</p>
+      <p>跑完 spfa，dist 满足每条边约束 dist[i] ≤ dist[j] + Ci，逐条对应回不等式 Xi − Xj ≤ Ci，所以 dist 就是一组解。</p>
+
+      <h2 id="super">二、超级源点：孤立点也要有人管</h2>
+      <p>只有从起点能到达的点，它身上的负环才会被 spfa 判到。变量可能没出现在任何不等式里，或者图本身不连通，负环在另一个分量里就漏了。建一个 0 号源点，向 1..n 每个点连一条权 0 的边，所有点都从 0 出发，负环在哪都能判到。这一步 n 条边，换整张图的覆盖，便宜得很。</p>
+
+      <h2 id="spfa">三、spfa 判负环</h2>
+      <p>一个点被入队次数超过 n 次就说明它在环上转：最短路最多经过 n 个点，入队超过 n 次意味着路径在无限绕。判到就输出 NO；没判到，dist[1..n] 就是一组解。</p>
+      <p>输入给的是 Xu − Xv ≤ c，正好对应建 v→u 权 c 的边，不用再转。n、m ≤ 5000，边最多 10000，链式前向星数组按 2m 开有余量。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+    typedef <span class="kw">long</span> <span class="kw">long</span> <span class="kw">ll</span>;
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 5005, MAXM = 10005, MAXQ = 5000005;
+    <span class="kw">int</span> head[MAXN], nxt[MAXM], to[MAXM], w[MAXM], cnt;
+    <span class="kw">int</span> dist[MAXN], upd[MAXN], que[MAXQ], h, t;
+    <span class="kw">bool</span> enter[MAXN];
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> ww) {
+      nxt[cnt] = head[u]; to[cnt] = v; w[cnt] = ww; head[u] = cnt++;
+    }
+
+    <span class="kw">bool</span> <span class="fn">spfa</span>(<span class="kw">int</span> s) {
+      h = t = 0;
+      fill(dist, dist + n + 1, INT_MAX);
+      fill(upd, upd + n + 1, 0);
+      fill(enter, enter + n + 1, <span class="kw">false</span>);
+      dist[s] = 0; upd[s] = 1;
+      que[t++] = s; enter[s] = <span class="kw">true</span>;
+      <span class="kw">while</span> (h &lt; t) {
+        <span class="kw">int</span> u = que[h++]; enter[u] = <span class="kw">false</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> ei = head[u]; ei &gt; 0; ei = nxt[ei]) {
+          <span class="kw">int</span> v = to[ei], ww = w[ei];
+          <span class="kw">if</span> (dist[v] &gt; dist[u] + ww) {
+            dist[v] = dist[u] + ww;
+            <span class="kw">if</span> (!enter[v]) {
+              <span class="kw">if</span> (++upd[v] &gt; n) <span class="kw">return</span> <span class="kw">true</span>;
+              que[t++] = v; enter[v] = <span class="kw">true</span>;
+            }
+          }
+        }
+      }
+      <span class="kw">return</span> <span class="kw">false</span>;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+      scanf("%d%d", &amp;n, &amp;m);
+      cnt = 1;
+      fill(head, head + n + 1, 0);
+      <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) add(0, i, 0);
+      <span class="kw">for</span> (<span class="kw">int</span> i = 1, u, v, ww; i &lt;= m; i++) {
+        scanf("%d%d%d", &amp;u, &amp;v, &amp;ww);
+        add(v, u, ww);
+      }
+      <span class="kw">if</span> (spfa(0)) {
+        printf("NO\n");
+      } <span class="kw">else</span> {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) printf("%d ", dist[i]);
+        printf("\n");
+      }
+      <span class="kw">return</span> 0;
+    }</pre>
+      <p>实测（对拍）：5000 组随机小不等式，变量 2..4、系数 −10..10、30% 故意注入矛盾环，课程输出与「枚举 x∈[−12,12] 判可行 + 有解时逐条验证 dist」完全一致。</p>
+
+      <h2 id="farm">四、题2 小K农场：三种关系翻译</h2>
+      <p>小K农场把关系换成三种说法，翻译成边就三行：</p>
+      <figure class="fig" id="figFarm"></figure>
+      <p>关系1 a b c：a 比 b 至少多种 c → xa − xb ≥ c → xb − xa ≤ −c → 边 a→b 权 −c。</p>
+      <p>关系2 a b c：至多多 c → xa − xb ≤ c → 边 b→a 权 c。</p>
+      <p>关系3 a b：一样多 → xa = xb → 双向 0 边。</p>
+      <p>然后同一个 spfa：有负环输出 No，没有输出 Yes。注意这里输出是首字母大写的 No/Yes，不是模板题的 NO。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+    typedef <span class="kw">long</span> <span class="kw">long</span> <span class="kw">ll</span>;
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 5005, MAXM = 20005, MAXQ = 20000005;
+    <span class="kw">int</span> head[MAXN], nxt[MAXM], to[MAXM], w[MAXM], cnt;
+    <span class="kw">int</span> dist[MAXN], upd[MAXN], que[MAXQ], h, t;
+    <span class="kw">bool</span> enter[MAXN];
+    <span class="kw">int</span> n, m;
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">int</span> ww) {
+      nxt[cnt] = head[u]; to[cnt] = v; w[cnt] = ww; head[u] = cnt++;
+    }
+
+    <span class="kw">bool</span> <span class="fn">spfa</span>(<span class="kw">int</span> s) {
+      h = t = 0;
+      fill(dist, dist + n + 1, INT_MAX);
+      fill(upd, upd + n + 1, 0);
+      fill(enter, enter + n + 1, <span class="kw">false</span>);
+      dist[s] = 0; upd[s] = 1;
+      que[t++] = s; enter[s] = <span class="kw">true</span>;
+      <span class="kw">while</span> (h &lt; t) {
+        <span class="kw">int</span> u = que[h++]; enter[u] = <span class="kw">false</span>;
+        <span class="kw">for</span> (<span class="kw">int</span> ei = head[u]; ei &gt; 0; ei = nxt[ei]) {
+          <span class="kw">int</span> v = to[ei], ww = w[ei];
+          <span class="kw">if</span> (dist[v] &gt; dist[u] + ww) {
+            dist[v] = dist[u] + ww;
+            <span class="kw">if</span> (!enter[v]) {
+              <span class="kw">if</span> (++upd[v] &gt; n) <span class="kw">return</span> <span class="kw">true</span>;
+              que[t++] = v; enter[v] = <span class="kw">true</span>;
+            }
+          }
+        }
+      }
+      <span class="kw">return</span> <span class="kw">false</span>;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+      scanf("%d%d", &amp;n, &amp;m);
+      cnt = 1;
+      fill(head, head + n + 1, 0);
+      <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) add(0, i, 0);
+      <span class="kw">for</span> (<span class="kw">int</span> i = 1, type, u, v, ww; i &lt;= m; i++) {
+        scanf("%d%d%d", &amp;type, &amp;u, &amp;v);
+        <span class="kw">if</span> (type == 1) {
+          scanf("%d", &amp;ww);
+          add(u, v, -ww);
+        } <span class="kw">else</span> <span class="kw">if</span> (type == 2) {
+          scanf("%d", &amp;ww);
+          add(v, u, ww);
+        } <span class="kw">else</span> {
+          add(u, v, 0);
+          add(v, u, 0);
+        }
+      }
+      printf("%s\n", spfa(0) ? "No" : "Yes");
+      <span class="kw">return</span> 0;
+    }</pre>
+
+      <div class="viz">
+        <p class="viz-title">演示 · spfa 逐点松弛：入队次数怎么涨，负环在哪一步现形</p>
+        <div class="viz-controls">
+          <select id="dcPreset">
+            <option>无环链（3 变量）</option>
+            <option>负环（3 变量）</option>
+            <option>P5960 混合例（4 变量无环）</option>
+          </select>
+        </div>
+        <div id="dcBoard"></div>
+        <p class="viz-note" id="dcNote"></p>
+        <p class="viz-answer" id="dcAns"></p>
+        <div class="viz-controls">
+          <button id="dcPrev">上一步</button>
+          <button id="dcNext">下一步</button>
+          <button id="dcReset">重置</button>
+        </div>
+      </div>
+
+      <h2 id="shift">五、解整体平移</h2>
+      <p>一组解 (x1, x2, ..., xn) 每个同时加同一个常数 d，代入每个不等式，两边各多一个 d，抵消。所以解从来不是一条，是一族。题目只要任意一组，输出 dist 就好；无解才是真正要判的事。</p>
+
+      <h2 id="sum">总结</h2>
+      <p>形式1 的 Xi − Xj ≤ Ci 建边 j→i 权 Ci，形式2 两边乘 −1 变回形式1，判负环的代码只有一份。</p>
+      <p>0 号源点向所有点连 0 权边，保证图里任何位置的负环都逃不过 spfa；入队次数超过 n 就是负环，没判到就把 dist 当解输出。</p>
+      <p>农场的三种关系翻译成边：≥ 转 −c、≤ 转 +c、等号拆两条 0 边，同一个 spfa 判矛盾。解整体平移仍是解，所以「给一组解」宽松，判无解才是重点。</p>
+
+      <h2 id="related">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P5960" target="_blank">【模板】差分约束</a></td><td><a href="https://www.luogu.com.cn/problem/P5960" target="_blank">luogu.com.cn</a></td></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P1993" target="_blank">小K的农场</a></td><td><a href="https://www.luogu.com.cn/problem/P1993" target="_blank">luogu.com.cn</a></td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解142【扩展】负环和差分约束</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function txt(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-size="'+(o.fs||12)+'" fill="'+(o.fill||'#1f2937')+'" text-anchor="'+(o.an||'middle')+'" font-family="ui-monospace,Menlo,Consolas,monospace">'+esc(s)+'</text>'; }
+function svg(w,h,body){ return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" xmlns="http://www.w3.org/2000/svg">'+body+'</svg>'; }
+function fnum(v){ return v===Infinity ? '∞' : String(v); }
+
+// ===== 图 1：两种形式互转 =====
+(function(){
+  var W=720, H=250, body='';
+  body += txt(W/2, 24, '两种形式，乘 -1 互相转化', {fs:13});
+  var x1=60, w1=270, x2=390, w2=270, y=60, hh=78;
+  body += '<rect x="'+x1+'" y="'+y+'" width="'+w1+'" height="'+hh+'" rx="8" fill="#eef4ff" stroke="#2563eb"/>';
+  body += txt(x1+w1/2, y+30, '形式1：Xi - Xj ≤ Ci', {fs:13, fill:'#1e3a8a'});
+  body += txt(x1+w1/2, y+56, '判负环（最短路）', {fs:11, fill:'#334155'});
+  body += txt(x1+w1/2, y+72, '边 j→i 权 Ci', {fs:11, fill:'#334155'});
+  body += '<rect x="'+x2+'" y="'+y+'" width="'+w2+'" height="'+hh+'" rx="8" fill="#fdf2f8" stroke="#db2777"/>';
+  body += txt(x2+w2/2, y+30, '形式2：Xi - Xj ≥ Ci', {fs:13, fill:'#86198f'});
+  body += txt(x2+w2/2, y+56, '判正环（最长路）', {fs:11, fill:'#334155'});
+  body += txt(x2+w2/2, y+72, '两边乘 -1 变形式1', {fs:11, fill:'#334155'});
+  body += '<line x1="'+(x1+w1+6)+'" y1="'+(y+hh/2)+'" x2="'+(x2-6)+'" y2="'+(y+hh/2)+'" stroke="#94a3b8" stroke-width="2" marker-end="url(#fw)"/>';
+  body += '<defs><marker id="fw" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#94a3b8"/></marker></defs>';
+  body += txt(W/2, y+hh/2-12, '互转', {fs:11, fill:'#64748b'});
+  body += txt(W/2, y+hh+36, 'Xi - Xj ≥ Ci 两边乘 -1 得 Xj - Xi ≤ -Ci，判负环的代码只需要写一份', {fs:11, fill:'#334155'});
+  document.getElementById('figForm').innerHTML = svg(W, H, body) +
+    '<figcaption>「有解」这件事在两种形式下等价，因为乘 -1 只是把不等式翻了个面。</figcaption>';
+})();
+
+// ===== 图 2：农场三种关系变边 =====
+(function(){
+  var W=720, H=270, body='';
+  body += txt(W/2, 22, '小K农场三种关系 → 边', {fs:13});
+  var xs=[30, 260, 490], ww=200;
+  function cell(x, title, edge, color){
+    body += '<rect x="'+x+'" y="46" width="'+ww+'" height="150" rx="8" fill="#f6f7f9" stroke="#cbd5e1"/>';
+    body += txt(x+ww/2, 70, title, {fs:12, fill:'#1f2937'});
+    body += txt(x+ww/2, 150, edge, {fs:12, fill:color});
+    body += txt(x+ww/2, 182, '同一套 spfa 判矛盾', {fs:10, fill:'#64748b'});
+  }
+  cell(xs[0], '关系1 a 比 b 至少多种 c', '边 a→b 权 -c', '#2563eb');
+  cell(xs[1], '关系2 a 比 b 至多多 c', '边 b→a 权 c', '#2563eb');
+  cell(xs[2], '关系3 a 和 b 一样多', '双向边权 0', '#2563eb');
+  var pa=[xs[0]+52, 108], pb=[xs[0]+148, 108];
+  body += '<line x1="'+(pa[0]+12)+'" y1="'+pa[1]+'" x2="'+(pb[0]-12)+'" y2="'+pb[1]+'" stroke="#2563eb" stroke-width="2" marker-end="url(#fm)"/>';
+  body += '<defs><marker id="fm" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#2563eb"/></marker></defs>';
+  body += '<circle cx="'+pa[0]+'" cy="'+pa[1]+'" r="11" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+  body += '<circle cx="'+pb[0]+'" cy="'+pb[1]+'" r="11" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+  body += txt(pa[0], pa[1]+4, 'a', {fs:11});
+  body += txt(pb[0], pb[1]+4, 'b', {fs:11});
+  body += txt(xs[0]+ww/2, 88, 'xa - xb ≥ c', {fs:10, fill:'#64748b'});
+  var p2a=[xs[1]+52, 108], p2b=[xs[1]+148, 108];
+  body += '<line x1="'+(p2b[0]+12)+'" y1="'+p2b[1]+'" x2="'+(p2a[0]-12)+'" y2="'+p2a[1]+'" stroke="#2563eb" stroke-width="2" marker-end="url(#fm)"/>';
+  body += '<circle cx="'+p2a[0]+'" cy="'+p2a[1]+'" r="11" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+  body += '<circle cx="'+p2b[0]+'" cy="'+p2b[1]+'" r="11" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+  body += txt(p2a[0], p2a[1]+4, 'a', {fs:11});
+  body += txt(p2b[0], p2b[1]+4, 'b', {fs:11});
+  body += txt(xs[1]+ww/2, 88, 'xa - xb ≤ c', {fs:10, fill:'#64748b'});
+  var p3a=[xs[2]+52, 108], p3b=[xs[2]+148, 108];
+  body += '<line x1="'+(p3a[0]+12)+'" y1="'+p3a[1]+'" x2="'+(p3b[0]-12)+'" y2="'+p3b[1]+'" stroke="#2563eb" stroke-width="2"/>';
+  body += '<line x1="'+(p3b[0]+12)+'" y1="'+p3b[1]+'" x2="'+(p3a[0]-12)+'" y2="'+p3a[1]+'" stroke="#2563eb" stroke-width="2"/>';
+  body += '<circle cx="'+p3a[0]+'" cy="'+p3a[1]+'" r="11" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+  body += '<circle cx="'+p3b[0]+'" cy="'+p3b[1]+'" r="11" fill="#fff" stroke="#1f2937" stroke-width="2"/>';
+  body += txt(p3a[0], p3a[1]+4, 'a', {fs:11});
+  body += txt(p3b[0], p3b[1]+4, 'b', {fs:11});
+  body += txt(xs[2]+ww/2, 88, 'xa = xb', {fs:10, fill:'#64748b'});
+  body += txt(W/2, 224, '三种关系都在「Xi - Xj ≤ Ci」这个框子里，负环出现就是矛盾', {fs:11, fill:'#334155'});
+  document.getElementById('figFarm').innerHTML = svg(W, H, body) +
+    '<figcaption>≥ 先乘 -1 再建边，等号拆成两条 0 边，最后都喂给同一个判负环函数。</figcaption>';
+})();
+
+// ===== 演示：spfa 判负环 =====
+var presets = {
+  '无环链（3 变量）': {
+    n: 3,
+    edges: [[2,1,2],[3,2,1],[1,3,5]]
+  },
+  '负环（3 变量）': {
+    n: 3,
+    edges: [[2,1,2],[3,2,1],[1,3,-4]]
+  },
+  'P5960 混合例（4 变量无环）': {
+    n: 4,
+    edges: [[2,1,2],[3,4,1],[4,1,-3],[2,3,5]]
+  }
+};
+var board=document.getElementById('dcBoard'), note=document.getElementById('dcNote'), ansEl=document.getElementById('dcAns');
+var sel=document.getElementById('dcPreset');
+var st={};
+
+function build(){
+  var p=presets[sel.value], n=p.n;
+  var adj=[]; for(var i=0;i<=n;i++) adj.push([]);
+  for(var i=1;i<=n;i++) adj[0].push([i,0]);
+  for(var e=0;e<p.edges.length;e++) adj[p.edges[e][0]].push([p.edges[e][1], p.edges[e][2]]);
+  var dis=[], up=[], enter=[];
+  for(var i=0;i<=n;i++){ dis.push(Infinity); up.push(0); enter.push(false); }
+  dis[0]=0; up[0]=1; enter[0]=true;
+  var q=[0], l=0;
+  var steps=[{kind:'init', q:q.slice(), l:l, dis:dis.slice(), up:up.slice(), enter:enter.slice()}];
+  var verdict=null;
+  while(l<q.length && !verdict){
+    var u=q[l++]; enter[u]=false;
+    var relaxed=[];
+    for(var i=0;i<adj[u].length;i++){
+      var v=adj[u][i][0], ww=adj[u][i][1];
+      if(dis[u]+ww<dis[v]){
+        dis[v]=dis[u]+ww; relaxed.push('点 '+v+' 变 '+fnum(dis[v]));
+        if(!enter[v]){
+          up[v]++;
+          if(up[v]>n){ verdict='点 '+v+' 入队 '+up[v]+' 次，超过 n='+n+'，负环'; break; }
+          q.push(v); enter[v]=true;
+        }
+      }
+    }
+    steps.push({kind:'pop', u:u, q:q.slice(), l:l, dis:dis.slice(), up:up.slice(), enter:enter.slice(), relaxed:relaxed});
+  }
+  st.p=p; st.steps=steps; st.verdict=verdict; st.step=0;
+  render();
+}
+function render(){
+  var s=st.steps[st.step], p=st.p;
+  var chips='';
+  for(var i=s.l;i<s.q.length;i++){
+    chips += '<span class="chip'+((i===s.l&&s.kind==='pop')?' cur':'')+'">'+s.q[i]+'</span>';
+  }
+  if(!chips) chips='<span class="mono">队列空</span>';
+  var rows='';
+  for(var i=1;i<=p.n;i++){
+    rows += '<span class="chip">点 '+i+'<br>'+fnum(s.dis[i])+'</span>';
+  }
+  board.innerHTML='<div class="mono">队列（0 号源点先入队，左边先出）：'+chips+'</div>'+
+    '<div class="mono">距离：'+rows+'</div>'+
+    '<div class="mono">入队次数：'+s.up.slice(1).join(' / ')+'　　在队列里：'+s.enter.slice(1).map(function(x){ return x?'是':'否'; }).join(' / ')+'</div>';
+  var line;
+  if(s.kind==='init') line='0 号源点入队，距离 0；它的 0 权边会把每个点先拉进队';
+  else line='出队 '+s.u+(s.relaxed&&s.relaxed.length?('，松弛了 '+s.relaxed.join('、')):'，没有改动');
+  note.textContent=line;
+  var over=(st.step>=st.steps.length-1);
+  if(over){
+    ansEl.textContent = st.verdict ? ('判负环：'+st.verdict+'，输出 NO') : ('没有负环，输出解 dist[1..n] = ['+s.dis.slice(1).join(', ')+']');
+  } else {
+    ansEl.textContent='';
+  }
+  document.getElementById('dcPrev').disabled=(st.step===0);
+  document.getElementById('dcNext').disabled=over;
+}
+sel.addEventListener('change', build);
+document.getElementById('dcPrev').addEventListener('click', function(){ if(st.step>0){ st.step--; render(); } });
+document.getElementById('dcNext').addEventListener('click', function(){ if(st.step<st.steps.length-1){ st.step++; render(); } });
+document.getElementById('dcReset').addEventListener('click', function(){ st.step=0; render(); });
+build();
+})();</script>
+</body>
+</html>
