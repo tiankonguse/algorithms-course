@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>笛卡尔树、Treap树：随机优先级保住平衡 · 算法仓库</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>笛卡尔树、Treap树：随机优先级保住平衡</h1>
+      <p class="intro">前面几课的有序表都在回答「插入删除时怎么维持平衡」。这一课换了个问法：给我一个已经定好的数组，能不能 O(n) 直接建成一棵「按下标是搜索树、按值是堆」的树。能。这棵树叫笛卡尔树，它把「区间最小值在哪」这种问题变成树上的祖先关系。Treap 是它的动态版：每个节点带一个随机优先级，靠旋转同时保住搜索树和堆两种结构，期望 O(log n)。</p>
+
+      <h2>零、背景</h2>
+      <p>AVL 树用旋转维持严格平衡，跳表用随机层数拆掉数据顺序的影响，替罪羊树失衡就重建。它们都是动态结构：边插入删除边修正。笛卡尔树不一样，它是静态的：给定数组，一次建树，结构完全由数组决定，没有插入删除。</p>
+      <p>那它有什么用？看它的定义就明白了。key 按下标组织成搜索二叉树（中序遍历恰好是 1..n），value 按小根堆组织（父节点的值 ≤ 子节点的值）。于是任意一段下标区间 [l, r]，区间最小值所在的位置，就是这段区间在树上对应子树的根。区间最值问题被翻译成了树上的问题。</p>
+      <p>Treap 就是把笛卡尔树动态化：插入的每个 (key, priority) 都是笛卡尔树的一个节点，priority 随机生成，key 当搜索树、priority 当堆。旋转只做左旋右旋两件事，实现比 AVL 简单，期望复杂度 O(log n)。算法竞赛里「有序表必带模板」一般是四个：替罪羊树、Treap、FHQ Treap、Splay。Treap 是旋转版，下下节课的 FHQ Treap 是拆分合并版，那才是 Treap 的重点。</p>
+
+      <h2>一、笛卡尔树长什么样</h2>
+      <p>给定数组 arr[1..n]，建出的树满足两条：下标是搜索树（i 的左子树里全是比 i 小的下标，右子树里全是比 i 大的），value 是小根堆（arr[父] ≤ arr[子]）。注意这是广义的堆：只要求子树的最小值一定在子树的头上，不要求子树是满的或者完全二叉树。</p>
+      <figure class="fig">
+        <div class="fig-title">图 1 数组 [3, 1, 4, 2, 5] 的笛卡尔树：中序是 1..5，每个节点的值 ≤ 子节点</div>
+        <div id="figDescartes"></div>
+      </figure>
+      <p>等值的 value 怎么处理？建树时用严格大于才弹栈，等于不弹。所以相等的值里，先出现的那个会在上面，后出现的挂到它的右侧。这保证「区间最左端最小值」跟树根一一对应，是下一课几道题要用到的细节。</p>
+      <p>堆性质怎么利用？查询「[l, r] 的最小值在哪个位置」：在树上找 l 和 r 的最近公共祖先。因为 l 和 r 的 LCA 是包含它们的最小子树的根，而这棵子树恰好对应下标区间 [l, r]，根就是区间最小值的位置。区间问题变成祖先查询，这就是笛卡尔树的核心价值。</p>
+
+      <h2>二、O(n) 建树：单调栈</h2>
+      <p>建树过程维护一个单调栈，栈底到栈顶的 value 严格递增（小根堆，大的被压在下面）。处理新节点 x 时四步：</p>
+      <p>1）按 x 的 value，把栈里 value 比 x 大的节点依次弹出。<br>
+      2）最后弹出的那个节点 y，带着它整棵子树，成为 x 的左子树。<br>
+      3）如果栈里还剩节点，栈顶 z 的右孩子变成 x。<br>
+      4）x 入栈。</p>
+      <p>为什么这样建出来正好是笛卡尔树？弹出去的节点 value 都比 x 大，所以 x 是它们这段区间的更小值，x 当它们的父节点；x 又比剩下的栈顶 z 大，所以 x 挂在 z 的右侧。两个性质都保住了。</p>
+      <p>复杂度是 O(n)：每个节点最多入栈一次、出栈一次，总弹出次数 ≤ n。代码短得吓人，核心就一个 while 循环。n 到 1e7 也能跑，实测 1e7 个随机数建树只要 0.16 秒。</p>
+      <p style="text-align:center"><code>for (int i = 1; i &lt;= n; i++) { while (top &gt; 0 &amp;&amp; arr[sta[top]] &gt; arr[i]) top--; ... }</code></p>
+      <figure class="fig">
+        <div class="fig-title">图 2 建树过程中的栈：arr = [3, 1, 4, 2, 5]，每行是处理完一个下标后的栈</div>
+        <div id="figBuild"></div>
+      </figure>
+      <div class="viz">
+        <div class="viz-title">演示：arr = [3, 1, 4, 2, 5] 逐步建树（上方树，下方单调栈）</div>
+        <svg id="vizTreeSvg" viewBox="0 0 600 360"></svg>
+        <p class="stepnote" id="vizTreeNote"></p>
+        <div class="viz-controls">
+          <button id="vizTreeNext">下一步</button>
+          <button id="vizTreeReset">重置</button>
+        </div>
+      </div>
+
+      <h2>三、题1 完整实现（P5854 笛卡尔树模版）</h2>
+      <p>洛谷 P5854 直接给 n 个值，要你输出验证用的两个异或值。数组开满 1e7，静态分配。提交时注意 i * (ls[i] + 1) 会溢出 int，先转 long long 再乘再异或。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+    <span class="kw">#include</span> &lt;vector&gt;
+    <span class="kw">#include</span> &lt;stack&gt;
+    <span class="kw">#include</span> &lt;cstdio&gt;
+
+    #define LL <span class="kw">long</span> <span class="kw">long</span>
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 10000001;
+
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> n;
+
+    <span class="kw">void</span> <span class="fn">build</span>() {
+        <span class="kw">int</span> top = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">int</span> pos = top;
+            <span class="kw">while</span> (pos &gt; 0 &amp;&amp; arr[sta[pos]] &gt; arr[i]) {
+                pos--;
+            }
+            <span class="kw">if</span> (pos &gt; 0) {
+                rs[sta[pos]] = i;
+            }
+            <span class="kw">if</span> (pos &lt; top) {
+                ls[i] = sta[pos + 1];
+            }
+            sta[++pos] = i;
+            top = pos;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        build();
+        <span class="kw">long</span> <span class="kw">long</span> ans1 = 0, ans2 = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            ans1 ^= 1LL * i * (ls[i] + 1);
+            ans2 ^= 1LL * i * (rs[i] + 1);
+        }
+        cout &lt;&lt; ans1 &lt;&lt; " " &lt;&lt; ans2 &lt;&lt; endl;
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2>四、Treap：给搜索树加随机优先级</h2>
+      <p>Treap = Tree + Heap。每个节点存 (key, priority)：key 按搜索二叉树组织，priority 按堆组织。priority 是插入时随机生成的，谁大谁在上面（代码里是大根堆，priority 大的当父）。</p>
+      <p>插入一个 (key, priority)：先按 key 在搜索树上走到空位，把节点挂上去，然后检查这个新节点和它的父节点：如果新节点的 priority 比父大，就旋转把它顶上去，一路顶到 priority 不再违反堆性质为止。</p>
+      <figure class="fig">
+        <div class="fig-title">图 3 左旋和右旋：旋转只改变一条链上的父子关系，搜索树中序不变</div>
+        <div id="figRotate"></div>
+      </figure>
+      <p>删除分四种情况。无左无右：直接删。有左无右：左孩子接替。无左有右：右孩子接替。左右都有：priority 大的那个孩子旋转上来当父，被删节点转进它的子树里，递归删。这一步之所以能一直旋下去，是因为每次旋转都把目标节点往叶子方向推一层，最终落到叶子再删。</p>
+      <p>为什么随机 priority 能保平衡？这棵树本质上是「给每个 key 随机一个优先级建的笛卡尔树」。随机序列的笛卡尔树期望高度 O(log n)，跟跳表是同一个道理：结构不依赖数据顺序，依赖随机数。最坏情况理论上存在（随机数全排好序），但概率指数级小。</p>
+      <p>查询和前驱后继跟普通 BST 一样，顺着 key 走。这里有个 150 课也出现过的判定：删除 x 前先检查 getRank(x) != getRank(x + 1)。两个排名相等说明集合里根本没有 x，删了也是白删。</p>
+
+      <h2>五、题2 完整实现（P3369 普通平衡树）</h2>
+      <p>六操作全在：增加、删除、排名、第 k 小、前驱、后继。priority 用 rand() / RAND_MAX 生成 double，插入后自底向上检查旋转。词频用 key_count 数组，重复插入同一个 key 只加计数不建新节点。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+
+    <span class="kw">int</span> cnt = 0;
+    <span class="kw">int</span> head = 0;
+    <span class="kw">int</span> key[MAXN];
+    <span class="kw">int</span> key_count[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">double</span> priority[MAXN];
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        siz[i] = siz[ls[i]] + siz[rs[i]] + key_count[i];
+    }
+
+    <span class="kw">int</span> <span class="fn">leftRotate</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> r = rs[i];
+        rs[i] = ls[r];
+        ls[r] = i;
+        up(i);
+        up(r);
+        <span class="kw">return</span> r;
+    }
+
+    <span class="kw">int</span> <span class="fn">rightRotate</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> l = ls[i];
+        ls[i] = rs[l];
+        rs[l] = i;
+        up(i);
+        up(l);
+        <span class="kw">return</span> l;
+    }
+
+    <span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            key[++cnt] = num;
+            key_count[cnt] = siz[cnt] = 1;
+            priority[cnt] = static_cast&lt;<span class="kw">double</span>&gt;(rand()) / RAND_MAX;
+            <span class="kw">return</span> cnt;
+        }
+        <span class="kw">if</span> (key[i] == num) {
+            key_count[i]++;
+        } <span class="kw">else</span> <span class="kw">if</span> (key[i] &gt; num) {
+            ls[i] = add(ls[i], num);
+        } <span class="kw">else</span> {
+            rs[i] = add(rs[i], num);
+        }
+        up(i);
+        <span class="kw">if</span> (ls[i] != 0 &amp;&amp; priority[ls[i]] &gt; priority[i]) {
+            <span class="kw">return</span> rightRotate(i);
+        }
+        <span class="kw">if</span> (rs[i] != 0 &amp;&amp; priority[rs[i]] &gt; priority[i]) {
+            <span class="kw">return</span> leftRotate(i);
+        }
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        head = add(head, num);
+    }
+
+    <span class="kw">int</span> <span class="fn">small</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (key[i] &gt;= num) {
+            <span class="kw">return</span> small(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> siz[ls[i]] + key_count[i] + small(rs[i], num);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getRank</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> small(head, num) + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> i, <span class="kw">int</span> x) {
+        <span class="kw">if</span> (siz[ls[i]] &gt;= x) {
+            <span class="kw">return</span> index(ls[i], x);
+        } <span class="kw">else</span> <span class="kw">if</span> (siz[ls[i]] + key_count[i] &lt; x) {
+            <span class="kw">return</span> index(rs[i], x - siz[ls[i]] - key_count[i]);
+        }
+        <span class="kw">return</span> key[i];
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> index(head, x);
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> INT_MIN;
+        }
+        <span class="kw">if</span> (key[i] &gt;= num) {
+            <span class="kw">return</span> pre(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> max(key[i], pre(rs[i], num));
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> pre(head, num);
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> INT_MAX;
+        }
+        <span class="kw">if</span> (key[i] &lt;= num) {
+            <span class="kw">return</span> post(rs[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> min(key[i], post(ls[i], num));
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> post(head, num);
+    }
+
+    <span class="kw">int</span> <span class="fn">remove</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (key[i] &lt; num) {
+            rs[i] = remove(rs[i], num);
+        } <span class="kw">else</span> <span class="kw">if</span> (key[i] &gt; num) {
+            ls[i] = remove(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">if</span> (key_count[i] &gt; 1) {
+                key_count[i]--;
+            } <span class="kw">else</span> {
+                <span class="kw">if</span> (ls[i] == 0 &amp;&amp; rs[i] == 0) {
+                    <span class="kw">return</span> 0;
+                } <span class="kw">else</span> <span class="kw">if</span> (ls[i] != 0 &amp;&amp; rs[i] == 0) {
+                    i = ls[i];
+                } <span class="kw">else</span> <span class="kw">if</span> (ls[i] == 0 &amp;&amp; rs[i] != 0) {
+                    i = rs[i];
+                } <span class="kw">else</span> {
+                    <span class="kw">if</span> (priority[ls[i]] &gt;= priority[rs[i]]) {
+                        i = rightRotate(i);
+                        rs[i] = remove(rs[i], num);
+                    } <span class="kw">else</span> {
+                        i = leftRotate(i);
+                        ls[i] = remove(ls[i], num);
+                    }
+                }
+            }
+        }
+        up(i);
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> num) {
+        <span class="kw">if</span> (getRank(num) != getRank(num + 1)) {
+            head = remove(head, num);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">clear</span>() {
+        memset(key + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(key_count + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(ls + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(rs + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(siz + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        memset(priority + 1, 0, cnt * <span class="kw">sizeof</span>(<span class="kw">int</span>));
+        cnt = 0;
+        head = 0;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        srand(time(0));
+        <span class="kw">int</span> n;
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x; i &lt;= n; i++) {
+            cin &gt;&gt; op &gt;&gt; x;
+            <span class="kw">if</span> (op == 1) {
+                add(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 2) {
+                remove(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 3) {
+                cout &lt;&lt; getRank(x) &lt;&lt; endl;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 4) {
+                cout &lt;&lt; index(x) &lt;&lt; endl;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 5) {
+                cout &lt;&lt; pre(x) &lt;&lt; endl;
+            } <span class="kw">else</span> {
+                cout &lt;&lt; post(x) &lt;&lt; endl;
+            }
+        }
+        clear();
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2>六、总结</h2>
+      <p>笛卡尔树是把数组 O(n) 建成「按下标搜索、按值堆」的树，区间最值位置就是子树的根，静态问题（区间划分、祖先关系、直方图分块）都变成树上问题。Treap 把同一个结构动态化：key 走搜索树，随机 priority 走堆，插入删除靠左旋右旋维持，期望 O(log n)。</p>
+      <p>下一课四道题全是笛卡尔树的应用：树的序、序列计数、表格填数、砖块消除。建树代码就上面那几行，题目的难点全在「把区间问题翻译成子树问题」这一步。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P5854" target="_blank">P5854 【模板】笛卡尔树</a></td><td><a href="https://www.luogu.com.cn/problem/P5854" target="_blank">https://www.luogu.com.cn/problem/P5854</a></td></tr>
+        <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P3369" target="_blank">P3369 【模板】普通平衡树</a></td><td><a href="https://www.luogu.com.cn/problem/P3369" target="_blank">https://www.luogu.com.cn/problem/P3369</a></td></tr>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解151【扩展】有序表专题4-笛卡尔树、Treap树</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">https://github.com/algorithmzuo/algorithm-journey/</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  function T(x, y, txt, fs, fill, anchor) {
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x); t.setAttribute('y', y);
+    t.setAttribute('font-size', fs || 13); t.setAttribute('fill', fill || '#222');
+    t.setAttribute('text-anchor', anchor || 'middle');
+    t.textContent = txt;
+    return t;
+  }
+  function R(x, y, w, h, fill, stroke, r) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    e.setAttribute('x', x); e.setAttribute('y', y); e.setAttribute('width', w); e.setAttribute('height', h);
+    e.setAttribute('fill', fill || 'none'); e.setAttribute('stroke', stroke || '#999'); e.setAttribute('rx', r || 0);
+    return e;
+  }
+  function LN(x1, y1, x2, y2, color, w) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    e.setAttribute('x1', x1); e.setAttribute('y1', y1); e.setAttribute('x2', x2); e.setAttribute('y2', y2);
+    e.setAttribute('stroke', color || '#888'); e.setAttribute('stroke-width', w || 1.5);
+    return e;
+  }
+  function mount(id, s) { document.getElementById(id).appendChild(s); }
+
+  function circle(cx, cy, r, fill, stroke) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    e.setAttribute('cx', cx); e.setAttribute('cy', cy); e.setAttribute('r', r);
+    e.setAttribute('fill', fill || '#fff'); e.setAttribute('stroke', stroke || '#444');
+    e.setAttribute('stroke-width', 1.6);
+    return e;
+  }
+  function edge(x1, y1, x2, y2, color) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    e.setAttribute('x1', x1); e.setAttribute('y1', y1); e.setAttribute('x2', x2); e.setAttribute('y2', y2);
+    e.setAttribute('stroke', color || '#bbb'); e.setAttribute('stroke-width', 1.5);
+    return e;
+  }
+  // 布局：按层数 BFS 排布，每层 x 均分，避免退化链重叠
+  function layoutTree(n, ls, rs, root) {
+    var pos = {};
+    var layer = {};
+    var q = [root], depth = {};
+    depth[root] = 0;
+    var order = [];
+    while (q.length) {
+      var u = q.shift();
+      order.push(u);
+      (layer[depth[u]] = layer[depth[u]] || []).push(u);
+      if (ls[u]) { depth[ls[u]] = depth[u] + 1; q.push(ls[u]); }
+      if (rs[u]) { depth[rs[u]] = depth[u] + 1; q.push(rs[u]); }
+    }
+    var maxDepth = 0;
+    for (var k in depth) maxDepth = Math.max(maxDepth, depth[k]);
+    for (var d = 0; d <= maxDepth; d++) {
+      var arr = layer[d] || [];
+      for (var i = 0; i < arr.length; i++) {
+        pos[arr[i]] = { x: 80 + i * (520 / Math.max(arr.length, 1)), y: 60 + d * 52 };
+      }
+    }
+    return { pos: pos, order: order, maxDepth: maxDepth };
+  }
+  function drawTree(s, n, ls, rs, root, pos, arr, hl, hlColor) {
+    // 边
+    for (var u = 1; u <= n; u++) {
+      if (ls[u] && pos[u]) s.appendChild(edge(pos[u].x, pos[u].y + 16, pos[ls[u]].x, pos[ls[u]].y - 16, '#c9d6e8'));
+      if (rs[u] && pos[u]) s.appendChild(edge(pos[u].x, pos[u].y + 16, pos[rs[u]].x, pos[rs[u]].y - 16, '#c9d6e8'));
+    }
+    for (var u = 1; u <= n; u++) {
+      if (!pos[u]) continue;
+      var isHl = hl && (hl.indexOf(u) >= 0);
+      s.appendChild(circle(pos[u].x, pos[u].y, 15, isHl ? (hlColor || '#ffd9a0') : '#fff', isHl ? '#e08a1e' : '#567'));
+      s.appendChild(T(pos[u].x, pos[u].y + 4, String(u), 13, '#1a3352'));
+      s.appendChild(T(pos[u].x, pos[u].y + 26, 'v=' + arr[u], 11, '#8a5a00'));
+    }
+  }
+
+  // ===== 图 1：笛卡尔树示例 =====
+  (function(){
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 600 260');
+    var arr = [0, 3, 1, 4, 2, 5];
+    // 树：2 左 1 右 4；4 左 3 右 5
+    var ls = [0,0,1,0,3,0], rs = [0,0,4,0,5,0];
+    var pos = layoutTree(5, ls, rs, 2).pos;
+    drawTree(s, 5, ls, rs, 2, pos, arr);
+    // 标注区间
+    s.appendChild(T(300, 32, '每个节点是它子树对应区间的最小值位置', 12, '#666'));
+    s.appendChild(R(45, 215, 200, 26, '#f4f7fb', '#999', 6));
+    s.appendChild(T(145, 232, '区间 [1,5] 最小值 = 位置 2', 11.5, '#333'));
+    mount('figDescartes', s);
+  })();
+
+  // ===== 图 2：建树过程栈 =====
+  (function(){
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 600 300');
+    var arr = [0, 3, 1, 4, 2, 5];
+    var steps = [
+      { i: 1, st: [1], note: 'x=3：栈空，直接入栈' },
+      { i: 2, st: [2], note: 'x=1：弹出 3（3>1），1 成为 3 的父；1 入栈' },
+      { i: 3, st: [2, 3], note: 'x=4：栈顶 1 不大于 4，4 挂在 1 的右侧；4 入栈' },
+      { i: 4, st: [2, 4], note: 'x=2：弹出 4（4>2），3 整棵成为 2 的左子树；2 挂在 1 的右侧' },
+      { i: 5, st: [2, 4, 5], note: 'x=5：栈顶 2 不大于 5，5 挂在 2 的右侧；5 入栈' }
+    ];
+    steps.forEach(function(stp, idx) {
+      var y = 14 + idx * 57;
+      s.appendChild(T(10, y + 14, '处理下标 ' + stp.i + '（值 ' + arr[stp.i] + '）', 12.5, '#1a3352', 'start'));
+      var x0 = 200;
+      stp.st.forEach(function(v, j) {
+        s.appendChild(R(x0 + j * 52, y - 2, 44, 30, '#fdf3e3', '#d6a35a', 6));
+        s.appendChild(T(x0 + j * 52 + 22, y + 18, '[' + v + '|' + arr[v] + ']', 11.5, '#7a4a00'));
+      });
+      s.appendChild(T(x0 + stp.st.length * 52 + 10, y + 17, '栈', 11, '#999', 'start'));
+      s.appendChild(T(10, y + 40, stp.note, 11.5, '#555', 'start'));
+    });
+    mount('figBuild', s);
+  })();
+
+  // ===== 图 3：左旋右旋 =====
+  (function(){
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 600 250');
+    // 右旋：A 的右孩子 B 提上来
+    s.appendChild(T(150, 30, '右旋（rightRotate）：B 提上来当父', 13, '#1a3352'));
+    // 左：A 在上，B 是 A 的左孩子
+    s.appendChild(edge(90, 80, 150, 130, '#c9d6e8'));
+    s.appendChild(edge(90, 80, 30, 130, '#c9d6e8'));
+    s.appendChild(circle(90, 70, 17, '#ffe8c9', '#e08a1e')); s.appendChild(T(90, 75, 'A', 13));
+    s.appendChild(circle(150, 130, 15, '#fff', '#567')); s.appendChild(T(150, 135, 'B', 12));
+    s.appendChild(circle(30, 130, 15, '#fff', '#567')); s.appendChild(T(30, 135, 'α', 12));
+    s.appendChild(T(90, 108, 'B 是 A 的左孩子', 10.5, '#666'));
+    s.appendChild(T(100, 200, '→', 20, '#888'));
+    // 右：B 在上，A 是 B 的右孩子
+    s.appendChild(edge(300, 70, 240, 130, '#c9d6e8'));
+    s.appendChild(edge(300, 70, 360, 130, '#c9d6e8'));
+    s.appendChild(circle(300, 60, 17, '#ffe8c9', '#e08a1e')); s.appendChild(T(300, 65, 'B', 13));
+    s.appendChild(circle(240, 130, 15, '#fff', '#567')); s.appendChild(T(240, 135, 'A', 12));
+    s.appendChild(circle(360, 130, 15, '#fff', '#567')); s.appendChild(T(360, 135, 'γ', 12));
+    s.appendChild(T(300, 108, 'A 变成 B 的右孩子', 10.5, '#666'));
+    s.appendChild(T(300, 200, '中序不变：α, A, B, γ', 11.5, '#8a5a00'));
+    // 左旋示意（小图）
+    s.appendChild(T(480, 30, '左旋', 13, '#1a3352'));
+    s.appendChild(edge(500, 80, 460, 130, '#c9d6e8'));
+    s.appendChild(edge(500, 80, 540, 130, '#c9d6e8'));
+    s.appendChild(circle(500, 70, 17, '#ffe8c9', '#e08a1e')); s.appendChild(T(500, 75, 'A', 13));
+    s.appendChild(circle(460, 130, 15, '#fff', '#567')); s.appendChild(T(460, 135, 'δ', 12));
+    s.appendChild(circle(540, 130, 15, '#fff', '#567')); s.appendChild(T(540, 135, 'B', 12));
+    s.appendChild(T(500, 108, 'B 是 A 的右孩子', 10.5, '#666'));
+    mount('figRotate', s);
+  })();
+
+  // ===== 演示：笛卡尔树逐步建树 =====
+  (function(){
+    var ARR = [0, 3, 1, 4, 2, 5];
+    var N = 5;
+    // 逐步执行课程 build，记录每帧的 ls/rs/栈
+    var FR = [];
+    var ls = [0,0,0,0,0,0], rs = [0,0,0,0,0,0], sta = [];
+    FR.push({ i: 0, ls: ls.slice(), rs: rs.slice(), sta: [], note: '初始：栈空，树空。点「下一步」开始建树。' });
+    var top = 0;
+    for (var i = 1; i <= N; i++) {
+      var pos = top;
+      var popped = [];
+      while (pos > 0 && ARR[sta[pos - 1]] > ARR[i]) { pos--; }
+      // 记录弹出区间（sta[pos..top-1]）
+      for (var j = pos; j < top; j++) popped.push(sta[j]);
+      if (pos > 0) rs[sta[pos - 1]] = i;
+      if (pos < top) ls[i] = sta[pos];
+      sta[pos] = i;
+      top = pos + 1;
+      var note;
+      if (popped.length === 0 && pos === 0) {
+        note = 'x=' + ARR[i] + '：栈空，直接入栈。';
+      } else if (popped.length === 0) {
+        note = 'x=' + ARR[i] + '：栈顶值 ≤ ' + ARR[i] + '，不弹。x 挂在栈顶（值 ' + ARR[sta[pos - 1]] + '）右侧，入栈。';
+      } else {
+        note = 'x=' + ARR[i] + '：弹出 ' + popped.map(function(v){ return '[' + v + '|' + ARR[v] + ']'; }).join('、') +
+               '，最后一个 ' + popped[popped.length - 1] + ' 带着子树成为 x 的左子树。x 入栈。';
+      }
+      FR.push({ i: i, ls: ls.slice(), rs: rs.slice(), sta: sta.slice(0, top), note: note });
+    }
+    // 末帧：完成
+    FR.push({ i: 0, ls: ls.slice(), rs: rs.slice(), sta: sta.slice(), note: '建树完成：中序遍历 1..5，每节点值 ≤ 子节点。' });
+
+    var svg = document.getElementById('vizTreeSvg');
+    var note = document.getElementById('vizTreeNote');
+    var at = 0;
+
+    function drawFrame(f) {
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      var root = f.ls[1] || 0;
+      for (var u = 1; u <= N; u++) { if (!f.ls[u] && !f.rs[u] && u !== 1) { /* 孤立点 */ } }
+      // 找根：入度 0
+      var indeg = {};
+      for (var u = 1; u <= N; u++) {
+        if (f.ls[u]) indeg[f.ls[u]] = 1;
+        if (f.rs[u]) indeg[f.rs[u]] = 1;
+      }
+      var root2 = 1;
+      for (var u = 1; u <= N; u++) { if (!indeg[u]) { root2 = u; break; } }
+      var layout = layoutTree(N, f.ls, f.rs, root2);
+      var pos = layout.pos;
+      // 边
+      for (var u = 1; u <= N; u++) {
+        if (f.ls[u] && pos[u] && pos[f.ls[u]]) svg.appendChild(edge(pos[u].x, pos[u].y + 16, pos[f.ls[u]].x, pos[f.ls[u]].y - 16, '#c9d6e8'));
+        if (f.rs[u] && pos[u] && pos[f.rs[u]]) svg.appendChild(edge(pos[u].x, pos[u].y + 16, pos[f.rs[u]].x, pos[f.rs[u]].y - 16, '#c9d6e8'));
+      }
+      // 栈区
+      var sx = 40, sy = 300;
+      f.sta.forEach(function(v, j) {
+        svg.appendChild(R(sx + j * 56, sy, 48, 30, '#fdf3e3', '#d6a35a', 6));
+        svg.appendChild(T(sx + j * 56 + 24, sy + 19, '[' + v + '|' + ARR[v] + ']', 11.5, '#7a4a00'));
+      });
+      svg.appendChild(T(sx + f.sta.length * 56 + 8, sy + 19, '单调栈', 11, '#999'));
+      // 节点
+      for (var u = 1; u <= N; u++) {
+        if (!pos[u]) continue;
+        var isCur = (f.i === u);
+        var isPopped = f.i && f.sta.indexOf(u) < 0 && (pos[u]) && (u !== f.i) && (at > 0) && (f.i > 0);
+        svg.appendChild(circle(pos[u].x, pos[u].y, 15, isCur ? '#ffd9a0' : '#fff', isCur ? '#e08a1e' : '#567'));
+        svg.appendChild(T(pos[u].x, pos[u].y + 4, String(u), 13, '#1a3352'));
+        svg.appendChild(T(pos[u].x, pos[u].y + 26, 'v=' + ARR[u], 11, '#8a5a00'));
+      }
+      if (f.i === 0 && at === 0) {
+        svg.appendChild(T(300, 160, '（空树）', 14, '#999'));
+      }
+      // note
+      note.textContent = '第 ' + (at === 0 ? 0 : f.i) + ' 步 · ' + f.note;
+      var nx = document.getElementById('vizTreeNext');
+      if (at + 1 >= FR.length) nx.disabled = true;
+    }
+    function resetAll() {
+      at = 0;
+      drawFrame(FR[0]);
+      document.getElementById('vizTreeNext').disabled = false;
+    }
+    function nextStep() {
+      if (at + 1 < FR.length) { at++; drawFrame(FR[at]); }
+      if (at + 1 >= FR.length) document.getElementById('vizTreeNext').disabled = true;
+    }
+    document.getElementById('vizTreeNext').addEventListener('click', nextStep);
+    document.getElementById('vizTreeReset').addEventListener('click', resetAll);
+    resetAll();
+  })();
+})();
+</script>
+</body>
+</html>
