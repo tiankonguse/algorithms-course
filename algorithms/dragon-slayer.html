@@ -1,0 +1,440 @@
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>屠龙勇士：选剑、列方程、修正答案</h1>
+      <p class="intro">每只龙要打固定 ans 下才死，ans 对所有龙是同一个数。题目最后变成「n 个形如 ans·atk ≡ hp (mod recovery) 的同余条件求最小解」，但真正的坑藏在最后：同余方程的解域是整个整数，而恢复次数不能是负数，答案还得再往上凑。</p>
+
+      <h2>零、背景</h2>
+      <p>n 只龙按顺序讨伐，每只有初始血量 hp、恢复力 recovery（被打到 ≤ 0 后每回合回 recovery 血）。手里有一批剑，每把有攻击力。对每只龙只能用固定的一把剑，规则是：攻击力不高于当前龙血量的剑里选最大的一把，没有就选攻击力最小的一把。龙死后用的剑消失，奖励一把新剑。</p>
+      <p>策略是全程只打 ans 下：每只龙挨 ans 剑后血量 ≤ 0，然后在恢复过程中恰好某刻归零就被杀死。求最小的 ans，做不到输出 -1。这个题把「有序表选剑」「同余方程组」「答案下界修正」三件事串在一起。</p>
+
+      <h2>一、选剑与打击下界</h2>
+      <p>剑的集合用有序表维护：攻击力不高于 hp 的最大一把，就是 upper_bound(hp) 的前一个元素；没有这样的剑，就取整个集合的最小值。选完删掉这把剑、插入奖励的剑。同时记下每只龙「砍到 ≤ 0」需要的次数 ceil(hp / atk)，全程取最大为 max。任何可行的 ans 都必须 ≥ max，这是后面修正的依据。</p>
+
+      <figure class="fig" id="fig-sword"></figure>
+
+      <p>选完剑后把血量取模：hp = hp % recovery。这是为下一步铺路。血量为正时「恢复中恰好到 0」等价于「攻击 ans 下后的剩余血量能由若干次恢复恰好补回」，而这个条件只跟 hp mod recovery 有关。</p>
+
+      <h2>二、转成同余方程组</h2>
+      <p>对第 i 只龙，攻击 ans 下后血量是 hp − ans·atk，它要能通过非负次恢复回到 0：hp − ans·atk ≡ 0 (mod recovery)，也就是 ans·atk ≡ hp (mod recovery)。前面把 hp 取过模，这里直接用余数。</p>
+
+      <figure class="fig" id="fig-eq"></figure>
+
+      <p>n 个这样的同余式，模数 recovery 之间没有任何互质保证，就用扩展中国剩余定理那套迭代合并。唯一区别是左边系数不再是 1：合并第 i 个方程时解的是 atk·lcm·x + recovery·y = hp − atk·tail，a = (atk·lcm) mod recovery，c = (hp − atk·tail) mod recovery，流程与 EXCRT 完全一致。</p>
+
+      <h2>三、答案修正：恢复次数必须非负</h2>
+      <p>合并完得到 ans = k·lcm + tail。这里的 k 每取一个整数都满足同余条件，但同余条件默认「恢复次数可以是任意整数」，实际它必须 ≥ 0。恢复次数 ≥ 0 等价于「ans 下就把血打到 ≤ 0」，也就是 ans ≥ max（max 是第一段算出的最大打击需求）。</p>
+      <p>所以：tail ≥ max 时答案就是 tail；tail < max 时要在 ans = tail + k·lcm 里找第一个 ≥ max 的，k 向上取整：k = ceil((max − tail) / lcm)，ans = k·lcm + tail。这步不做，答案会偏小。</p>
+
+      <figure class="fig" id="fig-max"></figure>
+
+      <h2>四、实现</h2>
+      <p>选剑用 multiset 模拟有序表，upper_bound 的前驱就是「不高于 hp 的最大剑」，取 begin 就是最小剑。合并部分和扩展中国剩余定理同一套代码，只改 a 和 c 的算法。乘法全程龟速乘。</p>
+
+              <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+    typedef <span class="kw">long</span> <span class="kw">long</span> <span class="kw">ll</span>;
+    multiset&lt;<span class="kw">ll</span>&gt; swords;
+    <span class="kw">ll</span> attack[100005];
+    <span class="kw">ll</span> <span class="fn">allocate</span>(<span class="kw">int</span> n, <span class="kw">int</span> m, <span class="kw">ll</span> hp[], <span class="kw">ll</span> recovery[], <span class="kw">ll</span> reward[], <span class="kw">ll</span> init[]) {
+      swords.clear();
+      <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) swords.insert(init[i]);
+      <span class="kw">ll</span> maxv = 0;
+      <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        auto it = swords.upper_bound(hp[i]);
+        <span class="kw">ll</span> sword;
+        <span class="kw">if</span> (it == swords.begin()) sword = *swords.begin();
+        <span class="kw">else</span> {
+          --it;
+          sword = *it;
+        }
+        attack[i] = sword;
+        swords.erase(swords.find(sword));
+        swords.insert(reward[i]);
+        maxv = max(maxv, (hp[i] + attack[i] - 1) / attack[i]);
+        hp[i] %= recovery[i];
+      }
+      <span class="kw">return</span> maxv;
+    }</pre>
+
+              <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+    typedef <span class="kw">long</span> <span class="kw">long</span> <span class="kw">ll</span>;
+    <span class="kw">ll</span> d, x, y, px, py;
+    <span class="kw">void</span> <span class="fn">exgcd</span>(<span class="kw">ll</span> a, <span class="kw">ll</span> b) {
+      <span class="kw">if</span> (b == 0) {
+        d = a;
+        x = 1;
+        y = 0;
+      } <span class="kw">else</span> {
+        exgcd(b, a % b);
+        px = x;
+        py = y;
+        x = py;
+        y = px - py * (a / b);
+      }
+    }
+    <span class="kw">ll</span> <span class="fn">multiply</span>(<span class="kw">ll</span> a, <span class="kw">ll</span> b, <span class="kw">ll</span> mod) {
+      a = (a % mod + mod) % mod;
+      b = (b % mod + mod) % mod;
+      <span class="kw">ll</span> ans = 0;
+      <span class="kw">while</span> (b != 0) {
+        <span class="kw">if</span> (b &amp; 1) ans = (ans + a) % mod;
+        a = (a + a) % mod;
+        b &gt;&gt;= 1;
+      }
+      <span class="kw">return</span> ans;
+    }
+    <span class="kw">ll</span> <span class="fn">compute</span>(<span class="kw">int</span> n, <span class="kw">int</span> m, <span class="kw">ll</span> hp[], <span class="kw">ll</span> recovery[], <span class="kw">ll</span> reward[], <span class="kw">ll</span> init[]) {
+      <span class="kw">ll</span> maxv = allocate(n, m, hp, recovery, reward, init);
+      <span class="kw">ll</span> tail = 0, lcm = 1, tmp, a, b, c, x0;
+      <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+        a = multiply(attack[i], lcm, recovery[i]);
+        b = recovery[i];
+        c = ((hp[i] - attack[i] * tail) % b + b) % b;
+        exgcd(a, b);
+        <span class="kw">if</span> (c % d != 0) <span class="kw">return</span> -1;
+        x0 = multiply(x, c / d, b / d);
+        tmp = lcm * (b / d);
+        tail = (tail + multiply(x0, lcm, tmp)) % tmp;
+        lcm = tmp;
+      }
+      <span class="kw">ll</span> ans;
+      <span class="kw">if</span> (tail &gt;= maxv) ans = tail;
+      <span class="kw">else</span> ans = (maxv - tail + lcm - 1) / lcm * lcm + tail;
+      <span class="kw">return</span> ans;
+    }
+    <span class="kw">int</span> <span class="fn">main</span>() {
+      <span class="kw">int</span> cases;
+      cin &gt;&gt; cases;
+      <span class="kw">while</span> (cases--) {
+        <span class="kw">int</span> n, m;
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">ll</span> hp[100005], recovery[100005], reward[100005], init[100005];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) cin &gt;&gt; hp[i];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) cin &gt;&gt; recovery[i];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) cin &gt;&gt; reward[i];
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) cin &gt;&gt; init[i];
+        cout &lt;&lt; compute(n, m, hp, recovery, reward, init) &lt;&lt; endl;
+      }
+      <span class="kw">return</span> 0;
+    }</pre>
+
+      <div class="viz" id="viz-sword">
+        <div class="viz-title">演示：选剑逐龙</div>
+        <div id="sword-svg"></div>
+        <div class="stepnote"></div>
+        <div class="viz-controls">
+          <select id="sword-sel">
+            <option value="s1">hp=[4,8]，剑 {2,3}</option>
+            <option value="s2">hp=[9,11]，剑 {2,3}</option>
+          </select>
+          <button type="button" id="sword-prev">上一步</button>
+          <button type="button" id="sword-next">下一步</button>
+          <button type="button" id="sword-play">自动播放</button>
+          <button type="button" id="sword-reset">重置</button>
+        </div>
+      </div>
+
+      <div class="viz" id="viz-dragon">
+        <div class="viz-title">演示：合并同余与 max 修正</div>
+        <div id="dragon-svg"></div>
+        <div class="stepnote"></div>
+        <div class="viz-controls">
+          <select id="dragon-sel">
+            <option value="d1">tail ≥ max：答案 33</option>
+            <option value="d2">tail ≥ max：答案 8</option>
+            <option value="d3">tail &lt; max：凑到 90</option>
+          </select>
+          <button type="button" id="dragon-prev">上一步</button>
+          <button type="button" id="dragon-next">下一步</button>
+          <button type="button" id="dragon-play">自动播放</button>
+          <button type="button" id="dragon-reset">重置</button>
+        </div>
+      </div>
+
+      <h2>总结</h2>
+      <p>屠龙勇士三步走：有序表选剑并算打击下界 max；把每只龙的条件整理成 ans·atk ≡ hp (mod recovery) 并迭代合并；最后按「恢复次数非负」修正答案，tail 不足 max 时向上凑到第一个 ≥ max 的同余解。无解发生在合并过程中 c 不被 gcd 整除，返回 -1。这个题的教训是：同余方程只管同余，实际问题里变量还有取值范围约束，公式解出来后还要回头核一遍。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td><a href="https://www.luogu.com.cn/problem/P4774" target="_blank">[NOI2018] 屠龙勇士</a></td><td><a href="https://www.luogu.com.cn/problem/P4774" target="_blank">P4774</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解141【扩展】中国剩余定理及其扩展</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+          <tr><td>OI-wiki</td><td>中国剩余定理（含扩展）</td><td><a href="https://oi-wiki.org/math/number-theory/crt/" target="_blank">oi-wiki.org</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function () {
+  function T(x, y, s, anchor) {
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x); t.setAttribute('y', y);
+    t.setAttribute('text-anchor', anchor || 'start');
+    t.setAttribute('font-size', 13);
+    t.textContent = s;
+    return t;
+  }
+  function mount(id, svg) {
+    document.getElementById(id).appendChild(svg);
+    return svg;
+  }
+  var HH = 300;
+
+  // ---------- 图1：选剑规则 ----------
+  (function () {
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 760 300');
+    var xs = [2, 3, 4, 6, 9];
+    s.appendChild(T(40, 40, '剑集合（有序）：{ 2, 3, 4, 6, 9 }', 'start'));
+    for (var i = 0; i < 5; i++) {
+      var cx = 60 + i * 70;
+      var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      r.setAttribute('x', cx - 16); r.setAttribute('y', 70); r.setAttribute('width', 32); r.setAttribute('height', 34);
+      r.setAttribute('fill', '#e2e8f0'); r.setAttribute('stroke', '#94a3b8');
+      s.appendChild(r);
+      s.appendChild(T(cx, 91, String(xs[i]), 'middle'));
+    }
+    var hp = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    hp.setAttribute('x1', 60 + 3 * 70); hp.setAttribute('y1', 130); hp.setAttribute('x2', 60 + 3 * 70); hp.setAttribute('y2', 60);
+    hp.setAttribute('stroke', '#dc2626'); hp.setAttribute('stroke-width', 2);
+    s.appendChild(hp);
+    s.appendChild(T(60 + 3 * 70 + 8, 150, 'hp = 6（选 ≤6 的最大一把 = 6）', 'start'));
+    // firstKey 情形
+    s.appendChild(T(40, 200, '没有 ≤ hp 的剑时（hp = 1），选最小一把 = 2', 'start'));
+    var ar = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    ar.setAttribute('x1', 60); ar.setAttribute('y1', 230); ar.setAttribute('x2', 44); ar.setAttribute('y2', 200);
+    ar.setAttribute('stroke', '#16a34a'); ar.setAttribute('marker-end', 'url(#arw)');
+    s.appendChild(ar);
+    s.appendChild(T(40, 270, 'upper_bound(hp) 的前驱；集合空时兜底取最小值。选完删剑、插入奖励剑', 'start'));
+    mount('fig-sword', s);
+  })();
+
+  // ---------- 图2：方程转化 ----------
+  (function () {
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 760 300');
+    var rows = [
+      '打 ans 下后剩余血量：hp − ans·atk（必须 ≤ 0 才可能被恢复杀死）',
+      '恢复过程中恰好到 0：hp − ans·atk + k·recovery = 0',
+      '移项：ans·atk = hp + k·recovery',
+      '同余形式：ans·atk ≡ hp (mod recovery)'
+    ];
+    for (var i = 0; i < 4; i++) {
+      var y = 50 + i * 60;
+      s.appendChild(T(40, y, rows[i], 'start'));
+      if (i < 3) {
+        var ar = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        ar.setAttribute('x1', 60); ar.setAttribute('y1', y + 6); ar.setAttribute('x2', 60); ar.setAttribute('y2', y + 42);
+        ar.setAttribute('stroke', '#64748b'); ar.setAttribute('marker-end', 'url(#arw)');
+        s.appendChild(ar);
+      }
+    }
+    s.appendChild(T(40, 290, 'k 是恢复次数，必须 ≥ 0——这就是最后 max 修正的由来', 'start'));
+    mount('fig-eq', s);
+  })();
+
+  // ---------- 图3：max 修正 ----------
+  (function () {
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 760 300');
+    // 数轴 0..100
+    var X0 = 80, X1 = 660, Y0 = 150;
+    var la = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    la.setAttribute('x1', X0); la.setAttribute('y1', Y0); la.setAttribute('x2', X1); la.setAttribute('y2', Y0);
+    la.setAttribute('stroke', '#94a3b8');
+    s.appendChild(la);
+    function sx(v) { return X0 + v * 5.6; }
+    for (var v = 0; v <= 100; v += 20) {
+      var t = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      t.setAttribute('x1', sx(v)); t.setAttribute('y1', Y0 - 4); t.setAttribute('x2', sx(v)); t.setAttribute('y2', Y0 + 4);
+      t.setAttribute('stroke', '#94a3b8');
+      s.appendChild(t);
+      s.appendChild(T(sx(v), Y0 + 20, String(v), 'middle'));
+    }
+    // tail = 20，lcm = 35，max = 67
+    var t1 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    t1.setAttribute('cx', sx(20)); t1.setAttribute('cy', Y0); t1.setAttribute('r', 6); t1.setAttribute('fill', '#2563eb');
+    s.appendChild(t1);
+    s.appendChild(T(sx(20), Y0 - 26, 'tail = 20', 'middle'));
+    var m1 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    m1.setAttribute('cx', sx(67)); m1.setAttribute('cy', Y0); m1.setAttribute('r', 6); m1.setAttribute('fill', '#dc2626');
+    s.appendChild(m1);
+    s.appendChild(T(sx(67), Y0 + 40, 'max = 67', 'middle'));
+    var a1 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    a1.setAttribute('cx', sx(90)); a1.setAttribute('cy', Y0); a1.setAttribute('r', 6); a1.setAttribute('fill', '#16a34a');
+    s.appendChild(a1);
+    s.appendChild(T(sx(90), Y0 - 26, 'ans = 90 = 2·35 + 20', 'middle'));
+    s.appendChild(T(40, 240, '候选解 20、55、90、……；20 和 55 小于 max = 67，第一个可行的在 90', 'start'));
+    mount('fig-max', s);
+  })();
+
+  // ---------- 演示1：选剑逐龙 ----------
+  var S = {
+    s1: { hp: [4, 8], rec: [5, 7], rew: [3, 2], init: [2, 3] },
+    s2: { hp: [9, 11], rec: [5, 7], rew: [3, 2], init: [2, 3] }
+  };
+  var SFR = [], sat = 0, stimer = null;
+  function ssim(p) {
+    var steps = [];
+    var swords = p.init.slice().sort(function (a, b) { return a - b; });
+    steps.push({ msg: '初始剑集合：{ ' + swords.join(', ') + ' }' });
+    var maxv = 0, hprem = [];
+    for (var i = 0; i < p.hp.length; i++) {
+      var hpv = p.hp[i];
+      var cand = swords.filter(function (x) { return x <= hpv; });
+      var pick = cand.length ? cand[cand.length - 1] : swords[0];
+      var idx = swords.indexOf(pick);
+      swords.splice(idx, 1);
+      swords.push(p.rew[i]);
+      swords.sort(function (a, b) { return a - b; });
+      var need = Math.ceil(hpv / pick);
+      maxv = Math.max(maxv, need);
+      var rem = hpv % p.rec[i];
+      hprem.push(rem);
+      steps.push({ msg: '龙' + (i + 1) + ' hp=' + hpv + '：选 ≤hp 的最大剑 ' + pick + '，砍到 ≤0 需 ' + need + ' 下，max=' + maxv + '；hp % recovery = ' + rem + '，剑集合变 { ' + swords.join(', ') + ' }' });
+    }
+    steps.push({ msg: '选剑完成：攻击力 [' + p.hp.map(function (_, i) { return 'atk' + (i + 1); }).join(',') + ']，max = ' + maxv + '，任何可行 ans 都必须 ≥ max' });
+    return steps;
+  }
+  function genS(key) {
+    SFR = ssim(S[key]);
+    sat = 0;
+    renderS();
+  }
+  function renderS() {
+    var svg = document.getElementById('sword-svg');
+    svg.innerHTML = '';
+    var step = SFR[Math.min(sat, SFR.length - 1)];
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 760 150');
+    s.appendChild(T(16, 30, step.msg, 'start'));
+    var note = document.querySelector('#viz-sword .stepnote');
+    note.textContent = step.msg;
+    document.getElementById('sword-prev').disabled = (sat === 0);
+    document.getElementById('sword-next').disabled = (sat >= SFR.length - 1);
+    mount('sword-svg', s);
+  }
+  var selS = document.getElementById('sword-sel');
+  selS.addEventListener('change', function () { genS(selS.value); });
+  document.getElementById('sword-prev').addEventListener('click', function () { if (sat > 0) { sat--; renderS(); } });
+  document.getElementById('sword-next').addEventListener('click', function () { if (sat < SFR.length - 1) { sat++; renderS(); } });
+  document.getElementById('sword-play').addEventListener('click', function () {
+    var self = this;
+    if (stimer) { clearInterval(stimer); stimer = null; self.textContent = '自动播放'; return; }
+    self.textContent = '暂停';
+    stimer = setInterval(function () {
+      if (sat < SFR.length - 1) { sat++; renderS(); }
+      else { clearInterval(stimer); stimer = null; self.textContent = '自动播放'; }
+    }, 1200);
+  });
+  document.getElementById('sword-reset').addEventListener('click', function () {
+    if (stimer) { clearInterval(stimer); stimer = null; document.getElementById('sword-play').textContent = '自动播放'; }
+    genS(document.getElementById('sword-sel').value);
+  });
+  genS('s1');
+
+  // ---------- 演示2：合并与修正 ----------
+  var D = {
+    d1: { atk: [3, 3], hprem: [4, 1], rec: [5, 7], maxv: 3, label: 'hp=[4,8] rec=[5,7] 剑=[3,3]' },
+    d2: { atk: [3, 3], hprem: [4, 0], rec: [5, 4], maxv: 3, label: 'hp=[4,8] rec=[5,4] 剑=[3,3]' },
+    d3: { atk: [3, 3], hprem: [0, 4], rec: [5, 7], maxv: 67, label: 'hp=[100,200] rec=[5,7] 剑=[3,3]' }
+  };
+  var DFR = [], dat = 0, dtimer = null;
+  function egcd(a, b) {
+    if (b === 0) return { d: a, x: 1, y: 0 };
+    var r = egcd(b, a % b), ox = r.x, oy = r.y;
+    return { d: r.d, x: oy, y: ox - oy * Math.floor(a / b) };
+  }
+  function mult(a, b, mod) {
+    a = ((a % mod) + mod) % mod; b = ((b % mod) + mod) % mod;
+    var ans = 0;
+    while (b !== 0) {
+      if (b & 1) ans = (ans + a) % mod;
+      a = (a + a) % mod; b = Math.floor(b / 2);
+    }
+    return ans;
+  }
+  function dsim(p) {
+    var steps = [];
+    steps.push({ msg: '准备：attack = [' + p.atk.join(',') + ']，hp 余数 [' + p.hprem.join(',') + ']，recovery [' + p.rec.join(',') + ']，max = ' + p.maxv });
+    var tail = 0, lcm = 1;
+    for (var i = 0; i < p.atk.length; i++) {
+      var a = mult(p.atk[i], lcm, p.rec[i]);
+      var b = p.rec[i];
+      var c = ((p.hprem[i] - p.atk[i] * tail) % b + b) % b;
+      steps.push({ msg: '合并龙' + (i + 1) + '：a = atk·lcm mod rec = ' + a + '，c = (hp − atk·tail) mod rec = ' + c + '，解 ' + a + '·x + ' + b + '·y = ' + c });
+      var g = egcd(a, b);
+      if (c % g.d !== 0) {
+        steps.push({ msg: 'gcd = ' + g.d + '，c % d ≠ 0 → 无解，返回 -1' });
+        return steps;
+      }
+      var x0 = mult(g.x, c / g.d, b / g.d);
+      var nlcm = lcm * (b / g.d);
+      tail = (tail + mult(x0, lcm, nlcm)) % nlcm;
+      lcm = nlcm;
+      steps.push({ msg: 'x0 = ' + x0 + '，lcm = ' + lcm + '，tail = ' + tail + '（ans ≡ ' + tail + ' mod ' + lcm + '）' });
+    }
+    steps.push({ msg: '同余解 tail = ' + tail + '，max = ' + p.maxv + (tail >= p.maxv ? '，tail ≥ max 直接用' : '，tail < max 要往上凑') });
+    if (tail < p.maxv) {
+      var k = Math.ceil((p.maxv - tail) / lcm);
+      var ans = k * lcm + tail;
+      steps.push({ msg: 'k = ceil((' + p.maxv + ' − ' + tail + ') / ' + lcm + ') = ' + k + '，ans = ' + k + '·' + lcm + ' + ' + tail + ' = ' + ans });
+    } else {
+      steps.push({ msg: '答案 ans = ' + tail });
+    }
+    return steps;
+  }
+  function genD(key) {
+    DFR = dsim(D[key]);
+    dat = 0;
+    renderD();
+  }
+  function renderD() {
+    var svg = document.getElementById('dragon-svg');
+    svg.innerHTML = '';
+    var step = DFR[Math.min(dat, DFR.length - 1)];
+    var p = D[document.getElementById('dragon-sel').value];
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 760 190');
+    var t1 = T(16, 30, p.label, 'start');
+    t1.setAttribute('font-size', 15);
+    s.appendChild(t1);
+    s.appendChild(T(16, 62, step.msg, 'start'));
+    var note = document.querySelector('#viz-dragon .stepnote');
+    note.textContent = step.msg;
+    document.getElementById('dragon-prev').disabled = (dat === 0);
+    document.getElementById('dragon-next').disabled = (dat >= DFR.length - 1);
+    mount('dragon-svg', s);
+  }
+  var selD = document.getElementById('dragon-sel');
+  selD.addEventListener('change', function () { genD(selD.value); });
+  document.getElementById('dragon-prev').addEventListener('click', function () { if (dat > 0) { dat--; renderD(); } });
+  document.getElementById('dragon-next').addEventListener('click', function () { if (dat < DFR.length - 1) { dat++; renderD(); } });
+  document.getElementById('dragon-play').addEventListener('click', function () {
+    var self = this;
+    if (dtimer) { clearInterval(dtimer); dtimer = null; self.textContent = '自动播放'; return; }
+    self.textContent = '暂停';
+    dtimer = setInterval(function () {
+      if (dat < DFR.length - 1) { dat++; renderD(); }
+      else { clearInterval(dtimer); dtimer = null; self.textContent = '自动播放'; }
+    }, 1200);
+  });
+  document.getElementById('dragon-reset').addEventListener('click', function () {
+    if (dtimer) { clearInterval(dtimer); dtimer = null; document.getElementById('dragon-play').textContent = '自动播放'; }
+    genD(document.getElementById('dragon-sel').value);
+  });
+  genD('d1');
+})();</script>
