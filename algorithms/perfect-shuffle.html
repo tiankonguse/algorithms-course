@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>完美洗牌：原地 O(1) 的下标循环怼</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>完美洗牌：原地 O(1) 的下标循环怼</h1>
+      <p class="intro">把数组的一段（偶数长度）原地交叉成「右半、左半、右半、左半…」，要求 O(n) 时间、O(1) 额外空间。直接开辅助数组太简单，原地做要处理下标映射成的一堆循环。特殊长度下循环个数有闭合公式，任意偶数长度都能从大到小拆成特殊长度，于是整段原地交叉。摇摆排序 II 的进阶解把中位数三分区和完美洗牌拼在一起。</p>
+
+      <h2 id="map">零、下标映射与循环</h2>
+      <p>给定范围 [l, r]，长度 n 偶数，左半 [l, m]、右半 [m+1, r]，m = (l+r)/2。目标：位置 l+j 放原右半第 j 个，位置 m+j 放原左半第 j 个。写成下标映射 to(i)：</p>
+      <p style="text-align:center;font-size:1.1em;">to(i) = i + (i−l+1)（i 在左半）；to(i) = i − (r−i+1)（i 在右半）</p>
+      <p>左半的元素整体移到右半，右半的元素整体移到左半。这个映射是排列，可以拆成若干不相交的循环。沿循环把值逐个往后传（curv/nextv 滚动），一个循环 O(循环长)，所有循环加起来 O(n)。问题只剩：循环的起点在哪？</p>
+      <figure class="fig" id="figCycle"></figure>
+      <p>对一般长度，循环个数没有简单公式，必须试探。但对特殊长度 2、8、26、80…（3^k − 1），有个数学结论：下标循环的个数 = k，且第 j 个循环的起点是 l + start[j] − 1（相对块左端偏移 start[j]−1 = 0、2、8…）。起点齐了，循环怼就能逐个启动。</p>
+
+      <h2 id="split">一、任意偶数拆成特殊长度</h2>
+      <p>特殊长度序列 p = 2、8、26、80…（3^k − 1），从大到小把 n 拆掉：先取 ≤ n 的最大特殊长度，处理完这块再取剩下的，处理不了就换小的。每个块的处理分两步：</p>
+      <p>第一步三段旋转 rotate(l+s/2, m, m+s/2)，把块内左右两半先摆到各自该去的位置。第二步 circle 沿块内每个循环滚值。块处理完，l 前进 s、n 减 s，直到 n 为 0。</p>
+      <figure class="fig" id="figSplit"></figure>
+      <p>为什么能拆干净：任何偶数 n 都能表示成若干个特殊长度之和（2、8、26…类似进制的基底）。对拍里随机偶数长度 3000 组，原地结果和辅助数组版本逐位一致。</p>
+
+      <h2 id="code5">二、完美洗牌实现</h2>
+      <p>shuffle(l, r) 是核心：build 生成特殊长度表，主循环按拆分处理每块。rotate 用三次 reverse 实现三段交换，circle 对块内每个循环滚动值，to 是下标映射。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 1000005;
+
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> start[MAXN];
+    <span class="kw">int</span> split[MAXN];
+    <span class="kw">int</span> size;
+
+    <span class="kw">void</span> <span class="fn">swap</span>(<span class="kw">int</span> i, <span class="kw">int</span> j) {
+    	<span class="kw">int</span> t = arr[i];
+    	arr[i] = arr[j];
+    	arr[j] = t;
+    }
+
+    <span class="kw">void</span> <span class="fn">reverse</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+    	<span class="kw">while</span> (l &lt; r) {
+    		swap(l++, r--);
+    	}
+    }
+
+    <span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+    	reverse(l, m);
+    	reverse(m + 1, r);
+    	reverse(l, r);
+    }
+
+    <span class="kw">int</span> <span class="fn">to</span>(<span class="kw">int</span> i, <span class="kw">int</span> l, <span class="kw">int</span> r) {
+    	<span class="kw">if</span> (i &lt;= (l + r) &gt;&gt; 1) {
+    		<span class="kw">return</span> i + (i - l + 1);
+    	} <span class="kw">else</span> {
+    		<span class="kw">return</span> i - (r - i + 1);
+    	}
+    }
+
+    <span class="kw">void</span> <span class="fn">circle</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+    	<span class="kw">for</span> (<span class="kw">int</span> j = 1, init, cur, next, curv, nextv; j &lt;= i; j++) {
+    		init = cur = l + start[j] - 1;
+    		next = to(cur, l, r);
+    		curv = arr[cur];
+    		<span class="kw">while</span> (next != init) {
+    			nextv = arr[next];
+    			arr[next] = curv;
+    			curv = nextv;
+    			cur = next;
+    			next = to(cur, l, r);
+    		}
+    		arr[init] = curv;
+    	}
+    }
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n) {
+    	size = 0;
+    	<span class="kw">for</span> (<span class="kw">int</span> s = 1, p = 2; p &lt;= n; s *= 3, p = s * 3 - 1) {
+    		start[++size] = s;
+    		split[size] = p;
+    	}
+    }
+
+    <span class="kw">void</span> <span class="fn">shuffle</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+    	<span class="kw">int</span> n = r - l + 1;
+    	build(n);
+    	<span class="kw">for</span> (<span class="kw">int</span> i = size, m; n &gt; 0;) {
+    		<span class="kw">if</span> (split[i] &lt;= n) {
+    			m = (l + r) / 2;
+    			rotate(l + split[i] / 2, m, m + split[i] / 2);
+    			circle(l, l + split[i] - 1, i);
+    			l += split[i];
+    			n -= split[i];
+    		} <span class="kw">else</span> {
+    			i--;
+    		}
+    	}
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+    	ios::sync_with_stdio(<span class="kw">false</span>);
+    	cin.tie(<span class="kw">nullptr</span>);
+    	<span class="kw">int</span> n;
+    	cin &gt;&gt; n;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+    		cin &gt;&gt; arr[i];
+    	}
+    	shuffle(1, n);
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+    		cout &lt;&lt; arr[i] &lt;&lt; " ";
+    	}
+    	cout &lt;&lt; endl;
+    	<span class="kw">return</span> 0;
+    }</pre>
+
+      <h2 id="wiggle">三、摇摆排序 II：拼上中位数</h2>
+      <p>题目要 arr[0] &lt; arr[1] &gt; arr[2] &lt; arr[3] &gt; …，O(n) 时间、O(1) 空间，输入保证有解。思路：把数组按中位数三分区，小于中位数的放一边、等于的中间、大于的另外一边。wiggle 的布局是偶数位（谷）放小数、奇数位（峰）放大数，让 <mid 的落偶数位、>mid 的落奇数位。三分区得到的是物理数组「<mid | =mid | >mid」，不是交错布局，靠完美洗牌来交错：</p>
+      <p>n 为偶数：shuffle(0, n−1) 把数组交错成「右半、左半…」，再整体 reverse 一次，正好变成「左半、右半…」的 wiggle 布局。n 为奇数：shuffle(1, n−1)，位置 0 保持不动（它本来就是谷位），从 1 开始交错。</p>
+      <figure class="fig" id="figWiggle"></figure>
+      <p>为什么要 reverse：洗牌后偶数位放的是原右半（大数）、奇数位放原左半（小数），wiggle 要偶数位小、奇数位大，整个反一下正好对调。奇数时位置 0 单独留在外面，是因为它没有相邻的左侧谷位，参与洗牌会把布局弄乱。</p>
+
+      <h2 id="code6">四、摇摆排序 II 实现</h2>
+      <p>randomizedSelect 找第 n/2 名的中位数并顺手三分区，再按奇偶调洗牌。测试链接：<a href="https://leetcode.cn/problems/wiggle-sort-ii/" target="_blank">LeetCode 324 摆动排序 II</a>，题目保证有解。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 1000005;
+
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> start[MAXN];
+    <span class="kw">int</span> split[MAXN];
+    <span class="kw">int</span> size;
+    <span class="kw">int</span> first, last;
+
+    <span class="kw">void</span> <span class="fn">swap</span>(<span class="kw">int</span> i, <span class="kw">int</span> j) {
+    	<span class="kw">int</span> t = arr[i];
+    	arr[i] = arr[j];
+    	arr[j] = t;
+    }
+
+    <span class="kw">void</span> <span class="fn">partition</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> x) {
+    	first = l;
+    	last = r;
+    	<span class="kw">int</span> i = l;
+    	<span class="kw">while</span> (i &lt;= last) {
+    		<span class="kw">if</span> (arr[i] == x) {
+    			i++;
+    		} <span class="kw">else</span> <span class="kw">if</span> (arr[i] &lt; x) {
+    			swap(first++, i++);
+    		} <span class="kw">else</span> {
+    			swap(i, last--);
+    		}
+    	}
+    }
+
+    <span class="kw">int</span> <span class="fn">randomizedSelect</span>(<span class="kw">int</span> n, <span class="kw">int</span> i) {
+    	<span class="kw">int</span> ans = 0;
+    	<span class="kw">for</span> (<span class="kw">int</span> l = 0, r = n - 1; l &lt;= r;) {
+    		partition(l, r, arr[l + rand() % (r - l + 1)]);
+    		<span class="kw">if</span> (i &lt; first) {
+    			r = first - 1;
+    		} <span class="kw">else</span> <span class="kw">if</span> (i &gt; last) {
+    			l = last + 1;
+    		} <span class="kw">else</span> {
+    			ans = arr[i];
+    			<span class="kw">break</span>;
+    		}
+    	}
+    	<span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">reverse</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+    	<span class="kw">while</span> (l &lt; r) {
+    		swap(l++, r--);
+    	}
+    }
+
+    <span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> l, <span class="kw">int</span> m, <span class="kw">int</span> r) {
+    	reverse(l, m);
+    	reverse(m + 1, r);
+    	reverse(l, r);
+    }
+
+    <span class="kw">int</span> <span class="fn">to</span>(<span class="kw">int</span> i, <span class="kw">int</span> l, <span class="kw">int</span> r) {
+    	<span class="kw">if</span> (i &lt;= (l + r) &gt;&gt; 1) {
+    		<span class="kw">return</span> i + (i - l + 1);
+    	} <span class="kw">else</span> {
+    		<span class="kw">return</span> i - (r - i + 1);
+    	}
+    }
+
+    <span class="kw">void</span> <span class="fn">circle</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+    	<span class="kw">for</span> (<span class="kw">int</span> j = 1, init, cur, next, curv, nextv; j &lt;= i; j++) {
+    		init = cur = l + start[j] - 1;
+    		next = to(cur, l, r);
+    		curv = arr[cur];
+    		<span class="kw">while</span> (next != init) {
+    			nextv = arr[next];
+    			arr[next] = curv;
+    			curv = nextv;
+    			cur = next;
+    			next = to(cur, l, r);
+    		}
+    		arr[init] = curv;
+    	}
+    }
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> n) {
+    	size = 0;
+    	<span class="kw">for</span> (<span class="kw">int</span> s = 1, p = 2; p &lt;= n; s *= 3, p = s * 3 - 1) {
+    		start[++size] = s;
+    		split[size] = p;
+    	}
+    }
+
+    <span class="kw">void</span> <span class="fn">shuffle</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+    	<span class="kw">int</span> n = r - l + 1;
+    	build(n);
+    	<span class="kw">for</span> (<span class="kw">int</span> i = size, m; n &gt; 0;) {
+    		<span class="kw">if</span> (split[i] &lt;= n) {
+    			m = (l + r) / 2;
+    			rotate(l + split[i] / 2, m, m + split[i] / 2);
+    			circle(l, l + split[i] - 1, i);
+    			l += split[i];
+    			n -= split[i];
+    		} <span class="kw">else</span> {
+    			i--;
+    		}
+    	}
+    }
+
+    <span class="kw">void</span> <span class="fn">wiggleSort</span>(<span class="kw">int</span> n) {
+    	randomizedSelect(n, n / 2);
+    	<span class="kw">if</span> ((n &amp; 1) == 0) {
+    		shuffle(0, n - 1);
+    		reverse(0, n - 1);
+    	} <span class="kw">else</span> {
+    		shuffle(1, n - 1);
+    	}
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+    	ios::sync_with_stdio(<span class="kw">false</span>);
+    	cin.tie(<span class="kw">nullptr</span>);
+    	srand(time(<span class="kw">nullptr</span>));
+    	<span class="kw">int</span> n;
+    	cin &gt;&gt; n;
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+    		cin &gt;&gt; arr[i];
+    	}
+    	wiggleSort(n);
+    	<span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; n; i++) {
+    		cout &lt;&lt; arr[i] &lt;&lt; " ";
+    	}
+    	cout &lt;&lt; endl;
+    	<span class="kw">return</span> 0;
+    }</pre>
+
+      <div class="viz">
+        <p class="viz-title">演示 · 摇摆排序：中位数三分区，洗牌交错，逐对验证</p>
+        <div class="viz-controls">
+          <select id="wgSel">
+            <option value="A" selected>A：1 0 2 1 1 0 2 1（n=8）</option>
+            <option value="B">B：1 2 1 1 0 2 0（n=7）</option>
+            <option value="C">C：1 1 2 2 1 2 0 0 2 1（n=10）</option>
+          </select>
+          <button id="wgNext">下一步</button>
+          <button id="wgReset">重置</button>
+        </div>
+        <div id="wgCanvas" style="min-height:360px;"></div>
+        <p class="stepnote" id="wgNote"></p>
+      </div>
+
+      <h2 id="sum">总结</h2>
+      <p>完美洗牌把「原地交叉一段」归结为下标映射 to(i) 的循环分解。特殊长度 (3^i+1)/2 时循环个数和起点有闭合公式（第 j 个起点 3^(j−1)），任意偶数长度从大到小拆成特殊长度块，每块三段旋转加循环怼，整段 O(n)、O(1)。摇摆排序 II 的进阶解是两个模块的组合：随机选择把中位数三分区，再按奇偶调完美洗牌交错，偶数洗完整段反转、奇数从位置 1 开始洗。交错后逐对验证就能确认布局。这两个技巧都不开额外数组，适合内存受限的场景。</p>
+
+      <h2 id="problems">相关题目</h2>
+      <table class="complexity">
+        <tr><th>平台</th><th>题目</th><th>链接</th></tr>
+        <tr><td>LeetCode</td><td>324 摆动排序 II</td><td><a href="https://leetcode.cn/problems/wiggle-sort-ii/" target="_blank">摆动排序 II</a></td></tr>
+        <tr><td>对数器</td><td>完美洗牌（原地调整偶数长度范围）</td><td>无公开链接，对数器验证</td></tr>
+      </table>
+
+      <h2 id="ref">参考材料</h2>
+      <table class="complexity">
+        <tr><th>来源</th><th>名字</th><th>链接</th></tr>
+        <tr><td>左程云</td><td>算法讲解146【扩展】康托展开、约瑟夫环、完美洗牌</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var P = 'http://www.w3.org/2000/svg';
+  function T(x,y,s,fs){ var t=document.createElementNS(P,'text'); t.setAttribute('x',x); t.setAttribute('y',y); t.setAttribute('font-size',fs||13); t.textContent=s; return t; }
+  function R(x,y,w,h){ var r=document.createElementNS(P,'rect'); r.setAttribute('x',x); r.setAttribute('y',y); r.setAttribute('width',w); r.setAttribute('height',h); r.setAttribute('rx',6); r.setAttribute('fill','#f2f6fc'); r.setAttribute('stroke','#7aa2d0'); return r; }
+  function LN(x1,y1,x2,y2){ var l=document.createElementNS(P,'line'); l.setAttribute('x1',x1); l.setAttribute('y1',y1); l.setAttribute('x2',x2); l.setAttribute('y2',y2); l.setAttribute('stroke','#94a8c0'); l.setAttribute('stroke-width',1.2); return l; }
+  function mount(id, svg){ document.getElementById(id).appendChild(svg); }
+
+  // ===== 图1：n=8 下标循环 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 680 240');
+    svg.appendChild(T(16, 26, 'n=8（特殊长度 3^2−1）的 to() 映射拆成 2 个循环', 12.5));
+    // 下标行
+    [0,1,2,3,4,5,6,7].forEach(function(i){ var rc=R(40+i*76, 44, 62, 26); svg.appendChild(rc); svg.appendChild(T(71+i*76, 62, 'p'+i, 10.5)); });
+    // to 目标行
+    [['→ 1','→ 3','→ 5','→ 7','→ 0','→ 2','→ 4','→ 6']].forEach(function(v,i){
+      v.forEach(function(s,j){ svg.appendChild(T(71+j*76, 90, s, 10.5)); });
+    });
+    svg.appendChild(T(16, 112, '循环 1（蓝）：0 → 1 → 3 → 7 → 6 → 4 → 0', 11.5));
+    svg.appendChild(T(16, 136, '循环 2（橙）：2 → 5 → 2', 11.5));
+    svg.appendChild(T(16, 160, '两个起点：相对块左端偏移 start[j]−1 = 0 和 2（start[1]=1、start[2]=3）', 11));
+    svg.appendChild(T(16, 184, '循环怼：从起点沿 to() 走到回到起点，滚动值覆盖整个循环', 11));
+    svg.appendChild(T(16, 208, '特殊长度 3^k − 1：2、8、26、80…，长度 8 的循环数 = 2 = k', 11));
+    mount('figCycle', svg);
+  })();
+
+  // ===== 图2：拆分 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 680 240');
+    svg.appendChild(T(16, 26, '特殊长度序列：3^k − 1（k=1,2,3…）', 12.5));
+    var seq = ['2 (3^1−1)', '8 (3^2−1)', '26 (3^3−1)', '80 (3^4−1)'];
+    seq.forEach(function(s,i){ var rc=R(16+i*160, 44, 148, 30); svg.appendChild(rc); svg.appendChild(T(34+i*160, 64, s, 11)); });
+    svg.appendChild(T(16, 96, '拆分示例：n=14 一块 14；n=10 拆 8+2；n=8 一块 8；n=6 拆 2+2+2', 11.5));
+    // 块处理
+    svg.appendChild(T(16, 132, '每块两步：', 12));
+    svg.appendChild(T(16, 156, '① 三段旋转 rotate：把块内右半挪到左半该去的位置', 11.5));
+    svg.appendChild(T(16, 180, '② 循环怼 circle：沿块内每个循环滚动值（起点偏移 start[j]−1）', 11.5));
+    svg.appendChild(T(16, 210, '主循环：取 ≤ n 的最大特殊长度处理一块，剩下的换小一号，直到 n 为 0', 11.5));
+    mount('figSplit', svg);
+  })();
+
+  // ===== 图3：wiggle 布局 =====
+  (function(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 680 200');
+    svg.appendChild(T(16, 26, '中位数三分区后，洗牌交错，偶位放的是原右半（大），不满足 wiggle', 12.5));
+    // 上排：洗牌后 D x D x D x（偶位大）
+    ['大','小','大','小','大','小'].forEach(function(v,i){ var rc=R(120+i*78, 52, 60, 28); svg.appendChild(rc); svg.appendChild(T(150+i*78, 71, v, 11.5)); });
+    svg.appendChild(T(16, 108, '偶数位（谷）要求小数，却放大数：0 &gt; 1 相邻对失败，整体反转', 11.5));
+    // 下排：反转后 x D x D x D
+    ['小','大','小','大','小','大'].forEach(function(v,i){ var rc=R(120+i*78, 124, 60, 28); svg.appendChild(rc); svg.appendChild(T(150+i*78, 143, v, 11.5)); });
+    svg.appendChild(T(16, 176, '反转后：小 &lt; 大 &gt; 小 &lt; 大 &gt; 小 &lt; 大，wiggle 条件逐对成立', 11.5));
+    mount('figWiggle', svg);
+  })();
+
+  // ===== 演示：摇摆排序 =====
+  var wgSel = document.getElementById('wgSel');
+  var wgNext = document.getElementById('wgNext');
+  var wgReset = document.getElementById('wgReset');
+  var wgNote = document.getElementById('wgNote');
+  var wgCanvas = document.getElementById('wgCanvas');
+  var WGSET = {
+    A: [1,0,2,1,1,0,2,1],
+    B: [1,2,1,1,0,2,0],
+    C: [1,1,2,2,1,2,0,0,2,1]
+  };
+  var wgState = null, wgAt = 0;
+
+  // 完美洗牌 JS 移植（0-based，l/r 含端点）
+  function wgSwap(a,i,j){ var t=a[i]; a[i]=a[j]; a[j]=t; }
+  function wgRev(a,l,r){ while(l<r) wgSwap(a,l++,r--); }
+  function wgRot(a,l,m,r){ wgRev(a,l,m); wgRev(a,m+1,r); wgRev(a,l,r); }
+  function wgTo(i,l,r){ if (i <= (l+r)>>1) return i+(i-l+1); return i-(r-i+1); }
+  function wgCircle(a,l,r,idx,start,split){
+    for (var j=1;j<=idx;j++){
+      var init=cur=l+start[j]-1;
+      var next=wgTo(cur,l,r);
+      var curv=a[cur];
+      while(next!==init){ var nextv=a[next]; a[next]=curv; curv=nextv; cur=next; next=wgTo(cur,l,r); }
+      a[init]=curv;
+    }
+  }
+  function wgBuild(n,start,split){
+    var sz=0;
+    for (var s=1,p=2;p<=n;s*=3,p=s*3-1){ start[++sz]=s; split[sz]=p; }
+    return sz;
+  }
+  function wgShuffle(a,l,r){
+    var n=r-l+1, start=[0], split=[0];
+    var size=wgBuild(n,start,split);
+    for (var i=size; n>0;){
+      if (split[i]<=n){
+        var m=(l+r)>>1;
+        wgRot(a, l+split[i]/2, m, m+split[i]/2);
+        wgCircle(a, l, l+split[i]-1, i, start, split);
+        l+=split[i]; n-=split[i];
+      } else i--;
+    }
+  }
+  // 三分区
+  function wgPart(a,l,r,x){
+    var first=l, last=r, i=l;
+    while(i<=last){
+      if(a[i]===x) i++;
+      else if(a[i]<x){ wgSwap(a,first++,i++); }
+      else { wgSwap(a,i,last--); }
+    }
+    return {first:first, last:last};
+  }
+  function wgWiggle(a){
+    var n=a.length;
+    // 随机选择：找第 n/2 名（0-based）并三分区（固定种子，单次即确定）
+    var l=0, r=n-1, i=n/2|0, mid;
+    var seed=20261017;
+    function rnd(){ seed=(seed+0x6D2B79F5)|0; var t=Math.imul(seed^(seed>>>15),seed|1); seed=t+Math.imul(t^(t>>>7),t|61)|0; return ((seed^(seed>>>14))>>>0)/4294967296; }
+    while(l<=r){
+      var x=a[l + Math.floor(rnd()*(r-l+1))];
+      var p=wgPart(a,l,r,x);
+      if(i<p.first){ r=p.first-1; }
+      else if(i>p.last){ l=p.last+1; }
+      else { mid=a[i]; break; }
+    }
+    var parts = {first:0, last:0};
+    // 记录三分区后的物理数组与分区边界（重新跑一遍 partition 拿边界）
+    var tmp = a.slice(); var l0=0, r0=n-1, i0=n/2|0;
+    seed=20261017;
+    function rnd2(){ seed=(seed+0x6D2B79F5)|0; var t=Math.imul(seed^(seed>>>15),seed|1); seed=t+Math.imul(t^(t>>>7),t|61)|0; return ((seed^(seed>>>14))>>>0)/4294967296; }
+    while(l0<=r0){
+      var x0=a[l0 + Math.floor(rnd2()*(r0-l0+1))];
+      var pp=wgPart(a,l0,r0,x0);
+      if(i0<pp.first){ r0=pp.first-1; }
+      else if(i0>pp.last){ l0=pp.last+1; }
+      else { parts={first:pp.first, last:pp.last}; break; }
+    }
+    // wiggle
+    if((n&1)===0){ wgShuffle(a,0,n-1); wgRev(a,0,n-1); }
+    else { wgShuffle(a,1,n-1); }
+    return {mid:mid, first:parts.first, last:parts.last};
+  }
+  function wgBuildState(){
+    var a = WGSET[wgSel.value].slice();
+    var orig = a.slice();
+    var info = wgWiggle(a);
+    var n = a.length;
+    // 验证
+    var checks = [];
+    for (var i=0;i<n-1;i++){
+      var ok = (i%2===0) ? (a[i]<a[i+1]) : (a[i]>a[i+1]);
+      checks.push(ok);
+    }
+    wgState = {orig:orig, mid:info.mid, first:info.first, last:info.last, out:a, checks:checks, n:n};
+  }
+  function wgRender(){
+    var svg = document.createElementNS(P,'svg');
+    svg.setAttribute('viewBox','0 0 680 320');
+    var n = wgState.n;
+    if (wgAt === 0){
+      svg.appendChild(T(16, 28, '原始数组（长度 ' + n + '）', 12.5));
+      for (var i=0;i<n;i++){ var rc=R(120+i*52, 44, 42, 30); svg.appendChild(rc); svg.appendChild(T(141+i*52, 64, String(wgState.orig[i]), 11.5)); }
+      svg.appendChild(T(16, 110, '第 ' + (n/2|0) + ' 名的中位数会被选出来做三分区', 11.5));
+    } else if (wgAt === 1){
+      svg.appendChild(T(16, 28, '按中位数 ' + wgState.mid + ' 三分区：<mid（蓝） =mid（灰） >mid（橙）', 12.5));
+      for (var i=0;i<n;i++){
+        var rc=R(120+i*52, 44, 42, 30);
+        svg.appendChild(rc);
+        var fill = i < wgState.first ? '#dbe8f7' : (i <= wgState.last ? '#eef0f3' : '#fde9d9');
+        rc.setAttribute('fill', fill);
+        svg.appendChild(T(141+i*52, 64, String(wgState.out[i]), 11.5));
+      }
+      svg.appendChild(T(16, 110, '左段 < ' + wgState.mid + '（' + wgState.first + ' 个），中段 = ' + wgState.mid + '，右段 > ' + wgState.mid, 11.5));
+    } else if (wgAt === 2){
+      svg.appendChild(T(16, 28, '完美洗牌交错' + ((n&1)===0 ? ' + 整体反转' : '（从位置 1 开始）') + '，得到 wiggle 布局', 12.5));
+      for (var i=0;i<n;i++){ var rc=R(120+i*52, 44, 42, 30); svg.appendChild(rc); svg.appendChild(T(141+i*52, 64, String(wgState.out[i]), 11.5)); }
+      svg.appendChild(T(16, 110, '偶位（谷）小数、奇位（峰）大数，下一步逐对验证', 11.5));
+    } else {
+      svg.appendChild(T(16, 28, '逐对验证 wiggle 条件', 12.5));
+      for (var i=0;i<n;i++){ var rc=R(120+i*52, 44, 42, 30); svg.appendChild(rc); svg.appendChild(T(141+i*52, 64, String(wgState.out[i]), 11.5)); }
+      var allOk = true;
+      for (var i=0;i<n-1;i++){
+        var ok = wgState.checks[i];
+        if (!ok) allOk = false;
+        var x = 120+i*52+21, y = 92;
+        svg.appendChild(T(x-8, y+14, ok ? '✓' : '✗', 14));
+        svg.appendChild(T(x-40, y+30, String(wgState.out[i]) + (i%2===0?'<':'>') + String(wgState.out[i+1]), 9.5));
+      }
+      svg.appendChild(T(16, 150, allOk ? '全部满足：' + wgState.out.join(' ') : '有对不满足，布局失败', 13));
+    }
+    wgCanvas.innerHTML = '';
+    wgCanvas.appendChild(svg);
+    var labels = ['原始数组', '中位数三分区', '完美洗牌交错', '逐对验证'];
+    wgNote.textContent = labels[Math.min(wgAt,3)] + '（第 ' + (Math.min(wgAt,3)+1) + ' / 4 帧）';
+    wgNext.disabled = wgAt >= 3;
+  }
+  wgReset.addEventListener('click', function(){ wgAt = 0; wgBuildState(); wgRender(); });
+  wgNext.addEventListener('click', function(){ if (wgAt < 3) { wgAt++; wgRender(); } });
+  wgSel.addEventListener('change', function(){ wgAt = 0; wgBuildState(); wgRender(); });
+  wgBuildState(); wgRender();
+})();</script>
+</body>
+</html>
