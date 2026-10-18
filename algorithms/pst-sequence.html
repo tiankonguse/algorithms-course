@@ -1,0 +1,404 @@
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>可持久化线段树：版本里记位置信息</h1>
+      <p class="intro">上一讲的可持久化线段树，版本里记的是「每个值域上有几个数」。这一讲的版本里换着记别的东西：第一次出现的位置、最后出现的位置。记的信息不同，能回答的问题就完全不同。</p>
+
+      <h2>一、从右往左建版本：每种数第一次出现的位置</h2>
+      <p>题目要求：给定 arr[1..n]，每次查询 [l, r]，把区间里每种数第一次出现的位置按从小到大排成一个序列，打印第 ceil(s/2) 个位置，s 是区间里不同数的个数。m、n ≤ 2e5，还带强制在线。</p>
+      <p>直接做是每个查询从左往右扫一遍，O(nm) 直接超时。换一个建版本的顺序：从右往左。root[i] 表示处理完 arr[i..n] 之后，「每种数第一次出现（也就是最靠左那次）的位置集合」。从 i+1 推到 i 时：</p>
+      <p>1）arr[i] 之前没出现过，直接把位置 i 标记上；<br>
+      2）arr[i] 出现过（更靠右的位置 j 还标着），现在 i 更靠左，它才是「第一次出现」，所以取消位置 j、标记位置 i。</p>
+      <p>用一个 pos 数组记每个值当前标在哪个位置，root[i] 从 root[i+1] 继承，最多做两次单点修改就得到新版本。注意线段树建在位置 1..n 上，不是值域上：每个叶子是一个位置，值域是 arr 的取值。</p>
+      <figure class="fig">
+        <svg viewBox="0 0 680 200" width="680" height="200">
+          <text x="30" y="28" font-size="13" fill="#555">arr = [3, 1, 4, 2, 1]，从右往左扫</text>
+          <rect x="60" y="40" width="60" height="34" fill="#eef" stroke="#888"/>
+          <rect x="120" y="40" width="60" height="34" fill="#eef" stroke="#888"/>
+          <rect x="180" y="40" width="60" height="34" fill="#eef" stroke="#888"/>
+          <rect x="240" y="40" width="60" height="34" fill="#eef" stroke="#888"/>
+          <rect x="300" y="40" width="60" height="34" fill="#ffd" stroke="#888"/>
+          <text x="90" y="61" text-anchor="middle" font-size="13">3</text>
+          <text x="150" y="61" text-anchor="middle" font-size="13">1</text>
+          <text x="210" y="61" text-anchor="middle" font-size="13">4</text>
+          <text x="270" y="61" text-anchor="middle" font-size="13">2</text>
+          <text x="330" y="61" text-anchor="middle" font-size="13">1</text>
+          <text x="60" y="88" font-size="11" fill="#555">1</text>
+          <text x="120" y="88" font-size="11" fill="#555">2</text>
+          <text x="180" y="88" font-size="11" fill="#555">3</text>
+          <text x="240" y="88" font-size="11" fill="#555">4</text>
+          <text x="300" y="88" font-size="11" fill="#555">5</text>
+          <line x1="330" y1="100" x2="330" y2="120" stroke="#888" marker-end=""/>
+          <text x="330" y="132" text-anchor="middle" font-size="12" fill="#a55">扫描方向</text>
+          <rect x="440" y="40" width="200" height="60" fill="#fff" stroke="#a55"/>
+          <text x="450" y="62" font-size="12" fill="#555">i=5：值 1 首次出现</text>
+          <text x="450" y="84" font-size="12" fill="#555">标记位置 5</text>
+          <rect x="440" y="120" width="200" height="60" fill="#fff" stroke="#a55"/>
+          <text x="450" y="142" font-size="12" fill="#555">i=2：值 1 已标在 5</text>
+          <text x="450" y="164" font-size="12" fill="#555">取消 5，改标位置 2</text>
+        </svg>
+        <figcaption>从右往左建版本：同一值出现更靠左的位置时，取消旧的、标记新的</figcaption>
+      </figure>
+
+      <p>查询 [l, r] 时，在 root[l] 上数 [l, r] 范围内的标记数 s。为什么能这么数：root[l] 只含 l..n 里每种数的首次位置，比 l 更左的位置不在版本里，比 r 更右的位置不落在查询范围，所以 [l, r] 内的标记恰好是区间里每种数第一次出现的位置。第 ceil(s/2) 个位置用 queryKth 取。两趟 O(log n)，一趟数个数、一趟取第 k 个。</p>
+      <div class="code-block"><h3>第一次出现位置的序列（HDU5919）</h3>
+            <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200002;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = MAXN * 37;
+    <span class="kw">int</span> cases, n, m;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> pos[MAXN];
+    <span class="kw">int</span> root[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> firstSize[MAXT];
+    <span class="kw">int</span> cnt;
+
+    <span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> rt = ++cnt;
+        <span class="kw">if</span> (l &lt; r) {
+            <span class="kw">int</span> mid = (l + r) / 2;
+            ls[rt] = build(l, mid);
+            rs[rt] = build(mid + 1, r);
+        }
+        firstSize[rt] = 0;
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">update</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = ++cnt;
+        ls[rt] = ls[i];
+        rs[rt] = rs[i];
+        firstSize[rt] = firstSize[i] + jobv;
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span> rt;
+        }
+        <span class="kw">int</span> mid = (l + r) / 2;
+        <span class="kw">if</span> (jobi &lt;= mid) {
+            ls[rt] = update(jobi, jobv, l, mid, ls[rt]);
+        } <span class="kw">else</span> {
+            rs[rt] = update(jobi, jobv, mid + 1, r, rs[rt]);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">querySize</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="kw">return</span> firstSize[i];
+        }
+        <span class="kw">int</span> mid = (l + r) / 2;
+        <span class="kw">int</span> ans = 0;
+        <span class="kw">if</span> (jobl &lt;= mid) {
+            ans += querySize(jobl, jobr, l, mid, ls[i]);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+            ans += querySize(jobl, jobr, mid + 1, r, rs[i]);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">queryKth</span>(<span class="kw">int</span> jobk, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span> l;
+        }
+        <span class="kw">int</span> mid = (l + r) / 2;
+        <span class="kw">int</span> lsize = firstSize[ls[i]];
+        <span class="kw">if</span> (lsize &gt;= jobk) {
+            <span class="kw">return</span> queryKth(jobk, l, mid, ls[i]);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> queryKth(jobk - lsize, mid + 1, r, rs[i]);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        cnt = 0;
+        memset(pos, 0, <span class="kw">sizeof</span>(pos));
+        root[n + 1] = build(1, n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = n; i &gt;= 1; i--) {
+            <span class="kw">if</span> (pos[arr[i]] == 0) {
+                root[i] = update(i, 1, 1, n, root[i + 1]);
+            } <span class="kw">else</span> {
+                root[i] = update(pos[arr[i]], -1, 1, n, root[i + 1]);
+                root[i] = update(i, 1, 1, n, root[i]);
+            }
+            pos[arr[i]] = i;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; cases;
+        <span class="kw">for</span> (<span class="kw">int</span> t = 1; t &lt;= cases; t++) {
+            cin &gt;&gt; n &gt;&gt; m;
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+                cin &gt;&gt; arr[i];
+            }
+            prepare();
+            cout &lt;&lt; "Case #" &lt;&lt; t &lt;&lt; ":";
+            <span class="kw">for</span> (<span class="kw">int</span> i = 1, a, b, l, r, k, lastAns = 0; i &lt;= m; i++) {
+                cin &gt;&gt; l &gt;&gt; r;
+                a = (l + lastAns) % n + 1;
+                b = (r + lastAns) % n + 1;
+                l = min(a, b);
+                r = max(a, b);
+                k = (querySize(l, r, 1, n, root[l]) + 1) / 2;
+                lastAns = queryKth(k, 1, n, root[l]);
+                cout &lt;&lt; " " &lt;&lt; lastAns;
+            }
+            cout &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+      </div>
+
+      <h2>二、值域树记「最后出现位置的最小值」：最小自然数</h2>
+      <p>题目要求：查询 [l, r] 内没出现过的最小自然数，0 也算自然数。n、m ≤ 2e5。这题版本里记的是每个值「最后一次出现的位置」。</p>
+      <p>先定值域：[0, n]。数组只有 n 个数，值域却有 n+1 个值，鸽子笼保证 [0, n] 里至少有一个没出现，答案一定在这个范围内。</p>
+      <p>root[i] 处理完 arr[1..i]：叶子 v 存 v 最后出现的位置，没出现过的值保持 0。节点的 lateLeft 存「子树里所有值最后出现位置的最小值」。查询 [l, r]：值 v 在区间里没出现过，等价于 v 的最后出现位置 < l。于是在 root[r] 上找最小的 v，满足 v 的 last < l：优先下左子树，左子树的 lateLeft ≥ l 说明左半边所有值最后都出现在区间里，答案只能去右子树。</p>
+      <figure class="fig">
+        <svg viewBox="0 0 680 200" width="680" height="200">
+          <text x="30" y="28" font-size="13" fill="#555">值域 [0,4]，root 已处理 arr=[1,0,1,2]，查询 [2,4]</text>
+          <circle cx="120" cy="50" r="16" fill="#cde"/>
+          <text x="120" y="55" text-anchor="middle" font-size="11">min=0</text>
+          <circle cx="60" cy="110" r="13" fill="#eef"/>
+          <text x="60" y="114" text-anchor="middle" font-size="10">2</text>
+          <circle cx="180" cy="110" r="13" fill="#eef"/>
+          <text x="180" y="114" text-anchor="middle" font-size="10">2</text>
+          <circle cx="320" cy="110" r="13" fill="#eef"/>
+          <text x="320" y="114" text-anchor="middle" font-size="10">0</text>
+          <circle cx="40" cy="170" r="12" fill="#eef"/>
+          <text x="40" y="174" text-anchor="middle" font-size="10">0:2</text>
+          <circle cx="90" cy="170" r="12" fill="#ffd" stroke="#a55"/>
+          <text x="90" y="174" text-anchor="middle" font-size="10">1:3</text>
+          <circle cx="150" cy="170" r="12" fill="#eef"/>
+          <text x="150" y="174" text-anchor="middle" font-size="10">2:4</text>
+          <circle cx="300" cy="170" r="12" fill="#eef"/>
+          <text x="300" y="174" text-anchor="middle" font-size="10">3:0</text>
+          <circle cx="350" cy="170" r="12" fill="#eef"/>
+          <text x="350" y="174" text-anchor="middle" font-size="10">4:0</text>
+          <line x1="60" y1="66" x2="50" y2="156" stroke="#888"/>
+          <line x1="60" y1="66" x2="70" y2="156" stroke="#888"/>
+          <line x1="180" y1="66" x2="160" y2="156" stroke="#888"/>
+          <line x1="320" y1="66" x2="300" y2="156" stroke="#888"/>
+          <text x="470" y="50" font-size="12" fill="#555">叶子 = 值 : 最后出现位置</text>
+          <text x="470" y="70" font-size="12" fill="#555">没出现过 = 0</text>
+          <text x="470" y="100" font-size="12" fill="#555">查询 [2,4]：找 last &lt; 2</text>
+          <text x="470" y="120" font-size="12" fill="#a55">值 3、4 的 last=0 &lt; 2</text>
+          <text x="470" y="140" font-size="12" fill="#555">最小的是 3 → 答案 3</text>
+        </svg>
+        <figcaption>叶子存最后出现位置，节点存子树最小值，下钻找第一个 last &lt; l 的值</figcaption>
+      </figure>
+      <p>值域从 0 开始，build 也建 [0, n]。arr[i] 超过 n 或小于 0 的值直接忽略：它们不可能成为 [0, n] 里的缺失值，记了反而把 lateLeft 弄乱。</p>
+      <div class="code-block"><h3>区间内没有出现的最小自然数（P4137）</h3>
+            <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = MAXN * 22;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> root[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> lateLeft[MAXT];
+    <span class="kw">int</span> cnt;
+
+    <span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> rt = ++cnt;
+        lateLeft[rt] = 0;
+        <span class="kw">if</span> (l &lt; r) {
+            <span class="kw">int</span> mid = (l + r) / 2;
+            ls[rt] = build(l, mid);
+            rs[rt] = build(mid + 1, r);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">update</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = ++cnt;
+        ls[rt] = ls[i];
+        rs[rt] = rs[i];
+        lateLeft[rt] = lateLeft[i];
+        <span class="kw">if</span> (l == r) {
+            lateLeft[rt] = jobv;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) / 2;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                ls[rt] = update(jobi, jobv, l, mid, ls[rt]);
+            } <span class="kw">else</span> {
+                rs[rt] = update(jobi, jobv, mid + 1, r, rs[rt]);
+            }
+            lateLeft[rt] = min(lateLeft[ls[rt]], lateLeft[rs[rt]]);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> pos, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span> l;
+        }
+        <span class="kw">int</span> mid = (l + r) / 2;
+        <span class="kw">if</span> (lateLeft[ls[i]] &lt; pos) {
+            <span class="kw">return</span> query(pos, l, mid, ls[i]);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> query(pos, mid + 1, r, rs[i]);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        cnt = 0;
+        root[0] = build(0, n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">if</span> (arr[i] &gt; n || arr[i] &lt; 0) {
+                root[i] = root[i - 1];
+            } <span class="kw">else</span> {
+                root[i] = update(arr[i], i, 0, n, root[i - 1]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        prepare();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, l, r; i &lt;= m; i++) {
+            cin &gt;&gt; l &gt;&gt; r;
+            cout &lt;&lt; query(l, 0, n, root[r]) &lt;&lt; "\n";
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+      </div>
+
+      <h2>三、演示：从右往左建版本</h2>
+      <div class="viz">
+        <h3 class="viz-title">从右往左建版本</h3>
+        <p class="intro">数组 [3, 1, 4, 2, 1]，位置从左到右。点「下一步」看扫描到每个位置时，标记集合怎么变。</p>
+        <div class="viz-canvas" id="vizCanvas1"></div>
+        <p class="stepnote" id="stepNote1"></p>
+        <div class="viz-controls"><button>重置</button><button>下一步</button></div>
+      </div>
+
+      <h2>四、总结</h2>
+      <p>这一讲的两个题共用一棵可持久化线段树，差别只在版本里记什么：题1 在位置域上记「首次出现」，从右往左建版本；题2 在值域上记「最后出现位置的最小值」，查询就是顺着 lateLeft 下钻找缺口。共同点是版本差：任何一个区间问题，只要能把信息拆成前缀可累积的形式，就能用两个版本相减回答。树上也有同样的玩法，下一讲把版本差搬到树上。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>HDU</td><td>5919 Sequence II</td><td><a href="https://acm.hdu.edu.cn/showproblem.php?pid=5919" target="_blank">查看题目</a></td></tr>
+          <tr><td>洛谷</td><td>P4137 Rmq Problem / mex</td><td><a href="https://www.luogu.com.cn/problem/P4137" target="_blank">查看题目</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解158【挺难】可持久化线段树的相关题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">查看仓库</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  // 从右往左建版本演示：arr=[3,1,4,2,1]，5 个位置
+  var svgNS = 'http://www.w3.org/2000/svg';
+  var HH = 240;
+  var steps = [
+    {marked: [], note: '初始：root[6] 空版本，任何位置都没标记。'},
+    {marked: [4], note: 'i=5：值 1 第一次出现（从右往左第一次见），标记位置 5。'},
+    {marked: [3, 4], note: 'i=4：值 2 首次出现，标记位置 4。'},
+    {marked: [2, 3, 4], note: 'i=3：值 4 首次出现，标记位置 3。'},
+    {marked: [1, 2, 3], note: 'i=2：值 1 已标在位置 5，这里更靠左，取消 5、标记位置 2。'},
+    {marked: [0, 1, 2, 3], note: 'i=1：值 3 首次出现，标记位置 1。root[1] 就是「每种数第一次出现的位置」集合。'}
+  ];
+  var MAXSTEP = steps.length;
+  var step = 0;
+
+  function draw() {
+    if (step >= MAXSTEP) return;
+    var box = document.getElementById('vizCanvas1');
+    box.innerHTML = '';
+    var svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 680 ' + HH);
+    svg.setAttribute('width', '680');
+    svg.setAttribute('height', HH);
+    var s = steps[step];
+    var vals = [3, 1, 4, 2, 1];
+    for (var i = 0; i < 5; i++) {
+      var x = 80 + i * 90;
+      var c = document.createElementNS(svgNS, 'rect');
+      c.setAttribute('x', x); c.setAttribute('y', 40); c.setAttribute('width', 70); c.setAttribute('height', 40);
+      c.setAttribute('fill', s.marked.indexOf(i) >= 0 ? '#fdd' : '#eef');
+      c.setAttribute('stroke', '#888');
+      svg.appendChild(c);
+      var t = document.createElementNS(svgNS, 'text');
+      t.setAttribute('x', x + 35); t.setAttribute('y', 65);
+      t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '16');
+      t.textContent = vals[i];
+      svg.appendChild(t);
+      var p = document.createElementNS(svgNS, 'text');
+      p.setAttribute('x', x + 35); p.setAttribute('y', 96);
+      p.setAttribute('text-anchor', 'middle'); p.setAttribute('font-size', '11'); p.setAttribute('fill', '#555');
+      p.textContent = '位置 ' + (i + 1);
+      svg.appendChild(p);
+      if (s.marked.indexOf(i) >= 0) {
+        var m = document.createElementNS(svgNS, 'text');
+        m.setAttribute('x', x + 35); m.setAttribute('y', 118);
+        m.setAttribute('text-anchor', 'middle'); m.setAttribute('font-size', '11'); m.setAttribute('fill', '#a55');
+        m.textContent = '已标记';
+        svg.appendChild(m);
+      }
+    }
+    // 扫描位置指示
+    if (step > 0) {
+      if (step < 6) {
+        var idx = 6 - step;
+        var t2 = document.createElementNS(svgNS, 'text');
+        t2.setAttribute('x', 520); t2.setAttribute('y', 50);
+        t2.setAttribute('font-size', '13'); t2.setAttribute('fill', '#a55');
+        t2.textContent = '扫到位置 ' + idx;
+        svg.appendChild(t2);
+        var t3 = document.createElementNS(svgNS, 'text');
+        t3.setAttribute('x', 520); t3.setAttribute('y', 70);
+        t3.setAttribute('font-size', '12'); t3.setAttribute('fill', '#555');
+        t3.textContent = step === 4 ? '取消 5，标记 2' : (step === 5 ? '标记位置 1' : (s.marked.length === step ? '标记位置 ' + idx : '取消 + 标记'));
+        svg.appendChild(t3);
+      } else {
+        var t4 = document.createElementNS(svgNS, 'text');
+        t4.setAttribute('x', 520); t4.setAttribute('y', 60);
+        t4.setAttribute('font-size', '13'); t4.setAttribute('fill', '#a55');
+        t4.textContent = '全部扫完';
+        svg.appendChild(t4);
+      }
+    }
+    // 图例
+    var lg = document.createElementNS(svgNS, 'text');
+    lg.setAttribute('x', 80); lg.setAttribute('y', 150);
+    lg.setAttribute('font-size', '12'); lg.setAttribute('fill', '#555');
+    lg.textContent = '红 = 本版本已标记的位置；未标 = 位置上的数已在更右出现或尚未扫到';
+    svg.appendChild(lg);
+    document.getElementById('stepNote1').textContent = s.note;
+    box.appendChild(svg);
+    var nextBtn = document.querySelector('#vizCanvas1').parentNode.querySelector('.viz-controls button:nth-child(2)');
+    nextBtn.disabled = step >= MAXSTEP;
+  }
+
+  var resetBtn = document.querySelector('#vizCanvas1').parentNode.querySelector('.viz-controls button:nth-child(1)');
+  var nextBtn = document.querySelector('#vizCanvas1').parentNode.querySelector('.viz-controls button:nth-child(2)');
+  resetBtn.addEventListener('click', function() { step = 0; draw(); nextBtn.disabled = step >= MAXSTEP; });
+  nextBtn.addEventListener('click', function() { if (step < MAXSTEP) { step++; draw(); } nextBtn.disabled = step >= MAXSTEP; });
+  draw();
+})();</script>
