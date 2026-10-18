@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>左偏树的懒更新：城池攻占与棘手操作</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>左偏树的懒更新：城池攻占与棘手操作</h1>
+      <p class="intro">左偏树的合并、弹出都只动根附近的节点，懒更新因此可以只打在堆顶：整棵树要更新，就在头节点记一个 mul / add 标记，等 merge、pop 真正碰到子树节点时再下发。与线段树的懒更新是同一套「能懒则懒」的机制。</p>
+
+      <h2>零、懒更新挂在头节点</h2>
+      <p>线段树的懒更新依赖下标区间：整段更新只改区间节点上的标记，查询或下推时才真正作用到叶子。左偏树没有下标区间，树的形态又随合并不断变化，标记打在哪里？答案是最简单的位置：<strong>堆顶</strong>。</p>
+      <p>小根堆里，根节点是整棵树的最小值。想让整棵树每个节点都加 v，就在根上记 <code>add += v</code>；想让整棵树都乘 m，就在根上记 <code>mul *= m</code>。任何时刻，某个节点的真实值 = 节点存的值经过它到根路径上所有标记作用后的结果。合并、弹出要比较两个节点的值，或者要移动子树时，才把堆顶的标记下发给左右儿子，保证比较和移动发生在真实值上。</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 660 250" width="100%" role="img" aria-label="懒更新标记只打在堆顶，下发时传给左右子树">
+          <!-- 根带标记 -->
+          <line x1="200" y1="70" x2="120" y2="160" stroke="#888" stroke-width="2"></line>
+          <line x1="200" y1="70" x2="330" y2="160" stroke="#888" stroke-width="2"></line>
+          <rect x="168" y="35" width="64" height="50" rx="6" fill="#cfe8ff" stroke="#4a90d9" stroke-width="2"></rect>
+          <text x="200" y="60" text-anchor="middle" font-size="17" fill="#1a1a2e">5</text>
+          <text x="200" y="78" text-anchor="middle" font-size="12" fill="#4a90d9">真实 8</text>
+          <rect x="155" y="95" width="92" height="30" rx="4" fill="#fff3c4" stroke="#d99a4a" stroke-width="1.5"></rect>
+          <text x="201" y="115" text-anchor="middle" font-size="13" fill="#8a6a00">mul 2, add 0</text>
+          <rect x="88" y="135" width="64" height="50" rx="6" fill="#ffe9c4" stroke="#d99a4a" stroke-width="2"></rect>
+          <text x="120" y="160" text-anchor="middle" font-size="17" fill="#1a1a2e">3</text>
+          <text x="120" y="178" text-anchor="middle" font-size="12" fill="#888">真实 6</text>
+          <rect x="298" y="135" width="64" height="50" rx="6" fill="#e2f5d5" stroke="#6ab04c" stroke-width="2"></rect>
+          <text x="330" y="160" text-anchor="middle" font-size="17" fill="#1a1a2e">7</text>
+          <text x="330" y="178" text-anchor="middle" font-size="12" fill="#888">真实 14</text>
+          <text x="452" y="80" text-anchor="middle" font-size="14" fill="#555">整树 ×2 只改堆顶标记</text>
+          <text x="452" y="105" text-anchor="middle" font-size="14" fill="#555">子树真实值 = 存的值 × mul + add</text>
+          <text x="452" y="150" text-anchor="middle" font-size="14" fill="#555">merge / pop 碰到子树时</text>
+          <text x="452" y="175" text-anchor="middle" font-size="14" fill="#555">才下发标记</text>
+        </svg>
+        <figcaption>整棵树乘 2 只改堆顶的 mul 标记：根 5 与左右儿子 3、7 的真实值分别是 8、6、14。只有合并或弹出要移动 3、7 时，才把 mul 标记下发给它们。</figcaption>
+      </figure>
+      <p>乘法标记有一个容易写错的细节：堆顶挂着 <code>mul = m, add = a</code> 时，真实值 = 存的值 × m + a。下发给儿子时，儿子的 add 要变成 <code>add × m + a</code>，而不是简单的 <code>add + a</code>，因为加法标记整体也要跟着乘法放大。上面城池攻占代码里的 <code>down</code> 函数就是照这个式子写的。</p>
+
+      <h2>一、城池攻占（P3261）</h2>
+      <p>n 个城市组成一棵树，1 号是根。每个城市有防御值，还有一条奖励规则：奖励类型 0 表示攻克后攻击力加一个值，类型 1 表示攻克后攻击力乘一个值。m 个骑士各带初始攻击力，从自己的起点城市开始向上攻城：攻击力 ≥ 城市防御，城破，拿到奖励继续攻上级；攻击力 &lt; 防御，骑士当场牺牲。每个骑士独立行动。要输出每个城市牺牲了几个骑士、每个骑士攻占了几座城。</p>
+      <p>数据范围是 3×10<sup>5</sup>，奖励还会让攻击力不断增长，所以骑士的攻击力得用 long long 存。</p>
+      <p>解法把每个城市看成一棵骑士堆，按攻击力排小根堆。城市编号满足上级编号小于自身编号，于是从 n 号城市倒着处理到 1 号：处理城市 i 时，从下级城市合并上来的骑士已经全在 i 的堆里了。这一步做三件事：</p>
+      <p>（1）把堆里攻击力小于防御的骑士全部弹出，每弹一个，城市 i 的牺牲计数加一，骑士的牺牲城市记成 i。弹出用上一课的 <code>pop</code>：左右儿子合并，头节点清空。</p>
+      <p>（2）剩余骑士整堆打上城市 i 的奖励懒标记：类型 0 是加、类型 1 是乘，都只改堆顶的 mul / add。</p>
+      <p>（3）整堆合并进上级城市 belong[i] 的堆。</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 660 240" width="100%" role="img" aria-label="城市树上每座城市维护一棵骑士堆，倒序合并到上级">
+          <!-- 城市树 1-2-3 -->
+          <line x1="180" y1="60" x2="330" y2="130" stroke="#888" stroke-width="2"></line>
+          <line x1="330" y1="130" x2="480" y2="60" stroke="#888" stroke-width="2"></line>
+          <rect x="148" y="35" width="64" height="50" rx="6" fill="#cfe8ff" stroke="#4a90d9" stroke-width="2"></rect>
+          <text x="180" y="60" text-anchor="middle" font-size="17" fill="#1a1a2e">城1</text>
+          <text x="180" y="78" text-anchor="middle" font-size="12" fill="#4a90d9">def 4</text>
+          <rect x="298" y="105" width="64" height="50" rx="6" fill="#ffe9c4" stroke="#d99a4a" stroke-width="2"></rect>
+          <text x="330" y="130" text-anchor="middle" font-size="17" fill="#1a1a2e">城2</text>
+          <text x="330" y="148" text-anchor="middle" font-size="12" fill="#d99a4a">def 3</text>
+          <rect x="448" y="35" width="64" height="50" rx="6" fill="#e2f5d5" stroke="#6ab04c" stroke-width="2"></rect>
+          <text x="480" y="60" text-anchor="middle" font-size="17" fill="#1a1a2e">城3</text>
+          <text x="480" y="78" text-anchor="middle" font-size="12" fill="#6ab04c">def 5</text>
+          <!-- 城2 的骑士堆 -->
+          <text x="420" y="195" text-anchor="middle" font-size="13" fill="#555">城2 骑士堆</text>
+          <rect x="388" y="165" width="64" height="50" rx="6" fill="#e8e0f5" stroke="#8a6ab0" stroke-width="2"></rect>
+          <text x="420" y="190" text-anchor="middle" font-size="17" fill="#1a1a2e">6</text>
+          <text x="420" y="208" text-anchor="middle" font-size="12" fill="#8a6ab0">att</text>
+          <text x="120" y="195" text-anchor="middle" font-size="13" fill="#555">处理完 3 的骑士</text>
+          <text x="120" y="215" text-anchor="middle" font-size="13" fill="#555">合并进上级堆</text>
+        </svg>
+        <figcaption>城市树倒序处理：城 3 的剩余骑士打上奖励标记后合并进城 2 的堆，城 2 再处理自己的防御，最后合并进城 1。</figcaption>
+      </figure>
+      <p>最后统计：每个骑士攻占的城市数 = 起点深度 <code>deep[first]</code> 减去牺牲城市深度 <code>deep[die]</code>。骑士一路攻到根没牺牲时 die 记 0、deep[0] 记 0，攻占数正好是起点深度。</p>
+      <p>核心代码只有 merge、pop 和两个懒更新函数，down 负责下发、upgrade 负责在堆顶打标记：</p>
+
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 300001;
+    <span class="kw">int</span> n, m;
+    <span class="kw">long</span> <span class="kw">long</span> defend[MAXN];
+    <span class="kw">int</span> belong[MAXN];
+    <span class="kw">int</span> type[MAXN];       
+    <span class="kw">long</span> <span class="kw">long</span> gain[MAXN];
+    <span class="kw">long</span> <span class="kw">long</span> attack[MAXN];
+    <span class="kw">int</span> first[MAXN];
+    <span class="kw">int</span> deep[MAXN];
+    <span class="kw">int</span> top[MAXN];
+    <span class="kw">int</span> sacrifice[MAXN];
+    <span class="kw">int</span> die[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> dist[MAXN];
+    <span class="kw">long</span> <span class="kw">long</span> mul[MAXN];
+    <span class="kw">long</span> <span class="kw">long</span> add[MAXN];
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        dist[0] = -1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            ls[i] = rs[i] = dist[i] = 0;
+            mul[i] = 1;
+            add[i] = 0;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            sacrifice[i] = top[i] = 0;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">upgrade</span>(<span class="kw">int</span> i, <span class="kw">int</span> t, <span class="kw">long</span> <span class="kw">long</span> v) {
+        <span class="kw">if</span> (t == 0) {
+            attack[i] += v;
+            add[i] += v;
+        } <span class="kw">else</span> {
+            attack[i] *= v;
+            mul[i] *= v;
+            add[i] *= v;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (mul[i] != 1 || add[i] != 0) {
+            <span class="kw">int</span> l = ls[i];
+            <span class="kw">int</span> r = rs[i];
+            <span class="kw">if</span> (l != 0) {
+                attack[l] = attack[l] * mul[i] + add[i];
+                mul[l] = mul[l] * mul[i];
+                add[l] = add[l] * mul[i] + add[i];
+            }
+            <span class="kw">if</span> (r != 0) {
+                attack[r] = attack[r] * mul[i] + add[i];
+                mul[r] = mul[r] * mul[i];
+                add[r] = add[r] * mul[i] + add[i];
+            }
+            mul[i] = 1;
+            add[i] = 0;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span> i, <span class="kw">int</span> j) {
+        <span class="kw">if</span> (i == 0 || j == 0) {
+            <span class="kw">return</span> i + j;
+        }
+        <span class="kw">if</span> (attack[i] &gt; attack[j]) {
+            swap(i, j);
+        }
+        down(i);
+        rs[i] = merge(rs[i], j);
+        <span class="kw">if</span> (dist[ls[i]] &lt; dist[rs[i]]) {
+            swap(ls[i], rs[i]);
+        }
+        dist[i] = dist[rs[i]] + 1;
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">int</span> <span class="fn">pop</span>(<span class="kw">int</span> i) {
+        down(i);
+        <span class="kw">int</span> ans = merge(ls[i], rs[i]);
+        ls[i] = rs[i] = dist[i] = 0;
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">void</span> <span class="fn">compute</span>() {
+        deep[1] = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            deep[i] = deep[belong[i]] + 1;
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">if</span> (top[first[i]] == 0) {
+                top[first[i]] = i;
+            } <span class="kw">else</span> {
+                top[first[i]] = merge(top[first[i]], i);
+            }
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = n; i &gt;= 1; i--) {
+            <span class="kw">while</span> (top[i] != 0 &amp;&amp; attack[top[i]] &lt; defend[i]) {
+                die[top[i]] = i;
+                sacrifice[i]++;
+                top[i] = pop(top[i]);
+            }
+            <span class="kw">if</span> (top[i] != 0) {
+                upgrade(top[i], type[i], gain[i]);
+                <span class="kw">if</span> (top[belong[i]] == 0) {
+                    top[belong[i]] = top[i];
+                } <span class="kw">else</span> {
+                    top[belong[i]] = merge(top[belong[i]], top[i]);
+                }
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        prepare();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; defend[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            cin &gt;&gt; belong[i] &gt;&gt; type[i] &gt;&gt; gain[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; attack[i] &gt;&gt; first[i];
+        }
+        compute();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cout &lt;&lt; sacrifice[i] &lt;&lt; "\n";
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cout &lt;&lt; deep[first[i]] - deep[die[i]] &lt;&lt; endl;
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <p>merge 比较的是骑士的攻击力，也就是真实值。所以合并前先 <code>down(i)</code> 把堆顶的标记下发，保证 <code>attack[i]</code> 与 <code>attack[j]</code> 可比。弹出时同样先 down 再合并左右。</p>
+
+      <h2>二、棘手的操作（P3273）</h2>
+      <p>n 个节点各自独立成集合，实现 7 种操作：U 合并两个集合、A1 单点加、A2 集合加、A3 全体加、F1 查单点、F2 查集合最大值、F3 查全局最大值。操作共 m 次，n、m 都是 3×10<sup>5</sup>。</p>
+      <p>每个集合用一棵大根堆维护，堆顶就是集合最大值。三个查询都能 O(1) 回答，麻烦的是三种加法怎么打标记：</p>
+      <p>（1）A2 集合加：只改堆顶的 <code>add[h]</code>，整棵堆共享。</p>
+      <p>（2）A3 全局加：单独记一个 <code>addAll</code> 偏移量，三个查询输出时统一加上，不下发到任何节点。</p>
+      <p>（3）A1 单点加：单点没法用集合标记，做法是把节点从堆里摘出来（remove），此刻把集合的 add 落进它的 num，加完 v 后独立成堆再合并回去。</p>
+      <p>F3 需要一个全局视角：代码里用 multiset <code>heads</code> 维护所有堆顶的真实值，A2、A1、U 改变堆顶时从 heads 里删掉旧的、插入新的，F3 直接取 <code>heads.rbegin()</code> 加 addAll。</p>
+      <p>U 合并两个集合时，课程代码做了启发式：比较两个集合的大小 siz，把小的集合整体 down 成绝对权值再 merge 进大的集合，大的集合的 add 标记直接继承。这样避免把两边都展开，摊还代价低。注意合并前先把两个堆顶从 heads 里删掉，合并完再插入新的堆顶。</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 660 240" width="100%" role="img" aria-label="两个集合各自带 add 标记，合并时小集合展开">
+          <!-- 左堆 -->
+          <line x1="150" y1="70" x2="90" y2="150" stroke="#888" stroke-width="2"></line>
+          <line x1="150" y1="70" x2="210" y2="150" stroke="#888" stroke-width="2"></line>
+          <rect x="118" y="35" width="64" height="50" rx="6" fill="#cfe8ff" stroke="#4a90d9" stroke-width="2"></rect>
+          <text x="150" y="60" text-anchor="middle" font-size="17" fill="#1a1a2e">7</text>
+          <text x="150" y="78" text-anchor="middle" font-size="12" fill="#4a90d9">add 3</text>
+          <rect x="58" y="125" width="64" height="50" rx="6" fill="#ffe9c4" stroke="#d99a4a" stroke-width="2"></rect>
+          <text x="90" y="150" text-anchor="middle" font-size="17" fill="#1a1a2e">5</text>
+          <rect x="178" y="125" width="64" height="50" rx="6" fill="#e2f5d5" stroke="#6ab04c" stroke-width="2"></rect>
+          <text x="210" y="150" text-anchor="middle" font-size="17" fill="#1a1a2e">3</text>
+          <text x="150" y="205" text-anchor="middle" font-size="13" fill="#555">集合 A 堆顶真实值 10</text>
+          <!-- 右堆 -->
+          <line x1="450" y1="70" x2="390" y2="150" stroke="#888" stroke-width="2"></line>
+          <line x1="450" y1="70" x2="510" y2="150" stroke="#888" stroke-width="2"></line>
+          <rect x="418" y="35" width="64" height="50" rx="6" fill="#e8e0f5" stroke="#8a6ab0" stroke-width="2"></rect>
+          <text x="450" y="60" text-anchor="middle" font-size="17" fill="#1a1a2e">8</text>
+          <text x="450" y="78" text-anchor="middle" font-size="12" fill="#8a6ab0">add 0</text>
+          <rect x="358" y="125" width="64" height="50" rx="6" fill="#f5e0e0" stroke="#c85a5a" stroke-width="2"></rect>
+          <text x="390" y="150" text-anchor="middle" font-size="17" fill="#1a1a2e">4</text>
+          <rect x="478" y="125" width="64" height="50" rx="6" fill="#e0f0f5" stroke="#4a9ab0" stroke-width="2"></rect>
+          <text x="510" y="150" text-anchor="middle" font-size="17" fill="#1a1a2e">2</text>
+          <text x="450" y="205" text-anchor="middle" font-size="13" fill="#555">集合 B 堆顶真实值 8</text>
+          <text x="560" y="80" text-anchor="middle" font-size="14" fill="#555">合并时</text>
+          <text x="560" y="105" text-anchor="middle" font-size="14" fill="#555">小集合 5、3</text>
+          <text x="560" y="130" text-anchor="middle" font-size="14" fill="#555">先 down 成 8、6</text>
+          <text x="560" y="155" text-anchor="middle" font-size="14" fill="#555">再与 8 的堆合并</text>
+        </svg>
+        <figcaption>U 合并集合：左边集合 add 标记为 3，右边没有标记。合并前把小的左边集合展开成真实值（5 变 8、3 变 6），再与右边合并，add 标记统一归到新堆顶。</figcaption>
+      </figure>
+      <p>这套代码的核心是 remove：删掉堆里任意节点后，还要从它的父节点向上重算 dist、必要时交换左右，并更新并查集指向。上一课的 leftist-delete 页已经完整讲过 remove，这里直接复用。</p>
+
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 300001;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> num[MAXN];
+    <span class="kw">int</span> up[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> dist[MAXN];
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> siz[MAXN]; 
+    <span class="kw">int</span> add[MAXN];
+    <span class="kw">int</span> sta[MAXN];
+    multiset&lt;<span class="kw">int</span>&gt; heads;
+    <span class="kw">int</span> addAll = 0;
+
+    <span class="kw">void</span> <span class="fn">minusHead</span>(<span class="kw">int</span> h) {
+        <span class="kw">if</span> (h != 0) {
+            heads.erase(heads.find(num[h] + add[h]));
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">addHead</span>(<span class="kw">int</span> h) {
+        <span class="kw">if</span> (h != 0) {
+            heads.insert(num[h] + add[h]);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        dist[0] = -1;
+        heads.clear();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            up[i] = ls[i] = rs[i] = dist[i] = 0;
+            fa[i] = i;
+            siz[i] = 1;
+            add[i] = 0;
+            addHead(i);
+        }
+        addAll = 0;
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+        fa[i] = fa[i] == i ? i : find(fa[i]);
+        <span class="kw">return</span> fa[i];
+    }
+
+    <span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span> i, <span class="kw">int</span> j) {
+        <span class="kw">if</span> (i == 0 || j == 0) <span class="kw">return</span> i + j;
+        <span class="kw">if</span> (num[i] &lt; num[j]) {
+            swap(i, j);
+        }
+        rs[i] = merge(rs[i], j);
+        up[rs[i]] = i;
+        <span class="kw">if</span> (dist[ls[i]] &lt; dist[rs[i]]) {
+            swap(ls[i], rs[i]);
+        }
+        dist[i] = dist[rs[i]] + 1;
+        fa[ls[i]] = i;
+        fa[rs[i]] = i;
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">int</span> <span class="fn">remove</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> h = find(i);
+        fa[ls[i]] = ls[i];
+        fa[rs[i]] = rs[i];
+        <span class="kw">int</span> s = merge(ls[i], rs[i]);
+        <span class="kw">int</span> f = up[i];
+        fa[i] = s;
+        up[s] = f;
+        <span class="kw">if</span> (h != i) {
+            fa[s] = h;
+            <span class="kw">if</span> (ls[f] == i) {
+                ls[f] = s;
+            } <span class="kw">else</span> {
+                rs[f] = s;
+            }
+            <span class="kw">for</span> (<span class="kw">int</span> d = dist[s]; dist[f] &gt; d + 1; f = up[f], d++) {
+                dist[f] = d + 1;
+                <span class="kw">if</span> (dist[ls[f]] &lt; dist[rs[f]]) {
+                    swap(ls[f], rs[f]);
+                }
+            }
+        }
+        up[i] = ls[i] = rs[i] = dist[i] = 0;
+        <span class="kw">return</span> fa[s];
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        <span class="kw">if</span> (i != 0) {
+            add[i] = 0;
+            <span class="kw">int</span> size = 0;
+            sta[++size] = i;
+            <span class="kw">while</span> (size &gt; 0) {
+                i = sta[size--];
+                num[i] += v;
+                <span class="kw">if</span> (rs[i] != 0) sta[++size] = rs[i];
+                <span class="kw">if</span> (ls[i] != 0) sta[++size] = ls[i];
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">u</span>(<span class="kw">int</span> i, <span class="kw">int</span> j) {
+        <span class="kw">int</span> l = find(i);
+        <span class="kw">int</span> r = find(j);
+        <span class="kw">if</span> (l == r) <span class="kw">return</span>;
+        <span class="kw">int</span> lsize = siz[l];
+        minusHead(l);
+        <span class="kw">int</span> rsize = siz[r];
+        minusHead(r);
+        <span class="kw">int</span> addTag;
+        <span class="kw">if</span> (lsize &lt;= rsize) {
+            down(l, add[l] - add[r]);
+            addTag = add[r];
+        } <span class="kw">else</span> {
+            down(r, add[r] - add[l]);
+            addTag = add[l];
+        }
+        <span class="kw">int</span> h = merge(l, r);
+        siz[h] = lsize + rsize;
+        add[h] = addTag;
+        addHead(h);
+    }
+
+    <span class="kw">void</span> <span class="fn">a1</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        <span class="kw">int</span> h = find(i);
+        minusHead(h);
+        <span class="kw">int</span> l = remove(i);
+        <span class="kw">if</span> (l != 0) {
+            siz[l] = siz[h] - 1;
+            add[l] = add[h];
+            addHead(l);
+        }
+        num[i] = num[i] + add[h] + v;
+        fa[i] = i;
+        siz[i] = 1;
+        add[i] = 0;
+        addHead(i);
+        u(l, i);
+    }
+
+    <span class="kw">void</span> <span class="fn">a2</span>(<span class="kw">int</span> i, <span class="kw">int</span> v) {
+        <span class="kw">int</span> h = find(i);
+        minusHead(h);
+        add[h] += v;
+        addHead(h);
+    }
+
+    <span class="kw">void</span> <span class="fn">a3</span>(<span class="kw">int</span> v) {
+        addAll += v;
+    }
+
+    <span class="kw">int</span> <span class="fn">f1</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> num[i] + add[find(i)] + addAll;
+    }
+
+    <span class="kw">int</span> <span class="fn">f2</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> h = find(i);
+        <span class="kw">return</span> num[h] + add[h] + addAll;
+    }
+
+    <span class="kw">int</span> <span class="fn">f3</span>() {
+        <span class="kw">return</span> (*heads.rbegin()) + addAll;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>(){
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) cin &gt;&gt; num[i];
+        prepare();
+        cin &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">string</span> op; 
+            cin &gt;&gt; op;
+            <span class="kw">if</span> (op == "F3") {
+                cout &lt;&lt; f3() &lt;&lt; "\n";
+            } <span class="kw">else</span> {
+                <span class="kw">int</span> x; cin &gt;&gt; x;
+                <span class="kw">if</span> (op == "U") {
+                    <span class="kw">int</span> y; cin &gt;&gt; y;
+                    u(x, y);
+                } <span class="kw">else</span> <span class="kw">if</span> (op == "A1") {
+                    <span class="kw">int</span> y; cin &gt;&gt; y;
+                    a1(x, y);
+                } <span class="kw">else</span> <span class="kw">if</span> (op == "A2") {
+                    <span class="kw">int</span> y; cin &gt;&gt; y;
+                    a2(x, y);
+                } <span class="kw">else</span> <span class="kw">if</span> (op == "A3") {
+                    a3(x);
+                } <span class="kw">else</span> <span class="kw">if</span> (op == "F1") {
+                    cout &lt;&lt; f1(x) &lt;&lt; "\n";
+                } <span class="kw">else</span> {
+                    cout &lt;&lt; f2(x) &lt;&lt; "\n";
+                }
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <p>课程注释里点了一句：集合级的懒更新其实已经属于「启发式合并」的范畴，后面的课会专门讲。左偏树在这里只是提供了一个 O(log n) 的合并工具。</p>
+
+      <h2>三、城池攻占演示</h2>
+      <div class="viz" id="viz-city">
+        <p class="viz-title">骑士爬城：防御、奖励与牺牲</p>
+        <p class="stepnote" id="city-note">城市树 1 ← 2 ← 3，防御 4 / 3 / 5。骑士 A 攻击 4 起点城 3，骑士 B 攻击 6 起点城 3。点「下一步」逐城处理。</p>
+        <svg id="city-svg" viewBox="0 0 660 300" width="100%" role="img"></svg>
+        <p class="legend">蓝 = 城市根，橙 = 防御，绿 = 骑士，红 = 牺牲骑士</p>
+        <div class="viz-controls">
+          <button type="button" id="city-reset">重置</button>
+          <button type="button" id="city-next">下一步</button>
+        </div>
+      </div>
+      <p>三座城市组成一条链：城 3 防御 5、奖励加 2（攻破后攻击 +2）；城 2 防御 3、奖励乘 2；城 1 防御 4、没有奖励。骑士 A 攻击 4、B 攻击 6，都从城 3 出发。逆序处理：城 3 先弹掉攻击不足的 A（4 &lt; 5），B 攻破城 3 拿 +2 变成 8；城 2 防御 3，B 攻破拿 ×2 变成 16；城 1 防御 4，B 攻破。最终 A 牺牲在城 3，B 攻占 3 座城。</p>
+
+      <h2>总结</h2>
+      <p>左偏树做懒更新，标记只挂在堆顶：整树加改 add、整树乘改 mul，merge、pop 碰到子树时才下发。乘法下发时 add 要跟着乘，这是最容易被写错的地方。城池攻占用城市逆序处理，把每座城的骑士堆合并到上级，奖励打一次标记整堆生效；棘手操作把集合加打在堆顶、全局加打成偏移量，堆顶集合用 multiset 维护，F3 才能 O(1) 取全局最大。下节课的可持久化左偏树会换一套玩法：合并不再改老节点，而是沿途拷贝。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>P3261 城池攻占</td><td><a href="https://www.luogu.com.cn/problem/P3261" target="_blank">P3261</a></td></tr>
+          <tr><td>洛谷</td><td>P3273 棘手的操作</td><td><a href="https://www.luogu.com.cn/problem/P3273" target="_blank">P3273</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解155【挺难】左偏树和懒更新、可持久化左偏树、k短路问题</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var svg = document.getElementById('city-svg');
+  var note = document.getElementById('city-note');
+  var resetBtn = document.getElementById('city-reset');
+  var nextBtn = document.getElementById('city-next');
+  // 城市布局：id -> {x, y}
+  var cityPos = { C1: {x: 170, y: 50}, C2: {x: 330, y: 120}, C3: {x: 490, y: 50} };
+  var defv = { C1: 4, C2: 3, C3: 5 };
+  var reward = { C1: '无', C2: '×2', C3: '+2' };
+  // 骑士状态：A、B
+  // att 存真实攻击力，alive 存是否还没牺牲，at 存当前所在城市
+  var state = { A: {att: 4, alive: true, at: 'C3'}, B: {att: 6, alive: true, at: 'C3'} };
+  var HH = 300;
+  function W() { return 660; }
+  function node(x, y, label, sub, color, stroke) {
+    var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    r.setAttribute('x', x - 34); r.setAttribute('y', y - 25);
+    r.setAttribute('width', '68'); r.setAttribute('height', '50');
+    r.setAttribute('rx', '6');
+    r.setAttribute('fill', color); r.setAttribute('stroke', stroke); r.setAttribute('stroke-width', '2');
+    svg.appendChild(r);
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x); t.setAttribute('y', y + 6);
+    t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '17');
+    t.setAttribute('fill', '#1a1a2e');
+    t.textContent = label;
+    svg.appendChild(t);
+    if (sub) {
+      var d = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      d.setAttribute('x', x); d.setAttribute('y', y + 22);
+      d.setAttribute('text-anchor', 'middle'); d.setAttribute('font-size', '12');
+      d.setAttribute('fill', '#888');
+      d.textContent = sub;
+      svg.appendChild(d);
+    }
+  }
+  function line(x1, y1, x2, y2) {
+    var ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    ln.setAttribute('x1', x1); ln.setAttribute('y1', y1);
+    ln.setAttribute('x2', x2); ln.setAttribute('y2', y2);
+    ln.setAttribute('stroke', '#888'); ln.setAttribute('stroke-width', '2');
+    svg.appendChild(ln);
+  }
+  function drawCity() {
+    svg.innerHTML = '';
+    line(170, 75, 310, 95);
+    line(330, 145, 470, 95);
+    node(cityPos.C1.x, cityPos.C1.y, '城1', 'def 4', '#cfe8ff', '#4a90d9');
+    node(cityPos.C2.x, cityPos.C2.y, '城2', 'def 3 · ×2', '#ffe9c4', '#d99a4a');
+    node(cityPos.C3.x, cityPos.C3.y, '城3', 'def 5 · +2', '#e2f5d5', '#6ab04c');
+    // 骑士
+    var kx = 170, ky = 235;
+    node(kx - 45, ky, '骑士A ' + state.A.att, state.A.alive ? '在 ' + state.A.at : '牺牲', state.A.alive ? '#e2f5d5' : '#f5e0e0', state.A.alive ? '#6ab04c' : '#c85a5a');
+    node(kx + 45, ky, '骑士B ' + state.B.att, state.B.alive ? '在 ' + state.B.at : '牺牲', state.B.alive ? '#e2f5d5' : '#f5e0e0', state.B.alive ? '#6ab04c' : '#c85a5a');
+    // 攻占箭头：存活骑士所在城市画连线
+    ['A', 'B'].forEach(function(k){
+      if (!state[k].alive) return;
+      var c = state[k].at;
+      var from = k === 'A' ? kx - 45 : kx + 45;
+      line(from, ky - 25, cityPos[c].x, cityPos[c].y + 25);
+    });
+  }
+  var step = 0;
+  var MAXSTEP = 3;
+  function render() {
+    if (step === 0) {
+      state = { A: {att: 4, alive: true, at: 'C3'}, B: {att: 6, alive: true, at: 'C3'} };
+      note.textContent = '初始：骑士 A 攻击 4、B 攻击 6，都在城 3。逆序从城 3 开始处理。';
+    } else if (step === 1) {
+      // 城3 处理：A 牺牲，B 攻破拿 +2
+      state.A.alive = false;
+      state.B.att = 8;
+      state.B.at = 'C2';
+      note.textContent = '城 3（防御 5）：A 攻击 4 不足，牺牲；B 攻破，攻击 6 + 2 = 8，爬向城 2。';
+    } else if (step === 2) {
+      // 城2 处理：B 攻破拿 ×2
+      state.B.att = 16;
+      state.B.at = 'C1';
+      note.textContent = '城 2（防御 3）：B 攻击 8 攻破，攻击 ×2 = 16，爬向城 1。';
+    } else {
+      // 城1 处理：B 攻破到根
+      state.B.att = 16;
+      state.B.at = 'C1';
+      note.textContent = '城 1（防御 4）：B 攻击 16 攻破，到达树根。B 攻占 3 座城，A 牺牲在城 3。';
+    }
+    drawCity();
+  nextBtn.disabled = step >= MAXSTEP;
+  }
+  resetBtn.addEventListener('click', function(){ step = 0; render(); });
+  nextBtn.addEventListener('click', function(){ if (step < MAXSTEP) { step++; render(); } });
+  render();
+})();</script>
+</body>
+</html>

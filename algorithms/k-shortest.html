@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K 短路：可持久化左偏树的最优解</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>K 短路：可持久化左偏树的最优解</h1>
+      <p class="intro">A* 算法也能做 k 短路，复杂度要高一个量级。可持久化左偏树把「相对最短路的偏离」组织成堆，展开一条候选 O(log m)，总复杂度 O((k + m) log m)。洛谷 P2483 就是这样过的。</p>
+
+      <h2>零、题意与三步框架</h2>
+      <p>n 个点、m 条有向正权边。从 1 号点走到 n 号点算一次旅行，旅行中边不能重复选、点可以重复经过，一到达 n 就立刻停止。任何两次旅行只要选的边稍有不同就算不同方案。钱数是 money，旅行一次扣一次路费，问最多能旅行几次。</p>
+      <p>注意「边不能重复选」说的是同一次旅行内部的边不能重复；课程的可持久化左偏树解法里，最短路树上的边段可以反复出现在不同候选里，因为每次旅行是不同的方案。费用全是正数，按费用从小到大依次扣钱即可。</p>
+      <p>解法分三步：</p>
+      <p>（1）反图跑 dijkstra，得到每个点到 n 的最短距离 dis，以及最短路树上的父边 path。</p>
+      <p>（2）mergeRoad 为每个点建一棵可持久化左偏树 rt[u]，装的是「从 u 出发的所有偏离边」的代价增量。</p>
+      <p>（3）expand 从最短路径开始，反复弹出最小的偏离增量候选，钱够就计数，并展开这个候选的三个后继。</p>
+
+      <h2>一、反图最短路与最短路树</h2>
+      <p>反图就是所有边反向。从 n 号点跑 dijkstra，dis[u] 就是 u 到 n 的最短距离。松弛成功时记下 <code>path[v] = e</code>，e 是反图上让 dis[v] 收敛的入边编号。因为正图边与反图边成对添加（编号一一对应），正图上 <code>u → tog[path[u]]</code> 就是 u 沿最短路树走向 n 的那条边，它的边权恰好等于 dis[u] - dis[tog[path[u]]]。</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 660 250" width="100%" role="img" aria-label="小图的最短路树与偏离边">
+          <line x1="160" y1="80" x2="330" y2="160" stroke="#888" stroke-width="2" stroke-dasharray="5 4"></line>
+          <line x1="160" y1="80" x2="500" y2="80" stroke="#888" stroke-width="2"></line>
+          <line x1="330" y1="160" x2="500" y2="80" stroke="#4a90d9" stroke-width="2"></line>
+          <line x1="330" y1="160" x2="560" y2="200" stroke="#4a90d9" stroke-width="2"></line>
+          <rect x="128" y="55" width="64" height="50" rx="6" fill="#cfe8ff" stroke="#4a90d9" stroke-width="2"></rect>
+          <text x="160" y="80" text-anchor="middle" font-size="17" fill="#1a1a2e">1</text>
+          <text x="160" y="98" text-anchor="middle" font-size="12" fill="#4a90d9">dis 4</text>
+          <rect x="298" y="135" width="64" height="50" rx="6" fill="#ffe9c4" stroke="#d99a4a" stroke-width="2"></rect>
+          <text x="330" y="160" text-anchor="middle" font-size="17" fill="#1a1a2e">2</text>
+          <text x="330" y="178" text-anchor="middle" font-size="12" fill="#d99a4a">dis 3</text>
+          <rect x="468" y="55" width="64" height="50" rx="6" fill="#e2f5d5" stroke="#6ab04c" stroke-width="2"></rect>
+          <text x="500" y="80" text-anchor="middle" font-size="17" fill="#1a1a2e">3</text>
+          <text x="500" y="98" text-anchor="middle" font-size="12" fill="#6ab04c">dis 0</text>
+          <rect x="528" y="175" width="64" height="50" rx="6" fill="#e8e0f5" stroke="#8a6ab0" stroke-width="2"></rect>
+          <text x="560" y="200" text-anchor="middle" font-size="17" fill="#1a1a2e">4</text>
+          <text x="560" y="218" text-anchor="middle" font-size="12" fill="#8a6ab0">dis 2</text>
+          <text x="245" y="95" text-anchor="middle" font-size="12" fill="#888">1→2 权1</text>
+          <text x="520" y="75" text-anchor="middle" font-size="12" fill="#888">1→3 权4</text>
+          <text x="388" y="140" text-anchor="middle" font-size="12" fill="#4a90d9">2→3 权3</text>
+          <text x="455" y="180" text-anchor="middle" font-size="12" fill="#4a90d9">4→3 权2</text>
+          <text x="330" y="230" text-anchor="middle" font-size="13" fill="#555">蓝色实线是最短路树：1→2→3 费用 4，4→3 费用 2</text>
+        </svg>
+        <figcaption>反图从 n 号点（这里是 3）跑 dijkstra 得到 dis 和最短路树。非树边（1→2、1→3 的虚线部分要看图例）进入偏离边堆。</figcaption>
+      </figure>
+
+      <h2>二、偏离边堆 rt[u]</h2>
+      <p>mergeRoad 逆着 dijkstra 的弹出顺序建堆。对每个点 u，遍历正图出边：</p>
+      <p>（1）跳过最短路树边 <code>e == path[u]</code>，它是沿树前进的边，不算偏离。</p>
+      <p>（2）其余每条出边 (u→v, w) 都是一个偏离选项，代价增量 = <code>w + dis[v] - dis[u]</code>：本来沿树边从 u 走到 n 花 dis[u]，改走这条边到 v 再沿树边到 n 花 w + dis[v]，多花的钱就是它。全为正数，所以可持久化左偏树按代价增量排小根堆。</p>
+      <p>（3）处理完 u 自己的偏离边，把 <code>rt[tog[path[u]]]</code> 也 merge 进来：沿树边走到树子后，还能继续偏离。这就是「前缀共享」：从 u 出发的候选包含从树子出发的全部候选。</p>
+      <p>可持久化 merge 在这里是必须的：rt[1] 和 rt[2] 都要包含 rt[3] 的子树，如果不拷贝，修改一棵就会破坏另一棵。</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 660 250" width="100%" role="img" aria-label="偏离边堆的结构，前缀共享">
+          <text x="110" y="40" text-anchor="middle" font-size="14" fill="#555">rt[1]</text>
+          <line x1="110" y1="60" x2="60" y2="130" stroke="#888" stroke-width="2"></line>
+          <line x1="110" y1="60" x2="160" y2="130" stroke="#888" stroke-width="2"></line>
+          <rect x="78" y="50" width="64" height="46" rx="6" fill="#cfe8ff" stroke="#4a90d9" stroke-width="2"></rect>
+          <text x="110" y="72" text-anchor="middle" font-size="16" fill="#1a1a2e">1→3</text>
+          <text x="110" y="88" text-anchor="middle" font-size="11" fill="#4a90d9">增量 2</text>
+          <rect x="28" y="115" width="64" height="46" rx="6" fill="#ffe9c4" stroke="#d99a4a" stroke-width="2"></rect>
+          <text x="60" y="137" text-anchor="middle" font-size="16" fill="#1a1a2e">2→1</text>
+          <text x="60" y="153" text-anchor="middle" font-size="11" fill="#888">增量 4</text>
+          <rect x="128" y="115" width="64" height="46" rx="6" fill="#e2f5d5" stroke="#6ab04c" stroke-width="2"></rect>
+          <text x="160" y="137" text-anchor="middle" font-size="16" fill="#1a1a2e">4→3</text>
+          <text x="160" y="153" text-anchor="middle" font-size="11" fill="#888">增量 2</text>
+          <text x="110" y="195" text-anchor="middle" font-size="13" fill="#555">1 的偏离边 + 树子的堆</text>
+          <text x="350" y="40" text-anchor="middle" font-size="14" fill="#555">rt[2]</text>
+          <rect x="318" y="50" width="64" height="46" rx="6" fill="#e8e0f5" stroke="#8a6ab0" stroke-width="2"></rect>
+          <text x="350" y="72" text-anchor="middle" font-size="16" fill="#1a1a2e">2→1</text>
+          <text x="350" y="88" text-anchor="middle" font-size="11" fill="#8a6ab0">增量 4</text>
+          <rect x="318" y="130" width="64" height="46" rx="6" fill="#e2f5d5" stroke="#6ab04c" stroke-width="2"></rect>
+          <text x="350" y="152" text-anchor="middle" font-size="16" fill="#1a1a2e">4→3</text>
+          <text x="350" y="168" text-anchor="middle" font-size="11" fill="#888">增量 2</text>
+          <text x="350" y="195" text-anchor="middle" font-size="13" fill="#555">2 的偏离边 + 树子的堆</text>
+          <text x="560" y="60" text-anchor="middle" font-size="14" fill="#555">4→3 节点</text>
+          <text x="560" y="90" text-anchor="middle" font-size="14" fill="#555">被 rt[1]、rt[2]</text>
+          <text x="560" y="120" text-anchor="middle" font-size="14" fill="#555">共享：可持久化</text>
+          <text x="560" y="150" text-anchor="middle" font-size="14" fill="#555">拷贝不是搬走</text>
+        </svg>
+        <figcaption>rt[u] = u 的偏离边 + 树子的 rt。4→3 这条偏离边同时出现在 rt[1] 和 rt[2] 里，靠可持久化拷贝共享。</figcaption>
+      </figure>
+
+      <h2>三、展开：A* 式弹出候选</h2>
+      <p>expand 先扣最短路费用 <code>money -= dis[1]</code>，能付就计一次旅行。然后候选堆里放第一组候选：rt[1] 的堆顶，预算是 <code>dis[1] + cost[rt[1]]</code>，即最短路加上第一个偏离增量。</p>
+      <p>每次弹出一个候选 h、预算 w，钱够就计数，然后展开三个后继：</p>
+      <p>（1）左儿子 ls[h]：同偏离点下一条更贵的偏离边，预算换成 <code>w - cost[h] + cost[ls[h]]</code>。</p>
+      <p>（2）右儿子 rs[h]：同理。</p>
+      <p>（3）偏离终点 <code>rt[to[h]]</code>：走到偏离边终点后继续偏离，预算 <code>w + cost[rt[to[h]]]</code>。</p>
+      <p>候选的预算就是路径的真实费用，因为第一个候选已经加上了 dis[1]。money 扣到负数就停，输出计数。</p>
+
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 5001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = 1000001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXH = 4200001;
+    <span class="kw">const</span> <span class="kw">double</span> INF = 1e18;
+
+    <span class="kw">int</span> n, m;
+    <span class="kw">double</span> money;
+
+    <span class="kw">int</span> headg[MAXN];
+    <span class="kw">int</span> tog[MAXM];
+    <span class="kw">int</span> nextg[MAXM];
+    <span class="kw">double</span> weightg[MAXM];
+    <span class="kw">int</span> cntg = 0;
+
+    <span class="kw">int</span> headr[MAXN];
+    <span class="kw">int</span> tor[MAXM];
+    <span class="kw">int</span> nextr[MAXM];
+    <span class="kw">double</span> weightr[MAXM];
+    <span class="kw">int</span> cntr = 0;
+
+    <span class="kw">int</span> to[MAXT];
+    <span class="kw">double</span> cost[MAXT];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> dist[MAXT];
+    <span class="kw">int</span> cntt = 0;
+
+    <span class="kw">int</span> rt[MAXN];
+
+    <span class="kw">int</span> key[MAXH];
+    <span class="kw">double</span> val[MAXH];
+    <span class="kw">int</span> heap[MAXH];
+    <span class="kw">int</span> cntd, cnth;
+
+    <span class="kw">bool</span> vis[MAXN];
+    <span class="kw">int</span> path[MAXN];
+    <span class="kw">double</span> dis[MAXN];
+
+    <span class="kw">void</span> <span class="fn">addEdgeG</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">double</span> w){
+        nextg[++cntg] = headg[u];
+        tog[cntg] = v;
+        weightg[cntg] = w;
+        headg[u] = cntg;
+    }
+
+    <span class="kw">void</span> <span class="fn">addEdgeR</span>(<span class="kw">int</span> u, <span class="kw">int</span> v, <span class="kw">double</span> w){
+        nextr[++cntr] = headr[u];
+        tor[cntr] = v;
+        weightr[cntr] = w;
+        headr[u] = cntr;
+    }
+
+    <span class="kw">int</span> <span class="fn">init</span>(<span class="kw">int</span> t, <span class="kw">double</span> v){
+        to[++cntt] = t;
+        cost[cntt] = v;
+        ls[cntt] = rs[cntt] = dist[cntt] = 0;
+        <span class="kw">return</span> cntt;
+    }
+
+    <span class="kw">int</span> <span class="fn">clone</span>(<span class="kw">int</span> i){
+        to[++cntt] = to[i];
+        cost[cntt] = cost[i];
+        ls[cntt] = ls[i];
+        rs[cntt] = rs[i];
+        dist[cntt] = dist[i];
+        <span class="kw">return</span> cntt;
+    }
+
+    <span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span> i, <span class="kw">int</span> j){
+        <span class="kw">if</span>(i == 0 || j == 0){
+            <span class="kw">return</span> i + j;
+        }
+        <span class="kw">if</span>(cost[i] &gt; cost[j]){
+            swap(i, j);
+        }
+        <span class="kw">int</span> h = clone(i);
+        rs[h] = merge(rs[h], j);
+        <span class="kw">if</span>(dist[ls[h]] &lt; dist[rs[h]]){
+            swap(ls[h], rs[h]);
+        }
+        dist[h] = dist[rs[h]] + 1;
+        <span class="kw">return</span> h;
+    }
+
+    <span class="kw">void</span> <span class="fn">heapAdd</span>(<span class="kw">int</span> k, <span class="kw">double</span> v){
+        key[++cntd] = k;
+        val[cntd] = v;
+        heap[++cnth] = cntd;
+        <span class="kw">int</span> cur = cnth, father = cur / 2;
+        <span class="kw">while</span>(cur &gt; 1 &amp;&amp; val[heap[father]] &gt; val[heap[cur]]){
+            swap(heap[father], heap[cur]);
+            cur = father;
+            father = cur / 2;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">heapPop</span>(){
+        <span class="kw">int</span> ans = heap[1];
+        heap[1] = heap[cnth--];
+        <span class="kw">int</span> cur = 1, l = cur * 2, r = l + 1, best;
+        <span class="kw">while</span>(l &lt;= cnth){
+            best = r &lt;= cnth &amp;&amp; val[heap[r]] &lt; val[heap[l]] ? r : l;
+            best = val[heap[best]] &lt; val[heap[cur]] ? best : cur;
+            <span class="kw">if</span>(best == cur) {
+                <span class="kw">break</span>;
+            }
+            swap(heap[best], heap[cur]);
+            cur = best;
+            l = cur * 2;
+            r = l + 1;
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">bool</span> <span class="fn">heapEmpty</span>(){
+        <span class="kw">return</span> cnth == 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">dijkstra</span>(){
+        fill(dis, dis + MAXN, INF);
+        dis[n] = 0;
+        cntd = cnth = 0;
+        heapAdd(n, 0.0);
+        <span class="kw">while</span>(!heapEmpty()){
+            <span class="kw">int</span> top = heapPop();
+            <span class="kw">int</span> u = key[top];
+            <span class="kw">double</span> w = val[top];
+            <span class="kw">if</span>(!vis[u]){
+                vis[u] = <span class="kw">true</span>;
+                <span class="kw">for</span>(<span class="kw">int</span> e = headr[u], v; e != 0; e = nextr[e]){
+                    v = tor[e];
+                    <span class="kw">if</span>(dis[v] &gt; w + weightr[e]){
+                        dis[v] = w + weightr[e];
+                        path[v] = e;
+                        heapAdd(v, dis[v]);
+                    }
+                }
+            }
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">mergeRoad</span>(){
+        cntd = cnth = 0;
+        <span class="kw">for</span>(<span class="kw">int</span> i = 1; i &lt;= n; i++){
+            heapAdd(i, dis[i]);
+        }
+        dist[0] = -1;
+        <span class="kw">while</span>(!heapEmpty()){
+            <span class="kw">int</span> top = heapPop();
+            <span class="kw">int</span> u = key[top];
+            <span class="kw">for</span>(<span class="kw">int</span> e = headg[u], v; e != 0; e = nextg[e]){
+                v = tog[e];
+                <span class="kw">if</span>(e != path[u]){
+                    rt[u] = merge(rt[u], init(v, weightg[e] + dis[v] - dis[u]));
+                }
+            }
+            <span class="kw">if</span>(path[u] != 0){
+                rt[u] = merge(rt[u], rt[tog[path[u]]]);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">expand</span>(){
+        <span class="kw">int</span> ans = 0;
+        money -= dis[1];
+        <span class="kw">if</span>(money &gt;= 0){
+            ans++;
+            cntd = cnth = 0;
+            <span class="kw">if</span>(rt[1] != 0){
+                heapAdd(rt[1], dis[1] + cost[rt[1]]);
+            }
+            <span class="kw">while</span>(!heapEmpty()){
+                <span class="kw">int</span> top = heapPop();
+                <span class="kw">int</span> h = key[top];
+                <span class="kw">double</span> w = val[top];
+                money -= w;
+                <span class="kw">if</span>(money &lt; 0){
+                    <span class="kw">break</span>;
+                }
+                ans++;
+                <span class="kw">if</span>(ls[h] != 0){
+                    heapAdd(ls[h], w - cost[h] + cost[ls[h]]);
+                }
+                <span class="kw">if</span>(rs[h] != 0){
+                    heapAdd(rs[h], w - cost[h] + cost[rs[h]]);
+                }
+                <span class="kw">if</span>(to[h] != 0 &amp;&amp; rt[to[h]] != 0){
+                    heapAdd(rt[to[h]], w + cost[rt[to[h]]]);
+                }
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>(){
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m &gt;&gt; money;
+        <span class="kw">int</span> u, v;
+        <span class="kw">double</span> w;
+        <span class="kw">for</span>(<span class="kw">int</span> i = 1; i &lt;= m; i++){
+            cin &gt;&gt; u &gt;&gt; v &gt;&gt; w;
+            <span class="kw">if</span>(u != n){
+                addEdgeG(u, v, w);
+                addEdgeR(v, u, w);
+            }
+        }
+        dijkstra();
+        mergeRoad();
+        <span class="kw">int</span> ans = expand();
+        cout &lt;&lt; ans &lt;&lt; endl;
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <p>mergeRoad 里 <code>e != path[u]</code> 的比较依赖正图边与反图边编号一一对应：main 里每条输入边都同时 addEdgeG 和 addEdgeR，两套编号同步递增。这是这道题里最容易被忽略的前提。</p>
+
+      <h2>四、K 短路演示</h2>
+      <div class="viz" id="viz-ksp">
+        <p class="viz-title">小图上的 k 短路展开</p>
+        <p class="stepnote" id="ksp-note">图：1→2 权1、2→3 权1、1→3 权4、2→1 权3。最短路 1→2→3 费用 2。点「下一步」展开候选。</p>
+        <svg id="ksp-svg" viewBox="0 0 680 300" width="100%" role="img"></svg>
+        <p class="legend">蓝 = 最短路树边，红 = 偏离边，绿 = 当前候选路径</p>
+        <div class="viz-controls">
+          <button type="button" id="ksp-reset">重置</button>
+          <button type="button" id="ksp-next">下一步</button>
+        </div>
+      </div>
+      <p>三条候选路径依次弹出：最短路 1→2→3 费用 2；偏离直连 1→3 费用 4；再偏离 2→1 后沿树回 n，路径 1→2→1→2→3 费用 6。如果 money 是 13，这三条都付得起，还能继续展开后面的候选，直到钱不够为止。</p>
+
+      <h2>总结</h2>
+      <p>k 短路的最优解把问题拆成三段：反图 dijkstra 提供 dis 与最短路树；每个点的偏离边堆 rt[u] 用可持久化左偏树维护，前缀靠拷贝共享；expand 从最短路开始按预算从小到大展开候选，每弹一个就是下一条路径。偏离增量的定义 <code>w + dis[v] - dis[u]</code> 是全部正确性的核心：它保证候选预算严格递增，所以弹出的顺序就是路径费用的顺序。可持久化左偏树在这里的价值是拷贝：同一个偏离边节点被多个点的堆共享，展开任何一个都不会破坏其他候选。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>P2483 魔法猪学院（k 短路）</td><td><a href="https://www.luogu.com.cn/problem/P2483" target="_blank">P2483</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解155【挺难】左偏树和懒更新、可持久化左偏树、k短路问题</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var svg = document.getElementById('ksp-svg');
+  var note = document.getElementById('ksp-note');
+  var resetBtn = document.getElementById('ksp-reset');
+  var nextBtn = document.getElementById('ksp-next');
+  var HH = 300;
+  var step = 0;
+  var MAXSTEP = 2;
+  function W() { return 680; }
+  var nodePos = { N1: {x: 120, y: 130}, N2: {x: 340, y: 130}, N3: {x: 560, y: 130} };
+  function edge(x1, y1, x2, y2, color, dash) {
+    var ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    ln.setAttribute('x1', x1); ln.setAttribute('y1', y1);
+    ln.setAttribute('x2', x2); ln.setAttribute('y2', y2);
+    ln.setAttribute('stroke', color); ln.setAttribute('stroke-width', '3');
+    if (dash) ln.setAttribute('stroke-dasharray', dash);
+    svg.appendChild(ln);
+  }
+  function node(id, color) {
+    var p = nodePos[id];
+    var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    r.setAttribute('x', p.x - 30); r.setAttribute('y', p.y - 20);
+    r.setAttribute('width', '60'); r.setAttribute('height', '40');
+    r.setAttribute('rx', '6');
+    r.setAttribute('fill', color); r.setAttribute('stroke', '#4a90d9'); r.setAttribute('stroke-width', '2');
+    svg.appendChild(r);
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', p.x); t.setAttribute('y', p.y + 5);
+    t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '16');
+    t.setAttribute('fill', '#1a1a2e');
+    t.textContent = id.replace('N', '');
+    svg.appendChild(t);
+  }
+  function lbl(x, y, t, color) {
+    var tx = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    tx.setAttribute('x', x); tx.setAttribute('y', y);
+    tx.setAttribute('text-anchor', 'middle'); tx.setAttribute('font-size', '12');
+    tx.setAttribute('fill', color || '#888');
+    tx.textContent = t;
+    svg.appendChild(tx);
+  }
+  function box(x, y, text) {
+    var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    r.setAttribute('x', x); r.setAttribute('y', y);
+    r.setAttribute('width', '180'); r.setAttribute('height', '34');
+    r.setAttribute('rx', '6');
+    r.setAttribute('fill', '#eef6ff'); r.setAttribute('stroke', '#4a90d9'); r.setAttribute('stroke-width', '1.5');
+    svg.appendChild(r);
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x + 90); t.setAttribute('y', y + 22);
+    t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '13');
+    t.setAttribute('fill', '#1a1a2e');
+    t.textContent = text;
+    svg.appendChild(t);
+  }
+  function render() {
+    svg.innerHTML = '';
+    if (step === 0) {
+      edge(120, 130, 340, 130, '#4a90d9');   // 1→2 树边
+      edge(340, 130, 560, 130, '#4a90d9');   // 2→3 树边
+      edge(560, 130, 120, 130, '#c85a5a', '6 4'); // 3→1 无，改 2→1
+      edge(340, 155, 120, 155, '#c85a5a', '6 4'); // 2→1 权3（红虚，在下方画）
+      lbl(230, 120, '1', '#4a90d9');
+      lbl(450, 120, '1', '#4a90d9');
+      lbl(230, 175, '3', '#c85a5a');
+      node('N1', '#cfe8ff'); node('N2', '#ffe9c4'); node('N3', '#e2f5d5');
+      box(250, 220, '最短路 1→2→3：费用 2');
+      note.textContent = '图：1→2 权1（树边）、2→3 权1（树边）、2→1 权3（偏离）、1→3 权4（偏离）。';
+    } else if (step === 1) {
+      edge(120, 130, 340, 130, '#4a90d9');
+      edge(340, 130, 560, 130, '#4a90d9');
+      edge(560, 130, 120, 130, '#6ab04c', '6 4'); // 1→3 偏离（绿）
+      edge(340, 155, 120, 155, '#c85a5a', '6 4'); // 2→1
+      lbl(230, 120, '1', '#4a90d9');
+      lbl(450, 120, '1', '#4a90d9');
+      lbl(230, 175, '3', '#c85a5a');
+      node('N1', '#cfe8ff'); node('N2', '#ffe9c4'); node('N3', '#e2f5d5');
+      box(250, 220, '候选 1→3：费用 4');
+      note.textContent = '第 1 个候选：偏离边 1→3（增量 4 - 2 = 2），路径 1→3 费用 4。';
+    } else {
+      edge(120, 130, 340, 130, '#4a90d9');
+      edge(340, 130, 560, 130, '#4a90d9');
+      edge(560, 130, 120, 130, '#6ab04c', '6 4'); // 1→3
+      edge(340, 155, 120, 155, '#c85a5a', '6 4'); // 2→1
+      edge(120, 170, 340, 170, '#6ab04c', '6 4'); // 1→2 再走一次（候选路径重复树边段）
+      lbl(230, 120, '1', '#4a90d9');
+      lbl(450, 120, '1', '#4a90d9');
+      lbl(230, 175, '3', '#c85a5a');
+      node('N1', '#cfe8ff'); node('N2', '#ffe9c4'); node('N3', '#e2f5d5');
+      box(230, 220, '候选 1→2→1→2→3：费用 6');
+      note.textContent = '第 2 个候选：偏离 2→1 后沿树边回 3，树边段重复但算新方案，费用 1 + 3 + 1 + 1 = 6。';
+    }
+  nextBtn.disabled = step >= MAXSTEP;
+  }
+  resetBtn.addEventListener('click', function(){ step = 0; render(); });
+  nextBtn.addEventListener('click', function(){ if (step < 2) { step++; render(); } });
+  render();
+})();</script>
+</body>
+</html>
