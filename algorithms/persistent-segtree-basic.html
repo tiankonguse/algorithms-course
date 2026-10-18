@@ -1,0 +1,396 @@
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>可持久化线段树：改一次，多一个版本</h1>
+      <p class="intro">普通线段树改一个点，整棵树的旧状态就没了。可持久化线段树把每次修改留痕：新版本和老版本共存，查任意历史版本都是 O(log n)。</p>
+
+      <h2>一、版本从哪来</h2>
+      <p>线段树的修改操作是原地进行的：update 递归下去，沿途把节点的值改掉。改完这棵树就变成了新样子，旧样子没有备份。</p>
+      <p>可持久化的做法是「复制路径」：update 每走到一个节点，先把它复制一份，在副本上改；没有走到的那部分子树，副本直接指向老节点。这样一次单点修改新建 O(log n) 个节点，老版本纹丝不动。</p>
+      <figure class="fig">
+        <svg viewBox="0 0 680 200" width="680" height="200">
+          <line x1="120" y1="40" x2="70" y2="110" stroke="#888"/>
+          <line x1="120" y1="40" x2="170" y2="110" stroke="#888"/>
+          <line x1="170" y1="110" x2="150" y2="170" stroke="#888"/>
+          <line x1="170" y1="110" x2="230" y2="170" stroke="#888"/>
+          <line x1="70" y1="110" x2="50" y2="170" stroke="#888"/>
+          <line x1="70" y1="110" x2="110" y2="170" stroke="#888"/>
+          <circle cx="120" cy="40" r="16" fill="#cde"/>
+          <text x="120" y="45" text-anchor="middle" font-size="12">root0</text>
+          <circle cx="70" cy="110" r="12" fill="#eef"/>
+          <circle cx="170" cy="110" r="12" fill="#eef"/>
+          <circle cx="50" cy="170" r="12" fill="#eef"/>
+          <circle cx="110" cy="170" r="12" fill="#eef"/>
+          <circle cx="150" cy="170" r="12" fill="#ffd"/>
+          <circle cx="230" cy="170" r="12" fill="#eef"/>
+          <text x="150" y="174" text-anchor="middle" font-size="11">改</text>
+          <line x1="320" y1="40" x2="270" y2="110" stroke="#a55"/>
+          <line x1="320" y1="40" x2="370" y2="110" stroke="#888"/>
+          <line x1="370" y1="110" x2="350" y2="170" stroke="#888"/>
+          <line x1="370" y1="110" x2="430" y2="170" stroke="#888"/>
+          <line x1="270" y1="110" x2="250" y2="170" stroke="#a55"/>
+          <line x1="270" y1="110" x2="310" y2="170" stroke="#e55"/>
+          <circle cx="320" cy="40" r="16" fill="#fbb"/>
+          <text x="320" y="45" text-anchor="middle" font-size="12">root1</text>
+          <circle cx="270" cy="110" r="12" fill="#fbb"/>
+          <circle cx="370" cy="110" r="12" fill="#eef"/>
+          <circle cx="250" cy="170" r="12" fill="#e55"/>
+          <text x="250" y="174" text-anchor="middle" font-size="11">新</text>
+          <circle cx="310" cy="170" r="12" fill="#fbb"/>
+          <circle cx="350" cy="170" r="12" fill="#eef"/>
+          <circle cx="430" cy="170" r="12" fill="#eef"/>
+          <text x="520" y="60" font-size="12" fill="#555">红 = 新建；白 = 与 root0 共享</text>
+          <text x="520" y="80" font-size="12" fill="#555">一次修改只新建路径上的节点</text>
+          <text x="520" y="100" font-size="12" fill="#555">其他子树继续指老节点</text>
+        </svg>
+        <figcaption>修改一次只复制根到叶子的一条路径，其余节点原样共享</figcaption>
+      </figure>
+
+      <p>每个版本存一个根节点编号，放进 root 数组：root[0] 是初始版本，root[k] 是第 k 次操作后的版本。查询「第 k 个版本」就是拿 root[k] 当入口下钻，复杂度 O(log n)。</p>
+      <p>总空间：初始树 4n 个节点，之后每次修改新建 O(log n) 个节点，n 次修改一共 O(n log n)。</p>
+
+      <h2>二、单点改、单点查</h2>
+      <p>单点修改是最朴素的可持久化，不需要懒更新，代码也好写。以模版题为例：原始数组是 0 号版本，每次操作基于某个版本生成新版本，版本号就是操作计数。</p>
+      <p>核心就两个函数。update 先复制当前节点，抄下左右孩子和值，再决定往左还是往右递归；query 从指定版本根节点一路下钻到目标位置。注意一个细节：查询操作也生成新版本，虽然内容跟来源版本一致，但版本号照常 +1。</p>
+      <div class="code-block"><h3>单点修改 + 单点查询（P3919）</h3>
+          <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 1000001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = MAXN * 23;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> root[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> value[MAXT];
+    <span class="kw">int</span> cnt = 0;
+
+    <span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> rt = ++cnt;
+        <span class="kw">if</span> (l == r) {
+            value[rt] = arr[l];
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            ls[rt] = build(l, mid);
+            rs[rt] = build(mid + 1, r);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">update</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = ++cnt;
+        ls[rt] = ls[i];
+        rs[rt] = rs[i];
+        value[rt] = value[i];
+        <span class="kw">if</span> (l == r) {
+            value[rt] = jobv;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                ls[rt] = update(jobi, jobv, l, mid, ls[rt]);
+            } <span class="kw">else</span> {
+                rs[rt] = update(jobi, jobv, mid + 1, r, rs[rt]);
+            }
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span> value[i];
+        }
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">if</span> (jobi &lt;= mid) {
+            <span class="kw">return</span> query(jobi, l, mid, ls[i]);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> query(jobi, mid + 1, r, rs[i]);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        root[0] = build(1, n);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, version, op, x, y; i &lt;= m; i++) {
+            cin &gt;&gt; version &gt;&gt; op &gt;&gt; x;
+            <span class="kw">if</span> (op == 1) {
+                cin &gt;&gt; y;
+                root[i] = update(x, y, 1, n, root[version]);
+            } <span class="kw">else</span> {
+                root[i] = root[version];
+                cout &lt;&lt; query(x, 1, n, root[i]) &lt;&lt; '\n';
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+      </div>
+
+      <h2>三、范围查询：版本做差</h2>
+      <p>单点查询只能问「某个位置的值」。要问区间信息，用「版本差」：把线段树改成值域线段树，叶子是值域上的每个值，节点的 siz 记这个值域里有几个数。对数组每个前缀位置建一个版本：第 i 个版本就是 arr[1..i] 插完后的值域树。</p>
+      <p>这样区间 [l, r] 的信息 = 版本 r 减去版本 l-1：两个版本从根一起往下走，每个节点的 siz 差就是这个值域里在 [l, r] 内的数的个数。这是可持久化线段树最常考的组合：单点修改 + 范围查询。</p>
+      <figure class="fig">
+        <svg viewBox="0 0 680 200" width="680" height="200">
+          <text x="30" y="30" font-size="13" fill="#555">版本 r</text>
+          <circle cx="120" cy="50" r="16" fill="#cde"/>
+          <text x="120" y="55" text-anchor="middle" font-size="12">siz=6</text>
+          <circle cx="70" cy="110" r="12" fill="#eef"/>
+          <text x="70" y="114" text-anchor="middle" font-size="10">3</text>
+          <circle cx="170" cy="110" r="12" fill="#eef"/>
+          <text x="170" y="114" text-anchor="middle" font-size="10">3</text>
+          <circle cx="50" cy="170" r="10" fill="#eef"/>
+          <circle cx="100" cy="170" r="10" fill="#eef"/>
+          <circle cx="140" cy="170" r="10" fill="#ffd"/>
+          <circle cx="200" cy="170" r="10" fill="#eef"/>
+          <line x1="120" y1="50" x2="70" y2="110" stroke="#888"/>
+          <line x1="120" y1="50" x2="170" y2="110" stroke="#888"/>
+          <line x1="70" y1="110" x2="50" y2="170" stroke="#888"/>
+          <line x1="70" y1="110" x2="100" y2="170" stroke="#888"/>
+          <line x1="170" y1="110" x2="140" y2="170" stroke="#888"/>
+          <line x1="170" y1="110" x2="200" y2="170" stroke="#888"/>
+          <text x="340" y="30" font-size="13" fill="#555">版本 l-1</text>
+          <circle cx="430" cy="50" r="16" fill="#dfe"/>
+          <text x="430" y="55" text-anchor="middle" font-size="12">siz=2</text>
+          <circle cx="380" cy="110" r="12" fill="#eef"/>
+          <text x="380" y="114" text-anchor="middle" font-size="10">1</text>
+          <circle cx="480" cy="110" r="12" fill="#eef"/>
+          <text x="480" y="114" text-anchor="middle" font-size="10">1</text>
+          <circle cx="360" cy="170" r="10" fill="#eef"/>
+          <circle cx="410" cy="170" r="10" fill="#eef"/>
+          <circle cx="450" cy="170" r="10" fill="#eef"/>
+          <circle cx="510" cy="170" r="10" fill="#eef"/>
+          <line x1="430" y1="50" x2="380" y2="110" stroke="#888"/>
+          <line x1="430" y1="50" x2="480" y2="110" stroke="#888"/>
+          <line x1="380" y1="110" x2="360" y2="170" stroke="#888"/>
+          <line x1="380" y1="110" x2="410" y2="170" stroke="#888"/>
+          <line x1="480" y1="110" x2="450" y2="170" stroke="#888"/>
+          <line x1="480" y1="110" x2="510" y2="170" stroke="#888"/>
+          <text x="560" y="110" font-size="12" fill="#555">左差 3-1=2</text>
+          <text x="560" y="130" font-size="12" fill="#555">k=3 走左</text>
+          <text x="560" y="150" font-size="12" fill="#555">k=1 也走左</text>
+          <text x="560" y="170" font-size="12" fill="#555">k=0? 不可能</text>
+        </svg>
+        <figcaption>第 k 小：两棵前缀树同时下钻，用 siz 差决定走向</figcaption>
+      </figure>
+      <p>第 k 小的查法：从两个版本的根同时出发，看左子树的 siz 差。差 ≥ k 就走左；否则 k 减去差、走右。走到叶子就是答案。值域先离散化，把 n 个不同值压缩成 1..s，树高就是 O(log n)。</p>
+      <div class="code-block"><h3>区间第 k 小（P3834）</h3>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = MAXN * 22;
+    <span class="kw">int</span> n, m, s;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> sorted[MAXN];
+    <span class="kw">int</span> root[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">int</span> siz[MAXT];
+    <span class="kw">int</span> cnt;
+
+    <span class="kw">int</span> <span class="fn">kth</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> left = 1, right = s, mid, ans = 0;
+        <span class="kw">while</span> (left &lt;= right) {
+            mid = (left + right) / 2;
+            <span class="kw">if</span> (sorted[mid] &lt;= num) {
+                ans = mid;
+                left = mid + 1;
+            } <span class="kw">else</span> {
+                right = mid - 1;
+            }
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> rt = ++cnt;
+        siz[rt] = 0;
+        <span class="kw">if</span> (l &lt; r) {
+            <span class="kw">int</span> mid = (l + r) / 2;
+            ls[rt] = build(l, mid);
+            rs[rt] = build(mid + 1, r);
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">insert</span>(<span class="kw">int</span> jobi, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = ++cnt;
+        ls[rt] = ls[i];
+        rs[rt] = rs[i];
+        siz[rt] = siz[i] + 1;
+        <span class="kw">if</span> (l &lt; r) {
+            <span class="kw">int</span> mid = (l + r) / 2;
+            <span class="kw">if</span> (jobi &lt;= mid) {
+                ls[rt] = insert(jobi, l, mid, ls[rt]);
+            } <span class="kw">else</span> {
+                rs[rt] = insert(jobi, mid + 1, r, rs[rt]);
+            }
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> jobk, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> u, <span class="kw">int</span> v) {
+        <span class="kw">if</span> (l == r) {
+            <span class="kw">return</span> l;
+        }
+        <span class="kw">int</span> lsiz = siz[ls[v]] - siz[ls[u]];
+        <span class="kw">int</span> mid = (l + r) / 2;
+        <span class="kw">if</span> (lsiz &gt;= jobk) {
+            <span class="kw">return</span> query(jobk, l, mid, ls[u], ls[v]);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> query(jobk - lsiz, mid + 1, r, rs[u], rs[v]);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        cnt = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            sorted[i] = arr[i];
+        }
+        sort(sorted + 1, sorted + n + 1);
+        s = 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt;= n; i++) {
+            <span class="kw">if</span> (sorted[s] != sorted[i]) {
+                sorted[++s] = sorted[i];
+            }
+        }
+        root[0] = build(1, s);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x; i &lt;= n; i++) {
+            x = kth(arr[i]);
+            root[i] = insert(x, 1, s, root[i - 1]);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        prepare();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, l, r, k, rank; i &lt;= m; i++) {
+            cin &gt;&gt; l &gt;&gt; r &gt;&gt; k;
+            rank = query(k, 1, s, root[l - 1], root[r]);
+            cout &lt;&lt; sorted[rank] &lt;&lt; '\n';
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+      </div>
+
+      <h2>四、版本复制演示</h2>
+      <div class="viz">
+        <h3 class="viz-title">版本复制演示</h3>
+        <p class="intro">4 个叶子。点「下一步」看每次单点修改只复制根到叶子的路径，其余节点共享。</p>
+        <div class="viz-canvas" id="vizCanvas1"></div>
+        <p class="stepnote" id="stepNote1"></p>
+        <div class="viz-controls"><button>重置</button><button>下一步</button></div>
+      </div>
+
+      <h2>五、总结</h2>
+      <p>可持久化线段树的核心就一句话：修改只复制路径，版本号做入口。单点修改加范围查询是它的主战场，区间第 k 小就是「版本差」的典型用法。下一种玩法是范围修改的可持久化，那要处理懒更新的可持久化问题。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>P3919 可持久化线段树 1</td><td><a href="https://www.luogu.com.cn/problem/P3919" target="_blank">查看题目</a></td></tr>
+          <tr><td>洛谷</td><td>P3834 可持久化线段树 2</td><td><a href="https://www.luogu.com.cn/problem/P3834" target="_blank">查看题目</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解157【挺难】可持久化线段树和标记永久化</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">查看仓库</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  // 版本复制演示：4 叶子，3 次单点修改
+  var svgNS = 'http://www.w3.org/2000/svg';
+  var HH = 240;
+  var steps = [
+    {op: '初始', vals: [3, 1, 4, 2], path: []},
+    {op: '版本1：改位置2为9', vals: [3, 9, 4, 2], path: [1]},
+    {op: '版本2：改位置4为7', vals: [3, 9, 4, 7], path: [3]},
+    {op: '版本3：改位置3为0', vals: [3, 9, 0, 7], path: [2]}
+  ];
+  var MAXSTEP = steps.length;
+  var step = 0;
+
+  function draw() {
+    if (step >= MAXSTEP) return;
+    var box = document.getElementById('vizCanvas1');
+    box.innerHTML = '';
+    var svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 680 ' + HH);
+    svg.setAttribute('width', '680');
+    svg.setAttribute('height', HH);
+    var s = steps[step];
+    // 树：7 个节点，根 0，左 1 右 2；节点 1 的左 3 右 4；节点 2 的左 5 右 6
+    var pos = [
+      [340, 30], [180, 90], [500, 90], [90, 160], [270, 160], [410, 160], [590, 160]
+    ];
+    var edges = [[0, 1], [0, 2], [1, 3], [1, 4], [2, 5], [2, 6]];
+    edges.forEach(function(e) {
+      var ln = document.createElementNS(svgNS, 'line');
+      ln.setAttribute('x1', pos[e[0]][0]); ln.setAttribute('y1', pos[e[0]][1]);
+      ln.setAttribute('x2', pos[e[1]][0]); ln.setAttribute('y2', pos[e[1]][1]);
+      ln.setAttribute('stroke', '#999');
+      svg.appendChild(ln);
+    });
+    // 叶子值
+    var leaves = [3, 4, 5, 6];
+    for (var i = 0; i < 4; i++) {
+      var cx = pos[leaves[i]][0], cy = pos[leaves[i]][1];
+      var isNew = s.path.indexOf(i) >= 0;
+      var c = document.createElementNS(svgNS, 'circle');
+      c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', 16);
+      c.setAttribute('fill', isNew ? '#fbb' : '#eef');
+      c.setAttribute('stroke', '#888');
+      svg.appendChild(c);
+      var t = document.createElementNS(svgNS, 'text');
+      t.setAttribute('x', cx); t.setAttribute('y', cy + 4);
+      t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '13');
+      t.textContent = s.vals[i];
+      svg.appendChild(t);
+    }
+    // 内部节点：版本信息
+    var t = document.createElementNS(svgNS, 'text');
+    t.setAttribute('x', 340); t.setAttribute('y', 14);
+    t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '12'); t.setAttribute('fill', '#555');
+    t.textContent = '版本 ' + step + '（' + s.op + '）';
+    svg.appendChild(t);
+    // 说明
+    var note = document.getElementById('stepNote1');
+    if (step === 0) {
+      note.textContent = '初始版本：root[0]，4 个叶子 3 1 4 2。';
+    } else {
+      var newly = s.path.length;
+      var shared = 4 - newly;
+      note.textContent = s.op + '：只新建 ' + newly + ' 个叶子节点，其余 ' + shared + ' 个叶子与上一版本共享。root[' + step + '] 是新的入口。';
+    }
+    box.appendChild(svg);
+    var nextBtn = document.querySelector('#vizCanvas1').parentNode.querySelector('.viz-controls button:nth-child(2)');
+    nextBtn.disabled = step >= MAXSTEP;
+  }
+
+  var resetBtn = document.querySelector('#vizCanvas1').parentNode.querySelector('.viz-controls button:nth-child(1)');
+  var nextBtn = document.querySelector('#vizCanvas1').parentNode.querySelector('.viz-controls button:nth-child(2)');
+  resetBtn.addEventListener('click', function() { step = 0; draw(); nextBtn.disabled = step >= MAXSTEP; });
+  nextBtn.addEventListener('click', function() { if (step < MAXSTEP) { step++; draw(); } nextBtn.disabled = step >= MAXSTEP; });
+  draw();
+})();</script>

@@ -1,0 +1,336 @@
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>标记永久化：标记不下发</h1>
+      <p class="intro">懒更新标记可以不下发。标记只属于它挂着的那个范围，上下级标记互不影响；查询时从上往下把标记叠加起来，一样算得对。</p>
+
+      <h2>一、标记属于范围，不属于路径</h2>
+      <p>普通懒更新的标记要下发：父节点有标记，查询/修改到孩子之前得先把标记推下去。标记永久化反着来：标记挂在父范围就不动了，孩子节点的标记是自己的，跟父标记无关。</p>
+      <p>查询时从头往下走，把沿途每个节点的标记累加进一个 addHistory，走到完全覆盖的节点，答案 = 节点 sum + addHistory × 区间长度。标记叠加是「求和式」的，先后顺序无所谓，所以能这么算。</p>
+      <figure class="fig">
+        <svg viewBox="0 0 680 200" width="680" height="200">
+          <circle cx="140" cy="60" r="18" fill="#ffd"/>
+          <text x="140" y="65" text-anchor="middle" font-size="12">add=3</text>
+          <line x1="140" y1="78" x2="90" y2="130" stroke="#888"/>
+          <line x1="140" y1="78" x2="190" y2="130" stroke="#888"/>
+          <circle cx="90" cy="130" r="14" fill="#fbb"/>
+          <text x="90" y="134" text-anchor="middle" font-size="11">add=5</text>
+          <circle cx="190" cy="130" r="14" fill="#eef"/>
+          <text x="190" y="134" text-anchor="middle" font-size="11">add=0</text>
+          <text x="20" y="170" font-size="12" fill="#555">父的 3 不落到孩子</text>
+          <text x="20" y="188" font-size="12" fill="#555">左孩子的 5 是自己的</text>
+          <text x="350" y="60" font-size="13" fill="#555">查左孩子覆盖区间时</text>
+          <text x="350" y="82" font-size="13" fill="#555">addHistory = 3 + 5 = 8</text>
+          <text x="350" y="104" font-size="13" fill="#555">查右孩子区间时</text>
+          <text x="350" y="126" font-size="13" fill="#555">addHistory = 3 + 0 = 3</text>
+          <text x="350" y="148" font-size="12" fill="#555">每个节点只认自己到根的</text>
+          <text x="350" y="166" font-size="12" fill="#555">标记叠加，不用下发</text>
+        </svg>
+        <figcaption>查询沿路叠加标记，addHistory 就是「这个区间整体加了多少」</figcaption>
+      </figure>
+
+      <h2>二、不是所有操作都能永久化</h2>
+      <p>标记永久化的前提是「修改和查询的性质可叠加」：范围加 + 区间求和可以（加多少就是多少，叠加无顺序问题）。范围重置 + 查询最值就不行：父范围的重置和子范围的修改互相覆盖，不下发就说不清谁先谁后。</p>
+      <figure class="fig">
+        <svg viewBox="0 0 680 190" width="680" height="190">
+          <text x="30" y="40" font-size="13" fill="#555">可叠加：加 + 求和</text>
+          <rect x="30" y="60" width="260" height="50" rx="8" fill="#dfe"/>
+          <text x="160" y="90" text-anchor="middle" font-size="13">sum 全由标记线性叠加</text>
+          <text x="360" y="40" font-size="13" fill="#555">不可叠加：重置 + 最值</text>
+          <rect x="360" y="60" width="260" height="50" rx="8" fill="#fee"/>
+          <text x="490" y="90" text-anchor="middle" font-size="13">重置后旧最值失效</text>
+          <text x="30" y="140" font-size="12" fill="#555">这种才能标记永久化</text>
+          <text x="360" y="140" font-size="12" fill="#555">这种只能用经典懒更新</text>
+          <text x="30" y="168" font-size="12" fill="#555">出题人刻意缩空间就是在考它</text>
+        </svg>
+        <figcaption>能叠加的用标记永久化省空间，不能叠加的别硬来</figcaption>
+      </figure>
+      <p>普通线段树用标记永久化实现，代码比经典懒更新还短：add 函数里，sum 先加上「本节点与操作区间的交集长度 × v」，只有操作完全覆盖本节点时才在 addTag 上累加 v；query 把 addHistory 传下去。</p>
+      <div class="code-block"><h3>标记永久化的普通线段树（P3372）</h3>
+          <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+    <span class="kw">#include</span> &lt;cstdio&gt;
+    <span class="kw">#include</span> &lt;cstring&gt;
+    <span class="kw">#include</span> &lt;algorithm&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">long</span> <span class="kw">long</span> arr[MAXN];
+    <span class="kw">long</span> <span class="kw">long</span> sum[MAXN &lt;&lt; 2];
+    <span class="kw">long</span> <span class="kw">long</span> addTag[MAXN &lt;&lt; 2];
+
+    <span class="kw">void</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (l == r) {
+            sum[i] = arr[l];
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) / 2;
+            build(l, mid, i &lt;&lt; 1);
+            build(mid + 1, r, i &lt;&lt; 1 | 1);
+            sum[i] = sum[i &lt;&lt; 1] + sum[i &lt;&lt; 1 | 1];
+        }
+        addTag[i] = 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">long</span> <span class="kw">long</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> a = max(jobl, l), b = min(jobr, r);
+        sum[i] += jobv * (b - a + 1);
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            addTag[i] += jobv;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) / 2;
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                add(jobl, jobr, jobv, l, mid, i &lt;&lt; 1);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                add(jobl, jobr, jobv, mid + 1, r, i &lt;&lt; 1 | 1);
+            }
+        }
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">long</span> <span class="kw">long</span> addHistory, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="kw">return</span> sum[i] + addHistory * (r - l + 1);
+        }
+        <span class="kw">int</span> mid = (l + r) &gt;&gt; 1;
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">if</span> (jobl &lt;= mid) {
+            ans += query(jobl, jobr, addHistory + addTag[i], l, mid, i &lt;&lt; 1);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+            ans += query(jobl, jobr, addHistory + addTag[i], mid + 1, r, i &lt;&lt; 1 | 1);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        <span class="kw">int</span> n, m;
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        build(1, n, 1);
+        <span class="kw">int</span> op, jobl, jobr;
+        <span class="kw">long</span> <span class="kw">long</span> jobv;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; op;
+            <span class="kw">if</span> (op == 1) {
+                cin &gt;&gt; jobl &gt;&gt; jobr &gt;&gt; jobv;
+                add(jobl, jobr, jobv, 1, n, 1);
+            } <span class="kw">else</span> {
+                cin &gt;&gt; jobl &gt;&gt; jobr;
+                cout &lt;&lt; query(jobl, jobr, 0, 1, n, 1) &lt;&lt; "\n";
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+      </div>
+
+      <h2>三、可持久化 + 标记永久化</h2>
+      <p>范围修改的可持久化如果用经典懒更新，查询也新建节点，空间 O(n log n + m log n)。换成标记永久化：add 不触发下发，查询只读不建，总空间回到 O(n·4 + n·log n)。</p>
+      <p>代码上 add 每层新建节点（复制 sum 和 addTag），完全覆盖才累加标记；query 同样带 addHistory，全程不新建。操作语义与经典版完全一致，C/Q/H/B 照旧，版本号同样是覆盖式写入。</p>
+      <div class="code-block"><h3>可持久化 + 标记永久化（HDU4348）</h3>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXT = MAXN * 25;
+    <span class="kw">int</span> n, m, t = 0;
+    <span class="kw">long</span> <span class="kw">long</span> arr[MAXN];
+    <span class="kw">int</span> root[MAXN];
+    <span class="kw">int</span> ls[MAXT];
+    <span class="kw">int</span> rs[MAXT];
+    <span class="kw">long</span> <span class="kw">long</span> sum[MAXT];
+    <span class="kw">long</span> <span class="kw">long</span> addTag[MAXT];
+    <span class="kw">int</span> cnt = 0;
+
+    <span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> rt = ++cnt;
+        addTag[rt] = 0;
+        <span class="kw">if</span> (l == r) {
+            sum[rt] = arr[l];
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) / 2;
+            ls[rt] = build(l, mid);
+            rs[rt] = build(mid + 1, r);
+            sum[rt] = sum[ls[rt]] + sum[rs[rt]];
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">long</span> <span class="kw">long</span> jobv, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">int</span> rt = ++cnt, a = max(jobl, l), b = min(jobr, r);
+        ls[rt] = ls[i];
+        rs[rt] = rs[i];
+        sum[rt] = sum[i] + jobv * (b - a + 1);
+        addTag[rt] = addTag[i];
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            addTag[rt] += jobv;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> mid = (l + r) / 2;
+            <span class="kw">if</span> (jobl &lt;= mid) {
+                ls[rt] = add(jobl, jobr, jobv, l, mid, ls[rt]);
+            }
+            <span class="kw">if</span> (jobr &gt; mid) {
+                rs[rt] = add(jobl, jobr, jobv, mid + 1, r, rs[rt]);
+            }
+        }
+        <span class="kw">return</span> rt;
+    }
+
+    <span class="kw">long</span> <span class="kw">long</span> <span class="fn">query</span>(<span class="kw">int</span> jobl, <span class="kw">int</span> jobr, <span class="kw">long</span> <span class="kw">long</span> addHistory, <span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i) {
+        <span class="kw">if</span> (jobl &lt;= l &amp;&amp; r &lt;= jobr) {
+            <span class="kw">return</span> sum[i] + addHistory * (r - l + 1);
+        }
+        <span class="kw">int</span> mid = (l + r) / 2;
+        <span class="kw">long</span> <span class="kw">long</span> ans = 0;
+        <span class="kw">if</span> (jobl &lt;= mid) {
+            ans += query(jobl, jobr, addHistory + addTag[i], l, mid, ls[i]);
+        }
+        <span class="kw">if</span> (jobr &gt; mid) {
+            ans += query(jobl, jobr, addHistory + addTag[i], mid + 1, r, rs[i]);
+        }
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; arr[i];
+        }
+        root[0] = build(1, n);
+        <span class="kw">char</span> op;
+        <span class="kw">int</span> x, y;
+        <span class="kw">long</span> <span class="kw">long</span> z;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            cin &gt;&gt; op;
+            <span class="kw">if</span> (op == 'C') {
+                cin &gt;&gt; x &gt;&gt; y &gt;&gt; z;
+                root[t + 1] = add(x, y, z, 1, n, root[t]);
+                t++;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 'Q') {
+                cin &gt;&gt; x &gt;&gt; y;
+                cout &lt;&lt; query(x, y, 0, 1, n, root[t]) &lt;&lt; "\n";
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 'H') {
+                cin &gt;&gt; x &gt;&gt; y &gt;&gt; z;
+                cout &lt;&lt; query(x, y, 0, 1, n, root[z]) &lt;&lt; "\n";
+            } <span class="kw">else</span> {
+                cin &gt;&gt; x;
+                t = x;
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+      </div>
+
+      <h2>四、标记叠加演示</h2>
+      <div class="viz">
+        <h3 class="viz-title">标记叠加演示</h3>
+        <p class="intro">4 个叶子，初始 [1,2,3,4]。1 1 3 +2、1 2 4 +3，最后 2 1 4 查询：标记挂节点不下发，查询沿路叠加。</p>
+        <div class="viz-canvas" id="vizCanvas3"></div>
+        <p class="stepnote" id="stepNote3"></p>
+        <div class="viz-controls"><button>重置</button><button>下一步</button></div>
+      </div>
+
+      <h2>五、总结</h2>
+      <p>标记永久化用「标记叠加」换掉「标记下发」，查询不建节点，空间省一个 O(m log n)。代价是只适用于可叠加的修改查询对，范围重置配最值这类题老老实实走经典方式。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>P3372 线段树 1</td><td><a href="https://www.luogu.com.cn/problem/P3372" target="_blank">查看题目</a></td></tr>
+          <tr><td>HDU</td><td>4348 To the moon</td><td><a href="https://acm.hdu.edu.cn/showproblem.php?pid=4348" target="_blank">查看题目</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解157【挺难】可持久化线段树和标记永久化</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">查看仓库</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  // 标记叠加演示：4 叶子，区间加 2 次 + 查询 1 次
+  var svgNS = 'http://www.w3.org/2000/svg';
+  var HH = 240;
+  var steps = [
+    {op: '初始', leaves: [1, 2, 3, 4], tags: [0, 0, 0], note: '4 个叶子，值 [1,2,3,4]，所有节点 addTag=0。'},
+    {op: '1 1 3 +2', leaves: [3, 4, 5, 4], tags: [0, 2, 0], note: '区间 [1,3] +2：根未完全覆盖 tag 不变；左子树 [1,2] 完全覆盖 → addTag=2；叶子 [3,3] 值 +2。'},
+    {op: '1 2 4 +3', leaves: [3, 7, 8, 7], tags: [0, 2, 3], note: '区间 [2,4] +3：根未完全覆盖 tag 不变；叶子 [2,2] 值 +3；右子树 [3,4] 完全覆盖 → addTag=0+3=3。'},
+    {op: '2 1 4 查询', leaves: [3, 7, 8, 7], tags: [0, 2, 3], note: '查询 [1,4]：addHistory=0，根 sum=25 直接返回。标记一个都没下发。'}
+  ];
+  var MAXSTEP = steps.length;
+  var step = 0;
+
+  function draw() {
+    if (step >= MAXSTEP) return;
+    var box = document.getElementById('vizCanvas3');
+    box.innerHTML = '';
+    var svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 680 ' + HH);
+    svg.setAttribute('width', '680');
+    svg.setAttribute('height', HH);
+    var s = steps[step];
+    var pos = [[340, 30], [180, 90], [500, 90], [90, 160], [270, 160], [410, 160], [590, 160]];
+    var edges = [[0, 1], [0, 2], [1, 3], [1, 4], [2, 5], [2, 6]];
+    edges.forEach(function(e) {
+      var ln = document.createElementNS(svgNS, 'line');
+      ln.setAttribute('x1', pos[e[0]][0]); ln.setAttribute('y1', pos[e[0]][1]);
+      ln.setAttribute('x2', pos[e[1]][0]); ln.setAttribute('y2', pos[e[1]][1]);
+      ln.setAttribute('stroke', '#999');
+      svg.appendChild(ln);
+    });
+    for (var i = 0; i < 3; i++) {
+      var cx = pos[i][0], cy = pos[i][1];
+      var c = document.createElementNS(svgNS, 'circle');
+      c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', 16);
+      c.setAttribute('fill', s.tags[i] ? '#ffd' : '#eef');
+      c.setAttribute('stroke', '#888');
+      svg.appendChild(c);
+      var t = document.createElementNS(svgNS, 'text');
+      t.setAttribute('x', cx); t.setAttribute('y', cy + 4);
+      t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '12');
+      t.textContent = 'tag=' + s.tags[i];
+      svg.appendChild(t);
+    }
+    var leaves = [3, 4, 5, 6];
+    for (var i = 0; i < 4; i++) {
+      var cx = pos[leaves[i]][0], cy = pos[leaves[i]][1];
+      var c = document.createElementNS(svgNS, 'circle');
+      c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', 16);
+      c.setAttribute('fill', '#eef'); c.setAttribute('stroke', '#888');
+      svg.appendChild(c);
+      var t = document.createElementNS(svgNS, 'text');
+      t.setAttribute('x', cx); t.setAttribute('y', cy + 4);
+      t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '13');
+      t.textContent = s.leaves[i];
+      svg.appendChild(t);
+    }
+    var t = document.createElementNS(svgNS, 'text');
+    t.setAttribute('x', 340); t.setAttribute('y', 14);
+    t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '12'); t.setAttribute('fill', '#555');
+    t.textContent = s.op;
+    svg.appendChild(t);
+    document.getElementById('stepNote3').textContent = s.note;
+    box.appendChild(svg);
+    var btns = document.querySelector('#vizCanvas3').parentNode.querySelectorAll('.viz-controls button');
+    btns[1].disabled = step >= MAXSTEP;
+  }
+
+  var resetBtn = document.querySelector('#vizCanvas3').parentNode.querySelector('.viz-controls button:nth-child(1)');
+  var nextBtn = document.querySelector('#vizCanvas3').parentNode.querySelector('.viz-controls button:nth-child(2)');
+  resetBtn.addEventListener('click', function() { step = 0; draw(); nextBtn.disabled = step >= MAXSTEP; });
+  nextBtn.addEventListener('click', function() { if (step < MAXSTEP) { step++; draw(); } nextBtn.disabled = step >= MAXSTEP; });
+  draw();
+})();</script>
