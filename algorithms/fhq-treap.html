@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FHQ Treap：split 与 merge 代替旋转 · 算法仓库</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>FHQ Treap：split 与 merge 代替旋转</h1>
+      <p class="intro">前面几课的有序表都在靠旋转维持平衡：AVL 转出四种违规分析，Treap 插入挂上再旋、删除分四情况。这一课换一种活法：整棵树不做任何旋转，只做两件事。split 把一棵树按值或排名劈成两半，merge 把两棵子树按优先级拼回去。所有操作都是这两个函数的排列组合，代码量比旋转版少一大截，还天然支持可持久化。算法竞赛「有序表必带模板」四件套里，FHQ Treap 是常被点名的一个。</p>
+
+      <h2>零、背景</h2>
+      <p>Treap 的平衡靠每个节点一个随机优先级：key 当搜索树、priority 当堆，期望 O(log n)。旋转版维护这两条性质要旋，插入删除各有分支；FHQ Treap 同一套随机优先级，但平衡性靠 split 和 merge 两个递归函数天然保持，写起来就剩「劈开、拼回」两个动作。</p>
+      <p>这一页讲普通有序表的两个版本：词频压缩版（重复值只存一个节点）和无词频版（FHQ 最常规的实现，每个值一个节点）。区间操作和可持久化在另外两页。</p>
+
+      <h2>一、split：按值把树劈成两半</h2>
+      <p>split 按 key 分裂：给定一棵搜索树和阈值 num，把 key ≤ num 的节点拧成一棵搜索树，key &gt; num 的拧成另一棵。也可以按排名分裂：前 rank 个节点一棵，剩下的另一棵。区间操作那页用排名版，这一页全是按值。</p>
+      <p>代码里 split 的签名是 <code>split(l, r, i, num)</code>，三个参数里 l 和 r 不是普通变量，是「缺口链」：递归走到 key ≤ num 的分支时，把当前节点挂到 l 链的右侧（rs[l] = i），再往下劈它的右子树；走 key &gt; num 的分支时，把节点挂到 r 链的左侧（ls[r] = i），再往下劈左子树。等 i 走到 0，两棵树的头分别出现在 rs[0]（≤ 部分）和 ls[0]（&gt; 部分）。</p>
+      <figure class="fig">
+        <div class="fig-title">图 1 split(head, 4)：key ≤ 4 的节点连成一棵（蓝），key &gt; 4 的连成另一棵（橙）</div>
+        <div id="figSplit"></div>
+      </figure>
+      <p>递归路径上的每个节点在返回前都 up 一次重算 siz，所以劈完两棵树的 siz 都是对的。</p>
+
+      <h2>二、merge：按优先级拼回一棵树</h2>
+      <p>merge(l, r) 要求 l 整棵树的 key 都小于 r 整棵树的 key（按排名分裂时是 l 的排名全在 r 前面）。每一层比较两个头的优先级，priority 大的一方做当前的根，然后递归拼对方的子树：l 当头就拼 rs[l] 和 r，r 当头就拼 l 和 ls[r]。</p>
+      <figure class="fig">
+        <div class="fig-title">图 2 merge 过程：l 树（key 都小）与 r 树（key 都大）合并，每一步优先级大者当头</div>
+        <div id="figMerge"></div>
+      </figure>
+      <p>因为 l 和 r 的 key 范围不相交，拼出来的树中序遍历正好是 l 的中序接 r 的中序，搜索树性质天然成立；优先级堆性质由每一层的取大保证。整个操作不做任何旋转，这是 FHQ 和旋转版 Treap 唯一的区别。</p>
+
+      <h2>三、无词频版六操作</h2>
+      <p>所有操作都是 split + merge 的组合。用临时槽 rs[0]、ls[0] 接收劈出的两棵树，用完立刻取走，下次 split 会重新覆盖。</p>
+      <p>1）增加 x：split(head, x - 1) 把 ≤ x - 1 的部分分出来，新建节点夹回去。<br>
+      2）删除 x：两次 split 取出整棵 key == x 的子树 m，直接把 m 丢掉，把左右拼回。<br>
+      3）查询排名：split(head, x - 1)，siz[rs[0]] + 1 就是比 x 小的个数加一。<br>
+      4）查第 k 小、前驱、后继：直接在树上递归，不用 split。</p>
+      <p>这里有个细节。删除用的是 <code>merge(merge(l, merge(ls[m], rs[m])), r)</code>，如果删除的 x 根本不在树里，第二次 split 劈出来的 m 是 0，ls[m] 和 rs[m] 会读到临时槽 rs[0]（那里还存着 l），等于把 l 和自己合并了一次，变成自环，递归下去就是栈溢出。P3369 保证删除的数存在，线上不会触发；但写通用代码时要么先查存在性，要么删完把临时槽清掉。</p>
+
+      <div class="viz">
+        <div class="viz-title">演示：priority 固定时，按顺序插入 5,2,8,1,6,3,7 再删除 3（每帧画当前树与优先级）</div>
+        <svg id="vizTreeSvg" viewBox="0 0 600 320"></svg>
+        <p class="stepnote" id="vizTreeNote"></p>
+        <div class="viz-controls">
+          <button id="vizTreeNext">下一步</button>
+          <button id="vizTreeReset">重置</button>
+        </div>
+      </div>
+
+      <h2>四、题2 完整实现（P3369 无词频版）</h2>
+      <p>无词频是 FHQ 最常规的设定：左子树的 key ≤ 根 ≤ 右子树。洛谷 P3369 数据规模 1e5、x ∈ [-1e7, 1e7]，静态数组开 1e5 就够。前驱后继不存在时分别返回整数最小值与最大值，和题面一致。</p>
+      <p>注意 <code>add</code> 里新节点入树用的是 merge(merge(rs[0], cnt), ls[0])，临时槽取走后立即使用；<code>getRank</code> 用完后把两半拼回，树保持原状。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+    <span class="kw">#include</span> &lt;cstdio&gt;
+    <span class="kw">#include</span> &lt;cstdlib&gt;
+    <span class="kw">#include</span> &lt;cstring&gt;
+    <span class="kw">#include</span> &lt;algorithm&gt;
+    <span class="kw">#include</span> &lt;climits&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">int</span> head = 0;
+    <span class="kw">int</span> cnt = 0;
+    <span class="kw">int</span> key[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">double</span> priority[MAXN];
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        siz[i] = siz[ls[i]] + siz[rs[i]] + 1;
+    }
+
+    <span class="kw">void</span> <span class="fn">split</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            rs[l] = ls[r] = 0;
+        } <span class="kw">else</span> {
+            <span class="kw">if</span> (key[i] &lt;= num) {
+                rs[l] = i;
+                split(i, r, rs[i], num);
+            } <span class="kw">else</span> {
+                ls[r] = i;
+                split(l, i, ls[i], num);
+            }
+            up(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == 0 || r == 0) {
+            <span class="kw">return</span> l + r;
+        }
+        <span class="kw">if</span> (priority[l] &gt;= priority[r]) {
+            rs[l] = merge(rs[l], r);
+            up(l);
+            <span class="kw">return</span> l;
+        } <span class="kw">else</span> {
+            ls[r] = merge(l, ls[r]);
+            up(r);
+            <span class="kw">return</span> r;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        split(0, 0, head, num);
+        key[++cnt] = num;
+        siz[cnt] = 1;
+        priority[cnt] = (<span class="kw">double</span>)rand() / RAND_MAX;
+        head = merge(merge(rs[0], cnt), ls[0]);
+    }
+
+    <span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> num) {
+        split(0, 0, head, num);
+        <span class="kw">int</span> lm = rs[0];
+        <span class="kw">int</span> r = ls[0];
+        split(0, 0, lm, num - 1);
+        <span class="kw">int</span> l = rs[0];
+        <span class="kw">int</span> m = ls[0];
+        head = merge(merge(l, merge(ls[m], rs[m])), r);
+    }
+
+    <span class="kw">int</span> <span class="fn">getRank</span>(<span class="kw">int</span> num) {
+        split(0, 0, head, num - 1);
+        <span class="kw">int</span> ans = siz[rs[0]] + 1;
+        head = merge(rs[0], ls[0]);
+        <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> i, <span class="kw">int</span> x) {
+        <span class="kw">if</span> (siz[ls[i]] &gt;= x) {
+            <span class="kw">return</span> index(ls[i], x);
+        } <span class="kw">else</span> <span class="kw">if</span> (siz[ls[i]] + 1 &lt; x) {
+            <span class="kw">return</span> index(rs[i], x - siz[ls[i]] - 1);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> key[i];
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> index(head, x);
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> INT_MIN;
+        }
+        <span class="kw">if</span> (key[i] &gt;= num) {
+            <span class="kw">return</span> pre(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> max(key[i], pre(rs[i], num));
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> pre(head, num);
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> INT_MAX;
+        }
+        <span class="kw">if</span> (key[i] &lt;= num) {
+            <span class="kw">return</span> post(rs[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> min(key[i], post(ls[i], num));
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> post(head, num);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        srand(time(0));
+        <span class="kw">int</span> n;
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x; i &lt;= n; i++) {
+            cin &gt;&gt; op &gt;&gt; x;
+            <span class="kw">if</span> (op == 1) {
+                add(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 2) {
+                remove(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 3) {
+                cout &lt;&lt; getRank(x) &lt;&lt; endl;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 4) {
+                cout &lt;&lt; index(x) &lt;&lt; endl;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 5) {
+                cout &lt;&lt; pre(x) &lt;&lt; endl;
+            } <span class="kw">else</span> {
+                cout &lt;&lt; post(x) &lt;&lt; endl;
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2>五、词频压缩版</h2>
+      <p>P3369 允许重复加入同一个 x。无词频版每个 x 一个节点，重复多少次就建多少个节点；词频版给每个节点多存一个 count，重复值只建一个节点，siz 变成左子树大小 + 右子树大小 + count。插入时先 find，找到了 count 加一，找不到才 split 建新节点；删除时先 find，count 大于一就减一，等于一才做真正的 split 删除。这版删除在找到节点时才动树，不存在直接不操作，没有上一节那个自环问题。</p>
+      <figure class="fig">
+        <div class="fig-title">图 3 同一份数据 [3,3,3,5,5,7]：无词频版 6 个节点，词频版 3 个节点</div>
+        <div id="figCount"></div>
+      </figure>
+      <p>词频版还有一个细节：删除时 count 等于一才 split，而 split 出来的是整棵 key == num 的子树，直接丢掉它（包括它的左右孩子），因为这个词频压缩下 key == num 只可能是这一个节点。up 里 siz 的合并公式换成带 count 的版本，排名查询就自动正确。</p>
+
+      <h2>六、题1 完整实现（P3369 词频压缩版）</h2>
+      <p>与题2 同题同数据范围，只是内部结构换成语频压缩。find 用搜索树性质直接找节点编号，changeCount 沿路更新 siz。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+    <span class="kw">#include</span> &lt;cstdio&gt;
+    <span class="kw">#include</span> &lt;cstdlib&gt;
+    <span class="kw">#include</span> &lt;cstring&gt;
+    <span class="kw">#include</span> &lt;algorithm&gt;
+    <span class="kw">#include</span> &lt;climits&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">int</span> head = 0;
+    <span class="kw">int</span> cnt = 0;
+    <span class="kw">int</span> key[MAXN];
+    <span class="kw">int</span> key_count[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">double</span> priority[MAXN];
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        siz[i] = siz[ls[i]] + siz[rs[i]] + key_count[i];
+    }
+
+    <span class="kw">void</span> <span class="fn">split</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            rs[l] = ls[r] = 0;
+        } <span class="kw">else</span> {
+            <span class="kw">if</span> (key[i] &lt;= num) {
+                rs[l] = i;
+                split(i, r, rs[i], num);
+            } <span class="kw">else</span> {
+                ls[r] = i;
+                split(l, i, ls[i], num);
+            }
+            up(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == 0 || r == 0) {
+            <span class="kw">return</span> l + r;
+        }
+        <span class="kw">if</span> (priority[l] &gt;= priority[r]) {
+            rs[l] = merge(rs[l], r);
+            up(l);
+            <span class="kw">return</span> l;
+        } <span class="kw">else</span> {
+            ls[r] = merge(l, ls[r]);
+            up(r);
+            <span class="kw">return</span> r;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (key[i] == num) {
+            <span class="kw">return</span> i;
+        } <span class="kw">else</span> <span class="kw">if</span> (key[i] &gt; num) {
+            <span class="kw">return</span> find(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> find(rs[i], num);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">changeCount</span>(<span class="kw">int</span> i, <span class="kw">int</span> num, <span class="kw">int</span> change) {
+        <span class="kw">if</span> (key[i] == num) {
+            key_count[i] += change;
+        } <span class="kw">else</span> <span class="kw">if</span> (key[i] &gt; num) {
+            changeCount(ls[i], num, change);
+        } <span class="kw">else</span> {
+            changeCount(rs[i], num, change);
+        }
+        up(i);
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        <span class="kw">if</span> (find(head, num) != 0) {
+            changeCount(head, num, 1);
+        } <span class="kw">else</span> {
+            split(0, 0, head, num);
+            key[++cnt] = num;
+            key_count[cnt] = siz[cnt] = 1;
+            priority[cnt] = (<span class="kw">double</span>)rand() / RAND_MAX;
+            head = merge(merge(rs[0], cnt), ls[0]);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> num) {
+        <span class="kw">int</span> i = find(head, num);
+        <span class="kw">if</span> (i != 0) {
+            <span class="kw">if</span> (key_count[i] &gt; 1) {
+                changeCount(head, num, -1);
+            } <span class="kw">else</span> {
+                split(0, 0, head, num);
+                <span class="kw">int</span> lm = rs[0];
+                <span class="kw">int</span> r = ls[0];
+                split(0, 0, lm, num - 1);
+                <span class="kw">int</span> l = rs[0];
+                head = merge(l, r);
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">small</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (key[i] &gt;= num) {
+            <span class="kw">return</span> small(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> siz[ls[i]] + key_count[i] + small(rs[i], num);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">getRank</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> small(head, num) + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> i, <span class="kw">int</span> x) {
+        <span class="kw">if</span> (siz[ls[i]] &gt;= x) {
+            <span class="kw">return</span> index(ls[i], x);
+        } <span class="kw">else</span> <span class="kw">if</span> (siz[ls[i]] + key_count[i] &lt; x) {
+            <span class="kw">return</span> index(rs[i], x - siz[ls[i]] - key_count[i]);
+        }
+        <span class="kw">return</span> key[i];
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> x) {
+        <span class="kw">return</span> index(head, x);
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> INT_MIN;
+        }
+        <span class="kw">if</span> (key[i] &gt;= num) {
+            <span class="kw">return</span> pre(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> max(key[i], pre(rs[i], num));
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> pre(head, num);
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> INT_MAX;
+        }
+        <span class="kw">if</span> (key[i] &lt;= num) {
+            <span class="kw">return</span> post(rs[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> min(key[i], post(ls[i], num));
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> num) {
+        <span class="kw">return</span> post(head, num);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        srand(time(0));
+        <span class="kw">int</span> n;
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, op, x; i &lt;= n; i++) {
+            cin &gt;&gt; op &gt;&gt; x;
+            <span class="kw">if</span> (op == 1) {
+                add(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 2) {
+                remove(x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 3) {
+                cout &lt;&lt; getRank(x) &lt;&lt; endl;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 4) {
+                cout &lt;&lt; index(x) &lt;&lt; endl;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 5) {
+                cout &lt;&lt; pre(x) &lt;&lt; endl;
+            } <span class="kw">else</span> {
+                cout &lt;&lt; post(x) &lt;&lt; endl;
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2>七、数据加强：P6136 强制在线</h2>
+      <p>题目链接页有 P6136：一开始给 n 个初始值，再给 m 个操作，每次输入的 x 要异或上一次查询的答案，最后把所有答案异或起来输出。代码就是无词频版加一个 main 的在线包装，数据量翻到 2e5，结构本身不用改。课上没有讲，留作自己验证。</p>
+
+      <h2>八、总结</h2>
+      <p>FHQ Treap 把平衡问题全部交给 split 和 merge：按值分裂适合有序表六操作，按排名分裂适合区间操作，两个函数都是纯递归、不碰旋转。词频压缩版用 count 换节点数，重复数据下省空间，删除只在 count 归零时动树；无词频版实现最直接，是理解 FHQ 的起点。下一课用它处理区间移动和范围翻转，再下一课加可持久化。</p>
+
+      <h2>相关题目</h2>
+      <table class="table complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>普通平衡树（题1 词频压缩版）</td><td><a href="https://www.luogu.com.cn/problem/P3369" target="_blank">P3369</a></td></tr>
+          <tr><td>洛谷</td><td>普通平衡树（题2 无词频版）</td><td><a href="https://www.luogu.com.cn/problem/P3369" target="_blank">P3369</a></td></tr>
+          <tr><td>洛谷</td><td>普通平衡树（数据加强）</td><td><a href="https://www.luogu.com.cn/problem/P6136" target="_blank">P6136</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="table complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解152【扩展】有序表专题5-FHQ Treap</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  function T(x, y, txt, fs, fill, anchor) {
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x); t.setAttribute('y', y);
+    t.setAttribute('font-size', fs || 13); t.setAttribute('fill', fill || '#222');
+    t.setAttribute('text-anchor', anchor || 'middle');
+    t.textContent = txt;
+    return t;
+  }
+  function R(x, y, w, h, fill, stroke, r) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    e.setAttribute('x', x); e.setAttribute('y', y); e.setAttribute('width', w); e.setAttribute('height', h);
+    e.setAttribute('fill', fill || 'none'); e.setAttribute('stroke', stroke || '#999'); e.setAttribute('rx', r || 0);
+    return e;
+  }
+  function LN(x1, y1, x2, y2, color, w) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    e.setAttribute('x1', x1); e.setAttribute('y1', y1); e.setAttribute('x2', x2); e.setAttribute('y2', y2);
+    e.setAttribute('stroke', color || '#888'); e.setAttribute('stroke-width', w || 1.5);
+    return e;
+  }
+  function mount(id, s) { document.getElementById(id).appendChild(s); }
+  function circle(cx, cy, r, fill, stroke) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    e.setAttribute('cx', cx); e.setAttribute('cy', cy); e.setAttribute('r', r);
+    e.setAttribute('fill', fill || '#fff'); e.setAttribute('stroke', stroke || '#444');
+    e.setAttribute('stroke-width', 1.6);
+    return e;
+  }
+  function edge(x1, y1, x2, y2, color) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    e.setAttribute('x1', x1); e.setAttribute('y1', y1); e.setAttribute('x2', x2); e.setAttribute('y2', y2);
+    e.setAttribute('stroke', color || '#bbb'); e.setAttribute('stroke-width', 1.5);
+    return e;
+  }
+  function layoutTree(n, ls, rs, root) {
+    var pos = {}, layer = {}, q = [root], depth = {}, order = [];
+    depth[root] = 0;
+    while (q.length) {
+      var u = q.shift();
+      order.push(u);
+      (layer[depth[u]] = layer[depth[u]] || []).push(u);
+      if (ls[u]) { depth[ls[u]] = depth[u] + 1; q.push(ls[u]); }
+      if (rs[u]) { depth[rs[u]] = depth[u] + 1; q.push(rs[u]); }
+    }
+    var maxDepth = 0;
+    for (var k in depth) maxDepth = Math.max(maxDepth, depth[k]);
+    for (var d = 0; d <= maxDepth; d++) {
+      var arr = layer[d] || [];
+      for (var i = 0; i < arr.length; i++) {
+        pos[arr[i]] = { x: 80 + i * (520 / Math.max(arr.length, 1)), y: 60 + d * 52 };
+      }
+    }
+    return { pos: pos, order: order, maxDepth: maxDepth };
+  }
+  function drawTree(s, n, ls, rs, root, pos, key, pr, hl, hlColor) {
+    for (var u = 1; u <= n; u++) {
+      if (ls[u] && pos[u]) s.appendChild(edge(pos[u].x, pos[u].y + 16, pos[ls[u]].x, pos[ls[u]].y - 16, '#c9d6e8'));
+      if (rs[u] && pos[u]) s.appendChild(edge(pos[u].x, pos[u].y + 16, pos[rs[u]].x, pos[rs[u]].y - 16, '#c9d6e8'));
+    }
+    for (var u = 1; u <= n; u++) {
+      if (!pos[u]) continue;
+      var isHl = hl && (hl.indexOf(u) >= 0);
+      s.appendChild(circle(pos[u].x, pos[u].y, 16, isHl ? (hlColor || '#ffd9a0') : '#fff', isHl ? '#e08a1e' : '#567'));
+      s.appendChild(T(pos[u].x, pos[u].y + 4, String(key[u]), 13, '#1a3352'));
+      s.appendChild(T(pos[u].x, pos[u].y + 26, 'p=' + pr[u].toFixed(2), 10, '#8a5a00'));
+    }
+  }
+
+  // ===== 图 1：split 按值劈树 =====
+  (function(){
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 640 300');
+    // 原树：4 根，左 2(1,3)，右 6(5,7)
+    var orig = { 4: {x:120,y:55}, 2: {x:70,y:140}, 1: {x:35,y:225}, 3: {x:105,y:225}, 6: {x:170,y:140}, 5: {x:140,y:225}, 7: {x:205,y:225} };
+    s.appendChild(T(120, 30, '原树', 14, '#1a3352', 'middle'));
+    s.appendChild(edge(orig[4].x, orig[4].y + 16, orig[2].x, orig[2].y - 16));
+    s.appendChild(edge(orig[4].x, orig[4].y + 16, orig[6].x, orig[6].y - 16));
+    s.appendChild(edge(orig[2].x, orig[2].y + 16, orig[1].x, orig[1].y - 16));
+    s.appendChild(edge(orig[2].x, orig[2].y + 16, orig[3].x, orig[3].y - 16));
+    s.appendChild(edge(orig[6].x, orig[6].y + 16, orig[5].x, orig[5].y - 16));
+    s.appendChild(edge(orig[6].x, orig[6].y + 16, orig[7].x, orig[7].y - 16));
+    for (var u in orig) {
+      s.appendChild(circle(orig[u].x, orig[u].y, 15, '#fff', '#567'));
+      s.appendChild(T(orig[u].x, orig[u].y + 4, u, 13, '#1a3352'));
+    }
+    // 中间：split 标注
+    s.appendChild(T(310, 130, 'split(head, 4)', 14, '#8a5a00'));
+    s.appendChild(T(310, 152, 'key ≤ 4 归左树', 12, '#1d6fa5'));
+    s.appendChild(T(310, 170, 'key > 4 归右树', 12, '#c0651a'));
+    s.appendChild(LN(240, 110, 262, 130, '#bbb', 1.5));
+    s.appendChild(LN(380, 110, 358, 130, '#bbb', 1.5));
+    // 右：两棵结果树
+    var L = { 4: {x:430,y:55}, 2: {x:385,y:140}, 1: {x:350,y:225}, 3: {x:420,y:225} };
+    var Rr = { 6: {x:555,y:55}, 5: {x:525,y:140}, 7: {x:585,y:140} };
+    s.appendChild(T(430, 30, '≤ 4（左树头在 rs[0]）', 13, '#1d6fa5'));
+    s.appendChild(T(555, 30, '> 4（右树头在 ls[0]）', 13, '#c0651a'));
+    s.appendChild(edge(L[4].x, L[4].y + 16, L[2].x, L[2].y - 16));
+    s.appendChild(edge(L[2].x, L[2].y + 16, L[1].x, L[1].y - 16));
+    s.appendChild(edge(L[2].x, L[2].y + 16, L[3].x, L[3].y - 16));
+    for (var u in L) {
+      s.appendChild(circle(L[u].x, L[u].y, 15, '#e6f2fa', '#1d6fa5'));
+      s.appendChild(T(L[u].x, L[u].y + 4, u, 13, '#1d4a72'));
+    }
+    s.appendChild(edge(Rr[6].x, Rr[6].y + 16, Rr[5].x, Rr[5].y - 16));
+    s.appendChild(edge(Rr[6].x, Rr[6].y + 16, Rr[7].x, Rr[7].y - 16));
+    for (var u in Rr) {
+      s.appendChild(circle(Rr[u].x, Rr[u].y, 15, '#fdf0e3', '#c0651a'));
+      s.appendChild(T(Rr[u].x, Rr[u].y + 4, u, 13, '#7a3d0e'));
+    }
+    mount('figSplit', s);
+  })();
+
+  // ===== 图 2：merge 过程 =====
+  (function(){
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 640 300');
+    // l 树：3(0.55) 左 1(0.20)
+    s.appendChild(T(105, 40, 'l 树（key 都小）', 13, '#1d6fa5'));
+    s.appendChild(circle(105, 90, 15, '#e6f2fa', '#1d6fa5'));
+    s.appendChild(T(105, 94, '3', 13, '#1d4a72'));
+    s.appendChild(T(105, 112, 'p=0.55', 10, '#1d6fa5'));
+    s.appendChild(circle(60, 170, 15, '#e6f2fa', '#1d6fa5'));
+    s.appendChild(T(60, 174, '1', 13, '#1d4a72'));
+    s.appendChild(T(60, 192, 'p=0.20', 10, '#1d6fa5'));
+    s.appendChild(edge(105, 106, 60, 154, '#9dc4e0'));
+    // r 树：5(0.80) 右 7(0.30)
+    s.appendChild(T(460, 40, 'r 树（key 都大）', 13, '#c0651a'));
+    s.appendChild(circle(460, 90, 15, '#fdf0e3', '#c0651a'));
+    s.appendChild(T(460, 94, '5', 13, '#7a3d0e'));
+    s.appendChild(T(460, 112, 'p=0.80', 10, '#c0651a'));
+    s.appendChild(circle(510, 170, 15, '#fdf0e3', '#c0651a'));
+    s.appendChild(T(510, 174, '7', 13, '#7a3d0e'));
+    s.appendChild(T(510, 192, 'p=0.30', 10, '#c0651a'));
+    s.appendChild(edge(460, 106, 510, 154, '#e6b98c'));
+    // 中间：比较
+    s.appendChild(T(285, 90, '5.p = 0.80', 13, '#8a5a00'));
+    s.appendChild(T(285, 110, '>', 13, '#8a5a00'));
+    s.appendChild(T(285, 130, '3.p = 0.55', 13, '#8a5a00'));
+    s.appendChild(T(285, 156, '→ 5 做根', 13, '#c0392b'));
+    s.appendChild(LN(200, 100, 252, 100, '#bbb'));
+    s.appendChild(LN(370, 100, 318, 100, '#bbb'));
+    // 底部：结果树
+    s.appendChild(T(320, 220, '结果：merge(l, r)', 13, '#1a3352'));
+    s.appendChild(circle(320, 258, 15, '#fff', '#567'));
+    s.appendChild(T(320, 262, '5', 13, '#1a3352'));
+    s.appendChild(circle(255, 258, 15, '#e6f2fa', '#1d6fa5'));
+    s.appendChild(T(255, 262, '3', 13, '#1d4a72'));
+    s.appendChild(circle(210, 258, 15, '#e6f2fa', '#1d6fa5'));
+    s.appendChild(T(210, 262, '1', 13, '#1d4a72'));
+    s.appendChild(circle(390, 258, 15, '#fdf0e3', '#c0651a'));
+    s.appendChild(T(390, 262, '7', 13, '#7a3d0e'));
+    s.appendChild(edge(320, 274, 255, 274, '#9dc4e0'));
+    s.appendChild(edge(255, 274, 210, 274, '#9dc4e0'));
+    s.appendChild(edge(320, 274, 390, 274, '#e6b98c'));
+    mount('figMerge', s);
+  })();
+
+  // ===== 图 3：词频压缩对比 =====
+  (function(){
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 640 240');
+    // 左：无词频 6 节点
+    s.appendChild(T(150, 40, '无词频：6 个节点', 13, '#1a3352'));
+    var pos = [[95,90],[145,90],[195,90],[95,150],[145,150],[95,210]];
+    var vals = [3,3,3,5,5,7];
+    for (var i = 0; i < 6; i++) {
+      s.appendChild(circle(pos[i][0], pos[i][1], 14, '#fff', '#567'));
+      s.appendChild(T(pos[i][0], pos[i][1] + 4, String(vals[i]), 12, '#1a3352'));
+    }
+    // 中间箭头
+    s.appendChild(T(320, 120, 'siz = 左 + 右 + 1', 13, '#8a5a00'));
+    s.appendChild(LN(245, 120, 272, 120, '#bbb'));
+    s.appendChild(LN(395, 120, 368, 120, '#bbb'));
+    // 右：词频 3 节点
+    s.appendChild(T(470, 40, '词频版：3 个节点', 13, '#1a3352'));
+    var p2 = [[440,90],[500,90],[470,160]];
+    var v2 = [3,5,7], c2 = [3,2,1];
+    for (var j = 0; j < 3; j++) {
+      s.appendChild(circle(p2[j][0], p2[j][1], 14, '#e6f2fa', '#1d6fa5'));
+      s.appendChild(T(p2[j][0], p2[j][1] + 4, String(v2[j]), 12, '#1d4a72'));
+      s.appendChild(T(p2[j][0] + 20, p2[j][1] - 8, '×' + c2[j], 11, '#c0392b'));
+    }
+    s.appendChild(T(470, 205, 'siz = 左 + 右 + count', 13, '#8a5a00'));
+    mount('figCount', s);
+  })();
+
+  // ===== 演示：FHQ 插入与删除 =====
+  (function(){
+    var svg = document.getElementById('vizTreeSvg');
+    var note = document.getElementById('vizTreeNote');
+    var KEY = [0], LS = [0], RS = [0], SZ = [0], PR = [0];
+    var head = 0;
+    function up(i) { SZ[i] = SZ[LS[i]] + SZ[RS[i]] + 1; }
+    function spl(i, num) {
+      if (!i) return [0, 0];
+      if (KEY[i] <= num) { var p = spl(RS[i], num); RS[i] = p[0]; up(i); return [i, p[1]]; }
+      else { var p = spl(LS[i], num); LS[i] = p[1]; up(i); return [p[0], i]; }
+    }
+    function mrg(a, b) {
+      if (!a || !b) return a || b;
+      if (PR[a] >= PR[b]) { RS[a] = mrg(RS[a], b); up(a); return a; }
+      else { LS[b] = mrg(a, LS[b]); up(b); return b; }
+    }
+    function snap() { return { head: head, KEY: KEY.slice(), LS: LS.slice(), RS: RS.slice(), SZ: SZ.slice(), PR: PR.slice() }; }
+    function addNode(v, pr) {
+      KEY.push(v); PR.push(pr); var id = KEY.length - 1; SZ.push(1); LS.push(0); RS.push(0);
+      var p = spl(head, v - 1);
+      head = mrg(mrg(p[0], id), p[1]);
+    }
+    function delNode(v) {
+      var p = spl(head, v);
+      var q = spl(p[0], v - 1);
+      head = mrg(q[0], p[1]);
+    }
+    var seq = [[5,0.40],[2,0.25],[8,0.80],[1,0.60],[6,0.15],[3,0.70],[7,0.35]];
+    var FR = [{ note: '初始：空树', snap: snap() }];
+    for (var i = 0; i < seq.length; i++) {
+      addNode(seq[i][0], seq[i][1]);
+      FR.push({ note: '插入 ' + seq[i][0] + '（priority ' + seq[i][1].toFixed(2) + '）：split 后 merge 回', snap: snap() });
+    }
+    delNode(3);
+    FR.push({ note: '删除 3：两次 split 取出 key=3 的子树丢掉，左右拼回', snap: snap() });
+
+    var at = 0;
+    function drawFrame(f) {
+      var st = f.snap;
+      var s = svg.cloneNode(false);
+      s.setAttribute('viewBox', '0 0 600 320');
+      var n = st.KEY.length - 1;
+      var ly = layoutTree(n, st.LS, st.RS, st.head);
+      for (var u = 1; u <= n; u++) {
+        if (st.LS[u] && ly.pos[u]) s.appendChild(edge(ly.pos[u].x, ly.pos[u].y + 16, ly.pos[st.LS[u]].x, ly.pos[st.LS[u]].y - 16, '#c9d6e8'));
+        if (st.RS[u] && ly.pos[u]) s.appendChild(edge(ly.pos[u].x, ly.pos[u].y + 16, ly.pos[st.RS[u]].x, ly.pos[st.RS[u]].y - 16, '#c9d6e8'));
+      }
+      for (var u2 = 1; u2 <= n; u2++) {
+        if (!ly.pos[u2]) continue;
+        s.appendChild(circle(ly.pos[u2].x, ly.pos[u2].y, 16, '#fff', '#567'));
+        s.appendChild(T(ly.pos[u2].x, ly.pos[u2].y + 4, String(st.KEY[u2]), 13, '#1a3352'));
+        s.appendChild(T(ly.pos[u2].x, ly.pos[u2].y + 26, 'p=' + st.PR[u2].toFixed(2), 10, '#8a5a00'));
+      }
+      if (n === 0) s.appendChild(T(300, 160, '（空树）', 14, '#999'));
+      svg.parentNode.replaceChild(s, svg);
+      svg = s;
+      note.textContent = '第 ' + (at === 0 ? 0 : at) + ' 步 · ' + f.note;
+      var nx = document.getElementById('vizTreeNext');
+      if (at + 1 >= FR.length) nx.disabled = true;
+    }
+    function resetAll() {
+      at = 0;
+      drawFrame(FR[0]);
+      document.getElementById('vizTreeNext').disabled = false;
+    }
+    function nextStep() {
+      if (at + 1 < FR.length) { at++; drawFrame(FR[at]); }
+      if (at + 1 >= FR.length) document.getElementById('vizTreeNext').disabled = true;
+    }
+    document.getElementById('vizTreeNext').addEventListener('click', nextStep);
+    document.getElementById('vizTreeReset').addEventListener('click', resetAll);
+    resetAll();
+  })();
+})();
+</script>
+</body>
+</html>

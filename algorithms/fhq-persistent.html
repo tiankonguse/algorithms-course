@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>可持久化 FHQ Treap：版本树与强制在线 · 算法仓库</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>可持久化 FHQ Treap：版本树与强制在线</h1>
+      <p class="intro">普通平衡树做完操作，旧版本就没了。可持久化要求每次操作之后旧版本原样保留，随时能查任意历史版本。暴力做法是每版整棵树拷贝一份，一次 O(n)；FHQ Treap 的办法是只复制操作路径上碰到的 O(log n) 个节点，没碰到的子树直接共享，新旧版本共用同一批节点。这套设计和可持久化线段树（主席树）几乎一模一样。</p>
+
+      <h2>零、背景</h2>
+      <p>可持久化的核心就一句话：旧版本不能被破坏。split 和 merge 递归时都会改写沿途节点的左右孩子和 siz，所以每一步动手前先 copy 一个一模一样的节点，在新节点上改。没走到的子树完全不动，多个版本共享它们。</p>
+      <figure class="fig">
+        <div class="fig-title">图 1 从版本 0 插入 3 生成版本 1：根 5 和左子树 2 被复制，右子树 8 原样共享</div>
+        <div id="figCopy"></div>
+      </figure>
+      <p>每次操作复制 O(log n) 个节点，时间空间代价都是 O(log n)。每个版本的头节点记录在 head[v] 里，第 i 号版本就存 head[i]。0 版本约定永远是空树：split 过程走完，临时槽 left[0] = right[0] = 0 必须保证。</p>
+
+      <h2>一、可持久化平衡树 P3835：版本树</h2>
+      <p>P3835 的每个操作都基于某个 v 版本：增加、删除生成新版本；查询也生成一个「状况等于 v 版本」的新版本，所以查询操作一样要把 head[i] 记成 head[v]。删除不存在的前驱时返回 -2^31 + 1，后继不存在返回 +2^31 - 1，这两个值用 INT_MIN + 1 和 INT_MAX 表达。</p>
+      <p>实现上 split 和 merge 内部先 copy 再递归，copy 函数把 key、左右孩子、siz、priority 全部搬到新槽位。add 建新节点后 merge 两棵树，remove 两次 split 取出 m 后把 m 的左右孩子合并回去。查询用的 small、index、pre、post 只读不写，不需要 copy。</p>
+      <figure class="fig">
+        <div class="fig-title">图 2 版本链：每次操作产生新版本，head 数组记下每个版本的根</div>
+        <div id="figVersion"></div>
+      </figure>
+      <p>merge 也要加可持久化设计：merge 里同样先 copy 再改孩子，这样可以直接合并两个不同版本的树而不污染它们。</p>
+
+      <h2>二、题5 完整实现（P3835 可持久化平衡树）</h2>
+      <p>n 到 5e5，x 到 ±1e9。节点数组开 MAXN 的几十倍，因为每次操作都会新造节点。输入先给 v、op、x，增删查共用一套 split/merge。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+    <span class="kw">#include</span> &lt;cstdio&gt;
+    <span class="kw">#include</span> &lt;cstdlib&gt;
+    <span class="kw">#include</span> &lt;cstring&gt;
+    <span class="kw">#include</span> &lt;algorithm&gt;
+    <span class="kw">#include</span> &lt;climits&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = MAXN * 50;
+
+    <span class="kw">int</span> cnt = 0;
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> key[MAXM];
+    <span class="kw">int</span> ls[MAXM];
+    <span class="kw">int</span> rs[MAXM];
+    <span class="kw">int</span> siz[MAXM];
+    <span class="kw">double</span> priority[MAXM];
+
+    <span class="kw">int</span> <span class="fn">copy</span>(<span class="kw">int</span> i) {
+        ++cnt;
+        key[cnt] = key[i];
+        ls[cnt] = ls[i];
+        rs[cnt] = rs[i];
+        siz[cnt] = siz[i];
+        priority[cnt] = priority[i];
+        <span class="kw">return</span> cnt;
+    }
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        siz[i] = siz[ls[i]] + siz[rs[i]] + 1;
+    }
+
+    <span class="kw">void</span> <span class="fn">split</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            rs[l] = ls[r] = 0;
+        } <span class="kw">else</span> {
+            i = copy(i);
+            <span class="kw">if</span> (key[i] &lt;= num) {
+                rs[l] = i;
+                split(i, r, rs[i], num);
+            } <span class="kw">else</span> {
+                ls[r] = i;
+                split(l, i, ls[i], num);
+            }
+            up(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == 0 || r == 0) {
+            <span class="kw">return</span> l + r;
+        }
+        <span class="kw">if</span> (priority[l] &gt;= priority[r]) {
+            l = copy(l);
+            rs[l] = merge(rs[l], r);
+            up(l);
+            <span class="kw">return</span> l;
+        } <span class="kw">else</span> {
+            r = copy(r);
+            ls[r] = merge(l, ls[r]);
+            up(r);
+            <span class="kw">return</span> r;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> v, <span class="kw">int</span> i, <span class="kw">int</span> num) {
+        split(0, 0, i, num);
+        <span class="kw">int</span> l = rs[0];
+        <span class="kw">int</span> r = ls[0];
+        ls[0] = rs[0] = 0;
+        ++cnt;
+        key[cnt] = num;
+        siz[cnt] = 1;
+        priority[cnt] = (<span class="kw">double</span>)rand() / RAND_MAX;
+        head[v] = merge(merge(l, cnt), r);
+    }
+
+    <span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> v, <span class="kw">int</span> i, <span class="kw">int</span> num) {
+        split(0, 0, i, num);
+        <span class="kw">int</span> lm = rs[0];
+        <span class="kw">int</span> r = ls[0];
+        split(0, 0, lm, num - 1);
+        <span class="kw">int</span> l = rs[0];
+        <span class="kw">int</span> m = ls[0];
+        ls[0] = rs[0] = 0;
+        head[v] = merge(merge(l, merge(ls[m], rs[m])), r);
+    }
+
+    <span class="kw">int</span> <span class="fn">small</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> 0;
+        }
+        <span class="kw">if</span> (key[i] &gt;= num) {
+            <span class="kw">return</span> small(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> siz[ls[i]] + 1 + small(rs[i], num);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> i, <span class="kw">int</span> x) {
+        <span class="kw">if</span> (siz[ls[i]] &gt;= x) {
+            <span class="kw">return</span> index(ls[i], x);
+        } <span class="kw">else</span> <span class="kw">if</span> (siz[ls[i]] + 1 &lt; x) {
+            <span class="kw">return</span> index(rs[i], x - siz[ls[i]] - 1);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> key[i];
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">pre</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> INT_MIN + 1;
+        }
+        <span class="kw">if</span> (key[i] &gt;= num) {
+            <span class="kw">return</span> pre(ls[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> max(key[i], pre(rs[i], num));
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">post</span>(<span class="kw">int</span> i, <span class="kw">int</span> num) {
+        <span class="kw">if</span> (i == 0) {
+            <span class="kw">return</span> INT_MAX;
+        }
+        <span class="kw">if</span> (key[i] &lt;= num) {
+            <span class="kw">return</span> post(rs[i], num);
+        } <span class="kw">else</span> {
+            <span class="kw">return</span> min(key[i], post(ls[i], num));
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        srand(time(0));
+        <span class="kw">int</span> n;
+        cin &gt;&gt; n;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">int</span> version, op, x;
+            cin &gt;&gt; version &gt;&gt; op &gt;&gt; x;
+            <span class="kw">if</span> (op == 1) {
+                add(i, head[version], x);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 2) {
+                remove(i, head[version], x);
+            } <span class="kw">else</span> {
+                head[i] = head[version];
+                <span class="kw">if</span> (op == 3) {
+                    cout &lt;&lt; small(head[i], x) + 1 &lt;&lt; "\n";
+                } <span class="kw">else</span> <span class="kw">if</span> (op == 4) {
+                    cout &lt;&lt; index(head[i], x) &lt;&lt; "\n";
+                } <span class="kw">else</span> <span class="kw">if</span> (op == 5) {
+                    cout &lt;&lt; pre(head[i], x) &lt;&lt; "\n";
+                } <span class="kw">else</span> {
+                    cout &lt;&lt; post(head[i], x) &lt;&lt; "\n";
+                }
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <div class="viz">
+        <div class="viz-title">演示：版本链 v0 空树 → 插 3 → 插 1 → 插 2 → 再基于 v1 插 4（每帧显示该版本树与中序）</div>
+        <svg id="vizVerSvg" viewBox="0 0 600 320"></svg>
+        <p class="stepnote" id="vizVerNote"></p>
+        <div class="viz-controls">
+          <button id="vizVerNext">下一步</button>
+          <button id="vizVerReset">重置</button>
+        </div>
+      </div>
+
+      <h2>三、可持久化文艺平衡树 P5055：懒标记也要持久化</h2>
+      <p>P5055 在可持久化平衡树的基础上加了两个东西：区间翻转的懒标记，和区间和查询。翻转区间时给中段根打 rev 标记；down 的时候麻烦来了：左右孩子可能是旧版本共享的节点，直接 swap 会破坏旧版本。所以 down 里先 copy 左右孩子再交换、再传标记，新版本的翻转才不碰旧版本。</p>
+      <p>每个节点多维护一个 sum（左子树和 + 右子树和 + 自己的 key），翻转只换左右孩子不换值，区间和不受影响。sum 用 long long，插入值能到 ±1e6、n 到 2e5，区间和会超 int。</p>
+      <p>这题强制在线：所有输入参数异或上一次查询的答案，lastAns 初始 0，查询操作把答案输出并写回 lastAns。操作 2 只读一个参数 x，其余操作还要再读一个 y 同样异或。</p>
+
+      <h2>四、题6 完整实现（P5055 可持久化文艺平衡树）</h2>
+      <p>插入是在第 x 个数后插入 y，所以按排名 split(head, x) 取前 x 个，新节点夹中间。查询区间和用两次 split 取出 m 段，输出 sum[m]。删除是取中段直接丢掉。所有参数读入后先异或 lastAns 再使用。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+    <span class="kw">#include</span> &lt;vector&gt;
+    <span class="kw">#include</span> &lt;cstdlib&gt;
+    <span class="kw">#include</span> &lt;ctime&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 200001;
+    <span class="kw">const</span> <span class="kw">int</span> MAXM = MAXN * 100;
+
+    <span class="kw">int</span> cnt = 0;
+    <span class="kw">int</span> head[MAXN];
+    <span class="kw">int</span> key[MAXM];
+    <span class="kw">int</span> ls[MAXM];
+    <span class="kw">int</span> rs[MAXM];
+    <span class="kw">int</span> siz[MAXM];
+    <span class="kw">bool</span> rev[MAXM];
+    <span class="kw">long</span> <span class="kw">long</span> sum[MAXM];
+    <span class="kw">double</span> priority[MAXM];
+
+    <span class="kw">int</span> <span class="fn">copy</span>(<span class="kw">int</span> i) {
+        key[++cnt] = key[i];
+        ls[cnt] = ls[i];
+        rs[cnt] = rs[i];
+        siz[cnt] = siz[i];
+        rev[cnt] = rev[i];
+        sum[cnt] = sum[i];
+        priority[cnt] = priority[i];
+        <span class="kw">return</span> cnt;
+    }
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        siz[i] = siz[ls[i]] + siz[rs[i]] + 1;
+        sum[i] = sum[ls[i]] + sum[rs[i]] + key[i];
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (rev[i]) {
+            <span class="kw">if</span> (ls[i] != 0) {
+                ls[i] = copy(ls[i]);
+                rev[ls[i]] ^= 1;
+            }
+            <span class="kw">if</span> (rs[i] != 0) {
+                rs[i] = copy(rs[i]);
+                rev[rs[i]] ^= 1;
+            }
+            swap(ls[i], rs[i]);
+            rev[i] = <span class="kw">false</span>;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">split</span>(<span class="kw">int</span> l, <span class="kw">int</span> r, <span class="kw">int</span> i, <span class="kw">int</span> rank) {
+        <span class="kw">if</span> (i == 0) {
+            rs[l] = ls[r] = 0;
+        } <span class="kw">else</span> {
+            i = copy(i);
+            down(i);
+            <span class="kw">if</span> (siz[ls[i]] + 1 &lt;= rank) {
+                rs[l] = i;
+                split(i, r, rs[i], rank - siz[ls[i]] - 1);
+            } <span class="kw">else</span> {
+                ls[r] = i;
+                split(l, i, ls[i], rank);
+            }
+            up(i);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">if</span> (l == 0 || r == 0) {
+            <span class="kw">return</span> l + r;
+        }
+        <span class="kw">if</span> (priority[l] &gt;= priority[r]) {
+            l = copy(l);
+            down(l);
+            rs[l] = merge(rs[l], r);
+            up(l);
+            <span class="kw">return</span> l;
+        } <span class="kw">else</span> {
+            r = copy(r);
+            down(r);
+            ls[r] = merge(l, ls[r]);
+            up(r);
+            <span class="kw">return</span> r;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        srand(time(0));
+        <span class="kw">int</span> n;
+        cin &gt;&gt; n;
+        <span class="kw">long</span> <span class="kw">long</span> lastAns = 0;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            <span class="kw">int</span> version, op;
+            <span class="kw">long</span> <span class="kw">long</span> x, y = 0;
+            cin &gt;&gt; version &gt;&gt; op &gt;&gt; x;
+            x ^= lastAns;
+            <span class="kw">if</span> (op != 2) {
+                cin &gt;&gt; y;
+                y ^= lastAns;
+            }
+            <span class="kw">int</span> l, m, lm, r;
+            <span class="kw">if</span> (op == 1) {
+                split(0, 0, head[version], x);
+                l = rs[0];
+                r = ls[0];
+                ls[0] = rs[0] = 0;
+                key[++cnt] = y;
+                siz[cnt] = 1;
+                sum[cnt] = y;
+                priority[cnt] = (<span class="kw">double</span>)rand() / RAND_MAX;
+                head[i] = merge(merge(l, cnt), r);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 2) {
+                split(0, 0, head[version], x);
+                lm = rs[0];
+                r = ls[0];
+                split(0, 0, lm, x - 1);
+                l = rs[0];
+                m = ls[0];
+                ls[0] = rs[0] = 0;
+                head[i] = merge(l, r);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 3) {
+                split(0, 0, head[version], y);
+                lm = rs[0];
+                r = ls[0];
+                split(0, 0, lm, x - 1);
+                l = rs[0];
+                m = ls[0];
+                ls[0] = rs[0] = 0;
+                rev[m] ^= 1;
+                head[i] = merge(merge(l, m), r);
+            } <span class="kw">else</span> {
+                split(0, 0, head[version], y);
+                lm = rs[0];
+                r = ls[0];
+                split(0, 0, lm, x - 1);
+                l = rs[0];
+                m = ls[0];
+                ls[0] = rs[0] = 0;
+                lastAns = sum[m];
+                cout &lt;&lt; lastAns &lt;&lt; endl;
+                head[i] = merge(merge(l, m), r);
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2>五、总结</h2>
+      <p>可持久化 FHQ Treap 就两件事：split / merge 里先 copy 再改，保证旧版本节点不被触碰；head[v] 记版本根，0 版本恒为空树。加了懒标记之后，down 也要先 copy 孩子再换，否则翻转会写穿共享节点。可持久化有序表和可持久化线段树共用同一套「路径复制、子树共享」思想，学会一个另一个就是换皮。强制在线只是输入输出层的包装，异或 lastAns 读入解码即可。</p>
+
+      <h2>相关题目</h2>
+      <table class="table complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>可持久化平衡树</td><td><a href="https://www.luogu.com.cn/problem/P3835" target="_blank">P3835</a></td></tr>
+          <tr><td>洛谷</td><td>可持久化文艺平衡树</td><td><a href="https://www.luogu.com.cn/problem/P5055" target="_blank">P5055</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="table complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解152【扩展】有序表专题5-FHQ Treap</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  function T(x, y, txt, fs, fill, anchor) {
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x); t.setAttribute('y', y);
+    t.setAttribute('font-size', fs || 13); t.setAttribute('fill', fill || '#222');
+    t.setAttribute('text-anchor', anchor || 'middle');
+    t.textContent = txt;
+    return t;
+  }
+  function R(x, y, w, h, fill, stroke, r) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    e.setAttribute('x', x); e.setAttribute('y', y); e.setAttribute('width', w); e.setAttribute('height', h);
+    e.setAttribute('fill', fill || 'none'); e.setAttribute('stroke', stroke || '#999'); e.setAttribute('rx', r || 0);
+    return e;
+  }
+  function LN(x1, y1, x2, y2, color, w) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    e.setAttribute('x1', x1); e.setAttribute('y1', y1); e.setAttribute('x2', x2); e.setAttribute('y2', y2);
+    e.setAttribute('stroke', color || '#888'); e.setAttribute('stroke-width', w || 1.5);
+    return e;
+  }
+  function mount(id, s) { document.getElementById(id).appendChild(s); }
+  function circle(cx, cy, r, fill, stroke) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    e.setAttribute('cx', cx); e.setAttribute('cy', cy); e.setAttribute('r', r);
+    e.setAttribute('fill', fill || '#fff'); e.setAttribute('stroke', stroke || '#444');
+    e.setAttribute('stroke-width', 1.6);
+    return e;
+  }
+  function edge(x1, y1, x2, y2, color) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    e.setAttribute('x1', x1); e.setAttribute('y1', y1); e.setAttribute('x2', x2); e.setAttribute('y2', y2);
+    e.setAttribute('stroke', color || '#bbb'); e.setAttribute('stroke-width', 1.5);
+    return e;
+  }
+  function layoutTree(n, ls, rs, root) {
+    var pos = {}, layer = {}, q = [root], depth = {}, order = [];
+    depth[root] = 0;
+    while (q.length) {
+      var u = q.shift();
+      order.push(u);
+      (layer[depth[u]] = layer[depth[u]] || []).push(u);
+      if (ls[u]) { depth[ls[u]] = depth[u] + 1; q.push(ls[u]); }
+      if (rs[u]) { depth[rs[u]] = depth[u] + 1; q.push(rs[u]); }
+    }
+    var maxDepth = 0;
+    for (var k in depth) maxDepth = Math.max(maxDepth, depth[k]);
+    for (var d = 0; d <= maxDepth; d++) {
+      var arr = layer[d] || [];
+      for (var i = 0; i < arr.length; i++) {
+        pos[arr[i]] = { x: 80 + i * (520 / Math.max(arr.length, 1)), y: 60 + d * 52 };
+      }
+    }
+    return { pos: pos, order: order, maxDepth: maxDepth };
+  }
+
+  // ===== 图 1：copy 节点共享子树 =====
+  (function(){
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 640 280');
+    // 旧树 v0：5 左 2 右 8
+    s.appendChild(T(130, 40, '版本 0', 13, '#1a3352'));
+    s.appendChild(circle(130, 90, 15, '#fff', '#567'));
+    s.appendChild(T(130, 94, '5', 13, '#1a3352'));
+    s.appendChild(circle(75, 170, 15, '#fff', '#567'));
+    s.appendChild(T(75, 174, '2', 13, '#1a3352'));
+    s.appendChild(circle(185, 170, 15, '#fff', '#567'));
+    s.appendChild(T(185, 174, '8', 13, '#1a3352'));
+    s.appendChild(edge(130, 106, 75, 154));
+    s.appendChild(edge(130, 106, 185, 154));
+    s.appendChild(T(130, 205, '插入 3', 12, '#8a5a00'));
+    s.appendChild(LN(130, 218, 310, 128, '#bbb'));
+    // 新树 v1：5' 左 2' 右 8（共享）
+    s.appendChild(T(460, 40, '版本 1', 13, '#1a3352'));
+    s.appendChild(circle(460, 90, 15, '#fdeaea', '#c0392b'));
+    s.appendChild(T(460, 94, '5', 13, '#7a2020'));
+    s.appendChild(circle(390, 170, 15, '#fdeaea', '#c0392b'));
+    s.appendChild(T(390, 174, '2', 13, '#7a2020'));
+    s.appendChild(circle(425, 250, 15, '#e6f2fa', '#1d6fa5'));
+    s.appendChild(T(425, 254, '3', 13, '#1d4a72'));
+    s.appendChild(circle(530, 170, 15, '#e8f5e9', '#2e7d32'));
+    s.appendChild(T(530, 174, '8', 13, '#1d5a1d'));
+    s.appendChild(edge(460, 106, 390, 154));
+    s.appendChild(edge(390, 106, 425, 234));
+    s.appendChild(edge(460, 106, 530, 154));
+    // 共享虚线
+    s.appendChild(LN(185, 178, 515, 178, '#2e7d32', 1.2));
+    s.appendChild(T(350, 172, '共享同一节点', 11, '#2e7d32'));
+    s.appendChild(T(455, 78, 'copy(5)', 10, '#c0392b'));
+    s.appendChild(T(385, 158, 'copy(2)', 10, '#c0392b'));
+    s.appendChild(T(425, 238, '新节点', 10, '#1d6fa5'));
+    mount('figCopy', s);
+  })();
+
+  // ===== 图 2：版本链 =====
+  (function(){
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 690 190');
+    var boxes = [
+      { x: 20,  v: 'head[0]', t: '0（空树）', sub: '永远为空' },
+      { x: 205, v: 'head[1]', t: '插 3', sub: '中序 3' },
+      { x: 390, v: 'head[2]', t: '插 1', sub: '中序 1 3' },
+      { x: 575, v: 'head[3]', t: '插 2', sub: '中序 1 2 3' }
+    ];
+    for (var i = 0; i < 4; i++) {
+      var b = boxes[i];
+      s.appendChild(R(b.x, 60, 100, 90, '#f5f7fa', '#567', 6));
+      s.appendChild(T(b.x + 50, 82, b.v, 12, '#1a3352'));
+      s.appendChild(T(b.x + 50, 108, b.t, 12, '#8a5a00'));
+      s.appendChild(T(b.x + 50, 130, b.sub, 10, '#999'));
+    }
+    for (var j = 0; j < 3; j++) {
+      s.appendChild(LN(120 + j * 185, 105, 201 + j * 185, 105, '#bbb', 1.8));
+      s.appendChild(T(160 + j * 185, 92, '基于 v' + j, 10, '#999'));
+    }
+    s.appendChild(T(345, 35, '每次操作基于某个 v 版本，生成新版本；v 版本本身不变', 13, '#1a3352'));
+    mount('figVersion', s);
+  })();
+
+  // ===== 演示：版本隔离 =====
+  (function(){
+    var svg = document.getElementById('vizVerSvg');
+    var note = document.getElementById('vizVerNote');
+    var KEY = [0], LS = [0], RS = [0], SZ = [0], PR = [0];
+    function up(i) { SZ[i] = SZ[LS[i]] + SZ[RS[i]] + 1; }
+    function copyNode(i) {
+      KEY.push(KEY[i]); LS.push(LS[i]); RS.push(RS[i]); SZ.push(SZ[i]); PR.push(PR[i]);
+      return KEY.length - 1;
+    }
+    function spl(i, num) {
+      if (!i) return [0, 0];
+      i = copyNode(i);
+      if (KEY[i] <= num) { var p = spl(RS[i], num); RS[i] = p[0]; up(i); return [i, p[1]]; }
+      else { var p = spl(LS[i], num); LS[i] = p[1]; up(i); return [p[0], i]; }
+    }
+    function mrg(a, b) {
+      if (!a || !b) return a || b;
+      if (PR[a] >= PR[b]) { a = copyNode(a); RS[a] = mrg(RS[a], b); up(a); return a; }
+      else { b = copyNode(b); LS[b] = mrg(a, LS[b]); up(b); return b; }
+    }
+    function add(root, v, pr) {
+      KEY.push(v); PR.push(pr); var id = KEY.length - 1; SZ.push(1); LS.push(0); RS.push(0);
+      var p = spl(root, v - 1);
+      return mrg(mrg(p[0], id), p[1]);
+    }
+    var HEAD = [0];
+    HEAD.push(add(HEAD[0], 3, 0.50));
+    HEAD.push(add(HEAD[1], 1, 0.80));
+    HEAD.push(add(HEAD[2], 2, 0.30));
+    HEAD.push(add(HEAD[1], 4, 0.60));
+    var FR = [
+      { v: 0, note: 'v0：空树，head[0] = 0' },
+      { v: 1, note: 'v1 = v0 插 3：只复制路径上的节点，中序 3' },
+      { v: 2, note: 'v2 = v1 插 1：1 的优先级 0.80 最大，做新根，v1 的 3 被共享' },
+      { v: 3, note: 'v3 = v2 插 2：中序 1 2 3，v2 整棵树原样保留' },
+      { v: 4, note: 'v4 = v1 插 4：基于 v1 而非 v3，v1 的树仍是 [3]，没被后续版本影响' }
+    ];
+    var at = 0;
+    function drawFrame(f) {
+      var root = HEAD[f.v];
+      var n = KEY.length - 1;
+      var ly = layoutTree(n, LS, RS, root);
+      var s = svg.cloneNode(false);
+      s.setAttribute('viewBox', '0 0 600 320');
+      for (var u = 1; u <= n; u++) {
+        if (LS[u] && ly.pos[u]) s.appendChild(edge(ly.pos[u].x, ly.pos[u].y + 16, ly.pos[LS[u]].x, ly.pos[LS[u]].y - 16, '#c9d6e8'));
+        if (RS[u] && ly.pos[u]) s.appendChild(edge(ly.pos[u].x, ly.pos[u].y + 16, ly.pos[RS[u]].x, ly.pos[RS[u]].y - 16, '#c9d6e8'));
+      }
+      for (var u2 = 1; u2 <= n; u2++) {
+        if (!ly.pos[u2]) continue;
+        s.appendChild(circle(ly.pos[u2].x, ly.pos[u2].y, 16, '#fff', '#567'));
+        s.appendChild(T(ly.pos[u2].x, ly.pos[u2].y + 4, String(KEY[u2]), 13, '#1a3352'));
+      }
+      if (n === 0) s.appendChild(T(300, 160, '（空树）', 14, '#999'));
+      // 中序
+      var out = [];
+      (function ino(i){ if (!i) return; ino(LS[i]); out.push(KEY[i]); ino(RS[i]); })(root);
+      s.appendChild(T(300, 230, '中序：' + (out.length ? out.join(' ') : '（空）'), 14, '#1a3352'));
+      s.appendChild(T(300, 258, '版本 ' + f.v + '（head[' + f.v + ']）', 13, '#8a5a00'));
+      svg.parentNode.replaceChild(s, svg);
+      svg = s;
+      note.textContent = '第 ' + (at === 0 ? 0 : at) + ' 步 · ' + f.note;
+      var nx = document.getElementById('vizVerNext');
+      if (at + 1 >= FR.length) nx.disabled = true;
+    }
+    function resetAll() {
+      at = 0;
+      drawFrame(FR[0]);
+      document.getElementById('vizVerNext').disabled = false;
+    }
+    function nextStep() {
+      if (at + 1 < FR.length) { at++; drawFrame(FR[at]); }
+      if (at + 1 >= FR.length) document.getElementById('vizVerNext').disabled = true;
+    }
+    document.getElementById('vizVerNext').addEventListener('click', nextStep);
+    document.getElementById('vizVerReset').addEventListener('click', resetAll);
+    resetAll();
+  })();
+})();
+</script>
+</body>
+</html>
