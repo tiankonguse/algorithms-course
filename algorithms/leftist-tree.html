@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>左偏树：可并堆的 merge 与删除堆顶</title>
+<link rel="stylesheet" href="../assets/css/shared.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>左偏树：可并堆的 merge 与删除堆顶</h1>
+      <p class="intro">堆结构用数组实现时，合并两个堆只能把小堆的元素逐个插进大堆，代价是 O(n log n)。左偏树是一棵用「右链长度」约束自身的二叉树，两个堆合并只要 O(log n)。</p>
+
+      <h2>零、背景</h2>
+      <p>能快速合并的堆结构不止左偏树一种：配对堆、斜堆、二项堆、斐波那契堆都能做到对数级合并。这一课只学左偏树，原因是下节课的可持久化版本要依赖它。其他可并堆结构没法方便地持久化。</p>
+      <p>左偏树表示的堆不是完全二叉树，而是广义的堆结构：父节点比子节点优先（小根堆里就是值更小），左右子树可以严重不对称。它的「平衡性」由 dist 值来维护，维护的不是树高，而是右链的长度。</p>
+
+      <h2>一、dist 值：左偏的定义</h2>
+      <p>每个节点的 dist 表示：离开这个节点后，至少经过几个节点能到达空。空节点的 dist 记作 <code>dist[0] = -1</code>，这样没有右儿子的节点，它的 dist 就等于 -1 + 1 = 0。</p>
+      <p>左偏树要求每个节点满足：<strong>左儿子 dist 不小于右儿子 dist</strong>。合并后一旦发现左儿子 dist 小于右儿子 dist，就交换左右子树。这个性质保证右链（一路走右儿子）的长度受 dist 限制，而合并恰好发生在右链上。</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 640 300" width="100%" role="img" aria-label="一棵左偏树各节点 dist 标注">
+          <!-- 根 5 dist2 -->
+          <line x1="220" y1="70" x2="130" y2="150" stroke="#888" stroke-width="2"></line>
+          <line x1="220" y1="70" x2="400" y2="150" stroke="#888" stroke-width="2"></line>
+          <line x1="130" y1="150" x2="70" y2="230" stroke="#888" stroke-width="2"></line>
+          <line x1="130" y1="150" x2="190" y2="230" stroke="#888" stroke-width="2"></line>
+          <line x1="400" y1="150" x2="340" y2="230" stroke="#888" stroke-width="2"></line>
+          <rect x="188" y="45" width="64" height="50" rx="6" fill="#cfe8ff" stroke="#4a90d9" stroke-width="2"></rect>
+          <text x="220" y="70" text-anchor="middle" font-size="17" fill="#1a1a2e">5</text>
+          <text x="220" y="88" text-anchor="middle" font-size="12" fill="#4a90d9">dist 1</text>
+          <rect x="98" y="125" width="64" height="50" rx="6" fill="#ffe9c4" stroke="#d99a4a" stroke-width="2"></rect>
+          <text x="130" y="150" text-anchor="middle" font-size="17" fill="#1a1a2e">3</text>
+          <text x="130" y="168" text-anchor="middle" font-size="12" fill="#d99a4a">dist 1</text>
+          <rect x="368" y="125" width="64" height="50" rx="6" fill="#e2f5d5" stroke="#6ab04c" stroke-width="2"></rect>
+          <text x="400" y="150" text-anchor="middle" font-size="17" fill="#1a1a2e">8</text>
+          <text x="400" y="168" text-anchor="middle" font-size="12" fill="#6ab04c">dist 0</text>
+          <rect x="38" y="205" width="64" height="50" rx="6" fill="#f5e0e0" stroke="#c85a5a" stroke-width="2"></rect>
+          <text x="70" y="230" text-anchor="middle" font-size="17" fill="#1a1a2e">1</text>
+          <text x="70" y="248" text-anchor="middle" font-size="12" fill="#c85a5a">dist 0</text>
+          <rect x="158" y="205" width="64" height="50" rx="6" fill="#e8e0f5" stroke="#8a6ab0" stroke-width="2"></rect>
+          <text x="190" y="230" text-anchor="middle" font-size="17" fill="#1a1a2e">4</text>
+          <text x="190" y="248" text-anchor="middle" font-size="12" fill="#8a6ab0">dist 0</text>
+          <rect x="308" y="205" width="64" height="50" rx="6" fill="#e0f0f5" stroke="#4a9ab0" stroke-width="2"></rect>
+          <text x="340" y="230" text-anchor="middle" font-size="17" fill="#1a1a2e">7</text>
+          <text x="340" y="248" text-anchor="middle" font-size="12" fill="#4a9ab0">dist 0</text>
+          <text x="320" y="290" text-anchor="middle" font-size="14" fill="#555">根 5 的右儿子 8 的 dist 是 0，根 dist = 0 + 1 = 1</text>
+        </svg>
+        <figcaption>左偏树示例：根 5 的右儿子是 8（dist 0），根 dist = 0 + 1 = 1。左子树 dist 1 ≥ 右子树 dist 0，满足左偏。</figcaption>
+      </figure>
+      <p>dist 沿右链单调递减，每走一步右儿子，dist 就少 1。</p>
+      <p>这个性质带来一个关键推论：dist 为 k 的子树至少包含 2<sup>k</sup> − 1 个节点。所以 n 个节点的左偏树，右链长度不超过 log(n+1)。合并沿着右链走，代价就是 O(log n)。</p>
+
+      <h2>二、merge：合并总发生在右树上</h2>
+      <p>合并两棵树 h1、h2，谁当头？小根堆取值较小的根（值相等取编号较小），另一个根递归合到它的右儿子上。这一步是左偏树的核心：<strong>递归永远发生在右树上</strong>，所以一趟合并最多走一条右链。</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 660 260" width="100%" role="img" aria-label="两棵左偏树合并过程">
+          <!-- 左树 5 -->
+          <line x1="140" y1="60" x2="80" y2="140" stroke="#888" stroke-width="2"></line>
+          <line x1="140" y1="60" x2="200" y2="140" stroke="#888" stroke-width="2"></line>
+          <rect x="108" y="35" width="64" height="50" rx="6" fill="#cfe8ff" stroke="#4a90d9" stroke-width="2"></rect>
+          <text x="140" y="60" text-anchor="middle" font-size="17" fill="#1a1a2e">5</text>
+          <rect x="48" y="115" width="64" height="50" rx="6" fill="#ffe9c4" stroke="#d99a4a" stroke-width="2"></rect>
+          <text x="80" y="140" text-anchor="middle" font-size="17" fill="#1a1a2e">3</text>
+          <rect x="168" y="115" width="64" height="50" rx="6" fill="#e2f5d5" stroke="#6ab04c" stroke-width="2"></rect>
+          <text x="200" y="140" text-anchor="middle" font-size="17" fill="#1a1a2e">9</text>
+          <!-- 右树 8 -->
+          <line x1="520" y1="60" x2="460" y2="140" stroke="#888" stroke-width="2"></line>
+          <line x1="520" y1="60" x2="580" y2="140" stroke="#888" stroke-width="2"></line>
+          <rect x="488" y="35" width="64" height="50" rx="6" fill="#e8e0f5" stroke="#8a6ab0" stroke-width="2"></rect>
+          <text x="520" y="60" text-anchor="middle" font-size="17" fill="#1a1a2e">8</text>
+          <rect x="428" y="115" width="64" height="50" rx="6" fill="#f5e0e0" stroke="#c85a5a" stroke-width="2"></rect>
+          <text x="460" y="140" text-anchor="middle" font-size="17" fill="#1a1a2e">2</text>
+          <rect x="548" y="115" width="64" height="50" rx="6" fill="#e0f0f5" stroke="#4a9ab0" stroke-width="2"></rect>
+          <text x="580" y="140" text-anchor="middle" font-size="17" fill="#1a1a2e">7</text>
+          <!-- 合并标记 -->
+          <text x="340" y="75" text-anchor="middle" font-size="26" fill="#d99a4a">merge</text>
+          <text x="340" y="120" text-anchor="middle" font-size="15" fill="#888">5 与 8 比，5 当头；8 递归到 5 的右儿子</text>
+          <text x="340" y="150" text-anchor="middle" font-size="15" fill="#888">merge(9, 8)：9 当头，8 递归到 9 的右儿子（空）</text>
+          <text x="340" y="180" text-anchor="middle" font-size="15" fill="#888">回溯时检查 dist，失衡就交换左右子树</text>
+        </svg>
+        <figcaption>merge(5 树, 8 树)：小根当头，另一个根递归合到右儿子，回溯时按 dist 交换左右。</figcaption>
+      </figure>
+      <p>回溯到每一层都要检查：左儿子 dist 是否不小于右儿子 dist。不满足就交换左右子树，然后 <code>dist[i] = dist[rs[i]] + 1</code>。同时把新根登记进并查集：<code>fa[ls[i]] = fa[rs[i]] = i</code>，让并查集的代表节点始终是堆顶。</p>
+      <p>这里有个细节：小根堆相等值怎么处理？课程代码写的是 <code>num[i] &gt; num[j] || (num[i] == num[j] &amp;&amp; i &gt; j)</code>，值相等时编号小的当头。这样 P3377 里「若有多个最小值，优先删除编号小的」就能保证删的是编号最小的那个堆顶。</p>
+
+      <h2>三、并查集：找堆顶不走树结构</h2>
+      <p>左偏树的平衡性只方便合并，树上依然可能出现很长的链。任何节点找堆顶的过程，不能依赖左偏树的结构，否则最坏情况还是 O(n)。</p>
+      <p>解法是给每个节点挂并查集：并查集最上方的代表节点 = 左偏树的头 = 堆顶。find(i) 一路压缩路径，摊还接近 O(1)。合并时新根的左、右儿子都指向它，代表节点自然被更新。</p>
+      <p>find 与树上父子是两个系统：树上的 left/right 是堆结构，并查集的 fa 是找头的捷径。merge 里更新 fa 的时机只有一个：新根确定之后。</p>
+
+      <h2>四、删除堆顶：三步</h2>
+      <p>删除堆顶节点 i，三步走：</p>
+      <p>1）i 的左右子树合并，形成新树；2）i 的 left、right、dist 信息清空；3）i 的 father 指向新树的头，这一步很重要：别的节点 find 到 i 时，能顺着 fa 一路压到新头。</p>
+      <p>课程代码里 pop 的前两行先把左右子树的 fa 复位成自己（<code>fa[ls[i]] = ls[i]; fa[rs[i]] = rs[i]</code>），这样 merge 时它们不会被误认成 i 的后代。然后 <code>fa[i] = merge(ls[i], rs[i])</code>，i 自己指向新头。</p>
+
+      <h2>五、P3377 左偏树模板</h2>
+      <p>题目给 n 个非负数字，每个单独成堆。操作 1 x y：x、y 所在堆合并，两个数字已在一个堆或某个已删除就不合并。操作 2 x：打印 x 所在堆的最小值并删掉它，x 已被删除打印 -1，多个最小值优先删编号小的。n、m ≤ 10<sup>5</sup>。</p>
+      <p>删除用 num[i] = -1 标记（输入保证值非负，-1 不冲突）。查询时先看 num[x] 是否 -1，再看 find(x) 的堆顶值。</p>
+
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100001;
+    <span class="kw">int</span> n, m;
+    <span class="kw">int</span> num[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> dist[MAXN];
+    <span class="kw">int</span> fa[MAXN];
+
+    <span class="kw">void</span> <span class="fn">prepare</span>() {
+        dist[0] = -1;
+        <span class="kw">for</span>(<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            ls[i] = rs[i] = dist[i] = 0;
+            fa[i] = i;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> i) {
+        fa[i] = fa[i] == i ? i : find(fa[i]);
+        <span class="kw">return</span> fa[i];
+    }
+
+    <span class="kw">int</span> <span class="fn">merge</span>(<span class="kw">int</span> i, <span class="kw">int</span> j) {
+        <span class="kw">if</span> (i == 0 || j == 0) {
+            <span class="kw">return</span> i + j;
+        }
+        <span class="kw">if</span> (num[i] &gt; num[j] || (num[i] == num[j] &amp;&amp; i &gt; j)) {
+            swap(i, j);
+        }
+        rs[i] = merge(rs[i], j);
+        <span class="kw">if</span> (dist[ls[i]] &lt; dist[rs[i]]) {
+            swap(ls[i], rs[i]);
+        }
+        dist[i] = dist[rs[i]] + 1;
+        fa[ls[i]] = fa[rs[i]] = i;
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">int</span> <span class="fn">pop</span>(<span class="kw">int</span> i) {
+        fa[ls[i]] = ls[i];
+        fa[rs[i]] = rs[i];
+        fa[i] = merge(ls[i], rs[i]);
+        ls[i] = rs[i] = dist[i] = 0;
+        <span class="kw">return</span> fa[i];
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        cin &gt;&gt; n &gt;&gt; m;
+        prepare();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; num[i];
+        }
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= m; i++) {
+            <span class="kw">int</span> op;
+            cin &gt;&gt; op;
+            <span class="kw">if</span> (op == 1) {
+                <span class="kw">int</span> x, y;
+                cin &gt;&gt; x &gt;&gt; y;
+                <span class="kw">if</span> (num[x] != -1 &amp;&amp; num[y] != -1) {
+                    <span class="kw">int</span> l = find(x);
+                    <span class="kw">int</span> r = find(y);
+                    <span class="kw">if</span> (l != r) {
+                        merge(l, r);
+                    }
+                }
+            } <span class="kw">else</span> {
+                <span class="kw">int</span> x;
+                cin &gt;&gt; x;
+                <span class="kw">if</span> (num[x] == -1) {
+                    cout &lt;&lt; -1 &lt;&lt; "\n";
+                } <span class="kw">else</span> {
+                    <span class="kw">int</span> ans = find(x);
+                    cout &lt;&lt; num[ans] &lt;&lt; "\n";
+                    pop(ans);
+                    num[ans] = -1;
+                }
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <p>题目的增强版 P2713 把数据量提到 10<sup>6</sup>，操作变成字符 M x y / K x，K 找不到时打印 0。merge、pop 的逻辑一字不改，只换了输入格式和输出值。</p>
+
+      <h2>六、merge 过程演示</h2>
+      <div class="viz" id="viz-merge">
+        <p class="viz-title">两棵小左偏树合并</p>
+        <p class="stepnote" id="merge-note">初始：A 树根 5（左 3，右 9），B 树根 8（左 2，右 7）。点「下一步」逐步合并。</p>
+        <svg id="merge-svg" viewBox="0 0 660 320" width="100%" role="img"></svg>
+        <p class="legend">蓝 = 原 A 树根，橙 = 左子树，绿 = 右子树，紫 = 原 B 树根</p>
+        <div class="viz-controls">
+          <button type="button" id="merge-reset">重置</button>
+          <button type="button" id="merge-next">下一步</button>
+        </div>
+      </div>
+      <p>演示里合并的是两个 3 节点左偏树：A 树 <code>5(3, 9)</code>、B 树 <code>8(2, 7)</code>。5 和 8 比较后 5 当头，8 递归到 5 的右儿子 9；9 和 8 比较后 9 当头，8 挂到 9 的右儿子（空）。回溯时 9 的右儿子 dist 1 大于左儿子 dist 0，交换左右，最后 5 的右子树 dist 变 1，平衡。</p>
+
+      <h2>总结</h2>
+      <p>左偏树用 dist 约束右链长度：左儿子 dist 不小于右儿子，节点 dist 等于右儿子 dist 加 1，空节点 dist 记 -1。合并只发生在右链上，代价 O(log n)；找堆顶靠并查集压缩路径，不靠树结构；删除堆顶三步：左右合并、清空信息、fa 指向新头。这套结构是下节课可持久化左偏树的地基。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>P3377 左偏树模板</td><td><a href="https://www.luogu.com.cn/problem/P3377" target="_blank">P3377</a></td></tr>
+          <tr><td>洛谷</td><td>P2713 左偏树（数据增强）</td><td><a href="https://www.luogu.com.cn/problem/P2713" target="_blank">P2713</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解154【挺难】左偏树的原理、代码、相关题目</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">algorithm-journey</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var svg = document.getElementById('merge-svg');
+  var note = document.getElementById('merge-note');
+  var resetBtn = document.getElementById('merge-reset');
+  var nextBtn = document.getElementById('merge-next');
+  // 节点布局：id -> {x, y, value, color}
+  var layout = {
+    A5:  {x: 180, y: 60,  value: 5, color: '#cfe8ff'},
+    A3:  {x: 110, y: 150, value: 3, color: '#ffe9c4'},
+    A9:  {x: 250, y: 150, value: 9, color: '#e2f5d5'},
+    B8:  {x: 460, y: 60,  value: 8, color: '#e8e0f5'},
+    B2:  {x: 390, y: 150, value: 2, color: '#f5e0e0'},
+    B7:  {x: 530, y: 150, value: 7, color: '#e0f0f5'}
+  };
+  var tree = {
+    A5: {l: 'A3', r: 'A9'},
+    A3: {l: null, r: null},
+    A9: {l: null, r: null},
+    B8: {l: 'B2', r: 'B7'},
+    B2: {l: null, r: null},
+    B7: {l: null, r: null}
+  };
+  var HH = 320;
+  function W() { return 660; }
+  function draw() {
+    svg.innerHTML = '';
+    var defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    var mk = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+    mk.setAttribute('id', 'arrowhead');
+    mk.setAttribute('markerWidth', '8');
+    mk.setAttribute('markerHeight', '8');
+    mk.setAttribute('refX', '8');
+    mk.setAttribute('refY', '3');
+    mk.setAttribute('orient', 'auto');
+    var mp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    mp.setAttribute('d', 'M0,0 L8,3 L0,6 Z');
+    mp.setAttribute('fill', '#888');
+    mk.appendChild(mp);
+    defs.appendChild(mk);
+    svg.appendChild(defs);
+    // 画边
+    Object.keys(tree).forEach(function(id){
+      var n = tree[id];
+      if (!n) return;
+      if (n.l) {
+        var a = layout[id], b = layout[n.l];
+        var ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        ln.setAttribute('x1', a.x); ln.setAttribute('y1', a.y + 25);
+        ln.setAttribute('x2', b.x); ln.setAttribute('y2', b.y - 25);
+        ln.setAttribute('stroke', '#888'); ln.setAttribute('stroke-width', '2');
+        ln.setAttribute('marker-end', 'url(#arrowhead)');
+        svg.appendChild(ln);
+      }
+      if (n.r) {
+        var a = layout[id], b = layout[n.r];
+        var ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        ln.setAttribute('x1', a.x); ln.setAttribute('y1', a.y + 25);
+        ln.setAttribute('x2', b.x); ln.setAttribute('y2', b.y - 25);
+        ln.setAttribute('stroke', '#888'); ln.setAttribute('stroke-width', '2');
+        ln.setAttribute('marker-end', 'url(#arrowhead)');
+        svg.appendChild(ln);
+      }
+    });
+    // 画节点
+    Object.keys(layout).forEach(function(id){
+      var n = layout[id];
+      var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      r.setAttribute('x', n.x - 32); r.setAttribute('y', n.y - 25);
+      r.setAttribute('width', '64'); r.setAttribute('height', '50');
+      r.setAttribute('rx', '6');
+      r.setAttribute('fill', n.color);
+      r.setAttribute('stroke', '#4a90d9'); r.setAttribute('stroke-width', '2');
+      svg.appendChild(r);
+      var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', n.x); t.setAttribute('y', n.y + 6);
+      t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '17');
+      t.setAttribute('fill', '#1a1a2e');
+      t.textContent = n.value;
+      svg.appendChild(t);
+      var d = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      d.setAttribute('x', n.x); d.setAttribute('y', n.y + 22);
+      d.setAttribute('text-anchor', 'middle'); d.setAttribute('font-size', '11');
+      d.setAttribute('fill', '#888');
+      d.textContent = 'dist ' + (id.charAt(0) === 'A' ? (id === 'A5' ? 1 : 0) : (id === 'B8' ? 1 : 0));
+      svg.appendChild(d);
+    });
+  }
+  var step = 0;
+  var MAXSTEP = 4;
+  function render() {
+    // step 0: 两树独立；1: 5 当头，8 合并到右链；2: 9 当头，8 挂右；3: 回溯交换 9 的左右；4: 完成
+    if (step === 0) {
+      tree = { A5: {l:'A3', r:'A9'}, A3: {l:null,r:null}, A9: {l:null,r:null},
+               B8: {l:'B2', r:'B7'}, B2: {l:null,r:null}, B7: {l:null,r:null} };
+      note.textContent = '初始：A 树根 5（左 3，右 9），B 树根 8（左 2，右 7）。';
+    } else if (step === 1) {
+      tree = { A5: {l:'A3', r:'A9'}, A3: {l:null,r:null}, A9: {l:null,r:null},
+               B8: {l:'B2', r:'B7'}, B2: {l:null,r:null}, B7: {l:null,r:null} };
+      note.textContent = '第 1 步：5 比 8 小，5 当头；merge(5 的右儿子 9, 8)。';
+    } else if (step === 2) {
+      tree = { A5: {l:'A3', r:'A9'}, A3: {l:null,r:null}, A9: {l:null, r:'B8'},
+               B8: {l:'B2', r:'B7'}, B2: {l:null,r:null}, B7: {l:null,r:null} };
+      note.textContent = '第 2 步：9 比 8 小，9 当头；8 挂到 9 的右儿子（原为空）。';
+    } else if (step === 3) {
+      tree = { A5: {l:'A3', r:'A9'}, A3: {l:null,r:null}, A9: {l:'B8', r:null},
+               B8: {l:'B2', r:'B7'}, B2: {l:null,r:null}, B7: {l:null,r:null} };
+      note.textContent = '第 3 步：回溯到 9，右儿子 dist 1 > 左儿子 dist 0，交换左右。';
+    } else {
+      tree = { A5: {l:'A3', r:'A9'}, A3: {l:null,r:null}, A9: {l:'B8', r:null},
+               B8: {l:'B2', r:'B7'}, B2: {l:null,r:null}, B7: {l:null,r:null} };
+      note.textContent = '完成：8 整棵树成为 9 的左子树，左偏保持，5 的右链还是 5 → 9。';
+    }
+    draw();
+    nextBtn.disabled = step >= MAXSTEP;
+  }
+  resetBtn.addEventListener('click', function(){ step = 0; render(); });
+  nextBtn.addEventListener('click', function(){ if (step < MAXSTEP) { step++; render(); } });
+  render();
+})();</script>
+</body>
+</html>
