@@ -1,0 +1,158 @@
+#include <bits/stdc++.h>
+
+using namespace std;
+
+const int MAXN = 100001;
+int n, m;
+
+unordered_map<string, int> nameId;
+bool root[MAXN];
+int id[MAXN];
+
+int headg[MAXN];
+int nextg[MAXN];
+int tog[MAXN];
+int cntg;
+
+int headq[MAXN];
+int nextq[MAXN];
+int ansiq[MAXN];
+int kq[MAXN];
+int cntq;
+
+int fa[MAXN];
+int siz[MAXN];
+int dep[MAXN];
+int son[MAXN];
+
+vector<unordered_set<int>> depSet;
+int ans[MAXN];
+
+int getNameId(const string &name) {
+    if (nameId.find(name) != nameId.end()) {
+        return nameId[name];
+    }
+    int newId = nameId.size() + 1;
+    nameId[name] = newId;
+    return newId;
+}
+
+void addId(int deep, int id) {
+    depSet[deep].insert(id);
+}
+
+void removeId(int deep, int id) {
+    depSet[deep].erase(id);
+}
+
+int sizeOfDeep(int deep) {
+    if (deep > n) {
+        return 0;
+    }
+    return (int)depSet[deep].size();
+}
+
+void addEdge(int u, int v) {
+    nextg[++cntg] = headg[u];
+    tog[cntg] = v;
+    headg[u] = cntg;
+}
+
+void addQuestion(int u, int ansi, int k) {
+    nextq[++cntq] = headq[u];
+    ansiq[cntq] = ansi;
+    kq[cntq] = k;
+    headq[u] = cntq;
+}
+
+void dfs1(int u, int f) {
+    fa[u] = f;
+    siz[u] = 1;
+    dep[u] = dep[f] + 1;
+    for (int e = headg[u]; e > 0; e = nextg[e]) {
+        dfs1(tog[e], u);
+    }
+    for (int e = headg[u], v; e > 0; e = nextg[e]) {
+        v = tog[e];
+        siz[u] += siz[v];
+        if (son[u] == 0 || siz[son[u]] < siz[v]) {
+            son[u] = v;
+        }
+    }
+}
+
+void effect(int u) {
+    addId(dep[u], id[u]);
+    for (int e = headg[u]; e > 0; e = nextg[e]) {
+        effect(tog[e]);
+    }
+}
+
+void cancel(int u) {
+    removeId(dep[u], id[u]);
+    for (int e = headg[u]; e > 0; e = nextg[e]) {
+        cancel(tog[e]);
+    }
+}
+
+void dfs2(int u, int keep) {
+    for (int e = headg[u], v; e > 0; e = nextg[e]) {
+        v = tog[e];
+        if (v != son[u]) {
+            dfs2(v, 0);
+        }
+    }
+    if (son[u] != 0) {
+        dfs2(son[u], 1);
+    }
+    addId(dep[u], id[u]);
+    for (int e = headg[u], v; e > 0; e = nextg[e]) {
+        v = tog[e];
+        if (v != son[u]) {
+            effect(v);
+        }
+    }
+    for (int i = headq[u]; i > 0; i = nextq[i]) {
+    	ans[ansiq[i]] = sizeOfDeep(dep[u] + kq[i]);
+    }
+    if (keep == 0) {
+        cancel(u);
+    }
+}
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+    cin >> n;
+    string name;
+    int father;
+    for (int i = 1; i <= n; i++) {
+        cin >> name >> father;
+        id[i] = getNameId(name);
+        if (father == 0) {
+        	root[i] = true;
+        } else {
+            addEdge(father, i);
+        }
+    }
+    for (int i = 1; i <= n; i++) {
+        if (root[i]) {
+            dfs1(i, 0);
+        }
+    }
+    depSet.resize(n + 1);
+    cin >> m;
+    for (int i = 1, node, k; i <= m; i++) {
+        cin >> node >> k;
+        addQuestion(node, i, k);
+    }
+    for (int i = 1; i <= n; i++) {
+        if (root[i]) {
+            dfs2(i, 0);
+        }
+    }
+    for (int i = 1; i <= m; i++) {
+        cout << ans[i] << "\n";
+    }
+    return 0;
+}

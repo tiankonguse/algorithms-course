@@ -1,0 +1,195 @@
+#include <bits/stdc++.h>
+
+using namespace std;
+
+const int MAXN = 100001;
+
+int cnt = 0;
+int head = 0;
+int key[MAXN];
+int key_count[MAXN];
+int ls[MAXN];
+int rs[MAXN];
+int siz[MAXN];
+double priority[MAXN];
+
+void up(int i) {
+    siz[i] = siz[ls[i]] + siz[rs[i]] + key_count[i];
+}
+
+int leftRotate(int i) {
+    int r = rs[i];
+    rs[i] = ls[r];
+    ls[r] = i;
+    up(i);
+    up(r);
+    return r;
+}
+
+int rightRotate(int i) {
+    int l = ls[i];
+    ls[i] = rs[l];
+    rs[l] = i;
+    up(i);
+    up(l);
+    return l;
+}
+
+int add(int i, int num) {
+    if (i == 0) {
+        key[++cnt] = num;
+        key_count[cnt] = siz[cnt] = 1;
+        priority[cnt] = static_cast<double>(rand()) / RAND_MAX;
+        return cnt;
+    }
+    if (key[i] == num) {
+        key_count[i]++;
+    } else if (key[i] > num) {
+        ls[i] = add(ls[i], num);
+    } else {
+        rs[i] = add(rs[i], num);
+    }
+    up(i);
+    if (ls[i] != 0 && priority[ls[i]] > priority[i]) {
+        return rightRotate(i);
+    }
+    if (rs[i] != 0 && priority[rs[i]] > priority[i]) {
+        return leftRotate(i);
+    }
+    return i;
+}
+
+void add(int num) {
+    head = add(head, num);
+}
+
+int small(int i, int num) {
+    if (i == 0) {
+        return 0;
+    }
+    if (key[i] >= num) {
+        return small(ls[i], num);
+    } else {
+        return siz[ls[i]] + key_count[i] + small(rs[i], num);
+    }
+}
+
+int getRank(int num) {
+    return small(head, num) + 1;
+}
+
+int index(int i, int x) {
+    if (siz[ls[i]] >= x) {
+        return index(ls[i], x);
+    } else if (siz[ls[i]] + key_count[i] < x) {
+        return index(rs[i], x - siz[ls[i]] - key_count[i]);
+    }
+    return key[i];
+}
+
+int index(int x) {
+    return index(head, x);
+}
+
+int pre(int i, int num) {
+    if (i == 0) {
+        return INT_MIN;
+    }
+    if (key[i] >= num) {
+        return pre(ls[i], num);
+    } else {
+        return max(key[i], pre(rs[i], num));
+    }
+}
+
+int pre(int num) {
+    return pre(head, num);
+}
+
+int post(int i, int num) {
+    if (i == 0) {
+        return INT_MAX;
+    }
+    if (key[i] <= num) {
+        return post(rs[i], num);
+    } else {
+        return min(key[i], post(ls[i], num));
+    }
+}
+
+int post(int num) {
+    return post(head, num);
+}
+
+int remove(int i, int num) {
+    if (key[i] < num) {
+        rs[i] = remove(rs[i], num);
+    } else if (key[i] > num) {
+        ls[i] = remove(ls[i], num);
+    } else {
+        if (key_count[i] > 1) {
+            key_count[i]--;
+        } else {
+            if (ls[i] == 0 && rs[i] == 0) {
+                return 0;
+            } else if (ls[i] != 0 && rs[i] == 0) {
+                i = ls[i];
+            } else if (ls[i] == 0 && rs[i] != 0) {
+                i = rs[i];
+            } else {
+                if (priority[ls[i]] >= priority[rs[i]]) {
+                    i = rightRotate(i);
+                    rs[i] = remove(rs[i], num);
+                } else {
+                    i = leftRotate(i);
+                    ls[i] = remove(ls[i], num);
+                }
+            }
+        }
+    }
+    up(i);
+    return i;
+}
+
+void remove(int num) {
+    if (getRank(num) != getRank(num + 1)) {
+        head = remove(head, num);
+    }
+}
+
+void clear() {
+    memset(key + 1, 0, cnt * sizeof(int));
+    memset(key_count + 1, 0, cnt * sizeof(int));
+    memset(ls + 1, 0, cnt * sizeof(int));
+    memset(rs + 1, 0, cnt * sizeof(int));
+    memset(siz + 1, 0, cnt * sizeof(int));
+    memset(priority + 1, 0, cnt * sizeof(int));
+    cnt = 0;
+    head = 0;
+}
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+    srand(time(0));
+    int n;
+    cin >> n;
+    for (int i = 1, op, x; i <= n; i++) {
+        cin >> op >> x;
+        if (op == 1) {
+            add(x);
+        } else if (op == 2) {
+            remove(x);
+        } else if (op == 3) {
+            cout << getRank(x) << endl;
+        } else if (op == 4) {
+            cout << index(x) << endl;
+        } else if (op == 5) {
+            cout << pre(x) << endl;
+        } else {
+            cout << post(x) << endl;
+        }
+    }
+    clear();
+    return 0;
+}

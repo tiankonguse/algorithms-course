@@ -48,6 +48,11 @@
 - 拼页先 Write 带 `@@片段名@@` 的占位版，再用 `apply_placeholders.py` 替换（占位名 = 片段文件名，只含 `[A-Za-z0-9_]`，**占位符别套 `<pre class="code">`**，要单独一行）。省上下文：PPT 抽到 `/tmp/pptNNN.txt` 后按段取，**别把新页面 HTML 读回来**。
 - **技能只有一份且自包含（2026-10-14 收敛）**：唯一副本是仓库 `.agent/skills/course-site-page/`，**不依赖项目外的任何技能**：截图/越界用自带 `scripts/shot_*.js` + `verify_pages.js`（不再调 `ui-verify-cdp`），去 AI 味规则已内联为 `references/humanize.md`（不再调 `去AI味`/`humanizer`）；脚本只用 node 内置模块 + 同目录 `cdp_page.js`。**改完不用 cp 同步**（旧规矩作废：`~/.workbuddy/skills/` 那份已不存在，`~/.agents/skills/course-site-page/` 已删除，备份 `/tmp/course-site-page-home-backup-20261014.tar.gz`）。`grep -c 'tools/build_nav.py' SKILL.md` 得 8 处 = 当前版。CDP 类脚本依赖同目录 `cdp_page.js`，别单搬一个文件用。
 
+## 材料归档（每课一目录 + 页面入口，2026-10-19 用户定）
+- **中间产物归 `artifacts/<课号>/`**：PPT 抽取文本（ppt.txt）、Java→C++ 转换与对拍器（code/，白名单 `*.cpp/*.cc/*.c/*.h/*.hpp/*.py` + `paipai*.out|log`；**随机测试数据 .in/.want/io*.txt、.bin 与 ELF/Mach-O 一律不入库**）。收口必跑 `python3 tools/archive_course.py <课号> <页名...>`，产物 `artifacts/<课号>/{index.json,index.html}` + 生成物 `assets/data/artifacts.json` 随提交入库。
+- **页面入口零标记**：shared.js 按 `assets/data/artifacts.json` 命中当前页，在 pager 前注入「本课材料」链接；无归档静默。改 shared.js 后跑 verify_pages 确认无 JS 错。`run.sh` 启动先 build_nav.py 再 build_artifacts.py。
+- **回填**：`tools/archive_course.py --backfill` 从 git 提交反查页名（兼容「转换第 N 课 / 转换N课 / N课 / N 标题」四种消息），跳过持锁课。已回填 131~170 共 40 课 126 页；003~130 的 /tmp 产物已清无法回填。
+
 ## 自检（全自动，别只靠截图）
 - **「起 Chrome + 跑 node」写在同一条命令里**（Chrome 随 Bash 结束被回收）；端口读 `CDP_PORT`（默认 9333）；**并发会话别 `pkill` 别人的 Chrome**，用空闲端口 + 独立 `--user-data-dir`。`--allow-file-access-from-files` 必带，别加 `--window-size`。
   ```bash

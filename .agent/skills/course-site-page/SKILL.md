@@ -65,6 +65,23 @@ agent_created: true
 
 **别为改而改**：159~175 阶段就跑过自检，旧页可能已大体合规；但「讲解 N」指代、结尾段标题这两类硬约定要逐页 grep 确认（`grep -c '讲解 [0-9]' <页名>.html`、`grep -o '<h2>最后</h2>' <页名>.html`），命中再改。
 
+## 〇·六、材料归档：每课一个目录 + 页面入口（2026-10-19 用户定）
+
+转换过程的中间产物很珍贵——PPT 抽取文本、Java→C++ 转换结果、对拍/压测程序与结果，以前丢 `/tmp`（重启即清）。现在**每课归档到站点 `artifacts/<课号>/`**，对应算法页底部由 shared.js 自动给出「本课材料」入口。
+
+**收口时必跑（全新转换与二次转换都一样，放在 CDP 自检之后、提交之前）**：
+
+```bash
+python3 tools/archive_course.py <课号> <页1.html> <页2.html> ...
+```
+
+脚本做的事：`/tmp/ppt<课号>.txt` → `artifacts/<课号>/ppt.txt`；`/tmp/cpp<课号>/` 下非 `.bin` 文件 → `artifacts/<课号>/code/`（含对拍器 `paipai*.py/.out/.log` 与辅助脚本）；生成 `index.json`（课号/标题/页面清单/文件清单）与 `index.html`（材料查看页：PPT 全文、C++ 源码、对拍程序与结果**内联**展示，另附原始文件下载链接与本站页面回链）；最后重生成 `assets/data/artifacts.json`（页面 → 归档入口映射）。
+
+- **页面入口是 shared.js 统一注入的，页面本身不写任何标记**：算法页加载时查 `assets/data/artifacts.json`，当前页有归档就在 pager 之前插一个「本课材料」链接（指向 `../artifacts/<课号>/index.html`）；没有归档的页面不显示、不报错。改 shared.js 后必须跑一遍 verify_pages 确认无 JS 错。
+- 目录结构：`artifacts/<NNN>/{ppt.txt, code/*, index.json, index.html}`。`.bin` 编译产物不入库；`artifacts/` 与 `assets/data/artifacts.json` 都要提交（发布时一起打包）。
+- **回填**：历史课 003~130 的 /tmp 产物已被系统清掉，无法回填；131~169 的 /tmp 还在，已用 `python3 tools/archive_course.py --backfill` 批量回填（页名清单从 git 提交反查，自动跳过锁仍被占用的课）。
+- 映射重生成：run.sh 启动已内置 `python3 tools/build_artifacts.py`；手动发布前与 build_nav.py 一起跑（见七节）。
+
 ## 一、定位材料
 
 ```
@@ -212,7 +229,7 @@ PY
 python3 tools/build_nav.py --check && python3 tools/build_nav.py && git add nav assets/data/algorithms.json
 ```
 
-**发布（WorkBuddy「发布为应用」打包本地目录）前必须先跑生成器**：线上那份 json 是静态文件，不会自己更新。`nav/` 与 `tools/` 会被一起打包，无害。发布后冒烟：`curl -s <host>/assets/data/algorithms.json | python3 -c "import json,sys;d=json.load(sys.stdin);print(len(d['algorithms']),len(d['groups']))"`。
+**发布（WorkBuddy「发布为应用」打包本地目录）前必须先跑生成器**：线上那份 json 是静态文件，不会自己更新。`nav/` 与 `tools/` 会被一起打包，无害；`artifacts/` 也会一起打包，是归档材料的静态入口。发布前跑 `python3 tools/build_nav.py && python3 tools/build_artifacts.py`（run.sh 启动时已自动跑）。发布后冒烟：`curl -s <host>/assets/data/algorithms.json | python3 -c "import json,sys;d=json.load(sys.stdin);print(len(d['algorithms']),len(d['groups']))"`，再 `curl -s <host>/assets/data/artifacts.json | python3 -c "import json,sys;d=json.load(sys.stdin);print(len(d))"` 看归档映射非空。
 
 ## 八、自检（必做）
 
@@ -255,6 +272,7 @@ $N $SKILL/shot_steps.js a.html 0 4 /tmp/s.png            # 多帧截图（页面
 ## 九、收尾
 
 - 更新 `algorithms-course/prompt.md` 进度：完成课挪进「已完成」，「下一课」+1（从小到大推进）；导学课挪进「跳过」并写一句原因。**详细记录写进 `algorithms-course/progress/NNN.md`（每课一个文件，文件头一行 `* NNN 课产出 X 页…`，正文格式照旧）**，prompt.md 不放正文。
+- **归档材料（〇·六）**：`python3 tools/archive_course.py <课号> <页1.html> ...`，产物 `artifacts/<课号>/` + `assets/data/artifacts.json` 随提交入库。全新转换与二次转换都要做。
 - **python 替换锚点截断会把旧句残留成重复**（029 实测）：锚点只写到「* 下一课：**029**。」就整行换掉，行尾原有「003~028 已产页…」留在原地变一句两半。替换后 `grep -n '下一课：' prompt.md` 整行看一遍。
 - 往 `algorithms-course/.workbuddy/memory/YYYY-MM-DD.md` 追加一条：本次建了哪几页、源自第几课、页码/组的位置。共享层有改动（shared.css/js）时写进 `memory/MEMORY.md`。
 

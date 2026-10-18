@@ -695,6 +695,21 @@
         }
       }
 
+      // 8-7b. 本课材料入口：页面有归档才显示（无归档静默），插在 pager 之前
+      fetch(ROOT + 'assets/data/artifacts.json')
+        .then(r => r.json())
+        .then(function(amap){
+          const info = amap && amap[current];
+          if (!main || !info) return;
+          const entry = document.createElement('div');
+          entry.className = 'material-entry';
+          entry.innerHTML = '<a class="material-link" href="' + info.href + '">本课材料</a>' +
+            '<span class="material-desc">PPT 文本 · C++ 源码 · 对拍程序</span>';
+          const pg = main.querySelector('.pager');
+          if (pg) main.insertBefore(entry, pg); else main.appendChild(entry);
+        })
+        .catch(function(){ /* 无归档映射文件时静默 */ });
+
       // 8-8. 初始选中：算法页看当前页属于哪一类，首页优先看 URL 里的 #cat-<分类名>
       {
         const m = decodeURIComponent(location.hash || '').match(/^#cat-(.+)$/);
