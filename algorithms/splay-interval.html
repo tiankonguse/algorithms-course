@@ -1,0 +1,710 @@
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>Splay 区间操作</h1>
+      <p class="intro">把区间整段切出来：find 两次 + splay 两次，剩下要处理的子树就是你要的区间。</p>
+
+      <h2>零、背景</h2>
+      <p>上一课 Splay 处理的是有序表：按值插、按值查。这一课换成按<strong>位置</strong>操作：给一个排名区间，翻转它、移动它、批量改值、求和。文艺平衡树、书架、维护数列全靠同一个手法：把区间对应的子树整棵切出来。</p>
+      <p>切法就三步：<code>find(l−1)</code> 提根，<code>find(r+1)</code> 挂到根的右孩子，于是根的右孩子的左子树正好是中序排名 <code>[l, r]</code> 的那一段。之后对这段子树做什么都行：打懒标记、整体回收、求和，代价都是 O(log n)。</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 760 220" width="100%" xmlns="http://www.w3.org/2000/svg">
+          <text x="20" y="26" font-size="14">提取区间 [l, r]：find(l−1) 提根 → find(r+1) 挂右 → ls[rs[head]] 就是要处理的段</text>
+          <rect x="330" y="40" width="36" height="26" fill="#fde68a" stroke="#b45309"/>
+          <text x="342" y="58" font-size="13" text-anchor="middle">l−1</text>
+          <rect x="120" y="100" width="36" height="26" fill="#bfdbfe" stroke="#1d4ed8"/>
+          <text x="132" y="118" font-size="13" text-anchor="middle">L 段</text>
+          <rect x="560" y="100" width="36" height="26" fill="#fca5a5" stroke="#b91c1c"/>
+          <text x="572" y="118" font-size="13" text-anchor="middle">r+1</text>
+          <line x1="348" y1="66" x2="138" y2="100" stroke="#888" stroke-width="1.5"/>
+          <line x1="348" y1="66" x2="578" y2="100" stroke="#888" stroke-width="1.5"/>
+          <line x1="138" y1="126" x2="70" y2="170" stroke="#888" stroke-width="1.5"/>
+          <line x1="138" y1="126" x2="200" y2="170" stroke="#888" stroke-width="1.5"/>
+          <rect x="50" y="165" width="36" height="26" fill="#e5e7eb" stroke="#6b7280"/>
+          <text x="62" y="183" font-size="13" text-anchor="middle">l−1 左</text>
+          <rect x="180" y="165" width="36" height="26" fill="#e5e7eb" stroke="#6b7280"/>
+          <text x="192" y="183" font-size="13" text-anchor="middle">l−1 右</text>
+          <line x1="578" y1="126" x2="640" y2="170" stroke="#888" stroke-width="1.5"/>
+          <line x1="578" y1="126" x2="520" y2="170" stroke="#888" stroke-width="1.5"/>
+          <rect x="620" y="165" width="36" height="26" fill="#e5e7eb" stroke="#6b7280"/>
+          <text x="632" y="183" font-size="13" text-anchor="middle">r+1 左</text>
+          <rect x="500" y="165" width="36" height="26" fill="#e5e7eb" stroke="#6b7280"/>
+          <text x="512" y="183" font-size="13" text-anchor="middle">r+1 右</text>
+          <text x="340" y="140" font-size="24" fill="#9ca3af">↓</text>
+          <rect x="340" y="160" width="90" height="30" fill="#bbf7d0" stroke="#15803d"/>
+          <text x="372" y="180" font-size="13" text-anchor="middle">ls[rs[head]]</text>
+        </svg>
+      </figure>
+
+      <p>后面的三题都是这个模板的变体。区别只在切出来的那段子树上面做什么。</p>
+
+      <h2>一、P1486 郁闷的出纳员：偏移量代替逐个改</h2>
+      <p>公司整体加工资、整体扣工资，还随时可能有一批人因为工资低于下限被开除。如果每次整体加减都去改树上每个节点的值，那就 O(n) 了。</p>
+      <p>这里的技巧是<strong>只维护一个偏移量 change</strong>：树里存的是相对工资 x − change，真实工资 = 树里的值 + change。整体加工资就是把 change 加一加，树一个节点都不用动。</p>
+      <p>整体扣工资时，真实工资低于 limit 的段要被砍掉。departure() 算 <code>num = limit − change − 1</code>（比 num 大的真实工资才合格），找第一个 key &gt; num 的节点 splay 到根，把根左子树整段丢掉（head 指到根，左子树作废）。插入时只有真实工资 ≥ limit 的才进树，同时累计入职人数。</p>
+      <p>查询第 k 大的工资，先看树里人数够不够，不够输出 −1，够就按排名找节点、真实工资 = 树值 + change。最后统计离职人数：入职总数 − 当前树里的人数。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+    <span class="kw">#include</span> &lt;cstring&gt;
+    <span class="kw">#include</span> &lt;algorithm&gt;
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 300001;
+
+    <span class="kw">int</span> head = 0;
+    <span class="kw">int</span> cnt = 0;
+    <span class="kw">int</span> key[MAXN];
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">int</span> limit;
+    <span class="kw">int</span> change = 0;
+    <span class="kw">int</span> enter = 0;
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        siz[i] = siz[ls[i]] + siz[rs[i]] + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> rs[fa[i]] == i ? 1 : 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> f = fa[i], g = fa[f], soni = lr(i), sonf = lr(f);
+        <span class="kw">if</span> (soni == 1) {
+            rs[f] = ls[i];
+            <span class="kw">if</span> (rs[f] != 0) {
+                fa[rs[f]] = f;
+            }
+            ls[i] = f;
+        } <span class="kw">else</span> {
+            ls[f] = rs[i];
+            <span class="kw">if</span> (ls[f] != 0) {
+                fa[ls[f]] = f;
+            }
+            rs[i] = f;
+        }
+        <span class="kw">if</span> (g != 0) {
+            <span class="kw">if</span> (sonf == 1) {
+                rs[g] = i;
+            } <span class="kw">else</span> {
+                ls[g] = i;
+            }
+        }
+        fa[f] = i;
+        fa[i] = g;
+        up(f);
+        up(i);
+    }
+
+    <span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> i, <span class="kw">int</span> goal) {
+        <span class="kw">int</span> f = fa[i], g = fa[f];
+        <span class="kw">while</span> (f != goal) {
+            <span class="kw">if</span> (g != goal) {
+                <span class="kw">if</span> (lr(i) == lr(f)) {
+                    rotate(f);
+                } <span class="kw">else</span> {
+                    rotate(i);
+                }
+            }
+            rotate(i);
+            f = fa[i];
+            g = fa[f];
+        }
+        <span class="kw">if</span> (goal == 0) {
+            head = i;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> num) {
+        key[++cnt] = num;
+        siz[cnt] = 1;
+        <span class="kw">if</span> (head == 0) {
+            head = cnt;
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> f = 0, i = head, son = 0;
+            <span class="kw">while</span> (i != 0) {
+                f = i;
+                <span class="kw">if</span> (key[i] &lt;= num) {
+                    son = 1;
+                    i = rs[i];
+                } <span class="kw">else</span> {
+                    son = 0;
+                    i = ls[i];
+                }
+            }
+            <span class="kw">if</span> (son == 1) {
+                rs[f] = cnt;
+            } <span class="kw">else</span> {
+                ls[f] = cnt;
+            }
+            fa[cnt] = f;
+            splay(cnt, 0);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">index</span>(<span class="kw">int</span> x) {
+        <span class="kw">int</span> i = head, last = head;
+        <span class="kw">while</span> (i != 0) {
+            last = i;
+            <span class="kw">if</span> (siz[ls[i]] &gt;= x) {
+                i = ls[i];
+            } <span class="kw">else</span> <span class="kw">if</span> (siz[ls[i]] + 1 &lt; x) {
+                x -= siz[ls[i]] + 1;
+                i = rs[i];
+            } <span class="kw">else</span> {
+                i = 0;
+            }
+        }
+        splay(last, 0);
+        <span class="kw">return</span> key[last];
+    }
+
+    <span class="kw">void</span> <span class="fn">departure</span>() {
+        <span class="kw">int</span> num = limit - change - 1;
+        <span class="kw">int</span> i = head, ans = 0;
+        <span class="kw">while</span> (i != 0) {
+            <span class="kw">if</span> (key[i] &gt; num) {
+                ans = i;
+                i = ls[i];
+            } <span class="kw">else</span> {
+                i = rs[i];
+            }
+        }
+        <span class="kw">if</span> (ans == 0) {
+            head = 0;
+        } <span class="kw">else</span> {
+            splay(ans, 0);
+            ls[head] = 0;
+            up(head);
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        <span class="kw">int</span> n, x;
+        <span class="kw">char</span> op;
+        cin &gt;&gt; n &gt;&gt; limit;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            cin &gt;&gt; op &gt;&gt; x;
+            <span class="kw">if</span> (op == 'I') {
+                <span class="kw">if</span> (x &gt;= limit) {
+                    enter++;
+                    add(x - change);
+                }
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 'A') {
+                change += x;
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 'S') {
+                change -= x;
+                departure();
+            } <span class="kw">else</span> <span class="kw">if</span> (op == 'F') {
+                <span class="kw">if</span> (x &gt; siz[head]) {
+                    cout &lt;&lt; -1 &lt;&lt; endl;
+                } <span class="kw">else</span> {
+                    cout &lt;&lt; index(siz[head] - x + 1) + change &lt;&lt; endl;
+                }
+            }
+        }
+        cout &lt;&lt; enter - siz[head] &lt;&lt; endl;
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2>二、P3391 文艺平衡树：懒翻转</h2>
+      <p>给一个 1 到 n 的序列，翻转若干区间，最后输出结果。直接逐个交换子树里的节点是 O(n)，所以翻转要打懒标记：在子树的根上记 rev，等以后真的需要走进这棵子树时再往下传。</p>
+      <p>头尾各放一个值为 0 的虚拟节点（排名 1 和 n+2），真实元素占 2 到 n+1。这样翻转区间 [l, r] 时，find(l) 和 find(r+2) 切出来的正好是真实元素那一段，不用处理边界特判。</p>
+            <figure class="fig">
+        <svg viewBox="0 0 760 210" width="100%" xmlns="http://www.w3.org/2000/svg">
+          <text x="20" y="26" font-size="14">rev 标记打在子树根：不真的交换，等访问到才下传</text>
+          <rect x="160" y="60" width="36" height="26" fill="#fde68a" stroke="#b45309"/>
+          <text x="172" y="78" font-size="13" text-anchor="middle">2</text>
+          <rect x="80" y="130" width="36" height="26" fill="#bfdbfe" stroke="#1d4ed8"/>
+          <text x="92" y="148" font-size="13" text-anchor="middle">1</text>
+          <rect x="260" y="130" width="36" height="26" fill="#bfdbfe" stroke="#1d4ed8"/>
+          <text x="272" y="148" font-size="13" text-anchor="middle">3</text>
+          <line x1="172" y1="86" x2="98" y2="130" stroke="#888" stroke-width="1.5"/>
+          <line x1="172" y1="86" x2="278" y2="130" stroke="#888" stroke-width="1.5"/>
+          <text x="178" y="52" font-size="12" fill="#b45309" text-anchor="middle">rev</text>
+          <text x="380" y="120" font-size="24" fill="#9ca3af">→</text>
+          <rect x="480" y="60" width="36" height="26" fill="#fde68a" stroke="#b45309"/>
+          <text x="492" y="78" font-size="13" text-anchor="middle">2</text>
+          <rect x="560" y="130" width="36" height="26" fill="#bbf7d0" stroke="#15803d"/>
+          <text x="572" y="148" font-size="13" text-anchor="middle">1</text>
+          <rect x="400" y="130" width="36" height="26" fill="#bbf7d0" stroke="#15803d"/>
+          <text x="412" y="148" font-size="13" text-anchor="middle">3</text>
+          <line x1="492" y1="86" x2="578" y2="130" stroke="#888" stroke-width="1.5"/>
+          <line x1="492" y1="86" x2="418" y2="130" stroke="#888" stroke-width="1.5"/>
+          <text x="492" y="52" font-size="12" fill="#b45309" text-anchor="middle">rev</text>
+          <text x="540" y="188" font-size="12" fill="#374151">孩子交换，rev 继续下传</text>
+        </svg>
+      </figure>
+      <p>down 传播时做两件事：rev 异或翻转，同时交换左右孩子。交换孩子这一步很关键：翻转整棵子树等价于交换左右子树，再给两边打上翻转标记，一直递归下去。中序遍历时沿途 down，输出跳过两个虚拟节点。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 100005;
+
+    <span class="kw">int</span> head = 0;
+    <span class="kw">int</span> cnt = 0;
+    <span class="kw">int</span> num[MAXN];
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">bool</span> rev[MAXN];
+    <span class="kw">int</span> sta[MAXN];
+    <span class="kw">int</span> si;
+    <span class="kw">int</span> ans[MAXN];
+    <span class="kw">int</span> ai;
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        siz[i] = siz[ls[i]] + siz[rs[i]] + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> rs[fa[i]] == i ? 1 : 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> f = fa[i], g = fa[f], soni = lr(i), sonf = lr(f);
+        <span class="kw">if</span> (soni == 1) {
+            rs[f] = ls[i];
+            <span class="kw">if</span> (rs[f] != 0) {
+                fa[rs[f]] = f;
+            }
+            ls[i] = f;
+        } <span class="kw">else</span> {
+            ls[f] = rs[i];
+            <span class="kw">if</span> (ls[f] != 0) {
+                fa[ls[f]] = f;
+            }
+            rs[i] = f;
+        }
+        <span class="kw">if</span> (g != 0) {
+            <span class="kw">if</span> (sonf == 1) {
+                rs[g] = i;
+            } <span class="kw">else</span> {
+                ls[g] = i;
+            }
+        }
+        fa[f] = i;
+        fa[i] = g;
+        up(f);
+        up(i);
+    }
+
+    <span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> i, <span class="kw">int</span> goal) {
+        <span class="kw">int</span> f = fa[i], g = fa[f];
+        <span class="kw">while</span> (f != goal) {
+            <span class="kw">if</span> (g != goal) {
+                <span class="kw">if</span> (lr(i) == lr(f)) {
+                    rotate(f);
+                } <span class="kw">else</span> {
+                    rotate(i);
+                }
+            }
+            rotate(i);
+            f = fa[i];
+            g = fa[f];
+        }
+        <span class="kw">if</span> (goal == 0) {
+            head = i;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (rev[i]) {
+            rev[ls[i]] = !rev[ls[i]];
+            rev[rs[i]] = !rev[rs[i]];
+            <span class="kw">int</span> tmp = ls[i];
+            ls[i] = rs[i];
+            rs[i] = tmp;
+            rev[i] = <span class="kw">false</span>;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> rank) {
+        <span class="kw">int</span> i = head;
+        <span class="kw">while</span> (i != 0) {
+            down(i);
+            <span class="kw">if</span> (siz[ls[i]] + 1 == rank) {
+                <span class="kw">return</span> i;
+            } <span class="kw">else</span> <span class="kw">if</span> (siz[ls[i]] &gt;= rank) {
+                i = ls[i];
+            } <span class="kw">else</span> {
+                rank -= siz[ls[i]] + 1;
+                i = rs[i];
+            }
+        }
+        <span class="kw">return</span> 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> x) {
+        num[++cnt] = x;
+        siz[cnt] = 1;
+        fa[cnt] = head;
+        rs[head] = cnt;
+        splay(cnt, 0);
+    }
+
+    <span class="kw">void</span> <span class="fn">reverse</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> i = find(l - 1);
+        <span class="kw">int</span> j = find(r + 1);
+        splay(i, 0);
+        splay(j, i);
+        rev[ls[rs[head]]] = !rev[ls[rs[head]]];
+    }
+
+    <span class="kw">void</span> <span class="fn">inorder</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (i != 0) {
+            down(i);
+            inorder(ls[i]);
+            ans[++ai] = num[i];
+            inorder(rs[i]);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">inorder</span>() {
+        si = 0;
+        <span class="kw">int</span> i = head;
+        <span class="kw">while</span> (si != 0 || i != 0) {
+            <span class="kw">if</span> (i != 0) {
+                down(i);
+                sta[++si] = i;
+                i = ls[i];
+            } <span class="kw">else</span> {
+                i = sta[si--];
+                ans[++ai] = num[i];
+                i = rs[i];
+            }
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        <span class="kw">int</span> n, m;
+        cin &gt;&gt; n &gt;&gt; m;
+        add(0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= n; i++) {
+            add(i);
+        }
+        add(0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x, y; i &lt;= m; i++) {
+            cin &gt;&gt; x &gt;&gt; y;
+            reverse(x + 1, y + 1);
+        }
+        ai = 0;
+        <span class="cm">// inorder(head);</span>
+        inorder();
+        <span class="kw">for</span> (<span class="kw">int</span> i = 2; i &lt; ai; i++) {
+            cout &lt;&lt; ans[i] &lt;&lt; " ";
+        }
+        cout &lt;&lt; endl;
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2>三、P2596 书架：按编号反查节点</h2>
+      <p>书架题里书的编号是外部给的，操作都是按编号（Top、Bottom、Ask、Query），不是按排名。所以除了 splay 树本身，还要维护一个 pos[s] 数组：编号 s 的书对应的节点下标。这样给一个编号就能 O(log n) 定位到它在树里的位置。</p>
+      <p>Top s（把书 s 放最上面）就是 move(rank, 2)：把 s 从它现在的排名挪到排名 2（虚拟头后面）。Bottom s 是 move(rank, n−1)（虚拟尾前面）。Insert 是 move(rank, rank+t)，t 可正可负，正数往后挪、负数往前挪。</p>
+      <p>move 的实现把三棵树段拼起来：把 a 段从原位置切出来，删掉（但节点不回收，还要复用），再插到 b 位置前。每段操作都是提取子树 + 拼接，全程 O(log n)。Ask s 输出 s 的排名减 1（去掉虚拟头）。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;iostream&gt;
+    <span class="kw">#include</span> &lt;<span class="kw">string</span>&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 80005;
+
+    <span class="kw">int</span> head = 0;
+    <span class="kw">int</span> cnt = 0;
+    <span class="kw">int</span> num[MAXN];
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">int</span> pos[MAXN];
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        siz[i] = siz[ls[i]] + siz[rs[i]] + 1;
+    }
+
+    <span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> rs[fa[i]] == i ? 1 : 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> f = fa[i], g = fa[f], soni = lr(i), sonf = lr(f);
+        <span class="kw">if</span> (soni == 1) {
+            rs[f] = ls[i];
+            <span class="kw">if</span> (rs[f] != 0) {
+                fa[rs[f]] = f;
+            }
+            ls[i] = f;
+        } <span class="kw">else</span> {
+            ls[f] = rs[i];
+            <span class="kw">if</span> (ls[f] != 0) {
+                fa[ls[f]] = f;
+            }
+            rs[i] = f;
+        }
+        <span class="kw">if</span> (g != 0) {
+            <span class="kw">if</span> (sonf == 1) {
+                rs[g] = i;
+            } <span class="kw">else</span> {
+                ls[g] = i;
+            }
+        }
+        fa[f] = i;
+        fa[i] = g;
+        up(f);
+        up(i);
+    }
+
+    <span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> i, <span class="kw">int</span> goal) {
+        <span class="kw">int</span> f = fa[i], g = fa[f];
+        <span class="kw">while</span> (f != goal) {
+            <span class="kw">if</span> (g != goal) {
+                <span class="kw">if</span> (lr(i) == lr(f)) {
+                    rotate(f);
+                } <span class="kw">else</span> {
+                    rotate(i);
+                }
+            }
+            rotate(i);
+            f = fa[i];
+            g = fa[f];
+        }
+        <span class="kw">if</span> (goal == 0) {
+            head = i;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> rank) {
+        <span class="kw">int</span> i = head;
+        <span class="kw">while</span> (i != 0) {
+            <span class="kw">if</span> (siz[ls[i]] + 1 == rank) {
+                <span class="kw">return</span> i;
+            } <span class="kw">else</span> <span class="kw">if</span> (siz[ls[i]] &gt;= rank) {
+                i = ls[i];
+            } <span class="kw">else</span> {
+                rank -= siz[ls[i]] + 1;
+                i = rs[i];
+            }
+        }
+        <span class="kw">return</span> 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">add</span>(<span class="kw">int</span> s) {
+        num[++cnt] = s;
+        pos[s] = cnt;
+        siz[cnt] = 1;
+        fa[cnt] = head;
+        rs[head] = cnt;
+        splay(cnt, 0);
+    }
+
+    <span class="kw">int</span> <span class="fn">ask</span>(<span class="kw">int</span> s) {
+        <span class="kw">int</span> i = pos[s];
+        splay(i, 0);
+        <span class="kw">return</span> siz[ls[i]];
+    }
+
+    <span class="kw">int</span> <span class="fn">query</span>(<span class="kw">int</span> s) {
+        <span class="kw">int</span> i = find(s);
+        splay(i, 0);
+        <span class="kw">return</span> num[i];
+    }
+
+    <span class="kw">void</span> <span class="fn">move</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) {
+        <span class="kw">int</span> l = find(a - 1);
+        <span class="kw">int</span> r = find(a + 1);
+        splay(l, 0);
+        splay(r, l);
+        <span class="kw">int</span> i = ls[r];
+        ls[r] = 0;
+        up(r);
+        up(l);
+        l = find(b - 1);
+        r = find(b);
+        splay(l, 0);
+        splay(r, l);
+        ls[r] = i;
+        fa[i] = r;
+        up(r);
+        up(l);
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        <span class="kw">int</span> n, m;
+        cin &gt;&gt; n &gt;&gt; m;
+        add(0);
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, x; i &lt;= n; i++) {
+            cin &gt;&gt; x;
+            add(x);
+        }
+        add(n + 1);
+        n = n + 2;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, s, t, rank; i &lt;= m; i++) {
+            <span class="kw">string</span> op;
+            cin &gt;&gt; op &gt;&gt; s;
+            rank = ask(s) + 1;
+            <span class="kw">if</span> (op == "Top") {
+                move(rank, 2);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == "Bottom") {
+                move(rank, n - 1);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == "Insert") {
+                cin &gt;&gt; t;
+                move(rank, rank + t);
+            } <span class="kw">else</span> <span class="kw">if</span> (op == "Ask") {
+                cout &lt;&lt; rank - 2 &lt;&lt; endl;
+            } <span class="kw">else</span> {
+                cout &lt;&lt; query(s + 1) &lt;&lt; endl;
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2>四、区间翻转演示</h2>
+      <p>演示懒翻转标记怎么一层层传下去：中序序列保持不变的值在子树里，翻转标记打上后，只有真正访问到那棵子树才交换孩子、继续下传。</p>
+      <div class="viz" id="viz-flip">
+        <p class="viz-title">文艺平衡树懒翻转</p>
+        <div class="breakdown" id="flip-out"></div>
+        <div class="viz-controls">
+          <select id="flip-len">
+            <option value="7">7 个元素</option>
+            <option value="9">9 个元素</option>
+          </select>
+          <button id="flip-reset">重置</button>
+          <button id="flip-next">下一步</button>
+        </div>
+        <svg id="flip-svg" viewBox="0 0 760 200" width="100%" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+
+      <h2>总结</h2>
+      <p>区间操作三题，套路是一样的：</p>
+      <p>1）提取区间：find(l−1) 提根 + find(r+1) 挂右，ls[rs[head]] 就是要处理的段。三题全部复用这一个模板。</p>
+      <p>2）P1486 用 change 偏移量让整体加减变成 O(1)，树里存相对值；扣工资后按值域斩段。</p>
+      <p>3）P3391 的翻转是懒标记 rev 加上交换孩子；P2596 靠 pos[] 把编号映射到节点，move 用三段拼接实现。</p>
+      <p>下一课把这一套推到极致：P2042 维护数列，六种操作全上，还带空间回收。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>P1486 郁闷的出纳员</td><td><a href="https://www.luogu.com.cn/problem/P1486" target="_blank">https://www.luogu.com.cn/problem/P1486</a></td></tr>
+          <tr><td>洛谷</td><td>P3391 文艺平衡树</td><td><a href="https://www.luogu.com.cn/problem/P3391" target="_blank">https://www.luogu.com.cn/problem/P3391</a></td></tr>
+          <tr><td>洛谷</td><td>P2596 书架</td><td><a href="https://www.luogu.com.cn/problem/P2596" target="_blank">https://www.luogu.com.cn/problem/P2596</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解153【扩展】有序表专题6-Splay树</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">https://github.com/algorithmzuo/algorithm-journey/</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var svg = document.getElementById('flip-svg');
+  var out = document.getElementById('flip-out');
+  var lenSel = document.getElementById('flip-len');
+  var arr = [], marks = [];
+  var revRange = null;   // 当前要翻转的区间 [ql, qr]
+  var step = 0;
+  function reset() {
+    var n = Number(lenSel.value);
+    arr = [];
+    marks = [];
+    for (var i = 1; i <= n; i++) { arr.push(i); marks.push(0); }
+    // 固定翻转中间一段，步数 = 区间长度
+    revRange = [Math.floor(n / 2) - 1, Math.floor(n / 2) + 1];
+    if (revRange[1] >= n) revRange[1] = n - 1;
+    step = 0;
+    render();
+  }
+  function render() {
+    svg.innerHTML = '';
+    var n = arr.length;
+    var W = 700, x0 = 30, gap = W / n;
+    for (var i = 0; i < n; i++) {
+      var x = x0 + i * gap;
+      var inR = i >= revRange[0] && i <= revRange[1];
+      var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      r.setAttribute('x', x + 4); r.setAttribute('y', 60);
+      r.setAttribute('width', gap - 8); r.setAttribute('height', 40);
+      r.setAttribute('fill', inR ? '#bbf7d0' : (marks[i] ? '#fde68a' : '#e5e7eb'));
+      r.setAttribute('stroke', inR ? '#15803d' : (marks[i] ? '#b45309' : '#6b7280'));
+      svg.appendChild(r);
+      var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', x + gap / 2); t.setAttribute('y', 86);
+      t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', 13);
+      t.textContent = arr[i];
+      svg.appendChild(t);
+      if (marks[i]) {
+        var m = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        m.setAttribute('x', x + gap / 2); m.setAttribute('y', 50);
+        m.setAttribute('text-anchor', 'middle'); m.setAttribute('font-size', 11);
+        m.setAttribute('fill', '#b45309');
+        m.textContent = 'rev';
+        svg.appendChild(m);
+      }
+    }
+    // 下边界画标记条
+    for (var i = 0; i < n; i++) {
+      var x = x0 + i * gap;
+      if (i >= revRange[0] && i <= revRange[1]) {
+        var b = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        b.setAttribute('x', x + 4); b.setAttribute('y', 130);
+        b.setAttribute('width', gap - 8); b.setAttribute('height', 18);
+        b.setAttribute('fill', '#dcfce7'); b.setAttribute('stroke', '#15803d');
+        svg.appendChild(b);
+        var tt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        tt.setAttribute('x', x + gap / 2); tt.setAttribute('y', 143);
+        tt.setAttribute('text-anchor', 'middle'); tt.setAttribute('font-size', 10);
+        tt.textContent = 'rev';
+        svg.appendChild(tt);
+      }
+    }
+    out.textContent = step >= revRange[1] - revRange[0] + 1
+      ? '翻转完成：[' + arr.join(', ') + ']，区间 [' + (revRange[0] + 1) + ', ' + (revRange[1] + 1) + '] 已整体倒序。点「重置」再来。'
+      : '当前序列：[' + arr.join(', ') + ']，翻转目标区间 [' + (revRange[0] + 1) + ', ' + (revRange[1] + 1) + ']，步进 ' + (step + 1) + '/' + (revRange[1] - revRange[0] + 1);
+  }
+  function next() {
+    var nbtn = document.getElementById('flip-next');
+    if (step >= revRange[1] - revRange[0] + 1) { nbtn.disabled = true; render(); return; }
+    if (step === revRange[1] - revRange[0]) nbtn.disabled = true;
+    var i = revRange[0] + step;
+    if (marks[i]) {
+      // 标记已打：交换这一格与对称格
+      var j = revRange[0] + revRange[1] - i;
+      var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+      marks[i] = 0;
+    } else {
+      // 打懒标记
+      marks[i] = 1;
+    }
+    step++;
+    // 全部标记完后整体应用（模拟 down 传播到叶子）
+    if (step === revRange[1] - revRange[0] + 1) {
+      var L = revRange[0], R = revRange[1];
+      while (L < R) { var t = arr[L]; arr[L] = arr[R]; arr[R] = t; L++; R--; }
+      marks.fill(0);
+      step++;
+    }
+    render();
+  }
+  document.getElementById('flip-reset').addEventListener('click', reset);
+  document.getElementById('flip-next').addEventListener('click', next);
+  lenSel.addEventListener('change', reset);
+  reset();
+})();</script>

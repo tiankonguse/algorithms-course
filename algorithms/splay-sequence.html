@@ -1,0 +1,464 @@
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <section class="algo-section">
+      <h1>Splay 维护数列</h1>
+      <p class="intro">六种区间操作塞进一棵树：插入、删除、批量赋值、翻转、求和、最大子段和，外加空间回收。</p>
+
+      <h2>零、背景</h2>
+      <p>P2042 维护数列是区间操作题的集大成者：INSERT、DELETE、MAKE-SAME（区间赋同一个值）、REVERSE、GET-SUM、MAX-SUM。题目还有两个硬约束：任何时刻序列长度不超过 5×10^5，且总共插入的元素可以超过这个数，所以删掉的节点要回收复用。</p>
+      <p>区间切法还是上一课那一套：find 两次 + splay 两次，把区间子树提出来。区别在于这题每个节点要维护的信息特别多：子树大小、区间和、最大子段和、最大前缀和、最大后缀和，外加两套懒标记。</p>
+
+      <h2>一、节点要维护什么</h2>
+      <p>每个节点存的值叫 num。上收 up 时用左右孩子的信息拼出父节点的五样东西：</p>
+      <ul>
+        <li>siz = 左 siz + 右 siz + 1</li>
+        <li>sum = 左 sum + 右 sum + num</li>
+        <li>all（最大子段和）= max(左 all, 右 all, 左 suf + num + 右 pre)</li>
+        <li>pre（最大前缀和）= max(左 pre, 左 sum + num + 右 pre)</li>
+        <li>suf（最大后缀和）= max(右 suf, 左 suf + num + 右 sum)</li>
+      </ul>
+      <figure class="fig">
+        <svg viewBox="0 0 760 230" width="100%" xmlns="http://www.w3.org/2000/svg">
+          <text x="20" y="26" font-size="14">all 的三种来源：纯左段、纯右段、跨过中间节点</text>
+          <rect x="150" y="90" width="120" height="34" fill="#bfdbfe" stroke="#1d4ed8"/>
+          <text x="210" y="112" font-size="13" text-anchor="middle">左子树</text>
+          <rect x="300" y="90" width="50" height="34" fill="#fde68a" stroke="#b45309"/>
+          <text x="325" y="112" font-size="13" text-anchor="middle">num</text>
+          <rect x="380" y="90" width="120" height="34" fill="#bbf7d0" stroke="#15803d"/>
+          <text x="440" y="112" font-size="13" text-anchor="middle">右子树</text>
+          <text x="150" y="170" font-size="13" fill="#1d4ed8">allL：最大子段完全在左</text>
+          <text x="400" y="170" font-size="13" fill="#15803d">allR：最大子段完全在右</text>
+          <text x="210" y="200" font-size="13" fill="#b45309">sufL + num + preR：跨中间节点</text>
+          <text x="40" y="60" font-size="13" fill="#374151">pre：max(preL, sumL + num + preR)</text>
+          <text x="40" y="80" font-size="13" fill="#374151">suf：max(sufR, sufL + num + sumR)</text>
+        </svg>
+      </figure>
+      <p>注意 all 允许取空段：子段和最大可以为 0（全负数时输出 0）。所以叶子的 all 初始化成 max(值, 0)，pre、suf 也是 max(值, 0)。</p>
+
+      <h2>二、两套懒标记</h2>
+      <p>MAKE-SAME 用 update/change 两个数组：update[i] 表示 i 这棵子树整段被赋成了 change[i]。打标记时只改根的 num、sum、all、pre、suf，整段赋同一个值 c 时：sum = siz × c、pre = suf = max(sum, 0)、all = max(sum, c)。等下次真的下到子树里才把标记传给两个孩子。</p>
+      <p>REVERSE 用 rev[i]：翻转整棵子树等价于交换左右孩子，再把翻转标记下传给孩子，同时交换 pre 和 suf（前后缀在翻转后互换）。注意 all 和 sum 在翻转下不变，所以打 REVERSE 标记时它们不用动。</p>
+      <p>down 的顺序有讲究：先处理 update（赋值），再处理 rev。因为 rev 之后再做赋值，值覆盖一切；反过来先翻转再赋值，翻转的结果也被覆盖了，等价。</p>
+
+      <h2>三、空间回收</h2>
+      <p>删除区间时不能真的把节点扔掉：题目允许总共插入很多个数，但任何时刻长度 ≤ 5×10^5，所以要复用。space 数组当栈用，si 是栈顶。init 建新节点时从 space 弹一个下标，recycle 删除子树时递归把子树里每个节点压回栈。</p>
+      <figure class="fig">
+        <svg viewBox="0 0 760 220" width="100%" xmlns="http://www.w3.org/2000/svg">
+          <text x="20" y="26" font-size="14">删除整棵子树 → recycle 递归回收 → space 栈复用</text>
+          <rect x="60" y="90" width="120" height="40" fill="#fca5a5" stroke="#b91c1c"/>
+          <text x="120" y="114" font-size="13" text-anchor="middle">被删子树</text>
+          <line x1="185" y1="110" x2="260" y2="110" stroke="#888" stroke-width="2"/>
+          <rect x="270" y="80" width="130" height="60" fill="#e5e7eb" stroke="#6b7280"/>
+          <text x="335" y="105" font-size="13" text-anchor="middle">space 栈</text>
+          <text x="335" y="125" font-size="12" text-anchor="middle" fill="#374151">旧节点下标逐个压回</text>
+          <line x1="405" y1="110" x2="470" y2="110" stroke="#888" stroke-width="2"/>
+          <rect x="480" y="90" width="140" height="40" fill="#bbf7d0" stroke="#15803d"/>
+          <text x="550" y="114" font-size="13" text-anchor="middle">下次 init 弹出复用</text>
+          <text x="60" y="180" font-size="13" fill="#374151">recycle 是递归：先收自己，再收左子树、右子树。序列再长，活节点数不超过 5×10^5。</text>
+        </svg>
+      </figure>
+
+      <h2>四、P2042 维护数列</h2>
+      <p>初始序列读进来，两端各放一个 −INF 虚拟哨兵（arr[1] 和 arr[n+2]），用 build 递归建一棵完美平衡的树。build 取中点当根，左右递归，然后 up。虚拟哨兵的 all/pre/suf 都是 0、sum 是 −INF，保证合并时不会污染真实段的结果。</p>
+      <p>INSERT 在 pos 位置后面插入 len 个数：切出区间后把新序列 build 成一棵子树挂进去。DELETE 把区间子树 recycle 掉。MAKE-SAME 和 REVERSE 给区间根打懒标记。GET-SUM 切出区间返回 sum。MAX-SUM 直接返回整棵树的 all（允许空段，全负输出 0）。</p>
+          <pre class="code"><span class="kw">#include</span> &lt;bits/stdc++.h&gt;
+
+    <span class="kw">using</span> <span class="kw">namespace</span> std;
+
+    <span class="kw">const</span> <span class="kw">int</span> MAXN = 500005;
+    <span class="kw">const</span> <span class="kw">int</span> INF = 1000000001;
+
+    <span class="kw">int</span> head = 0;
+    <span class="kw">int</span> arr[MAXN];
+    <span class="kw">int</span> num[MAXN];
+    <span class="kw">int</span> fa[MAXN];
+    <span class="kw">int</span> ls[MAXN];
+    <span class="kw">int</span> rs[MAXN];
+    <span class="kw">int</span> siz[MAXN];
+    <span class="kw">int</span> space[MAXN], si;
+    <span class="kw">int</span> sum[MAXN];
+    <span class="kw">int</span> all[MAXN];
+    <span class="kw">int</span> pre[MAXN];
+    <span class="kw">int</span> suf[MAXN];
+    <span class="kw">bool</span> update[MAXN];
+    <span class="kw">int</span> change[MAXN];
+    <span class="kw">bool</span> rev[MAXN];
+
+    <span class="kw">void</span> <span class="fn">up</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> l = ls[i], r = rs[i];
+        siz[i] = siz[l] + siz[r] + 1;
+        sum[i] = sum[l] + sum[r] + num[i];
+        all[i] = max(max(all[l], all[r]), suf[l] + num[i] + pre[r]);
+        pre[i] = max(pre[l], sum[l] + num[i] + pre[r]);
+        suf[i] = max(suf[r], suf[l] + num[i] + sum[r]);
+    }
+
+    <span class="kw">int</span> <span class="fn">lr</span>(<span class="kw">int</span> i) {
+        <span class="kw">return</span> rs[fa[i]] == i ? 1 : 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">rotate</span>(<span class="kw">int</span> i) {
+        <span class="kw">int</span> f = fa[i], g = fa[f], soni = lr(i), sonf = lr(f);
+        <span class="kw">if</span> (soni == 1) {
+            rs[f] = ls[i];
+            <span class="kw">if</span> (rs[f] != 0) {
+                fa[rs[f]] = f;
+            }
+            ls[i] = f;
+        } <span class="kw">else</span> {
+            ls[f] = rs[i];
+            <span class="kw">if</span> (ls[f] != 0) {
+                fa[ls[f]] = f;
+            }
+            rs[i] = f;
+        }
+        <span class="kw">if</span> (g != 0) {
+            <span class="kw">if</span> (sonf == 1) {
+                rs[g] = i;
+            } <span class="kw">else</span> {
+                ls[g] = i;
+            }
+        }
+        fa[f] = i;
+        fa[i] = g;
+        up(f);
+        up(i);
+    }
+
+    <span class="kw">void</span> <span class="fn">splay</span>(<span class="kw">int</span> i, <span class="kw">int</span> goal) {
+        <span class="kw">while</span> (fa[i] != goal) {
+            <span class="kw">int</span> f = fa[i], g = fa[f];
+            <span class="kw">if</span> (g != goal) {
+                <span class="kw">if</span> (lr(i) == lr(f)) {
+                    rotate(f);
+                } <span class="kw">else</span> {
+                    rotate(i);
+                }
+            }
+            rotate(i);
+        }
+        <span class="kw">if</span> (goal == 0) {
+            head = i;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">setValue</span>(<span class="kw">int</span> i, <span class="kw">int</span> val) {
+        <span class="kw">if</span> (i != 0) {
+            update[i] = <span class="kw">true</span>;
+            change[i] = val;
+            num[i] = val;
+            sum[i] = siz[i] * val;
+            all[i] = max(sum[i], val);
+            pre[i] = max(sum[i], 0);
+            suf[i] = max(sum[i], 0);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">setReverse</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (i != 0) {
+            swap(pre[i], suf[i]);
+            rev[i] ^= 1;
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">down</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (update[i]) {
+            setValue(ls[i], change[i]);
+            setValue(rs[i], change[i]);
+            update[i] = <span class="kw">false</span>;
+        }
+        <span class="kw">if</span> (rev[i]) {
+            swap(ls[i], rs[i]);
+            setReverse(ls[i]);
+            setReverse(rs[i]);
+            rev[i] = <span class="kw">false</span>;
+        }
+    }
+
+    <span class="kw">int</span> <span class="fn">init</span>(<span class="kw">int</span> val) {
+        <span class="kw">int</span> i = space[si--];
+        siz[i] = 1;
+        num[i] = sum[i] = all[i] = val;
+        pre[i] = suf[i] = max(val, 0);
+        fa[i] = ls[i] = rs[i] = 0;
+        update[i] = rev[i] = <span class="kw">false</span>;
+        <span class="kw">return</span> i;
+    }
+
+    <span class="kw">int</span> <span class="fn">build</span>(<span class="kw">int</span> l, <span class="kw">int</span> r) {
+        <span class="kw">int</span> mid = (l + r) / 2;
+        <span class="kw">int</span> root = init(arr[mid]);
+        <span class="kw">if</span> (l &lt; mid) {
+            ls[root] = build(l, mid - 1);
+            fa[ls[root]] = root;
+        }
+        <span class="kw">if</span> (mid &lt; r) {
+            rs[root] = build(mid + 1, r);
+            fa[rs[root]] = root;
+        }
+        up(root);
+        <span class="kw">return</span> root;
+    }
+
+    <span class="kw">int</span> <span class="fn">find</span>(<span class="kw">int</span> rank) {
+        <span class="kw">int</span> i = head;
+        <span class="kw">while</span> (i != 0) {
+            down(i);
+            <span class="kw">if</span> (siz[ls[i]] + 1 == rank) {
+                <span class="kw">return</span> i;
+            } <span class="kw">else</span> <span class="kw">if</span> (siz[ls[i]] &gt;= rank) {
+                i = ls[i];
+            } <span class="kw">else</span> {
+                rank -= siz[ls[i]] + 1;
+                i = rs[i];
+            }
+        }
+        <span class="kw">return</span> 0;
+    }
+
+    <span class="kw">void</span> <span class="fn">insert</span>(<span class="kw">int</span> rank, <span class="kw">int</span> n) {
+        <span class="kw">if</span> (rank == 0) {
+            head = build(1, n);
+        } <span class="kw">else</span> {
+            <span class="kw">int</span> l = find(rank);
+            <span class="kw">int</span> r = find(rank + 1);
+            splay(l, 0);
+            splay(r, l);
+            ls[r] = build(1, n);
+            fa[ls[r]] = r;
+            up(r);
+            up(l);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">recycle</span>(<span class="kw">int</span> i) {
+        <span class="kw">if</span> (i != 0) {
+            space[++si] = i;
+            recycle(ls[i]);
+            recycle(rs[i]);
+        }
+    }
+
+    <span class="kw">void</span> <span class="fn">remove</span>(<span class="kw">int</span> rank, <span class="kw">int</span> n) {
+        <span class="kw">int</span> l = find(rank - 1);
+        <span class="kw">int</span> r = find(rank + n);
+        splay(l, 0);
+        splay(r, l);
+        recycle(ls[r]);
+        ls[r] = 0;
+        up(r);
+        up(l);
+    }
+
+    <span class="kw">void</span> <span class="fn">reset</span>(<span class="kw">int</span> rank, <span class="kw">int</span> n, <span class="kw">int</span> val) {
+        <span class="kw">int</span> l = find(rank - 1);
+        <span class="kw">int</span> r = find(rank + n);
+        splay(l, 0);
+        splay(r, l);
+        setValue(ls[r], val);
+        up(r);
+        up(l);
+    }
+
+    <span class="kw">void</span> <span class="fn">reverse</span>(<span class="kw">int</span> rank, <span class="kw">int</span> n) {
+        <span class="kw">int</span> l = find(rank - 1);
+        <span class="kw">int</span> r = find(rank + n);
+        splay(l, 0);
+        splay(r, l);
+        setReverse(ls[r]);
+        up(r);
+        up(l);
+    }
+
+    <span class="kw">int</span> <span class="fn">querySum</span>(<span class="kw">int</span> rank, <span class="kw">int</span> n) {
+        <span class="kw">int</span> l = find(rank - 1);
+        <span class="kw">int</span> r = find(rank + n);
+        splay(l, 0);
+        splay(r, l);
+        <span class="kw">return</span> sum[ls[r]];
+    }
+
+    <span class="kw">int</span> <span class="fn">queryMax</span>() {
+        <span class="kw">return</span> all[head];
+    }
+
+    <span class="kw">int</span> <span class="fn">main</span>() {
+        ios::sync_with_stdio(<span class="kw">false</span>);
+        cin.tie(<span class="kw">nullptr</span>);
+        <span class="kw">int</span> n, m;
+        cin &gt;&gt; n &gt;&gt; m;
+        si = MAXN - 1;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1; i &lt;= si; i++) {
+            space[i] = i;
+        }
+        arr[1] = arr[n + 2] = all[0] = -INF;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 1, j = 2; i &lt;= n; i++, j++) {
+            cin &gt;&gt; arr[j];
+        }
+        insert(0, n + 2);
+        <span class="kw">string</span> op;
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; m; i++) {
+            cin &gt;&gt; op;
+            <span class="kw">if</span> (op == "MAX-SUM") {
+                cout &lt;&lt; queryMax() &lt;&lt; endl;
+            } <span class="kw">else</span> {
+                <span class="kw">int</span> pos, len, c;
+                cin &gt;&gt; pos &gt;&gt; len;
+                pos++;
+                <span class="kw">if</span> (op == "INSERT") {
+                    <span class="kw">for</span> (<span class="kw">int</span> j = 1; j &lt;= len; j++) {
+                        cin &gt;&gt; arr[j];
+                    }
+                    insert(pos, len);
+                } <span class="kw">else</span> <span class="kw">if</span> (op == "DELETE") {
+                    remove(pos, len);
+                } <span class="kw">else</span> <span class="kw">if</span> (op == "MAKE-SAME") {
+                    cin &gt;&gt; c;
+                    reset(pos, len, c);
+                } <span class="kw">else</span> <span class="kw">if</span> (op == "REVERSE") {
+                    reverse(pos, len);
+                } <span class="kw">else</span> <span class="kw">if</span> (op == "GET-SUM") {
+                    cout &lt;&lt; querySum(pos, len) &lt;&lt; endl;
+                }
+            }
+        }
+        <span class="kw">return</span> 0;
+    }</pre>
+
+      <h2>五、MAX-SUM 合并演示</h2>
+      <p>给定一段数组，演示逐段合并时 all、pre、suf 怎么从叶子一路拼到根。每个格子显示它代表区间的三个值，跨中间节点的候选是合并的关键。</p>
+      <div class="viz" id="viz-maxsum">
+        <p class="viz-title">最大子段和合并</p>
+        <div class="breakdown" id="maxsum-out"></div>
+        <div class="viz-controls">
+          <select id="maxsum-len">
+            <option value="7">7 个数（含负数）</option>
+            <option value="9">9 个数（全负）</option>
+          </select>
+          <button id="maxsum-reset">重置</button>
+          <button id="maxsum-next">下一步</button>
+        </div>
+        <svg id="maxsum-svg" viewBox="0 0 760 260" width="100%" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+
+      <h2>总结</h2>
+      <p>这题把 Splay 区间操作的能力拉满：</p>
+      <p>1）节点维护 siz / sum / all / pre / suf 五样，up 用左右孩子拼，all 允许空段所以全负输出 0。</p>
+      <p>2）两套懒标记：update+change 管赋值、rev 管翻转，down 时先 update 再 rev，翻转要交换孩子并交换 pre/suf。</p>
+      <p>3）space 栈 + recycle 递归回收，让任何时刻活节点数不超过 5×10^5，总共插入再多也扛得住。</p>
+      <p>到这里 Splay 的六个专题题就齐了：有序表、偏移量、区间翻转、区间移动、维护数列、强制在线。</p>
+
+      <h2>相关题目</h2>
+      <table class="complexity">
+        <thead><tr><th>平台</th><th>题目</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>洛谷</td><td>P2042 维护数列</td><td><a href="https://www.luogu.com.cn/problem/P2042" target="_blank">https://www.luogu.com.cn/problem/P2042</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2>参考材料</h2>
+      <table class="complexity">
+        <thead><tr><th>来源</th><th>名字</th><th>链接</th></tr></thead>
+        <tbody>
+          <tr><td>左程云</td><td>算法讲解153【扩展】有序表专题6-Splay树</td><td><a href="https://github.com/algorithmzuo/algorithm-journey/" target="_blank">https://github.com/algorithmzuo/algorithm-journey/</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <aside class="toc-panel"><p class="toc-title">目录</p><ul class="toc-list" id="toc"></ul></aside>
+</div>
+<script src="../assets/js/shared.js"></script>
+<script>(function(){
+  var svg = document.getElementById('maxsum-svg');
+  var out = document.getElementById('maxsum-out');
+  var lenSel = document.getElementById('maxsum-len');
+  var a = [];
+  var segs = [];   // 每个已合并段的 {l, r, sum, all, pre, suf, y}
+  var step = 0;
+  var total = 0;
+  function reset() {
+    document.getElementById('maxsum-next').disabled = false;
+    var n = Number(lenSel.value);
+    if (n === 7) a = [5, -3, 4, -1, 2, 6, -2];
+    else a = [-3, -5, -1, -4, -2, -6, -1, -3, -2];
+    segs = [];
+    for (var i = 0; i < n; i++) {
+      var v = a[i];
+      segs.push({ l: i, r: i, sum: v, all: Math.max(v, 0), pre: Math.max(v, 0), suf: Math.max(v, 0), y: 60 });
+    }
+    total = n;
+    step = 0;
+    render();
+  }
+  function render() {
+    svg.innerHTML = '';
+    // 底层：原始数
+    var n = a.length;
+    var W = 700, x0 = 30, gap = W / n;
+    for (var i = 0; i < n; i++) {
+      var x = x0 + i * gap;
+      var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      r.setAttribute('x', x + 4); r.setAttribute('y', 30);
+      r.setAttribute('width', gap - 8); r.setAttribute('height', 34);
+      r.setAttribute('fill', a[i] >= 0 ? '#bbf7d0' : '#fecaca');
+      r.setAttribute('stroke', '#6b7280');
+      svg.appendChild(r);
+      var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', x + gap / 2); t.setAttribute('y', 52);
+      t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', 13);
+      t.textContent = a[i];
+      svg.appendChild(t);
+    }
+    // 合并段
+    var maxY = 30;
+    segs.forEach(function(s) {
+      var xl = x0 + s.l * gap, xr = x0 + (s.r + 1) * gap;
+      var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      r.setAttribute('x', xl + 4); r.setAttribute('y', s.y);
+      r.setAttribute('width', xr - xl - 8); r.setAttribute('height', 30);
+      r.setAttribute('fill', '#dbeafe'); r.setAttribute('stroke', '#1d4ed8');
+      svg.appendChild(r);
+      var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', (xl + xr) / 2); t.setAttribute('y', s.y + 19);
+      t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', 11);
+      t.textContent = 'sum=' + s.sum + ' all=' + s.all;
+      svg.appendChild(t);
+      if (s.y + 30 > maxY) maxY = s.y + 30;
+    });
+    if (segs.length === 1) {
+      var f = segs[0];
+      out.textContent = '合并完成：sum=' + f.sum + '，all=' + f.all + '，pre=' + f.pre + '，suf=' + f.suf + '。all 就是整段最大子段和（允许空段）。';
+    } else {
+      out.textContent = '第 ' + step + ' 轮合并：还剩 ' + segs.length + ' 段。两两合并时 all = max(allL, allR, sufL + num + preR)。';
+    }
+  }
+  function next() {
+    var nbtn = document.getElementById('maxsum-next');
+    if (segs.length <= 1) { nbtn.disabled = true; render(); return; }
+    if (segs.length === 2) nbtn.disabled = true;
+    var ns = [];
+    for (var i = 0; i < segs.length; i += 2) {
+      if (i + 1 >= segs.length) { ns.push(segs[i]); break; }
+      var L = segs[i], R = segs[i + 1];
+      var y = Math.max(L.y, R.y) + 36;
+      var midVal = a[L.r]; // 左右段交界元素
+      var s = {
+        l: L.l, r: R.r,
+        sum: L.sum + R.sum,
+        all: Math.max(L.all, R.all, L.suf + midVal + R.pre),
+        pre: Math.max(L.pre, L.sum + midVal + R.pre),
+        suf: Math.max(R.suf, L.suf + midVal + R.sum),
+        y: y
+      };
+      ns.push(s);
+    }
+    segs = ns;
+    step++;
+    render();
+  }
+  document.getElementById('maxsum-reset').addEventListener('click', reset);
+  document.getElementById('maxsum-next').addEventListener('click', next);
+  lenSel.addEventListener('change', reset);
+  reset();
+})();</script>
