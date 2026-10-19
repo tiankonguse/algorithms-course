@@ -1,0 +1,178 @@
+#include <bits/stdc++.h>
+
+using namespace std;
+
+struct Query {
+    int l, r, k, id;
+};
+
+const int MAXN = 10001;
+const int MAXM = 50001;
+const int MAXB = 301;
+
+int n, m;
+int arr[MAXN];
+Query query[MAXM];
+int sorted[MAXN];
+int cntv;
+
+int blen, bnum;
+int bi[MAXN];
+int br[MAXB];
+
+int cnt[MAXN];
+int maxCnt;
+int minMode;
+
+int ans[MAXM];
+
+bool QueryCmp(Query &a, Query &b) {
+    if (bi[a.l] != bi[b.l]) {
+        return bi[a.l] < bi[b.l];
+    }
+    return a.r < b.r;
+}
+
+int kth(int num) {
+    int left = 1, right = cntv, ret = 0;
+    while (left <= right) {
+        int mid = (left + right) >> 1;
+        if (sorted[mid] <= num) {
+            ret = mid;
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+    return ret;
+}
+
+int force(int l, int r, int k) {
+    int mx = 0, who = 0;
+    for (int i = l; i <= r; i++) {
+        cnt[arr[i]]++;
+    }
+    for (int i = l; i <= r; i++) {
+        int num = arr[i];
+        if (cnt[num] > mx || (cnt[num] == mx && num < who)) {
+            mx = cnt[num];
+            who = num;
+        }
+    }
+    for (int i = l; i <= r; i++) {
+        cnt[arr[i]]--;
+    }
+    return mx >= k ? sorted[who] : -1;
+}
+
+void add(int num) {
+    cnt[num]++;
+    if (cnt[num] > maxCnt || (cnt[num] == maxCnt && num < minMode)) {
+        maxCnt = cnt[num];
+        minMode = num;
+    }
+}
+
+void del(int num) {
+    cnt[num]--;
+}
+
+void compute() {
+    for (int block = 1, qi = 1; block <= bnum && qi <= m; block++) {
+        maxCnt = 0;
+        minMode = 0;
+        fill(cnt + 1, cnt + cntv + 1, 0);
+        int winl = br[block] + 1, winr = br[block];
+        for (; qi <= m && bi[query[qi].l] == block; qi++) {
+            int jobl = query[qi].l;
+            int jobr = query[qi].r;
+            int jobk = query[qi].k;
+            int id = query[qi].id;
+            if (jobr <= br[block]) {
+                ans[id] = force(jobl, jobr, jobk);
+            } else {
+                while (winr < jobr) {
+                    add(arr[++winr]);
+                }
+                int backupCnt = maxCnt;
+                int backupNum = minMode;
+                while (winl > jobl) {
+                    add(arr[--winl]);
+                }
+                if (maxCnt >= jobk) {
+                    ans[id] = sorted[minMode];
+                } else {
+                	ans[id] = -1;
+                }
+                maxCnt = backupCnt;
+                minMode = backupNum;
+                while (winl <= br[block]) {
+                    del(arr[winl++]);
+                }
+            }
+        }
+    }
+}
+
+void prepare() {
+    for (int i = 1; i <= n; i++) {
+        sorted[i] = arr[i];
+    }
+    sort(sorted + 1, sorted + n + 1);
+    cntv = 1;
+    for (int i = 2; i <= n; i++) {
+        if (sorted[cntv] != sorted[i]) {
+            sorted[++cntv] = sorted[i];
+        }
+    }
+    for (int i = 1; i <= n; i++) {
+        arr[i] = kth(arr[i]);
+    }
+    blen = (int)sqrt(n);
+    bnum = (n + blen - 1) / blen;
+    for (int i = 1; i <= n; i++) {
+        bi[i] = (i - 1) / blen + 1;
+    }
+    for (int i = 1; i <= bnum; i++) {
+        br[i] = min(i * blen, n);
+    }
+    sort(query + 1, query + m + 1, QueryCmp);
+}
+
+class Solution {
+public:
+    vector<int> subarrayMajority(vector<int>& nums, vector<vector<int>>& queries) {
+        n = (int)nums.size();
+        m = (int)queries.size();
+        for (int i = 1; i <= n; i++) {
+            arr[i] = nums[i - 1];
+        }
+        for (int i = 1; i <= m; i++) {
+            query[i].l = queries[i - 1][0] + 1;
+            query[i].r = queries[i - 1][1] + 1;
+            query[i].k = queries[i - 1][2];
+            query[i].id = i;
+        }
+        prepare();
+        compute();
+        vector<int> ret(m);
+        for (int i = 1; i <= m; i++) {
+            ret[i - 1] = ans[i];
+        }
+        return ret;
+    }
+};
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+    cin >> n >> m;
+    vector<int> nums(n);
+    for (int i = 0; i < n; i++) cin >> nums[i];
+    vector<vector<int>> queries(m, vector<int>(3));
+    for (int i = 0; i < m; i++) cin >> queries[i][0] >> queries[i][1] >> queries[i][2];
+    Solution sol;
+    vector<int> ret = sol.subarrayMajority(nums, queries);
+    for (int i = 0; i < m; i++) cout << ret[i] << '\n';
+    return 0;
+}
