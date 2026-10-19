@@ -600,6 +600,33 @@
       setText('statL2', subCount);
       setText('statHighCount', algos.filter(a => (a.level || 1) >= 3).length);
 
+      // 8-5b. 首页：九个一级分类导览卡片
+      (function renderCatGrid(){
+        const box = document.getElementById('catGrid');
+        if (!box) return;
+        const CAT_DESC = {
+          '语言基础':'C++ 标准库容器与快速输入输出，写题时的基本功。',
+          '算法基础':'排序、二分、分治、贪心——最常被后面专题借用的基础手法。',
+          '搜索':'DFS/BFS、回溯、双向搜索与记忆化，把状态空间一步步展开。',
+          '动态规划':'从线性 DP 到区间 DP、树形 DP，以及背包与状态压缩。',
+          '字符串':'哈希、KMP、Manacher、AC 自动机与后缀结构。',
+          '数学':'数论、组合、快速幂与矩阵，以及那些「推完公式就能 O(1)」的题。',
+          '数据结构':'并查集、堆、树状数组、线段树与平衡树，管好一片区间。',
+          '图论':'最短路、最小生成树、拓扑排序、网络流与树上问题。',
+          '杂项':'不属于上面任何一类、但考频不低的巧办法。'
+        };
+        box.innerHTML = tree.map(function(c){
+          const n = catCount(c);
+          const desc = CAT_DESC[c.name] || (c.subs[0] && c.subs[0].desc) || '';
+          return '<a class="cat-tile" href="' + ROOT + 'catalog.html#cat-' + encodeURIComponent(c.name) + '">' +
+            '<div class="cat-tile-top"><span class="cat-tile-name">' + esc(c.name) + '</span>' +
+            '<span class="cat-tile-count">' + n + ' 篇</span></div>' +
+            '<p class="cat-tile-desc">' + esc(desc) + '</p>' +
+            '<span class="cat-tile-subs">' + c.subs.length + ' 个专题</span>' +
+          '</a>';
+        }).join('');
+      })();
+
       // 8-6. 三条学习路线（二级分类改名后照旧按名取篇目）
       const pathsBox = document.getElementById('routePaths');
       if (pathsBox) {
