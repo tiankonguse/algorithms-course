@@ -1,0 +1,278 @@
+#include <bits/stdc++.h>
+
+using namespace std;
+
+using ll = long long;
+
+const int MAXN = 600001;
+int n, m, q, k, cntn;
+
+int head1[MAXN];
+int next1[MAXN << 1];
+int to1[MAXN << 1];
+int weight1[MAXN << 1];
+int cnt1;
+
+int head2[MAXN];
+int next2[MAXN];
+int to2[MAXN];
+ll weight2[MAXN];
+int cnt2;
+
+int head3[MAXN];
+int next3[MAXN];
+int to3[MAXN];
+int cnt3;
+
+int dfn[MAXN];
+int low[MAXN];
+int cntd;
+int sta[MAXN];
+int stasiz;
+
+ll fromWeight[MAXN];
+ll cycleLen[MAXN];
+ll cycleSum[MAXN];
+
+int fa[MAXN];
+int dep[MAXN];
+int siz[MAXN];
+ll len[MAXN];
+int son[MAXN];
+int top[MAXN];
+
+int arr[MAXN];
+int tmp[MAXN];
+
+ll dist[MAXN];
+ll diameter;
+
+int idx[MAXN];
+ll pre[MAXN];
+ll val[MAXN];
+int que[MAXN];
+
+void addEdge1(int u, int v, int w) {
+    next1[++cnt1] = head1[u];
+    to1[cnt1] = v;
+    weight1[cnt1] = w;
+    head1[u] = cnt1;
+}
+
+void addEdge2(int u, int v, ll w) {
+    next2[++cnt2] = head2[u];
+    to2[cnt2] = v;
+    weight2[cnt2] = w;
+    head2[u] = cnt2;
+}
+
+void addEdge3(int u, int v) {
+    next3[++cnt3] = head3[u];
+    to3[cnt3] = v;
+    head3[u] = cnt3;
+}
+
+void cycleLink(int u, int v) {
+    cntn++;
+    cycleSum[cntn] = fromWeight[u];
+    addEdge2(u, cntn, 0);
+    int tmp = stasiz;
+    int pop;
+    do {
+        pop = sta[tmp--];
+        cycleLen[pop] = cycleSum[cntn];
+        cycleSum[cntn] += fromWeight[pop];
+    } while (pop != v);
+    do {
+        pop = sta[stasiz--];
+        addEdge2(cntn, pop, min(cycleLen[pop], cycleSum[cntn] - cycleLen[pop]));
+    } while (pop != v);
+}
+
+void tarjan(int u, int preEdge) {
+    dfn[u] = low[u] = ++cntd;
+    sta[++stasiz] = u;
+    for (int e = head1[u]; e > 0; e = next1[e]) {
+        if ((e ^ 1) == preEdge) {
+            continue;
+        }
+        int v = to1[e];
+        ll w = weight1[e];
+        if (dfn[v] == 0) {
+            tarjan(v, e);
+            fromWeight[v] = w;
+            if (low[v] < dfn[u]) {
+                low[u] = min(low[u], low[v]);
+            } else if (low[v] > dfn[u]) {
+                stasiz--;
+                addEdge2(u, v, w);
+            } else {
+                cycleLink(u, v);
+            }
+        } else if (dfn[v] < dfn[u]) {
+            fromWeight[v] = w;
+            low[u] = min(low[u], dfn[v]);
+        }
+    }
+}
+
+void dfs1(int u, int f, ll l) {
+    fa[u] = f;
+    dep[u] = dep[f] + 1;
+    siz[u] = 1;
+    len[u] = l;
+    for (int e = head2[u], v; e > 0; e = next2[e]) {
+        v = to2[e];
+        if (v != f) {
+            dfs1(v, u, len[u] + weight2[e]);
+            siz[u] += siz[v];
+            if (son[u] == 0 || siz[son[u]] < siz[v]) {
+                son[u] = v;
+            }
+        }
+    }
+}
+
+void dfs2(int u, int t) {
+    top[u] = t;
+    dfn[u] = ++cntd;
+    if (son[u] != 0) {
+        dfs2(son[u], t);
+    }
+    for (int e = head2[u]; e > 0; e = next2[e]) {
+        int v = to2[e];
+        if (v != fa[u] && v != son[u]) {
+            dfs2(v, v);
+        }
+    }
+}
+
+int lca(int a, int b) {
+    while (top[a] != top[b]) {
+        if (dep[top[a]] <= dep[top[b]]) {
+            b = fa[top[b]];
+        } else {
+            a = fa[top[a]];
+        }
+    }
+    return dep[a] <= dep[b] ? a : b;
+}
+
+int find(int x, int square) {
+    int pre = 0;
+    while (top[x] != top[square]) {
+        pre = top[x];
+        x = fa[pre];
+    }
+    return x == square ? pre : son[square];
+}
+
+int buildVirtualTree() {
+    sort(arr + 1, arr + k + 1, [](int a, int b) {
+        return dfn[a] < dfn[b];
+    });
+    int len = 0;
+    for (int i = 1; i < k; i++) {
+        tmp[++len] = arr[i];
+        tmp[++len] = lca(arr[i], arr[i + 1]);
+    }
+    tmp[++len] = arr[k];
+    sort(tmp + 1, tmp + len + 1, [](int a, int b) {
+        return dfn[a] < dfn[b];
+    });
+    int unique = 1;
+    for (int i = 2; i <= len; i++) {
+        if (tmp[unique] != tmp[i]) {
+            tmp[++unique] = tmp[i];
+        }
+    }
+    cnt3 = 0;
+    for (int i = 1; i <= unique; i++) {
+        head3[tmp[i]] = 0;
+    }
+    for (int i = 1; i < unique; i++) {
+        addEdge3(lca(tmp[i], tmp[i + 1]), tmp[i + 1]);
+    }
+    return tmp[1];
+}
+
+void computeOnCycle(int u, int siz) {
+    sort(idx + 1, idx + siz + 1, [](int a, int b) {
+        return cycleLen[a] < cycleLen[b];
+    });
+    for (int i = 1; i <= siz; i++) {
+        pre[i] = cycleLen[idx[i]];
+        pre[i + siz] = pre[i] + cycleSum[u];
+        val[i] = dist[idx[i]];
+        val[i + siz] = val[i];
+    }
+    int l = 1;
+    int r = 0;
+    for (int i = 1; i <= siz * 2; i++) {
+        while (l <= r && (pre[i] - pre[que[l]]) * 2 > cycleSum[u]) {
+            l++;
+        }
+        if (l <= r) {
+            diameter = max(diameter, val[que[l]] - pre[que[l]] + val[i] + pre[i]);
+        }
+        while (l <= r && val[que[r]] - pre[que[r]] <= val[i] - pre[i]) {
+            r--;
+        }
+        que[++r] = i;
+    }
+}
+
+void dpOnTree(int u) {
+    dist[u] = 0;
+    if (u <= n) {
+        for (int e = head3[u]; e > 0; e = next3[e]) {
+            int v = to3[e];
+            dpOnTree(v);
+            diameter = max(diameter, dist[u] + dist[v] + len[v] - len[u]);
+            dist[u] = max(dist[u], dist[v] + len[v] - len[u]);
+        }
+    } else {
+        for (int e = head3[u]; e > 0; e = next3[e]) {
+            int v = to3[e];
+            dpOnTree(v);
+        }
+        int siz = 0;
+        for (int e = head3[u]; e > 0; e = next3[e]) {
+            int v = to3[e];
+            int f = find(v, u);
+            dist[f] = dist[v] + len[v] - len[f];
+            idx[++siz] = f;
+            dist[u] = max(dist[u], dist[v] + len[v] - len[u]);
+        }
+        computeOnCycle(u, siz);
+    }
+}
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+    cin >> n >> m;
+    cntn = n;
+    cnt1 = 1;
+    for (int i = 1, u, v, w; i <= m; i++) {
+        cin >> u >> v >> w;
+        addEdge1(u, v, w);
+        addEdge1(v, u, w);
+    }
+    tarjan(1, 0);
+    cntd = 0;
+    dfs1(1, 0, 0);
+    dfs2(1, 1);
+    cin >> q;
+    for (int i = 1; i <= q; i++) {
+        cin >> k;
+        for (int j = 1; j <= k; j++) {
+            cin >> arr[j];
+        }
+        diameter = 0;
+        int tree = buildVirtualTree();
+        dpOnTree(tree);
+        cout << diameter << "\n";
+    }
+    return 0;
+}
