@@ -1,0 +1,197 @@
+#include <bits/stdc++.h>
+
+using namespace std;
+
+const int MAXN = 100007;
+int n, m;
+int u[MAXN];
+int v[MAXN];
+int w[MAXN];
+
+int head[MAXN];
+int nxt[MAXN << 1];
+int to[MAXN << 1];
+int cntg;
+
+int dfn[MAXN];
+int cntd;
+int from[MAXN];
+bool cycle[MAXN];
+int arr[MAXN];
+int cnta;
+
+int cycleEdgeTo[MAXN];
+int cycleId[MAXN];
+int belong[MAXN];
+
+int fa[MAXN];
+int dep[MAXN];
+int siz[MAXN];
+int son[MAXN];
+int top[MAXN];
+
+int tree[MAXN << 1];
+
+void addEdge(int u, int v) {
+    nxt[++cntg] = head[u];
+    to[cntg] = v;
+    head[u] = cntg;
+}
+
+void dfs1(int u) {
+    dfn[u] = ++cntd;
+    for (int e = head[u]; e > 0; e = nxt[e]) {
+        int v = to[e];
+        if (dfn[v] == 0) {
+            from[v] = u;
+            cycleEdgeTo[(e + 1) >> 1] = v;
+            dfs1(v);
+        } else if (dfn[u] < dfn[v]) {
+            cycleEdgeTo[(e + 1) >> 1] = u;
+            cycle[u] = true;
+            arr[++cnta] = u;
+            for (int i = v; i != u; i = from[i]) {
+                cycle[i] = true;
+                arr[++cnta] = i;
+            }
+        }
+    }
+}
+
+void dfs2(int u, int f, int h) {
+    belong[u] = h;
+    fa[u] = f;
+    dep[u] = dep[f] + 1;
+    siz[u] = 1;
+    for (int e = head[u], v; e > 0; e = nxt[e]) {
+        v = to[e];
+        if (!cycle[v] && v != f) {
+            dfs2(v, u, h);
+            siz[u] += siz[v];
+            if (son[u] == 0 || siz[son[u]] < siz[v]) {
+                son[u] = v;
+            }
+        }
+    }
+}
+
+void dfs3(int u, int t) {
+    top[u] = t;
+    dfn[u] = ++cntd;
+    if (son[u] != 0) {
+        dfs3(son[u], t);
+    }
+    for (int e = head[u]; e > 0; e = nxt[e]) {
+        int v = to[e];
+        if (!cycle[v] && v != fa[u] && v != son[u]) {
+            dfs3(v, v);
+        }
+    }
+}
+
+int lowbit(int i) {
+    return i & -i;
+}
+
+void add(int i, int v) {
+    while (i <= cntd) {
+        tree[i] += v;
+        i += lowbit(i);
+    }
+}
+
+int query(int i) {
+    int ans = 0;
+    while (i >= 1) {
+        ans += tree[i];
+        i -= lowbit(i);
+    }
+    return ans;
+}
+
+int sum(int l, int r) {
+    if (l > r) {
+        return 0;
+    }
+    return query(r) - query(l - 1);
+}
+
+int edgeToNode(int i) {
+    if (cycle[u[i]] && cycle[v[i]]) {
+        return cycleId[cycleEdgeTo[i]];
+    } else {
+        return max(dfn[u[i]], dfn[v[i]]);
+    }
+}
+
+void prepare() {
+    dfs1(1);
+    cntd = 0;
+    for (int i = 1; i <= cnta; i++) {
+        dfs2(arr[i], 0, arr[i]);
+        dfs3(arr[i], arr[i]);
+    }
+    for (int i = 1; i <= cnta; i++) {
+        cycleId[arr[i]] = ++cntd;
+    }
+    for (int i = 1; i <= n; i++) {
+        add(edgeToNode(i), w[i]);
+    }
+}
+
+void setEdge(int edge, int val) {
+    add(edgeToNode(edge), val - w[edge]);
+    w[edge] = val;
+}
+
+int jump(int x, int y) {
+    int ans = 0;
+    while (top[x] != top[y]) {
+        if (dep[top[x]] < dep[top[y]]) {
+            ans += sum(dfn[top[y]], dfn[y]);
+            y = fa[top[y]];
+        } else {
+            ans += sum(dfn[top[x]], dfn[x]);
+            x = fa[top[x]];
+        }
+    }
+    if (dfn[x] < dfn[y]) {
+        ans += sum(dfn[x] + 1, dfn[y]);
+    } else {
+        ans += sum(dfn[y] + 1, dfn[x]);
+    }
+    return ans;
+}
+
+int getDistance(int x, int y) {
+    if (belong[x] == belong[y]) {
+        return jump(x, y);
+    } else {
+        int a = min(cycleId[belong[x]], cycleId[belong[y]]);
+        int b = max(cycleId[belong[x]], cycleId[belong[y]]);
+        int p1 = sum(a, b - 1);
+        int p2 = sum(n + 1, cntd) - p1;
+        return jump(x, belong[x]) + jump(y, belong[y]) + min(p1, p2);
+    }
+}
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+    cin >> n >> m;
+    for (int i = 1; i <= n; i++) {
+        cin >> u[i] >> v[i] >> w[i];
+        addEdge(u[i], v[i]);
+        addEdge(v[i], u[i]);
+    }
+    prepare();
+    for (int i = 1, op, x, y; i <= m; i++) {
+        cin >> op >> x >> y;
+        if (op == 1) {
+            setEdge(x, y);
+        } else {
+            cout << getDistance(x, y) << "\n";
+        }
+    }
+    return 0;
+}
